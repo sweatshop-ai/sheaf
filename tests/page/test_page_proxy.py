@@ -22,7 +22,7 @@ def as_member(site, work):
     hub = site.hub
     bea = proxy.Member(BEA, "Bea", (str(work),))
     real = hub.page
-    hub.page = lambda e, nonce, member=None: real(e, nonce, member=bea)
+    hub.page = lambda e, nonce, member=None, **kw: real(e, nonce, member=bea, **kw)
     return bea
 
 

@@ -36,7 +36,7 @@ def as_member(tab, work=None, can=(), doc_work=None, doc_can=None, sent=None):
     site = tab.site
     bea = proxy.Member(BEA, "Bea", (str(site.file.parent),))
     real = site.hub.page
-    site.hub.page = lambda e, nonce, member=None: real(e, nonce, member=bea)
+    site.hub.page = lambda e, nonce, member=None, **kw: real(e, nonce, member=bea, **kw)
 
     def page(route):
         html = route.fetch().text()

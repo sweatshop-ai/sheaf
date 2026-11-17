@@ -338,14 +338,18 @@ def test_the_file_the_command_writes_is_the_file_the_hub_reads(sheaf, stdin, mon
 
 # ── the two findings of the review of the file store ─────────────────────────────────────────────────────────────
 
+@pytest.fixture(autouse=True)
+def warned_nothing_yet():
+    connect._WARNED.clear()
+
+
 @pytest.mark.parametrize("how", ["a file", "a closed folder", "a leftover link"])
-def test_a_file_store_that_cannot_be_written_is_a_message_and_not_a_traceback(sheaf, stdin, tmp_path, how, closed):
+def test_a_file_store_that_cannot_be_written_is_a_message_and_not_a_traceback(sheaf, stdin, tmp_path, how, request):
     folder = tmp_path / "creds"
     if how == "a file":
         folder.write_text("x")
     elif how == "a closed folder":
-        folder.mkdir()
-        closed(folder)
+        request.getfixturevalue("closed")(folder)     # only this case needs the folder shut: root enters any folder and skips it
     else:
         folder.mkdir()
         (folder / (connect.peer_credential_name(PEER) + ".new")).symlink_to(tmp_path / "elsewhere")
@@ -371,6 +375,39 @@ def test_a_missing_credential_file_says_nothing(keyring, monkeypatch, tmp_path, 
     monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
     assert connect.peer_token_for(PEER) == FAKE
     assert capsys.readouterr().err == ""
+
+
+def test_a_failure_after_the_token_was_written_leaves_no_temp_file_and_the_message_stays_true(sheaf, stdin, tmp_path, monkeypatch):
+    def refuse(*a, **k):
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(connect.os, "replace", refuse)
+    stdin(FAKE + "\n")
+    r = sheaf("peer", "use", PEER, "--store", "file", "--dir", tmp_path / "creds")
+    assert r.code == 1 and "nothing was written" in r.err and FAKE not in r.out + r.err
+    assert list((tmp_path / "creds").iterdir()) == []               # neither the file nor its temp: the token is nowhere
+
+
+def test_a_leftover_temp_that_is_not_ours_is_left_alone_when_the_open_refuses_it(sheaf, stdin, tmp_path):
+    folder = tmp_path / "creds"
+    folder.mkdir()
+    link = folder / (connect.peer_credential_name(PEER) + ".new")
+    link.symlink_to(tmp_path / "elsewhere")
+    stdin(FAKE + "\n")
+    assert sheaf("peer", "use", PEER, "--store", "file", "--dir", folder).code == 1
+    assert link.is_symlink() and not (tmp_path / "elsewhere").exists()
+
+
+def test_a_corrupt_credential_file_is_warned_about_once_per_process(keyring, monkeypatch, tmp_path, capsys):
+    keyring.set("sheaf-peer", PEER, FAKE)
+    (tmp_path / connect.peer_credential_name(PEER)).write_bytes(b"\xff\xfe")
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+    for _ in range(3):
+        assert connect.peer_token_for(PEER) == FAKE
+    assert len(capsys.readouterr().err.strip().splitlines()) == 1
+    (tmp_path / connect.peer_credential_name("https://third.example.com")).write_bytes(b"\xff")
+    keyring.set("sheaf-peer", "https://third.example.com", FAKE)
+    connect.peer_token_for("https://third.example.com")               # another peer's file is another warning
+    assert len(capsys.readouterr().err.strip().splitlines()) == 1
 
 
 # ── the root verb (ticket 21) ────────────────────────────────────────────────

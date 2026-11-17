@@ -91,7 +91,12 @@ class ProxyConfig:
     gid: int                    # proxy_user's group: the group of the socket's folder
     members: dict               # id -> Member
     client: bool = False        # a client tiroir: an agent never Shares to the client's members (9.11)
+    clients: dict = None        # an agency tiroir's client tiroirs, name -> origin: the "Clients" folder reads them through (9.9)
     repos: dict | None = None   # `[proxy.repos]`: where the tiroir keeps its repo clones and how it gets a token (SPEC 14)
+
+    def __post_init__(self):
+        if self.clients is None:
+            object.__setattr__(self, "clients", {})
 
     def member_of_token(self, name: str):
         """The member the door token `name` acts for, by their `tokens`; None for a token bound to nobody."""
@@ -162,7 +167,7 @@ _EMAIL_RE = re.compile(r"[^\s<>@,;\"']+@[^\s<>@,;\"']+")
 _SHORT_RE = re.compile(r"[A-Za-z0-9._-]{1,40}")
 _LOGIN_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 OPTIONAL_MEMBER_KEYS = ("email", "short", "github", "shell", "tokens", "private_root", "agency")
-OPTIONAL_TABLE_KEYS = ("client", "repos")
+OPTIONAL_TABLE_KEYS = ("client", "clients", "repos")
 _OPTIONAL_WORDS = {"short": "1 to 40 letters, digits, dots, dashes or underscores (nell)",
                    "github": "a GitHub login (tiroir)"}
 SOCKET_MAX = 107                # bytes of a Unix socket's path (sun_path less its NUL)
@@ -187,6 +192,29 @@ def _origin(origin: str, where: str) -> tuple[str, str]:
         raise wrong
     netloc = host if port in (None, 443) else f"{host}:{port}"      # a browser names 443 by no port
     return "https://" + netloc, netloc
+
+
+_CLIENT_NAME_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]{0,39}")
+
+
+def _clients(table, own: str, where: str) -> dict:
+    """The `[proxy.clients]` table: each client tiroir's folder name under "Clients" and its https origin. The token that opens
+    the channel to it is in `peers.json`, never here."""
+    if not isinstance(table, dict):
+        raise ProxyError(f"'clients' must be a table of name = origin, in {where}")
+    out: dict = {}
+    for name, origin in table.items():
+        if not isinstance(name, str) or not _CLIENT_NAME_RE.fullmatch(name) or name.casefold() == "clients":
+            raise ProxyError(f"a name in 'clients' is 1 to 40 letters, digits, dots, dashes or underscores, not starting "
+                             f"with a dot, and not 'Clients': {name!r}, in {where}")
+        if not isinstance(origin, str):
+            raise ProxyError(f"the origin of client {name!r} must be https://host, not {origin!r}, in {where}")
+        out[name] = _origin(origin, f"{where}, client {name!r}")[0]
+        if out[name] == own:
+            raise ProxyError(f"client {name!r} is this tiroir itself, in {where}")
+    if len({n.casefold() for n in out}) != len(out):
+        raise ProxyError(f"a name of 'clients' is there twice, ignoring case, in {where}")
+    return out
 
 
 def _real(path: str) -> str:
@@ -383,6 +411,7 @@ def parse(t: dict, where, list_table: dict | None = None) -> ProxyConfig:
         if not isinstance(repos.get("install_url", ""), str):
             raise ProxyError(f"'install_url' must be text, in {rhere}")
     origin, host = _origin(t["origin"], here)
+    clients = _clients(t.get("clients", {}), origin, here)
     sock = t["socket"]
     if not sock.startswith("/"):
         raise ProxyError(f"'socket' must be an absolute path, in {here}: {sock!r}")
@@ -445,7 +474,7 @@ def parse(t: dict, where, list_table: dict | None = None) -> ProxyConfig:
     _check_private_roots(members, where)
     if client and not any(m.agency and m.short for m in members.values()):
         raise ProxyError(f"{here} is a client tiroir with no agency member that has a 'short': an agent could Share with nobody")
-    return ProxyConfig(origin, host, Path(sock), t["proxy_user"], acct.pw_uid, acct.pw_gid, members, client, repos)
+    return ProxyConfig(origin, host, Path(sock), t["proxy_user"], acct.pw_uid, acct.pw_gid, members, client, clients, repos)
 
 
 def _check_private_roots(members: dict, where) -> None:

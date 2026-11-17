@@ -78,9 +78,6 @@ jobs:
         slice: [1, 2, 3, 4, 5, 6]
     env:
       SHEAF_TEST_SLICE: ${{ matrix.slice }}/6
-      # The names no file of this public repository may hold (tests/public_tree.py): a secret, because even a
-      # hash of them would publish them. A run without it fails, and a pull request from a fork has none.
-      SHEAF_PUBLIC_TREE_TERMS: ${{ secrets.SHEAF_PUBLIC_TREE_TERMS }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -100,6 +97,11 @@ jobs:
       # the process table and the pytest process's thread stacks when the output stops for six
       # minutes, then ends the run after ten, so a hung job names itself instead of being cancelled.
       - name: Tests
+        # The names no file of this public repository may hold (tests/public_tree.py): a secret, because even a
+        # hash of them would publish them. Only this step has it. A run without it fails, and a pull request
+        # from a fork has none.
+        env:
+          SHEAF_PUBLIC_TREE_TERMS: ${{ secrets.SHEAF_PUBLIC_TREE_TERMS }}
         run: uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v -n 4 --durations=25 -m "not page"
 
       # The page tests drive Chromium through Playwright (tests/page) and take about half of a pull

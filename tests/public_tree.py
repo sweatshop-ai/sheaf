@@ -74,7 +74,9 @@ class Hit(NamedTuple):
 def terms_from(value):
     """The terms of a list as the environment holds it, each as its lower-case words."""
     terms = []
-    for raw in re.split(r"[,\n]", value or ""):
+    for number, raw in enumerate((r for r in re.split(r"[,\n]", value or "") if r.strip()), 1):
+        if not raw.isascii():
+            raise ValueError(f"term {number} has a character outside a-z and 0-9 that the scan cannot read, and would match as a cut-short word")
         words = " ".join(WORD.findall(raw.lower()))
         if words:
             terms.append(("=" if raw.strip().startswith("=") else "") + words)

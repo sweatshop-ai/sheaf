@@ -116,7 +116,7 @@ def _landed(hub, door, b, owner, deadline, peer: str | None = None) -> tuple:
         return _land_steps(hub, door, b, owner, deadline, peer, mine)
 
 
-def _land_steps(hub, door, b, owner, deadline, peer: str | None, mine: list) -> tuple:
+def _land_steps(hub, door, b, owner, deadline, peer: str | None, mine) -> tuple:
     caller = mcp.Caller(owner.name, TokenRow("peer-transfer", owner.name, True, member=owner.id))
     # The Share does not travel: its audience is text, and the people it names are not this tiroir's. The page lands the
     # owner's alone, every Share box unticked and no `shared` line, whatever the sender's text said.

@@ -376,3 +376,19 @@ def test_an_undo_takes_back_only_the_lines_its_thread_added_and_keeps_another_wr
     log.undo("a.md", mine)
     assert [l.writer for l in log.lines("a.md")] == ["Bea", "Cal"]
     assert [l.writer for l in WriteLog().lines("a.md")] == ["Bea", "Cal"]
+
+
+def test_an_undo_keeps_a_renamed_lines_address_and_brings_back_the_lines_the_landing_pushed_out():
+    log = WriteLog(keep=3)
+    log.add(address="old.md", writer="Bea", place="page", via="save")
+    log.rename("old.md", "new.md")                  # the line sits at new.md, still marked old.md in memory
+    log.add(address="new.md", writer="Cal", place="page", via="save")
+    log.add(address="new.md", writer="Dan", place="page", via="save")
+    with log.own_lines() as mine:
+        for i in range(3):                          # the address holds 3: the landing pushes all three earlier lines out
+            log.add(address="new.md", writer=f"landing {i}", place="tiroir", via="transfer")
+    assert [l.writer for l in log.lines("new.md")] == ["landing 0", "landing 1", "landing 2"]
+    log.undo("new.md", mine)
+    assert [l.writer for l in log.lines("new.md")] == ["Bea", "Cal", "Dan"]
+    assert {l.address for l in log.lines("new.md")} == {"new.md"}
+    assert [l.writer for l in WriteLog(keep=3).lines("new.md")] == ["Bea", "Cal", "Dan"]

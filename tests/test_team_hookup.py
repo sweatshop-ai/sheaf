@@ -46,6 +46,24 @@ def team_post(agency, doc, member=AG_ALICE, **body):
                        member=member)
 
 
+def test_a_team_add_sent_again_with_its_request_id_is_stored_once(agency_and_client):
+    agency, client = agency_and_client
+    mine = client.make("alice", "# Plan\n\nsome words here\n")
+    rid = "r" * 16
+    assert team_post(agency, mine, quote="some words", rid=rid).status == 200
+    again = team_post(agency, mine, quote="some words", rid=rid)
+    assert again.status == 200 and len(again.json()["team"]) == 1
+    assert len(team_post(agency, mine, quote="some words", rid="s" * 16).json()["team"]) == 2     # another request id is another comment
+    assert len(team_post(agency, mine, quote="some words").json()["team"]) == 3                   # no id: nothing to match
+
+
+def test_a_team_add_with_a_malformed_request_id_is_refused(agency_and_client):
+    agency, client = agency_and_client
+    mine = client.make("alice", "# Plan\n\nsome words here\n")
+    assert team_post(agency, mine, quote="some words", rid="short").status == 400
+    assert agency.hub.team.list(f"Clients/acme/{mine}") == []
+
+
 # ── step 1: the store is kept at start, and the client tiroir is the gate ────
 
 def test_a_hub_with_client_tiroirs_keeps_team_comments_in_its_state_folder(agency_and_client):

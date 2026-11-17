@@ -2168,6 +2168,8 @@ class Handler:
         _shape(op in OPS, f"op must be one of {', '.join(OPS)}")
         for k in ("id", "body", "quote", "status", "hash", "side"):
             _shape(k not in b or isinstance(b[k], str), f"{k} must be text")
+        rid = b.get("rid")
+        _shape(rid is None or (isinstance(rid, str) and _RID_RE.fullmatch(rid)), "rid is not a request id")
         _shape(not b.get("tell"), "Tell is not for a Team comment: it stays on this tiroir and no agent is asked")
         _shape(b.get("side", "team") == "team", "this route writes Team comments only")
         store, name, cid = self.hub.team, req.member.name, b.get("id", "")
@@ -2180,7 +2182,7 @@ class Handler:
         at = time.strftime(STAMP_FORMAT)
         try:
             if op == "add":
-                store.add(doc, name, b["quote"], b["body"], b.get("hash", ""), at)
+                store.add(doc, name, b["quote"], b["body"], b.get("hash", ""), at, rid)
             elif op == "reply":
                 store.reply(doc, cid, name, b["body"], at)
             elif op == "status":

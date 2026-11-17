@@ -79,3 +79,13 @@ def test_a_named_owner_read_at_another_commit_is_not_carried_to_the_landed_one(r
     repos._write({REPO: {PATH: {"owner": "bea", "commit": "old", "named": "carl"}}})
     repos.land_record(REPO, PATH, "dan", "c0ffee", {})
     assert repos.owner_of(REPO, PATH) == "dan"
+
+
+def test_a_landed_row_is_keyed_as_a_report_keys_it_so_the_reader_finds_it(repos):
+    """A report writes under the lower-cased repo (`_clean_repo`); the landing of a root whose body spells it otherwise
+    must write, read back and drop under that same key."""
+    repos.land_record("Owner/Repo", PATH, "bea", "c0ffee", {})
+    assert list(repos._read()) == ["owner/repo"]
+    assert repos.owner_of("owner/repo", PATH) == "bea"
+    repos.drop_record("Owner/Repo", PATH, None)
+    assert repos._read() == {}

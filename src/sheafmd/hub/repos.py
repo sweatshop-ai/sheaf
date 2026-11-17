@@ -454,6 +454,7 @@ class Repos:
     def land_record(self, repo: str, path: str, owner: str, commit: str, record: dict) -> dict | None:
         """Write the row of a page that landed from another tiroir, as `_settle` writes one (`owner`, `commit`, and the
         `session`, `host`, `link` of `record` that are set; never its `named`, which only a report reads, from the page's own front matter; the `named` a report read at this same commit is kept). Returns the row it replaced, or None, for `drop_record`."""
+        repo = _clean_repo(repo)        # the key a report writes under
         with self._records:
             data = self._read()
             prior = data.get(repo, {}).get(path)
@@ -466,6 +467,7 @@ class Repos:
 
     def drop_record(self, repo: str, path: str, prior: dict | None):
         """Undo `land_record`: put back the row it returned, or take the page's row away when there was none."""
+        repo = _clean_repo(repo)
         with self._records:
             data = self._read()
             if prior is None:

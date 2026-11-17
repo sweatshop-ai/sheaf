@@ -238,7 +238,7 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
     (`moved`), unless `peer` (the origin the channel's token names, passed by the caller) is the tiroir it moved to: that root is
     coming back, and is unmoved once nothing in this check refuses it. The root's `.sheaf.toml` at the tip must name this tiroir
     (`not_named` otherwise; a root unmoved by this call then sleeps again). The clone's state is written only by what this calls:
-    the unmove, and the report, which is the laptop's own, so it dates the clone as used and records the first owner's page, as a
+    the unmove, and the report, which is the laptop's own, so it dates the clone as used and records each owned page, as a
     laptop's would; the page's own state is landing's."""
     if (bad := _root_shape(b)) is not None:
         raise ValueError(bad)
@@ -247,13 +247,14 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
         return 409, {"why": "no_clones"}
     if getattr(hub, "proxy", None) is None:
         return 409, {"why": "no_origin"}
-    judged, first, unmoved = {}, None, False
+    judged, owned, unmoved = {}, [], False
     for p in b["pages"]:
         owner, why = owner_for(hub, p["owner_email"])
         if owner is None:
             judged[p["path"]] = {"ok": False, "why": why}
-        elif first is None:
-            first = (owner, p["path"])
+        else:
+            owned.append((owner, p["path"]))
+    first = owned[0] if owned else None
     if first is not None:
         privates = [(m.short or m.id, m.private_root) for m in hub.proxy.members.values() if m.private_root]
         if peer and root_moves.origin(peer) == repos.moved_to(b["repo"]):
@@ -274,6 +275,14 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
             return 409, {"why": clone.replace("-", "_")}
         if clone != repos_mod.OK or not said.get("commit_known"):
             return 202, {"state": "cloning"}
+        for owner, path in owned[1:]:       # each owned page is reported for its owner, so each row keeps the owner its front matter names
+            try:
+                later = repos.report(owner.short or owner.id, b["repo"], path, b["tip"], privates, {})
+            except repos_mod.Refused:
+                judged[path] = {"ok": False, "why": "refused"}
+                continue
+            if later.get("clone") != repos_mod.OK:
+                judged[path] = {"ok": False, "why": str(later.get("clone")).replace("-", "_")}
         if not repos.settle(channel.SECONDS / 2):       # the report's own thread writes the page's row and keeps the repo busy: it ends before any page lands or the clone sleeps
             return 202, {"state": "cloning"}
         named = config.tiroir_named(repos.page_text(b["repo"], config.ROOT_FILE, b["tip"]) or "")

@@ -18,7 +18,7 @@ def member(id, email, short="", private_root=""):
 
 class FakeRepos:
     def __init__(self, clone, dest):
-        self.answer, self.dest, self.calls = {"clone": clone, "commit_known": True}, dest, []
+        self.answer, self.dest, self.calls, self.queue = {"clone": clone, "commit_known": True}, dest, [], []
 
     busy, settle_ok = False, True
 
@@ -27,7 +27,7 @@ class FakeRepos:
         if isinstance(self.answer, Exception):
             raise self.answer
         self.busy = True            # the report is settled on the repo's own thread: `settle` waits for it
-        self.queued = (member, repo, path, commit)
+        self.queue.append((member, repo, path, commit))
         return {"repo": repo, "path": path, **self.answer}
 
     def clone_dir(self, repo):
@@ -118,10 +118,25 @@ def test_the_report_is_the_laptops_own_with_the_owner_the_tip_and_the_private_ro
     assert privates == [("bob", "/x")]
 
 
-def test_one_report_is_made_for_the_whole_root(clone):
+def test_a_report_is_made_for_each_owned_page_so_each_keeps_the_owner_its_front_matter_names(clone):
     h = hub(clone)
-    incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None), ("b.md", "bob@example.com", None)))
-    assert len(h.repos.calls) == 1
+    incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None), ("b.md", "bob@example.com", None),
+                                ("c.md", "nobody@example.com", None)))
+    assert [(who, path) for who, _, path, *_ in h.repos.calls] == [("al", "a.md"), ("bob", "b.md")]
+
+
+def test_every_owned_page_has_its_row_settled_before_any_page_lands(clone):
+    (clone / "b.md").write_text("# A\n")      # the same text as a.md: the body's blob fits both
+    git(clone, "add", "b.md")
+    git(clone, "-c", "user.name=a", "-c", "user.email=a@example.com", "commit", "-qm", "b")
+    git(clone, "push", "-q", "origin", "dev")
+    h = land_hub(clone)
+    b = body(clone, ("a.md", "alice@example.com", None), ("b.md", "bob@example.com", None))
+    incoming.check_root(h, b)
+    assert h.repos.events == ["settled"] and set(h.repos.rows) == {("o/r", "a.md"), ("o/r", "b.md")}
+    incoming.land_root(h, b)
+    assert h.repos.events == ["settled", "settled", "land_record", "land_record"]
+    assert set(h.repos.rows) == {("o/r", "a.md"), ("o/r", "b.md")}
 
 
 def test_a_clone_being_made_answers_cloning(clone):
@@ -333,9 +348,10 @@ class LandRepos(FakeRepos):
     def _settled(self):
         """What the repo's thread writes when it settles the report: the row of the page it was made for, as `_settle` writes one,
         the first owner kept and no field of a landed record."""
-        member, repo, path, commit = self.queued
-        row = self.rows.get((repo, path))
-        self.rows[(repo, path)] = (row[0] if row else member, commit, {})
+        for member, repo, path, commit in self.queue:
+            row = self.rows.get((repo, path))
+            self.rows[(repo, path)] = (row[0] if row else member, commit, {})
+        self.queue.clear()
         self.events.append("settled")
 
     def land_record(self, repo, path, owner, commit, record):

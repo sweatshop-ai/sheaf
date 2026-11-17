@@ -342,3 +342,23 @@ def test_a_write_that_fails_after_the_hub_expected_it_leaves_no_expectation_behi
         "doc": DOC, "expected_hash": md_hash(text), "text": text + "\nLost.\n"}}), token=agents.tokens["bea-claude"], as_name=None)
     assert res.json()["result"]["isError"]
     assert agents.hub.writes._own == {}
+
+
+def test_a_restore_keeps_the_lines_of_a_renamed_page_at_the_new_address_after_a_restart():
+    log = WriteLog()
+    log.add(address="old.md", writer="Bea", place="page", via="save")
+    log.rename("old.md", "new.md")                  # the line now sits at new.md, still marked old.md in the file
+    log.restore("new.md", log.lines("new.md"))
+    again = WriteLog()
+    assert [l.writer for l in again.lines("new.md")] == ["Bea"] and again.lines("old.md") == []
+
+
+def test_a_restore_is_one_write_to_the_file_so_a_cut_one_takes_back_nothing(monkeypatch):
+    log = WriteLog()
+    log.add(address="a.md", writer="Bea", place="page", via="save")
+    kept = log.lines("a.md")
+    writes = []
+    real = os.write
+    monkeypatch.setattr(os, "write", lambda fd, data: writes.append(data) or real(fd, data))
+    log.restore("a.md", kept)
+    assert len(writes) == 1                         # the retraction and the lines it keeps reach the file together

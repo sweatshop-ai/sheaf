@@ -335,3 +335,34 @@ def test_two_identical_lines_in_one_bundle_are_both_kept(members):
     res = back(members, peer_token(origin=ELSEWHERE), writes=[line, dict(line)])      # two writes in the same second
     assert res.status == 200, res.text
     assert len([w for w in members.hub.writes.lines(GONE) if w.via == "door"]) == 2
+
+
+def _fails_after_carry(monkeypatch):
+    from sheafmd.hub.writelog import WriteLog
+    real = WriteLog.carry
+
+    def carried_then_broken(self, *a, **k):
+        real(self, *a, **k)
+        raise OSError("disk full")
+    monkeypatch.setattr(WriteLog, "carry", carried_then_broken)
+
+
+def test_a_failed_landing_is_taken_back_in_the_write_log_file_too_so_a_restart_does_not_bring_its_lines_back(members, monkeypatch):
+    from sheafmd.hub.writelog import WriteLog
+    forwarded(members)
+    members.hub.writes.add(GONE, "Bea", "laptop", "door")           # kept at the address when the page left
+    kept = members.hub.writes.lines(GONE)
+    _fails_after_carry(monkeypatch)
+    assert back(members, peer_token(origin=ELSEWHERE)).status != 200
+    assert members.hub.writes.lines(GONE) == kept
+    assert WriteLog().lines(GONE) == kept                           # a restarted hub, built from the file
+
+
+def test_a_failed_landing_at_a_new_address_leaves_no_line_of_it_after_a_restart(members, monkeypatch):
+    from sheafmd.hub.writelog import WriteLog
+    _fails_after_carry(monkeypatch)
+    assert transfer(members, peer_token()).status != 200
+    address = "loose-bea/projects/blog/notes.md"
+    assert members.hub.writes.lines(address) == []
+    assert WriteLog().lines(address) == []
+

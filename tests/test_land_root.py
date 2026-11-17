@@ -274,3 +274,173 @@ def test_a_root_with_no_clone_of_the_tip_yet_is_not_judged_by_its_toml(clone):
     h = hub(clone)
     h.repos.answer["commit_known"] = False
     assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None))) == (202, {"state": "cloning"})
+
+
+# ── landing (ticket 21 part 2b) ──────────────────────────────────────────────
+
+class Store:
+    """A hub store that records what it is given, and fails when told to."""
+
+    def __init__(self, fail=False):
+        self.puts, self.forgot, self.carried, self.dropped, self.fail = [], [], [], [], fail
+
+    def put(self, address, text):
+        if self.fail:
+            raise OSError("disk full")
+        self.puts.append((address, text))
+
+    def forget(self, address):
+        self.forgot.append(address)
+
+    def carry(self, address, lines, came_from, by):
+        self.carried.append((address, lines, came_from, by))
+
+    def drop(self, address):
+        self.dropped.append(address)
+
+
+class LandRepos(FakeRepos):
+    def __init__(self, *a):
+        super().__init__(*a)
+        self.rows, self.priors = {}, {}
+
+    def land_record(self, repo, path, owner, commit, record):
+        self.priors[(repo, path)] = self.rows.get((repo, path))
+        self.rows[(repo, path)] = (owner, commit, record)
+        return self.priors[(repo, path)]
+
+    def drop_record(self, repo, path, prior):
+        if prior is None:
+            self.rows.pop((repo, path), None)
+        else:
+            self.rows[(repo, path)] = prior
+
+
+def land_hub(clone, state=repos_mod.OK, fail=False):
+    h = hub(clone, state)
+    h.repos = LandRepos(state, clone)
+    h.versions, h.writes = Store(fail), Store()
+    return h
+
+
+def test_a_ready_page_writes_its_record_versions_and_write_log_under_the_roots_address(clone):
+    h = land_hub(clone)
+    b = body(clone, ("a.md", "alice@example.com", None))
+    b["pages"][0].update(record={"session": "s1", "host": "box"}, versions=[{"text": "# old\n"}],
+                         writes=[{"time": "t", "writer": "w"}])
+    blob = b["pages"][0]["blob"]
+    assert incoming.land_root(h, b) == (200, {"pages": {"a.md": {"ok": True, "hash": blob}}})
+    assert h.repos.rows == {("o/r", "a.md"): ("al", b["tip"], {"session": "s1", "host": "box"})}
+    assert h.versions.puts == [("o--r/a.md", "# old\n")]
+    assert h.writes.carried == [("o--r/a.md", [{"time": "t", "writer": "w"}], "https://there.example", "alice")]
+
+
+def test_a_landed_version_brings_back_no_audience(clone):
+    h = land_hub(clone)
+    b = body(clone, ("a.md", "alice@example.com", None))
+    b["pages"][0]["versions"] = [{"text": "---\nshared: bob\n---\n# old\n"}]
+    incoming.land_root(h, b)
+    (_, text), = h.versions.puts
+    assert "shared" not in text
+
+
+def test_a_page_with_no_extras_lands_its_record_alone(clone):
+    h = land_hub(clone)
+    incoming.land_root(h, body(clone, ("a.md", "bob@example.com", None)))
+    assert h.repos.rows == {("o/r", "a.md"): ("bob", git(clone, "rev-parse", "dev"), {})}
+    assert h.versions.puts == [] and h.writes.carried[0][3] == "alice"
+
+
+def test_a_repeat_with_the_same_id_and_path_lands_once_and_is_told_the_same_answer(clone):
+    h = land_hub(clone)
+    b = body(clone, ("a.md", "alice@example.com", None))
+    b["pages"][0]["versions"] = [{"text": "# old\n"}]
+    first = incoming.land_root(h, b)
+    second = incoming.land_root(h, b)
+    assert first == second
+    assert len(h.versions.puts) == 1 and len(h.writes.carried) == 1
+
+
+def test_a_second_id_for_the_same_path_lands_again(clone):
+    h = land_hub(clone)
+    incoming.land_root(h, body(clone, ("a.md", "alice@example.com", None)))
+    incoming.land_root(h, body(clone, ("a.md", "alice@example.com", None), id="m2"))
+    assert len(h.writes.carried) == 2
+
+
+def test_a_failing_store_leaves_nothing_and_answers_failed_for_that_page(clone):
+    h = land_hub(clone, fail=True)
+    b = body(clone, ("a.md", "alice@example.com", None))
+    b["pages"][0]["versions"] = [{"text": "# old\n"}]
+    assert incoming.land_root(h, b) == (200, {"pages": {"a.md": {"ok": False, "why": "failed"}}})
+    assert h.repos.rows == {}
+    assert h.versions.forgot == ["o--r/a.md"] and h.writes.dropped == ["o--r/a.md"]
+
+
+def test_a_failed_landing_restores_the_row_the_page_had_and_is_not_remembered(clone):
+    h = land_hub(clone, fail=True)
+    h.repos.rows[("o/r", "a.md")] = ("bob", "old", {})
+    b = body(clone, ("a.md", "alice@example.com", None))
+    b["pages"][0]["versions"] = [{"text": "# old\n"}]
+    incoming.land_root(h, b)
+    assert h.repos.rows == {("o/r", "a.md"): ("bob", "old", {})}
+    h.versions.fail = False
+    assert incoming.land_root(h, b)[1]["pages"]["a.md"]["ok"] is True     # a retry of the same id lands
+
+
+def test_one_page_failing_does_not_stop_the_next(clone):
+    h = land_hub(clone)
+    real = h.versions.put
+    h.versions.put = lambda address, text: (_ for _ in ()).throw(OSError("x")) if address.endswith("a.md") else real(address, text)
+    (clone / "b.md").write_text("# B\n")
+    git(clone, "add", "b.md")
+    git(clone, "-c", "user.name=a", "-c", "user.email=a@example.com", "commit", "-qm", "b")
+    git(clone, "push", "-q", "origin", "dev")
+    b = body(clone, ("a.md", "alice@example.com", None), ("b.md", "alice@example.com", git(clone, "hash-object", "b.md")))
+    b["pages"][0]["versions"] = [{"text": "x"}]
+    status, answer = incoming.land_root(h, b)
+    assert answer["pages"]["a.md"] == {"ok": False, "why": "failed"} and answer["pages"]["b.md"]["ok"] is True
+    assert list(h.repos.rows) == [("o/r", "b.md")]
+
+
+def test_a_page_the_check_refused_writes_nothing(clone):
+    h = land_hub(clone)
+    b = body(clone, ("a.md", "nobody@example.com", None), ("gone.md", "alice@example.com", "0" * 40))
+    status, answer = incoming.land_root(h, b)
+    assert status == 200 and answer["pages"]["a.md"]["why"] == "no_owner" and answer["pages"]["gone.md"]["why"] == "text_differs"
+    assert h.repos.rows == {} and h.versions.puts == [] and h.writes.carried == []
+
+
+def test_a_root_the_check_refuses_whole_is_answered_as_is_and_writes_nothing(clone):
+    h = land_hub(clone, repos_mod.NO_APP)
+    assert incoming.land_root(h, body(clone, ("a.md", "alice@example.com", None))) == (409, {"why": "no_app"})
+    assert h.repos.rows == {} and h.writes.carried == []
+    h = land_hub(clone, repos_mod.CLONING)
+    assert incoming.land_root(h, body(clone, ("a.md", "alice@example.com", None))) == (202, {"state": "cloning"})
+
+
+def test_a_move_naming_a_repo_outside_the_receivers_installation_clones_nothing(clone):
+    h = land_hub(clone, repos_mod.NO_APP)
+    h.repos.answer["install"] = "https://install.example/o/r"
+    status, answer = incoming.land_root(h, body(clone, ("a.md", "alice@example.com", None)))
+    assert (status, answer["why"]) == (409, "no_app")
+    assert h.repos.rows == {} and h.repos.unmoved == []
+
+
+def test_the_peer_is_passed_on_to_the_check(clone):
+    h = land_hub(clone)
+    h.repos.moved = THERE
+    incoming.land_root(h, body(clone, ("a.md", "alice@example.com", None)), peer=THERE)
+    assert h.repos.unmoved == ["o/r"]
+
+
+@pytest.mark.parametrize("extra", [{"record": "x"}, {"record": ["a"]}, {"versions": "x"}, {"versions": [{"nope": 1}]}, {"versions": [3]},
+                                   {"versions": [{"text": "x"}] * (incoming.MAX_VERSIONS + 1)}, {"writes": [3]}, {"writes": "x"},
+                                   {"writes": [{}] * (incoming.MAX_WRITES + 1)}])
+def test_a_page_with_a_malformed_extra_is_a_value_error_before_anything_is_written(clone, extra):
+    h = land_hub(clone)
+    b = body(clone, ("a.md", "alice@example.com", None))
+    b["pages"][0].update(extra)
+    with pytest.raises(ValueError):
+        incoming.land_root(h, b)
+    assert h.repos.calls == [] and h.repos.rows == {}

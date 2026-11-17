@@ -234,10 +234,13 @@ def test_the_row_holds_no_script_and_no_address_but_the_hubs_own(mounted):
 # ── the byline of an opened page is the same way back (ticket 10) ───────────
 
 def open_page(m, doc):
-    """Opens `doc` from its row and waits for its byline in the root the page attached."""
+    """Opens `doc` from its row and waits for its byline in the root the page attached, and for the page to start in it: mount.js puts
+    the rendered html in the root first, waits for the stylesheet, and only then starts the page, which names the session in the
+    byline (page.js takeAgent, before it appends its menu). Until then the line is the one rendered ("Document prepared by Ada")."""
     m.click(f'.sheaf-row[data-doc="{doc}"] .sheaf-title a')
     until(lambda: m.page.evaluate("window.__roots.length > 1 && !!window.__roots[window.__roots.length - 1].querySelector('p.doc-by')"),
           what="the page's byline")
+    until(lambda: m.page.evaluate("!!window.__roots[window.__roots.length - 1].querySelector('#rd-menu')"), what="the page started")
 
 
 def byline(m):
@@ -259,6 +262,19 @@ def test_the_byline_of_an_opened_page_names_the_session_as_its_row_does(mounted)
     b = byline(mounted)
     assert b["text"].startswith("Document prepared by Claude Code (Bea)")
     assert (b["tag"], b["href"], b["target"], b["rel"]) == ("A", RC, "_blank", "noopener noreferrer")
+
+
+def test_the_byline_is_as_rendered_until_the_stylesheet_has_loaded_and_the_page_started(mounted):
+    held = []
+    mounted.page.route("**/_/mount.css*", lambda route: held.append(route))
+    mounted.click('.sheaf-row[data-doc="work/plan.md"] .sheaf-title a')
+    until(lambda: held, what="the page's stylesheet, held")
+    assert mounted.page.evaluate("window.__roots.length") > 1
+    assert byline(mounted)["text"].startswith("Document prepared by ") and "Claude Code" not in byline(mounted)["text"]
+    assert not mounted.page.evaluate("!!window.__roots[window.__roots.length - 1].querySelector('#rd-menu')")
+    for route in held:
+        route.continue_()
+    until(lambda: byline(mounted)["text"].startswith("Document prepared by Claude Code (Bea)"), what="the session's name")
 
 
 def test_a_click_on_the_byline_asks_agentview_to_jump_and_goes_nowhere_else(mounted, agentview):

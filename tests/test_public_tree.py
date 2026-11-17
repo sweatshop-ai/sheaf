@@ -135,6 +135,11 @@ def test_terms_are_read_from_a_comma_or_line_separated_list_and_a_term_is_its_wo
     assert terms_from("") == () and terms_from(None) == ()
 
 
+def test_a_term_with_a_character_the_scan_cannot_read_is_refused_not_cut_short():
+    with pytest.raises(ValueError, match="term 2"):
+        terms_from("fine, Zo\u00eb")
+
+
 def test_the_scan_prints_hits_without_the_matched_text(repo, capsys, monkeypatch):
     planted(repo, "a.txt", "leakguardcanary\n")
     monkeypatch.setenv("SHEAF_PUBLIC_TREE_TERMS", "leakguardcanary")

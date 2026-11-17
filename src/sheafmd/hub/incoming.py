@@ -109,7 +109,14 @@ class _TooSlow(Exception):
 
 def _landed(hub, door, b, owner, deadline, peer: str | None = None) -> tuple:
     """The landing of `land`, with `transfers.lock` held. The deadline is the sender's: past it the sender has given up and
-    keeps its page, so a page landed after it would be a second one. It is checked between the steps, never inside one."""
+    keeps its page, so a page landed after it would be a second one. It is checked between the steps, never inside one.
+    The landing holds no writer lock: a failed one takes back the Write log lines it wrote itself, never those another writer
+    added at the address meanwhile."""
+    with hub.writes.own_lines() as mine:
+        return _land_steps(hub, door, b, owner, deadline, peer, mine)
+
+
+def _land_steps(hub, door, b, owner, deadline, peer: str | None, mine) -> tuple:
     caller = mcp.Caller(owner.name, TokenRow("peer-transfer", owner.name, True, member=owner.id))
     # The Share does not travel: its audience is text, and the people it names are not this tiroir's. The page lands the
     # owner's alone, every Share box unticked and no `shared` line, whatever the sender's text said.
@@ -119,7 +126,6 @@ def _landed(hub, door, b, owner, deadline, peer: str | None = None) -> tuple:
     # the address stays, and refuses the landing as it refuses a create.
     back = _forward_back(hub, owner, b, peer)
     lifted = hub.forwards.lift_remote(back) if back is not None else {}
-    kept = hub.writes.lines(back) if back is not None else []      # what `moved_remote` kept at that address: a failed landing leaves it
     try:
         made = door._create(args, caller)
     except BaseException as e:
@@ -148,7 +154,7 @@ def _landed(hub, door, b, owner, deadline, peer: str | None = None) -> tuple:
         with contextlib.suppress(Exception):
             hub.versions.forget(address)
         with contextlib.suppress(Exception):
-            hub.writes.restore(address, kept if address == back else [])
+            hub.writes.undo(address, mine)
         if (loose_root := hub.loose.known(owner)) is not None:
             with contextlib.suppress(loose.Refused, OSError):
                 _unkeep(loose_root, address)

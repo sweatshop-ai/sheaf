@@ -366,3 +366,23 @@ def test_a_failed_landing_at_a_new_address_leaves_no_line_of_it_after_a_restart(
     assert members.hub.writes.lines(address) == []
     assert WriteLog().lines(address) == []
 
+
+
+def test_a_landing_that_fails_keeps_the_line_someone_else_wrote_at_its_address_meanwhile(members, monkeypatch):
+    import threading
+    import time
+    monkeypatch.setattr(chan, "SECONDS", 0.05)
+    address = "loose-bea/projects/blog/notes.md"
+    real = members.hub.versions.put
+
+    def slow(*a, **k):
+        # the landing holds no writer lock: another writer's line reaches the log from its own thread while the landing runs
+        other = threading.Thread(target=members.hub.writes.add, args=(address, "Cal", "page", "save"))
+        other.start()
+        other.join()
+        time.sleep(0.15)
+        return real(*a, **k)
+    monkeypatch.setattr(members.hub.versions, "put", slow)
+    res = transfer(members, peer_token())
+    assert res.status == 409 and res.json()["why"] == "too_slow"
+    assert [(l.writer, l.via) for l in members.hub.writes.lines(address)] == [("Cal", "save")]    # the landing's own lines go, Cal's stays

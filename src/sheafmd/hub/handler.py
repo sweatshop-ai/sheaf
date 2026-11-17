@@ -707,6 +707,8 @@ class Handler:
         """The document `doc` names. A member of proxy mode is told of no document of another
         root, nor of a root nested inside one of theirs: the same 404 as for one that does not
         exist, before anything is made or rendered for it (9.9)."""
+        if readthrough.is_clients(doc):          # a client page is read through (9.9): only its comments are relayed
+            raise Refuse(403, "A client page is read here: comment on it, or edit it on the client tiroir.")
         self._owned(req, doc)
         try:
             return self.hub.entry(doc)
@@ -2254,6 +2256,9 @@ class Handler:
         kind = b.get("kind")
         _shape(isinstance(kind, str) and kind.strip(), "kind is missing")
         doc = b.get("doc") if isinstance(b.get("doc"), str) else None
+        if readthrough.is_clients(doc):          # what a client page is called, and what went wrong on it, stays off this disk (9.9)
+            diagnostics.record("page", kind.strip()[:40], None, **self._who(req))
+            return Response(204)
         detail = {str(k)[:40]: str(v) for k, v in list(b.items())[:40] if k not in _RESERVED}
         diagnostics.record("page", kind.strip()[:40], doc, **detail, **self._who(req))
         return Response(204)

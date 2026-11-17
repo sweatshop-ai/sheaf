@@ -124,6 +124,7 @@ _Avoid_: back, thread panel
 
 **Root's tiroir**:
 The tiroir every page of a root goes to, named in its root config; a root that names none sends its pages to the person's default tiroir. A root moved to another tiroir takes its pages with it, versions and comments, and their old addresses lead to the new ones. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 04; not built.)
+Built for the receiving end: a moved root's pages land on the tiroir its `.sheaf.toml` names, each whole or not at all, by the channel's `root` verb (SPEC 9.9); the sending end is not built.
 _Avoid_: binding, target
 
 **Client tiroir**:

@@ -32,10 +32,12 @@ from . import assets as assets_mod
 from . import boxwait
 from . import forwards as forwards_mod
 from . import loose as loose_mod
+from . import outgoing
 from . import moves as moves_mod
 from . import place
 from . import projects
 from . import proxy as proxy_mod
+from . import readthrough
 from . import roots as roots_mod
 from . import sheaf_view
 from . import state
@@ -135,6 +137,8 @@ class Hub:
         self.port, self.version, self.service = port, version, service
         self.assets = assets_mod.load(version)   # /_/mount.js and .css as this hub serves them to its end (#179)
         self.proxy = proxy                       # the checked `[proxy]` table (9.9), None in loopback mode
+        # the agency tiroir's client tiroirs, read through (9.9); None for a tiroir with none. The call is the channel's (`outgoing.call`).
+        self.clients = readthrough.Clients(proxy.clients, self.peer_call) if proxy is not None and proxy.clients else None
         self.started_by, self.clock = started_by, clock
         self.auth = Auth(key, port)
         self.boot = str(uuid.uuid4())
@@ -695,7 +699,7 @@ class Hub:
             return False
         return e.images_scope != self._image_scope(self._file_root(e), e.address)
 
-    def page(self, e: Entry, nonce: str, member=None) -> str:
+    def page(self, e: Entry, nonce: str, member=None, mount: str = "") -> str:
         """The page to send: the nonce of this response on its script, and the read state as it
         is now (it changes without the page being rendered again). For a `member` of proxy mode
         (9.9, 10.1) the meta block is theirs: their name and seen state, no agent and nothing it
@@ -709,11 +713,11 @@ class Hub:
         found = list(_META_RE.finditer(html))
         if found:
             m = found[-1]
-            meta = self._fresh_meta(e, json.loads(m.group(2)), member)
+            meta = self._fresh_meta(e, json.loads(m.group(2)), member, mount)
             html = (html[:m.start(2)] + json.dumps(meta).replace("<", "\\u003c") + html[m.end(2):])
         return html
 
-    def _fresh_meta(self, e: Entry, meta: dict, member) -> dict:
+    def _fresh_meta(self, e: Entry, meta: dict, member, mount: str = "") -> dict:
         """The meta block as it is now: the read state and what changes without the page being rendered again. The page
         route and the mount route (#116) both send this, so a page mounted in the front reads what a framed one does."""
         # The buttons of the text the page draws: a write since its render brings a `changed` and a reload,
@@ -731,7 +735,7 @@ class Hub:
             meta["agent"], meta["can"], meta["lines"] = v.agent(), v.can(), v.lines
             meta["targets"] = targets_mod.choices(self, e.address)
         else:
-            meta["doc"] = self.alias(member, e.address)
+            meta["doc"] = (f"{mount}/" if mount else "") + self.alias(member, e.address)      # a read-through page is told under `Clients/<client>` (9.9)
             meta.update(me=member.name, seen=self.member_seen.get(member.id, e.address), proxy=True,
                         member=member.id)
             work, can = self.member_work(e, member)
@@ -740,6 +744,9 @@ class Hub:
             mt = self.member_target(e.address, member, can)
             meta["agent"], meta["can"], meta["lines"], meta["targets"] = mt.agent, mt.can, mt.lines, mt.picks
             meta["way_back"] = sheaf_view.byline(self, e.address, member)
+            if mount:                           # read through for another tiroir's member (9.9): read and comment, never edit, press or Tell here
+                meta["edit"], meta["actions"], meta["targets"], meta["can"] = False, [], [], []
+                meta.pop("work", None), meta.pop("way_back", None)
         return meta
 
     def member_target(self, address: str, member, can: list) -> MemberTarget:
@@ -756,16 +763,23 @@ class Hub:
         v = targets_mod.agent_view(self, raw, member)
         return MemberTarget(v.shape, sorted({*can, "queue"}) if v.reaches else can, {"tell": v.line}, pickable)
 
-    def mount_doc(self, e: Entry, member=None) -> dict:
+    def mount_doc(self, e: Entry, member=None, mount: str = "") -> dict:
         """The rectoverso as the front mounts it (#116): {title, toc, html, config, css, version, script, assets}. The text
         is rendered now through the sanitiser's mount mode; the config is the meta block of `page`, so both read the
         same state."""
         h, text, branch = e.live.current_read()         # the hash and the branch of one render
         got = json.loads(self._build(e, text, mount=True, count=False, branch=branch))
-        got["config"] = self._fresh_meta(e, got["config"], member)
+        got["config"] = self._fresh_meta(e, got["config"], member, mount)
         got["version"] = self.version
         got.update(self.mount_fields())
         return got
+
+    def peer_call(self, client: str, verb: str, body: dict) -> tuple:
+        """The hub-to-hub channel to the client tiroir `client`: `(status, answer)`, OSError when it does not answer."""
+        origin = self.proxy.clients.get(client) if self.proxy is not None else None
+        if origin is None:
+            raise OSError(f"no client tiroir is called {client}")
+        return outgoing.call(origin, verb, body)
 
     def mount_fields(self) -> dict:
         """What every mount answer carries for mount.js (#179): `script`, the name of the scripts this hub serves, which

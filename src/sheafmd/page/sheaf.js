@@ -88,6 +88,59 @@ function follow(a, e, where) {
     if (where.live()) where.say('That session could not be brought back: AgentView does not answer on this computer.');
   });
 }
+// One row of the table, for the rows of render and for the rows a client tiroir's node reads through (SPEC 9.9).
+function buildRow(doc, el, r) {
+  var tr = el('tr', 'sheaf-row');
+  tr.dataset.folder = r.folder;
+  tr.dataset.title = String(r.title).toLowerCase();
+  tr.dataset.doc = r.doc;
+  var t = el('td', 'sheaf-title'), a = el('a', null, r.title);
+  href(a, r.url);
+  t.append(a);
+  if (r.new) {                                // a page Shared with the member that changed since they opened it
+  var dot = el('span', 'sheaf-new', 'new');
+  dot.title = 'New or changed since you last opened it';
+  t.append(' ', dot);
+  }
+  if (r.shared_by) t.append(' ', el('span', 'sheaf-shared-by', 'shared by ' + r.shared_by));
+  if (r.own) {                                // the owner's own acts on a loose page (SPEC 8.6): Keep, Archive now or Restore, Delete
+  [r.archived ? ['restore', 'Restore'] : ['archive', 'Archive now'], ['keep', r.kept ? 'Kept' : 'Keep'], ['delete', 'Delete']].forEach(function (a) {
+    var ab = el('button', 'sheaf-act' + (a[0] === 'keep' && r.kept ? ' on' : ''), a[1]);
+    ab.type = 'button';
+    ab.dataset.act = a[0];
+    if (a[0] === 'keep') ab.dataset.on = r.kept ? '0' : '1';
+    t.append(' ', ab);
+  });
+  }
+  if (r.share) {                              // the member's own loose page that no Share line opens: the button writes the line
+  var sb = el('button', 'sheaf-share', 'Share');
+  sb.type = 'button';
+  sb.dataset.hash = r.share;
+  sb.title = 'Share this page with every member of the tiroir';
+  t.append(' ', sb);
+  }
+  if (r.can_move) {                           // the member's own loose page: Move… puts it in another folder of their root
+  var mb = el('button', 'sheaf-move', 'Move…');
+  mb.type = 'button';
+  mb.title = 'Put this page in another folder of your loose root';
+  t.append(' ', mb);
+  var tb = el('button', 'sheaf-move-tiroir', 'Move to another tiroir…');   // to the shared Sheaf where the owner has an account too
+  tb.type = 'button';
+  tb.title = 'Send this page to another shared Sheaf where you have an account';
+  t.append(' ', tb);
+  }
+  var w = el('td', 'sheaf-write', r.write);
+  if (r.write_tip) w.title = r.write_tip;
+  var s = el('td', 'sheaf-session');
+  if (r.session) s.append(sessionNode(doc, r.session, r.session_link));
+  if (r.session_tip) s.title = r.session_tip;
+  var when = el('td', 'sheaf-when'), time = el('time', null, r.when);
+  time.setAttribute('data-mtime', String(r.mtime));
+  when.append(time);
+  tr.append(t, el('td', 'sheaf-where', r.folder), w, s, when, el('td', 'sheaf-open', r.open ? r.open : ''));
+  return tr;
+}
+
 function render(data, target) {
   var doc = target && target.ownerDocument ? target.ownerDocument : document;
   function el(tag, cls, text) {
@@ -116,6 +169,7 @@ function render(data, target) {
       var b = el('button', 'sheaf-folder', n.name);
       b.type = 'button';
       b.dataset.path = n.path;
+      if (n.client) b.dataset.client = n.client;      // a client tiroir of the agency (SPEC 9.9): its rows are read when the node is opened
       row.append(toggle, b);
       if (n.rename) {                           // a folder of the member's own loose root: Rename folder… moves each page in it
         var rb = el('button', 'sheaf-rename-folder', 'Rename…');
@@ -141,57 +195,8 @@ function render(data, target) {
   ['Title', 'Folder', 'Last write', 'Last agent session', 'When', 'Open'].forEach(function (h) { hr.append(el('th', null, h)); });
   head.append(hr);
   var body = el('tbody');
-  (data.rows || []).forEach(function (r) {
-    var tr = el('tr', 'sheaf-row');
-    tr.dataset.folder = r.folder;
-    tr.dataset.title = String(r.title).toLowerCase();
-    tr.dataset.doc = r.doc;
-    var t = el('td', 'sheaf-title'), a = el('a', null, r.title);
-    href(a, r.url);
-    t.append(a);
-    if (r.new) {                                // a page Shared with the member that changed since they opened it
-      var dot = el('span', 'sheaf-new', 'new');
-      dot.title = 'New or changed since you last opened it';
-      t.append(' ', dot);
-    }
-    if (r.shared_by) t.append(' ', el('span', 'sheaf-shared-by', 'shared by ' + r.shared_by));
-    if (r.own) {                                // the owner's own acts on a loose page (SPEC 8.6): Keep, Archive now or Restore, Delete
-      [r.archived ? ['restore', 'Restore'] : ['archive', 'Archive now'], ['keep', r.kept ? 'Kept' : 'Keep'], ['delete', 'Delete']].forEach(function (a) {
-        var ab = el('button', 'sheaf-act' + (a[0] === 'keep' && r.kept ? ' on' : ''), a[1]);
-        ab.type = 'button';
-        ab.dataset.act = a[0];
-        if (a[0] === 'keep') ab.dataset.on = r.kept ? '0' : '1';
-        t.append(' ', ab);
-      });
-    }
-    if (r.share) {                              // the member's own loose page that no Share line opens: the button writes the line
-      var sb = el('button', 'sheaf-share', 'Share');
-      sb.type = 'button';
-      sb.dataset.hash = r.share;
-      sb.title = 'Share this page with every member of the tiroir';
-      t.append(' ', sb);
-    }
-    if (r.can_move) {                           // the member's own loose page: Move… puts it in another folder of their root
-      var mb = el('button', 'sheaf-move', 'Move…');
-      mb.type = 'button';
-      mb.title = 'Put this page in another folder of your loose root';
-      t.append(' ', mb);
-      var tb = el('button', 'sheaf-move-tiroir', 'Move to another tiroir…');   // to the shared Sheaf where the owner has an account too
-      tb.type = 'button';
-      tb.title = 'Send this page to another shared Sheaf where you have an account';
-      t.append(' ', tb);
-    }
-    var w = el('td', 'sheaf-write', r.write);
-    if (r.write_tip) w.title = r.write_tip;
-    var s = el('td', 'sheaf-session');
-    if (r.session) s.append(sessionNode(doc, r.session, r.session_link));
-    if (r.session_tip) s.title = r.session_tip;
-    var when = el('td', 'sheaf-when'), time = el('time', null, r.when);
-    time.setAttribute('data-mtime', String(r.mtime));
-    when.append(time);
-    tr.append(t, el('td', 'sheaf-where', r.folder), w, s, when, el('td', 'sheaf-open', r.open ? r.open : ''));
-    body.append(tr);
-  });
+  (data.rows || []).forEach(function (r) { body.append(buildRow(doc, el, r)); });
+  if (data.clients_line) main.append(el('p', 'sheaf-clients-line', data.clients_line));      // no Clients folder for a member with no e-mail: the line says why
   table.append(head, body);
   var empty = el('p', 'sheaf-empty', 'No pages here.');
   empty.hidden = true;
@@ -248,13 +253,13 @@ function create(ROOT, opts) {
   var selected = '', gone = false, handle = null, opened = 0;
   var view = ROOT.querySelector('.sheaf-view');
   var main = view.querySelector('.sheaf-main'), pane = view.querySelector('.sheaf-doc');
-  var rows = Array.prototype.slice.call(ROOT.querySelectorAll('.sheaf-row'));
+  function allRows() { return Array.prototype.slice.call(ROOT.querySelectorAll('.sheaf-row')); }
   var filter = ROOT.querySelector('.sheaf-filter'), empty = ROOT.querySelector('.sheaf-empty');
   var said = ROOT.querySelector('.sheaf-said');
 
   function show() {
     var words = filter.value.trim().toLowerCase().split(/\s+/).filter(Boolean), n = 0;
-    rows.forEach(function (tr) {
+    allRows().forEach(function (tr) {
       var f = tr.dataset.folder;
       var inside = !selected || f === selected || f.indexOf(selected + '/') === 0;
       var named = words.every(function (w) { return tr.dataset.title.indexOf(w) !== -1; });
@@ -263,8 +268,31 @@ function create(ROOT, opts) {
     });
     empty.hidden = n !== 0;
   }
-  function choose(path) {
+  // A client tiroir's rows are asked of the hub when its node is opened and replace the last ones: the hub keeps none, so
+  // neither does the page. A row of one has no Share, Keep, Archive or Delete (the hub tells it `own: false`).
+  var asked = {};                 // per client: the read that counts, so an earlier one that comes back late adds nothing
+  function load(name) {
+    var tbody = ROOT.querySelector('.sheaf-table tbody'), d = ROOT.ownerDocument;
+    function el(tag, cls, text) { var e = d.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = String(text); return e; }
+    var mine = asked[name] = (asked[name] || 0) + 1;
+    say('');
+    fetch('/_/clients/sheaf?client=' + encodeURIComponent(name), { credentials: 'same-origin', headers: { Accept: 'application/json' } }).then(function (r) {
+      return r.ok ? r.json() : { rows: [], line: 'This client tiroir could not be read.' };
+    }).then(function (b) {
+      if (gone || mine !== asked[name]) return;
+      allRows().forEach(function (tr) { if (tr.dataset.client === name) tr.remove(); });
+      (b.rows || []).forEach(function (r) { var tr = buildRow(d, el, r); tr.dataset.client = name; tbody.append(tr); });
+      if (b.line) say(b.line);
+      show();
+    }, function () {
+      if (gone || mine !== asked[name]) return;
+      allRows().forEach(function (tr) { if (tr.dataset.client === name) tr.remove(); });
+      say('This client tiroir could not be read.');
+    });
+  }
+  function choose(path, client) {
     selected = path;
+    if (client) load(client);
     Array.prototype.forEach.call(ROOT.querySelectorAll('.sheaf-folder'), function (b) {
       b.classList.toggle('on', b.dataset.path === path);
     });
@@ -520,7 +548,7 @@ function create(ROOT, opts) {
     var toggle = t.closest('.sheaf-toggle');
     if (toggle && !toggle.disabled) { fold(toggle); return; }
     var folder = t.closest('.sheaf-folder');
-    if (folder) { choose(folder.dataset.path); return; }
+    if (folder) { choose(folder.dataset.path, folder.dataset.client); return; }
     if (t.closest('.sheaf-back')) { close(); return; }
     var back = t.closest('.sheaf-session-link[data-laptop]');
     if (back && !(e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey)) { follow(back, e, where); return; }

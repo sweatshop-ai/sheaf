@@ -2343,6 +2343,8 @@ var create = function (ROOT, CFG, opts) {
     if (s.state === 'picked-up') return '<div class="rd-msg rd-sent">' + esc(s.to) + '’s window is opening' + DOTS + '</div>';
     if (s.state === 'delivered') return '<div class="rd-msg rd-sent rd-working">' + esc(s.to) +
       ' is working on it in his window' + DOTS + '</div>';
+    // `answered`: the Starter wrote its answer into the thread; the line is done, with no dots and no window named.
+    if (s.state === 'answered') return '<div class="rd-msg rd-sent">Answered; the reply appears in this thread.</div>';
     return '<div class="rd-msg rd-sent">Sent to ' + esc(s.to) + '’s window; his answer appears in this thread.</div>';
   }
   // What a send with Tell started: on a box rectoverso the line, counted from the thread as the hub's answer

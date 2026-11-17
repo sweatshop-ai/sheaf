@@ -60,7 +60,7 @@ def origin(tmp_path, request):
     subprocess.run(["git", "clone", "-q", str(bare), str(seed)], check=True, capture_output=True)
     sh(seed, "config", "user.name", "Dee Dev")
     sh(seed, "config", "user.email", "dee@example.com")
-    files = {"docs/plan.md": ("---\nowner: bea\n---\n" if shape.get("owned") else "") + "# Plan\n\nA plan.\n", "notes/idea.md": "# Idea\n\nAn idea.\n", "README.md": "# Site\n"}
+    files = {"docs/plan.md": ("---\nowner: bea\n---\n" if shape.get("owned") else "---\nvisibility: project\n---\n" if shape.get("shared") else "") + "# Plan\n\nA plan.\n", "notes/idea.md": "# Idea\n\nAn idea.\n", "README.md": "# Site\n"}
     if "toml" in shape:
         files[".sheaf.toml"] = shape["toml"]
     for rel, text in files.items():
@@ -76,6 +76,7 @@ def origin(tmp_path, request):
 
 DEV = pytest.mark.parametrize("origin", [{"dev": True}], indirect=True)
 NAMED = pytest.mark.parametrize("origin", [{"toml": 'branch = "staging"\n', "branches": ["staging"]}], indirect=True)
+SHARED = pytest.mark.parametrize("origin", [{"dev": True, "shared": True}], indirect=True)
 DEV_AND_NAMED = pytest.mark.parametrize(
     "origin", [{"dev": True, "toml": 'branch = "staging"\n', "branches": ["staging"]}], indirect=True)
 NAMED_MISSING = pytest.mark.parametrize("origin", [{"toml": 'branch = "staging"\n'}], indirect=True)
@@ -749,6 +750,61 @@ def test_a_sessions_report_on_a_sleeping_clones_page_wakes_the_clone_first(hub_r
     hub_repos.post("/_/sessions", {"doc": ADDRESS, "id": "7b0c1c2e-3d4f-4a5b-8c6d-9e0f1a2b3c4d", "machine": "bea-mac"},
                    member=BEA)                              # whatever the answer: the clone is awake for it
     assert not hub_repos.hub.repos.sleeping(REPO)
+
+
+@DEV
+def test_a_refused_sessions_report_on_a_clone_page_dates_no_use_and_wakes_nothing(hub_repos):
+    """A clone page is never a rectoverso (the report's own check refuses it), so the route has nothing to wake: a refused
+    report neither wakes the clone nor dates a use of it."""
+    asleep(hub_repos)
+    repos = hub_repos.hub.repos
+    dated = repos._usage()[REPO]["last_used"]
+    r = hub_repos.post("/_/sessions", {"doc": ADDRESS, "id": "7b0c1c2e-3d4f-4a5b-8c6d-9e0f1a2b3c4d", "machine": "bea-mac"},
+                       member=BEA)
+    assert r.status == 404, r.text
+    assert repos.sleeping(REPO) and repos._usage()[REPO]["last_used"] == dated
+
+
+@DEV
+def test_a_fresh_get_of_a_sleeping_clones_page_by_its_owner_wakes_the_clone_and_serves_the_editor(hub_repos):
+    asleep(hub_repos)
+    r = hub_repos.get(f"/{ADDRESS}", member=BEA)
+    assert r.status == 200, r.text
+    assert "A plan." in r.text and '"branch": "dev"' in r.text
+    assert not hub_repos.hub.repos.sleeping(REPO) and hub_repos.hub.file(ADDRESS).exists()
+
+
+@SHARED
+def test_a_fresh_get_of_a_sleeping_clones_page_by_another_member_says_it_sleeps_and_never_wakes_it(hub_repos):
+    """Cal may see the page (`visibility: project`) but is not its owner: no 404 for a page that exists, no wake."""
+    asleep(hub_repos)
+    r = hub_repos.get(f"/{ADDRESS}", member=CAL)
+    assert r.status == 503 and "asleep" in r.text and REPO in r.text, (r.status, r.text)
+    assert hub_repos.hub.repos.sleeping(REPO) and not hub_repos.hub.file(ADDRESS).exists()
+
+
+@DEV
+def test_a_fresh_get_of_a_sleeping_clones_page_a_member_may_not_see_is_still_a_404(hub_repos):
+    """The page is Bea's alone (no `visibility`): Cal is told nothing of it, asleep or not."""
+    asleep(hub_repos)
+    assert hub_repos.get(f"/{ADDRESS}", member=CAL).status == 404
+    assert hub_repos.hub.repos.sleeping(REPO)
+
+
+@DEV
+def test_a_fresh_get_of_a_page_a_sleeping_clone_does_not_hold_is_a_404(hub_repos):
+    asleep(hub_repos)
+    assert hub_repos.get(f"/{root_name(REPO)}/docs/nothing.md", member=BEA).status == 404
+
+
+@DEV
+def test_a_door_reply_or_resolve_by_a_read_only_token_on_a_sleeping_clone_says_the_clone_sleeps(hub_repos):
+    asleep(hub_repos)
+    hub_repos.tokens["ro"] = Tokens().add("ro", write=False)
+    for tool, args in (("resolve", {"id": "c1"}), ("reply", {"id": "c1", "text": "x"})):
+        bad, said = door_call(hub_repos, "ro", tool, doc=ADDRESS, **args)
+        assert bad and "asleep" in said and REPO in said and "no document" not in said.lower(), (tool, said)
+        assert hub_repos.hub.repos.sleeping(REPO), tool
 
 
 @DEV

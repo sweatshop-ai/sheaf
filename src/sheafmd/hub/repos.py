@@ -286,7 +286,7 @@ class Repos:
             self._queues[repo] = []
             t = threading.Thread(target=self._sleep_one, args=(repo, dest, [], to), name=f"repos-{repo}", daemon=True)
             self._threads.add(t)
-        t.start()
+            t.start()                           # under the guard: a settle() that sees the thread in `_threads` finds it started
         t.join(self.SLEEP_WAIT)
         if t.is_alive():
             diagnostics.record("hub", "clone-sleep-slow", repo=repo)
@@ -327,7 +327,7 @@ class Repos:
                 self._queues[repo] = []         # this repo's thread is the one below; a report that comes waits in its queue
                 t = threading.Thread(target=self._sleep_one, args=(repo, dest, slept), name=f"repos-{repo}", daemon=True)
                 self._threads.add(t)
-            t.start()
+                t.start()                       # under the guard, as in sleep()
             claimed.append((repo, t))
         end = time.monotonic() + self.SLEEP_WAIT
         for repo, t in claimed:
@@ -739,7 +739,7 @@ class Repos:
             self._queues[repo] = [item]
             t = threading.Thread(target=self._drain, args=(repo,), name=f"repos-{repo}", daemon=True)
             self._threads.add(t)
-        t.start()
+            t.start()                           # under the guard, as in sleep()
 
     def settle(self, seconds: float = 120.0) -> bool:
         """Wait until no repo's thread is left working; whether that came before `seconds` ran out."""

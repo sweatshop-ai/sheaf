@@ -215,3 +215,121 @@ def test_peer_use_without_a_keyring_says_so(sheaf, monkeypatch):
     monkeypatch.setattr(connect, "system_store", none)
     r = sheaf("peer", "use", PEER, "sheaf_mcp_" + "a" * 43)
     assert r.code != 0 and "keyring" in r.err and "sheaf_mcp_" not in r.err
+
+
+# ── peer use: the token on stdin, and the file store a service reads from $CREDENTIALS_DIRECTORY ─────────────────
+
+FAKE = "sheaf_mcp_" + "b" * 43
+
+
+@pytest.fixture
+def stdin(monkeypatch):
+    """Put `text` on the standard input of the next command; it is a pipe, never a terminal."""
+    import io
+    def put(text, tty=False):
+        s = io.StringIO(text)
+        s.isatty = lambda: tty
+        monkeypatch.setattr("sys.stdin", s)
+    return put
+
+
+def test_peer_use_reads_the_token_from_stdin_when_none_is_given(sheaf, keyring, stdin):
+    stdin(FAKE + "\n")
+    r = sheaf("peer", "use", PEER)
+    assert r.code == 0 and FAKE not in r.out + r.err
+    assert keyring.get("sheaf-peer", PEER) == FAKE
+
+
+def test_peer_use_on_a_terminal_without_a_token_asks_for_a_pipe_and_keeps_nothing(sheaf, keyring, stdin):
+    stdin(FAKE + "\n", tty=True)
+    r = sheaf("peer", "use", PEER)
+    assert r.code == 2 and "pipe" in r.err and FAKE not in r.out + r.err
+    assert keyring.items == {}
+
+
+@pytest.mark.parametrize("text", ["", "\n", "hunter2\n", FAKE + "\nsecond line\n", FAKE[:-1] + "\n"])
+def test_peer_use_refuses_a_stdin_that_is_not_exactly_one_token(sheaf, keyring, stdin, text):
+    stdin(text)
+    r = sheaf("peer", "use", PEER)
+    assert r.code != 0 and keyring.items == {} and FAKE not in r.out + r.err
+
+
+def test_the_help_of_peer_use_names_the_argument_form_as_discouraged(sheaf):
+    r = sheaf("peer", "use", "--help")
+    assert "discouraged" in r.out and "standard input" in " ".join(r.out.split())
+
+
+def test_peer_use_into_a_file_store_writes_one_0600_file_in_a_0700_folder_and_prints_no_token(sheaf, keyring, stdin, tmp_path):
+    folder = tmp_path / "creds"
+    stdin(FAKE + "\n")
+    r = sheaf("peer", "use", PEER, "--store", "file", "--dir", folder)
+    assert r.code == 0 and FAKE not in r.out + r.err
+    name = connect.peer_credential_name(PEER)
+    assert [f.name for f in folder.iterdir()] == [name]
+    assert (folder / name).read_text().strip() == FAKE
+    assert (folder / name).stat().st_mode & 0o777 == 0o600 and folder.stat().st_mode & 0o777 == 0o700
+    assert keyring.items == {}                                      # the file store never touches the keyring
+
+
+def test_the_file_store_needs_a_folder_and_a_folder_needs_the_file_store(sheaf, stdin, tmp_path):
+    stdin(FAKE + "\n")
+    assert sheaf("peer", "use", PEER, "--store", "file").code == 2
+    stdin(FAKE + "\n")
+    assert sheaf("peer", "use", PEER, "--dir", tmp_path / "x").code == 2
+    assert not (tmp_path / "x").exists()
+
+
+def test_the_file_store_replaces_a_token_and_leaves_other_peers_alone(sheaf, stdin, tmp_path):
+    tmp_path = tmp_path / "creds"
+    other = "sheaf_mcp_" + "c" * 43
+    for origin, token in ((PEER, FAKE), ("https://third.example.com", other), (PEER, other)):
+        stdin(token + "\n")
+        assert sheaf("peer", "use", origin, "--store", "file", "--dir", tmp_path).code == 0
+    assert (tmp_path / connect.peer_credential_name(PEER)).read_text().strip() == other
+    assert len(list(tmp_path.iterdir())) == 2
+
+
+def test_a_credential_name_is_one_safe_word_per_origin_and_port():
+    a, b = connect.peer_credential_name(PEER), connect.peer_credential_name("https://other.example.com:8443")
+    assert a != b and re.fullmatch(r"[A-Za-z0-9._-]+", a + b)
+    assert connect.peer_credential_name("HTTPS://Other.Example.com") == a
+
+
+def test_the_hub_reads_the_peer_token_from_the_credentials_folder_before_the_keyring(keyring, monkeypatch, tmp_path):
+    keyring.set("sheaf-peer", PEER, "sheaf_mcp_" + "k" * 43)
+    (tmp_path / connect.peer_credential_name(PEER)).write_text(FAKE + "\n")
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+    assert connect.peer_token_for(PEER) == FAKE
+
+
+def test_with_a_credential_file_the_keyring_is_never_asked(monkeypatch, tmp_path):
+    (tmp_path / connect.peer_credential_name(PEER)).write_text(FAKE)
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+    def refuse():
+        raise AssertionError("the keyring was asked although the credential file holds the token")
+    monkeypatch.setattr(connect, "system_store", refuse)
+    assert connect.peer_token_for(PEER) == FAKE
+
+
+def test_without_a_credential_file_or_with_one_that_is_no_token_the_keyring_answers(keyring, monkeypatch, tmp_path):
+    keyring.set("sheaf-peer", PEER, FAKE)
+    assert connect.peer_token_for(PEER) == FAKE                    # no CREDENTIALS_DIRECTORY at all
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+    assert connect.peer_token_for(PEER) == FAKE                    # a folder with no file for this origin
+    (tmp_path / connect.peer_credential_name(PEER)).write_text("not a token\n")
+    assert connect.peer_token_for(PEER) == FAKE                    # a file that is no token is no credential
+    assert connect.peer_token_for("https://third.example.com") is None
+
+
+def test_a_credential_file_for_one_origin_is_not_used_for_another(monkeypatch, tmp_path):
+    (tmp_path / connect.peer_credential_name(PEER)).write_text(FAKE)
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+    monkeypatch.setattr(connect, "system_store", lambda: FakeKeyring())
+    assert connect.peer_token_for("https://third.example.com") is None
+
+
+def test_the_file_the_command_writes_is_the_file_the_hub_reads(sheaf, stdin, monkeypatch, tmp_path):
+    stdin(FAKE + "\n")
+    assert sheaf("peer", "use", PEER, "--store", "file", "--dir", tmp_path).code == 0
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+    assert connect.peer_token_for(PEER) == FAKE

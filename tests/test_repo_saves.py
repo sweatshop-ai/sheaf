@@ -6,6 +6,7 @@ import dataclasses
 import json
 import os
 import pwd
+import re
 import subprocess
 import threading
 
@@ -88,11 +89,14 @@ def served(hub_repos, **kw):
     return hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8")
 
 
-def save(hub_repos, member=BEA, words="A plan, saved on the page."):
+def save(hub_repos, member=BEA, words="A plan, saved on the page.", branch=None):
+    """The page's save: it carries the branch the page was read on (its meta's `branch`), by default the clone's HEAD now;
+    `branch=""` leaves it out."""
     text = hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8")
     i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("A plan"))
-    return hub_repos.post("/_/save", {"doc": ADDRESS, "hash": md_hash(text), "edits": [{"i": i, "html": f"<p>{words}</p>"}]},
-                          member=member)
+    read_on = sh(the_clone(hub_repos), "symbolic-ref", "--short", "HEAD") if branch is None else branch
+    return hub_repos.post("/_/save", {"doc": ADDRESS, "hash": md_hash(text), "edits": [{"i": i, "html": f"<p>{words}</p>"}],
+                                      **({"branch": read_on} if read_on else {})}, member=member)
 
 
 def remote_commits(hub_repos, branch):
@@ -401,11 +405,8 @@ def test_a_save_racing_the_switch_of_the_clone_is_held_and_never_carried_onto_th
     assert sh(clone, "symbolic-ref", "--short", "HEAD") == "dev"
     assert remote_commits(hub_repos, "staging") == []                      # not on the branch it was made on
     dev = sh(hub_repos.origin, "log", "--format=%an|%s", "main..dev").splitlines()
-    if raced["answer"].status == 200:       # it came after the move: a save of dev's text, on top of dev's own commit
-        assert dev == ["Bea|edit: docs/plan.md", "Dee Dev|dev's plan"]
-        assert "as dev has it" in sh(hub_repos.origin, "show", "dev:docs/plan.md")
-    else:
-        assert dev == ["Dee Dev|dev's plan"] and sh(hub_repos.origin, "show", "dev:docs/plan.md").endswith("as dev has it.")
+    assert raced["answer"].status == 403        # read on staging, it reached the page's lock after the move: refused
+    assert dev == ["Dee Dev|dev's plan"] and sh(hub_repos.origin, "show", "dev:docs/plan.md").endswith("as dev has it.")
 
 
 @DEV
@@ -552,3 +553,131 @@ def test_a_member_whose_id_is_anothers_short_name_does_not_own_that_members_page
     text = doc.read_text(encoding="utf-8")
     got = box.post("/_/share", {"doc": DOC, "hash": md_hash(text)}, member="nell")
     assert got.status != 200 and doc.read_text(encoding="utf-8") == text
+
+
+# ── round 6: a save lands only on the branch it was read on ──────────────────
+
+@NAMED
+def test_a_save_read_on_one_branch_is_refused_once_the_clone_is_on_another_and_merges_nothing(hub_repos, tmp_path):
+    """Read on staging, the clone then moved to dev, the save reaches the page's lock: refused as a read-only page is
+    (403), nothing merged into dev's text, nothing committed on either branch. Deterministic: the switch is done first."""
+    served(hub_repos)
+    clone = the_clone(hub_repos)
+    assert sh(clone, "symbolic-ref", "--short", "HEAD") == "staging"
+    dev_changes_the_plan(hub_repos, tmp_path)
+    sh(clone, "fetch", "-q", "origin")
+    assert hub_repos.hub.repos.decide(REPO, "ghs_faketoken")[0] == "dev"      # as a report decides it, then moves the clone
+    assert hub_repos.hub.repos.switch(REPO, "dev", "ghs_faketoken") == ""
+    on_dev = (clone / "docs/plan.md").read_text(encoding="utf-8")
+    assert "as dev has it" in on_dev
+    r = save(hub_repos, branch="staging")
+    assert r.status == 403 and "staging" in r.text and "dev" in r.text, r.text
+    hub_repos.hub.commits.settle()
+    assert (clone / "docs/plan.md").read_text(encoding="utf-8") == on_dev
+    assert sh(clone, "status", "--porcelain", "--untracked-files=no") == ""
+    assert remote_commits(hub_repos, "staging") == []
+    assert sh(hub_repos.origin, "log", "--format=%an|%s", "main..dev").splitlines() == ["Dee Dev|dev's plan"]
+    assert save(hub_repos, branch="dev").status == 200          # read on dev, it lands there
+
+
+@DEV
+def test_a_save_that_names_no_branch_on_a_clone_page_is_refused_and_writes_nothing(hub_repos):
+    served(hub_repos)
+    before = hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8")
+    r = save(hub_repos, branch="")
+    assert r.status == 400 and "branch" in r.text, r.text
+    assert hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8") == before
+    assert remote_commits(hub_repos, "dev") == []
+
+
+@DEV
+def test_the_page_of_a_clone_carries_the_branch_it_was_read_on(hub_repos):
+    served(hub_repos)
+    assert '"branch": "dev"' in hub_repos.get(f"/{ADDRESS}", member=BEA).text
+
+
+@DEV
+def test_a_sleeping_clones_read_only_line_names_the_sleeping_state_and_the_wake_clears_it(hub_repos):
+    repos, now = hub_repos.hub.repos, [1_000_000.0]
+    repos.clock = lambda: now[0]
+    served(hub_repos)
+    assert hub_repos.hub.read_only_line(ADDRESS) == ""
+    now[0] += 31 * 86400
+    assert repos.sleep_idle() == [REPO]
+    line = hub_repos.hub.read_only_line(ADDRESS)
+    assert "asleep" in line and REPO in line, line
+    assert not report(hub_repos, path="docs/plan.md")[0]
+    assert hub_repos.hub.read_only_line(ADDRESS) == ""
+
+
+# ── round 7: the moved line, and the branch of the render ────────────────────
+
+@DEV
+def test_a_moved_clones_read_only_line_says_the_repo_moved_and_does_not_promise_a_wake(hub_repos):
+    served(hub_repos)
+    there = "https://there.example"
+    assert hub_repos.hub.repos.sleep_moved(REPO, there)
+    assert hub_repos.hub.repos.sleeping(REPO)
+    line = hub_repos.hub.read_only_line(ADDRESS)
+    assert "moved" in line and there in line, line
+    assert "wakes" not in line and "asleep" not in line, line
+
+
+def meta_branch(hub_repos):
+    """The `branch` the page's meta carries as the hub serves the page now (None: it carries none), and its hash."""
+    page = hub_repos.get(f"/{ADDRESS}", member=BEA).text
+    m = re.search(r'"branch": ("[^"]*"|null)', page)
+    return (json.loads(m.group(1)) if m else None), re.search(r'"hash": "([0-9a-f]+)"', page).group(1)
+
+
+def the_page_moves_to_dev(hub_repos, tmp_path, identical):
+    """A report's work: `dev` appears on the remote (with the same pages when `identical`), is decided and the clone moves."""
+    if identical:
+        push_branch(hub_repos.origin, tmp_path, "dev")
+    else:
+        dev_changes_the_plan(hub_repos, tmp_path)
+    sh(the_clone(hub_repos), "fetch", "-q", "origin")
+    assert hub_repos.hub.repos.decide(REPO, "ghs_faketoken")[0] == "dev"
+    assert hub_repos.hub.repos.switch(REPO, "dev", "ghs_faketoken") == ""
+
+
+@NAMED
+def test_a_page_identical_on_both_branches_is_saveable_on_dev_after_a_switch_and_a_reload(hub_repos, tmp_path):
+    """The file does not change in the switch, so no render is made again: the page must still be sent as read on dev."""
+    served(hub_repos)
+    assert meta_branch(hub_repos)[0] == "staging"
+    the_page_moves_to_dev(hub_repos, tmp_path, identical=True)
+    branch, h = meta_branch(hub_repos)             # the reload
+    assert branch == "dev"
+    r = hub_repos.post("/_/save", {"doc": ADDRESS, "hash": h, "branch": branch,
+                                   "edits": [{"i": 1, "html": "<p>A plan, saved on the page.</p>"}]}, member=BEA)
+    assert r.status == 200, r.text
+
+
+@NEITHER
+def test_a_page_rendered_read_only_is_saveable_once_the_clone_reaches_the_save_branch_and_the_page_is_reloaded(hub_repos, tmp_path):
+    served(hub_repos)
+    assert "readonly" in hub_repos.get(f"/{ADDRESS}", member=BEA).text
+    the_page_moves_to_dev(hub_repos, tmp_path, identical=True)
+    page = hub_repos.get(f"/{ADDRESS}", member=BEA).text
+    assert '"readonly"' not in page, page
+    branch, h = meta_branch(hub_repos)
+    assert branch == "dev"
+    r = hub_repos.post("/_/save", {"doc": ADDRESS, "hash": h, "branch": branch,
+                                   "edits": [{"i": 1, "html": "<p>A plan, saved on the page.</p>"}]}, member=BEA)
+    assert r.status == 200, r.text
+
+
+@NAMED
+def test_a_mounted_page_reads_its_hash_and_its_branch_from_one_render_whatever_the_clone_does_between(hub_repos, tmp_path):
+    """The hash and the branch are one read (`live.current_read`): a switch between that read and the build of the mount
+    answer gives the hash of staging's text with staging's name, never dev's."""
+    served(hub_repos)
+    e = hub_repos.hub.entry(ADDRESS)
+    old_hash = md_hash(hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8"))
+    dev_changes_the_plan(hub_repos, tmp_path)
+    sh(the_clone(hub_repos), "fetch", "-q", "origin")
+    assert hub_repos.hub.repos.decide(REPO, "ghs_faketoken")[0] == "dev"
+    assert hub_repos.hub.repos.switch(REPO, "dev", "ghs_faketoken") == ""
+    got = hub_repos.hub.mount_doc(e)["config"]        # no catch_up: the entry's render is staging's
+    assert (got["hash"], got["branch"]) == (old_hash, "staging"), got

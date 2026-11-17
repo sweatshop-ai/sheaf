@@ -32,6 +32,7 @@ from . import assets as assets_mod
 from . import boxwait
 from . import forwards as forwards_mod
 from . import loose as loose_mod
+from . import moves as moves_mod
 from . import place
 from . import projects
 from . import proxy as proxy_mod
@@ -144,7 +145,7 @@ class Hub:
         self.versions = state.Versions()
         self.writes = WriteLog()                 # one line per write to a page, whatever the path (the Write log)
         self.commits = Commits(self.record, self._writers_out, self.roots.all,
-                               lambda: bool(self._private_paths), pulling=self.pulling, pulled=self.pulled)   # the roots that commit (8.11); the rewrite guard while a private root is configured
+                               lambda: bool(self._private_paths), pulling=self.pulling, pulled=self.pulled, renamed=self.renamed)   # the roots that commit (8.11); the rewrite guard while a private root is configured
         self._told_projects: set = set()         # what check_projects warned of this run (8.12)
         self._projects: dict = {}                # root id -> (stat key, entries | Invalid | None) of its projects.toml
         self._grants_seen: dict = {}             # root id -> the projects_of answer the open tabs were last told (8.12)
@@ -534,20 +535,29 @@ class Hub:
             self.entries[address] = e
             return e
 
-    def _rendered(self, e: Entry, text: str):
-        e.html = self._build(e, text)
+    def _rendered(self, e: Entry, text: str) -> str | None:
+        """Render `text` for `e`; answers the branch the page was rendered on (a clone's page), which the live document keeps
+        with the hash. The render runs under the pages' lock, which a switch of the clone takes, so HEAD is the text's."""
+        repo = self.clone_of(e.address)
+        branch = self._repos.head_of(repo) if repo else None
+        e.html = self._build(e, text, branch=branch)
         e.rebuild_failure = None         # every rebuild that works passes here: the next failure is news
+        return branch
 
     def _settings(self, address: str) -> dict:
         s = self.docs.get(address)
         return {k: s.get(k) for k in SETTING_KEYS}
 
-    def _build(self, e: Entry, text: str, *, mount: bool = False, count: bool = True) -> str:
+    def _build(self, e: Entry, text: str, *, mount: bool = False, count: bool = True, branch: str | None = None) -> str:
         s = self._settings(e.address)
         root = self._file_root(e)
         meta = {"doc": e.address, "root": e.root_id, "boot": self.boot, "version": self.version,
                 "service": self.service, "me": self.person,
                 "agent": None, "can": [], "lines": {}, "seen": {}}
+        if self.clone_of(e.address):
+            # The branch this page is read on, the one `_rendered` read with the text its `hash` is of: its save carries it
+            # back and a switch since is refused (SPEC 14). `_fresh_meta` keeps it, whatever HEAD is when the page is sent.
+            meta["branch"] = branch
         log = []
         scope = self._image_scope(root, e.address)
         # The link rule is a warning for whoever renders the document, said once: the hub's
@@ -679,6 +689,8 @@ class Hub:
         meta["actions"] = self.actions(e, member, text) if h == meta.get("hash") else []
         if line := self.read_only_line(e.address):
             meta["readonly"], meta["why_readonly"] = True, line
+        if "branch" in meta and meta.get("readonly"):
+            del meta["branch"]                  # a read-only page saves nowhere: it carries no branch to save on
         if member is None:
             meta["seen"] = self.seen.get(e.address)
             v = self.tell.view(e.address)
@@ -714,8 +726,8 @@ class Hub:
         """The rectoverso as the front mounts it (#116): {title, toc, html, config, css, version, script, assets}. The text
         is rendered now through the sanitiser's mount mode; the config is the meta block of `page`, so both read the
         same state."""
-        h, text = e.live.current()
-        got = json.loads(self._build(e, text, mount=True, count=False))
+        h, text, branch = e.live.current_read()         # the hash and the branch of one render
+        got = json.loads(self._build(e, text, mount=True, count=False, branch=branch))
         got["config"] = self._fresh_meta(e, got["config"], member)
         got["version"] = self.version
         got.update(self.mount_fields())
@@ -995,6 +1007,55 @@ class Hub:
                 self.index.touch(address)
             except Exception:
                 self.record_exception("status-failed")
+
+    def moved_remote(self, old: str, origin: str, to: str, by: str, landed: str, was: str = ""):
+        """The page at `old` landed on the tiroir at `origin` as `to` (ticket 20): the Forward is written first, so the old address
+        answers from this moment, then the Tells on the page end as cancelled, what the hub keeps of it is dropped, the page's file
+        goes, and the tabs open on it are told where it went. The Write log keeps the page's lines: they are all that is left of
+        what was written here. Each step is on its own, as `moved_page`'s are: one that fails is a row in the diagnostics log.
+        The caller holds the page's writer lock and its file lock, so nothing here takes the hub's lock (it comes before them in
+        `lockorder.ORDER`), and the entry's document, which takes the writer lock again to forget its versions, is not touched: the
+        entry, the tabs and the index are the returned `finish`, which the caller runs once the file is gone and the locks are let go."""
+        at = roots_mod.Address.parse(old)
+        root = self.roots.get(at.root)
+        opaque = self.shared_ids.known(old)      # the name a recipient's tab holds: told them as it was, once the store forgets it
+        self.forwards.add_remote(old, origin, to, by, landed, was)
+        for ending in (self.session_tells, self.waiting_tells):
+            try:
+                ending.end_page(old, "page moved")
+            except Exception:
+                self.record_exception("tell-end-failed", old)
+
+        def forget(store):
+            # Exactly this address: `forget_prefix` takes every address that starts with it, so the key goes under a name no
+            # other page has first.
+            gone = f"\0moved/{os.urandom(8).hex()}"
+            store.rename(old, gone)
+            store.forget_prefix(gone)
+        steps = [lambda: forget(self.docs), lambda: forget(self.seen), lambda: forget(self.member_seen),
+                 lambda: forget(self.member_opened), lambda: forget(self.shared_ids),
+                 lambda: (self._versions_of(root) or self.versions).forget(old, inside=True),
+                 lambda: loose_mod.marks_gone(root.path, at.rel)]
+        for step in steps:
+            try:
+                step()
+            except Exception:
+                self.record_exception("move-store-failed", old)
+
+        def finish():
+            with self._lock:
+                e = self.entries.pop(old, None)
+            if e is not None:
+                try:
+                    e.live.forget()
+                except Exception:
+                    self.record_exception("move-store-failed", old)
+                e.bus.publish("moved", {"doc": old, "to": to, "origin": origin, **({"opaque": opaque} if opaque else {})})
+            try:
+                self.index.touch(old)       # the file is gone by now: the row goes
+            except Exception:
+                self.record_exception("status-failed")
+        return finish
 
     def open_index_stream(self, describe, accept=None):
         """A new index stream. The first one to open starts the board afresh, so a stream is
@@ -1476,6 +1537,9 @@ class Hub:
                 e.last_stat = key
             if self._images_moved(e):           # projects.toml or the owners moved: its images are judged otherwise
                 e.live.rebuild()
+            elif (repo := self.clone_of(e.address)) and e.live.current_read()[2] != self._repos.head_of(repo):
+                e.live.rebuild()                # the clone moved (or left read-only) since the render: its file may be the
+                                                # same on both branches, and the page must be read on the branch it saves on
         except Exception as ex:
             self._rebuild_failed(e, ex)
 
@@ -1541,6 +1605,39 @@ class Hub:
             self.writes.end_pull(address, text)
             if ok:
                 self.writes.add(address, f"git · {author}", "tiroir", "pull")
+
+    def renamed(self, folder: Path, pairs: list[tuple[Path, Path]]):
+        """A pull of the repo at `folder` brought in the rename of each `(old path, new path)`, and the files are moved (9.11): a
+        repo page moves only by git, and the hub writes the Forward and carries what it keeps of the page, as for a Move. Under
+        the moves' lock, which comes before the repo's: the pull lets the repo's lock go first. A rename of a file the hub does
+        not serve, or to an address where a page already stood, is none."""
+        with moves_mod.exclusive():
+            for old, new in pairs:
+                a, b = self._page_of(old), self._page_of(new)
+                if a is None or b is None or a == b or not new.exists() or old.exists():
+                    continue
+                if roots_mod.Address.parse(a).root != roots_mod.Address.parse(b).root:
+                    self.record("rename-between-roots", a, to=b)      # 9.11: no move between roots; the page's stores stay
+                    continue
+                # A rename cannot be refused as a Move is: the address is marked, so no Tell starts on it meanwhile, and a Tell
+                # already running is a row (its answer meets a page that is gone from where it began). A Forward at the new
+                # address, which `Forwards.add` drops, the page being there, is a row too.
+                with self.admit:
+                    live = self.tell_live(a)
+                    self.moving.add(a)
+                try:
+                    if live:
+                        self.record("rename-under-tell", a, to=b)
+                    was = self.forwards.follow(b)
+                    if was is not None and was != a:
+                        self.record("forward-replaced", b, was=was)
+                    with place.held(self, a), place.held(self, b):
+                        self.moved_page(a, b, "git")
+                except Exception:
+                    self.record_exception("move-store-failed", b)
+                finally:
+                    with self.admit:
+                        self.moving.discard(a)
 
     def wrote(self, address: str, moved: bool = False):
         """The door made or changed this document's file (SPEC 12): tell its open tabs now, as the

@@ -8,7 +8,7 @@ and chat id. What a writer declares is kept as declared and never verified; it n
 import json
 import os
 import threading
-from collections import deque
+from collections import Counter, deque
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
@@ -117,6 +117,8 @@ class WriteLog:
         keeps one (cleaned); then one line of this tiroir's own that says it came by transfer, from `came_from`. Never raises, as
         `add` does not. Returns how many of the carried lines were kept."""
         n = 0
+        with self._lock:
+            held = Counter(self._lines.get(address, ()))      # what the address kept before this call: a carried line matches one of these, once
         for got in lines:
             if not isinstance(got, dict):
                 continue
@@ -125,7 +127,11 @@ class WriteLog:
                         session=clean(got.get("session"), MAX_SESSION), host=clean(got.get("host")),
                         link=declared_link(got.get("link")), chat=clean(got.get("chat")))
             with self._lock:
-                self._lines.setdefault(address, deque(maxlen=self._keep)).append(line)
+                kept = self._lines.setdefault(address, deque(maxlen=self._keep))
+                if held[line] > 0:      # a page that came back brings the lines this address kept when it left: each is kept once
+                    held[line] -= 1
+                    continue
+                kept.append(line)
                 self._append(line)
             n += 1
         self.add(address, by, "tiroir", "transfer", host=came_from)
@@ -197,6 +203,16 @@ class WriteLog:
         """Whether a change a page just saw, to the text of `hash_`, is a door write's own."""
         with self._lock:
             return self._own.pop(address, None) == hash_
+
+    def restore(self, address: str, kept: list) -> None:
+        """The lines of `address` are `kept`, as `lines` gave them: a landing that wrote some and did not land takes back those, and
+        no more (in memory; the file keeps what was written)."""
+        with self._lock:
+            if kept:
+                self._lines[address] = deque(kept, maxlen=self._keep)
+            else:
+                self._lines.pop(address, None)
+            self._own.pop(address, None)
 
     def drop(self, address: str):
         """Forget the in-memory lines of `address`: a page that was moved here and taken back. The file keeps what was written."""

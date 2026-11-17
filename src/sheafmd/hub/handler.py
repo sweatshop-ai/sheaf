@@ -37,7 +37,7 @@ from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
 from . import archive as archive_mod
-from . import auth, boxwait, channel, codes, events, incoming, laptops, loose, moves, peer, place, proxy, sheaf_view, targets, the_list, transcribe, visibility, work
+from . import auth, boxwait, channel, codes, events, incoming, laptops, loose, moves, outgoing, peer, place, proxy, sheaf_view, targets, the_list, transcribe, visibility, work
 from . import waiting as waiting_mod
 from .tell import NO_AGENT, JobRefused
 from .index import Status
@@ -136,6 +136,7 @@ class Req:
     member_id: str = ""              # the member header, once the connection is the proxy's: every row names it
     code: object = None              # the codes.Code that let the request in, instead of the member header (9.13)
     gone: object = None              # `gone()`: whether the caller closed the connection (a poll that waits asks it); None in a test
+    arrived: float = field(default_factory=time.monotonic)      # when the request came in: a transfer's deadline counts from here
 
 
 @dataclass(frozen=True)
@@ -272,6 +273,7 @@ class Handler:
             ("POST", "/_/share", "share", COOKIE, self._share),
             ("POST", "/_/move", "move", COOKIE, self._move),
             ("POST", "/_/move-folder", "move-folder", COOKIE, self._move_folder),
+            ("POST", "/_/move-tiroir", "move-tiroir", COOKIE, self._move_tiroir),
             ("POST", "/_/archive", "archive", COOKIE, self._archive),
             ("POST", "/_/restore", "restore", COOKIE, self._restore),
             ("POST", "/_/keep", "keep", COOKIE, self._keep),
@@ -561,7 +563,7 @@ class Handler:
         """Land a page moved here (ticket 20): `incoming.land`. Whatever fails after the page was made takes it back and is a 500
         the sender reads as a failed transfer, so it keeps its page."""
         try:
-            status, answer = incoming.land(self.hub, self.door, req.body)
+            status, answer = incoming.land(self.hub, self.door, req.body, peer=req.token.peer, deadline=req.arrived + channel.SECONDS)
         except ValueError as e:
             raise Refuse(400, str(e)) from None
         return _json(status, answer)
@@ -749,24 +751,31 @@ class Handler:
         if (to := self._forwarded(req, address)) is not None:
             # 302 and never 301, and never cached: the page can move back, and a browser that kept a 301 from A to B
             # would then loop between the two. "For ever" is the Forward's, not the redirect's.
-            return Response(302, {"Location": url_path(to), "Cache-Control": "no-store"})
+            return Response(302, {"Location": to, "Cache-Control": "no-store"})
         with self._reading(address):
             e = self._entry(req, address)
             self.hub.catch_up(e)
             return _html(200, self.hub.page(e, nonce, member=req.member), nonce)
 
     def _forwarded(self, req: Req, address: str) -> str | None:
-        """Where the old address `address` of a page now leads, for the one who may be led there: the page's owner, or the hub's
-        person. None for everyone else, and for an address a page stands at: the answer is then the one of an address never
-        used, so no one learns that a page once was there (9.11)."""
+        """The place (a path here, a full address on another tiroir) where the old address `address` of a page now leads, for the one who
+        may be led there: the page's owner, or the hub's person. None for everyone else, and for an address a page stands at: the
+        answer is then the one of an address never used, so no one learns that a page once was there (9.11)."""
         hub, member = self.hub, req.member
         to = hub.forwards.follow(address)
         if to is None or self._has_file(address):
             return None
+        if (far := hub.forwards.remote(address)) is not None:
+            # The page went to another tiroir (ticket 20). Its owner is the one who may be told; the other tiroir asks for its own
+            # sign-in and answers what the visitor may open.
+            if member is not None and hub.loose_owner(address) != member.id:
+                return None
+            hub.record("moved-knock", address, via="browser", place="", member=member.short if member else "", to=far["origin"])
+            return far["origin"] + url_path(to)
         if member is not None and not (hub.loose_owner(to) == member.id and hub.member_owns(member, to)
                                        and hub.visible(member, to)):
             return None
-        return to
+        return url_path(to)
 
     def _has_file(self, address: str) -> bool:
         try:
@@ -793,6 +802,11 @@ class Handler:
         def for_member(name, data):
             if name == "moved":      # the page went elsewhere (9.11): told to its owner alone, where it went
                 to = data.get("to") if isinstance(data, dict) else None
+                if isinstance(data, dict) and isinstance(data.get("origin"), str):     # to another tiroir (ticket 20): only its owner is led
+                    if hub.loose_owner(data["doc"]) == member.id:
+                        return {"doc": data["doc"], "to": data["to"], "origin": data["origin"]}
+                    opaque = data.get("opaque")     # made before the page left, as the recipient's tab holds it: none is made now
+                    return events.Renamed("gone", {"doc": f"{data['doc'].split('/', 1)[0]}/{opaque}.md"}) if isinstance(opaque, str) else None
                 if isinstance(to, str) and hub.loose_owner(to) == member.id and hub.visible(member, to):
                     return {"doc": data["doc"], "to": to}
                 if isinstance(to, str) and hub.visible(member, to):     # a recipient is never led: the page is gone from here, told as it is told them
@@ -957,6 +971,29 @@ class Handler:
         if line := self.hub.read_only_line(address):
             raise Refuse(403, line)
 
+    def _read_on(self, address: str, given) -> str:
+        """The branch a save of a repo clone's page was read on, as the page's meta gave it; "" for any other page. A save of
+        a clone page names it (SPEC 14): without it the hub cannot tell a save of this branch from one of another."""
+        if not self.hub.clone_of(address):
+            return ""
+        _shape(isinstance(given, str) and given != "", "branch must be the branch the page was read on")
+        return given
+
+    def _on_branch(self, address: str, read_on: str, guard):
+        """`guard` and, under the page's lock, the refusal of a save read on a branch the clone has left: answered as a
+        read-only page is (403), and nothing is merged into the new branch's text."""
+        if not read_on:
+            return guard
+        repo = self.hub.clone_of(address)
+
+        def on_branch(text, new, toggled):
+            on = self.hub.repos.head_of(repo)
+            if on != read_on:
+                raise Refuse(403, f"The clone of {repo} moved from {read_on} to {on or 'no branch'} since this page was read, "
+                                  "so the save is not made: reload the page.")
+            return guard(text, new, toggled)
+        return on_branch
+
     def _save(self, req: Req) -> Response:
         b = req.body
         e = self._entry(req, b.get("doc"))
@@ -971,8 +1008,10 @@ class Handler:
         _shape(rid is None or (isinstance(rid, str) and _RID_RE.fullmatch(rid)), "rid is not a request id")
         # The name's lock (9.11) from the guard's judging of the rectoverso's home to the commit: move, write, render,
         # commit, one operation.
+        read_on = self._read_on(e.address, b.get("branch"))
         with place.held(self.hub, e.address):
             guard, ticked = self._ticks(req, e)
+            guard = self._on_branch(e.address, read_on, guard)
             move, moved = self._mover(e, ticked)
             with self._moved_committed(e, req.member, "edit", moved):
                 try:
@@ -1077,6 +1116,21 @@ class Handler:
             raise Refuse(r.status, r.message) from None
         self.hub.writes.add(new, req.member.name, "page", "move")
         return _ok(doc=new, url=url_path(new), moved_from=doc)
+
+    def _move_tiroir(self, req: Req) -> Response:
+        """The row's "Move to another tiroir…" (ticket 20): the owner of a loose page sends it to the tiroir at `tiroir`, where they
+        have an account. A page that is not theirs is answered as a page that is not there, before anything is sent."""
+        b = req.body
+        try:
+            doc = self._owned(req, b.get("doc"))
+        except Refuse as r:
+            raise Refuse(r.status, r.message, answer={"say": r.message}) from None
+        _shape(isinstance(b.get("tiroir"), str) and b["tiroir"] != "", "tiroir is missing")
+        try:
+            got = outgoing.move_to_tiroir(self.hub, req.member, doc, b["tiroir"])
+        except outgoing.Refusal as r:
+            raise Refuse(r.status, r.say, answer={"why": r.why, "say": r.say}) from None
+        return _ok(**got)
 
     def _move_folder(self, req: Req) -> Response:
         """Renaming a folder of the member's loose root moves each page in it, each with its own Forward (9.11)."""

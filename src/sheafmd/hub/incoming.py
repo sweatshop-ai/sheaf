@@ -10,10 +10,11 @@ lost is answered again and never lands twice.
 import contextlib
 import json
 import os
+import time
 from pathlib import Path
 
 from .. import config, mcp, paths
-from . import loose, proxy, root_moves, state, visibility
+from . import channel, loose, proxy, root_moves, state, visibility
 from . import repos as repos_mod
 from .state import TokenRow
 
@@ -24,6 +25,7 @@ SAYS = {
     "ambiguous_owner": "more than one person on this shared Sheaf has the owner's e-mail address",
     "name_taken": "a page of that name is there already, in that folder: it may be an older copy of this one",
     "not_landed": "the page was not accepted",
+    "too_slow": "the landing took longer than the time the sender waits for it, so nothing was kept: send the page again",
 }
 MAX_VERSIONS = 60       # `Versions` keeps no more
 MAX_WRITES = 200
@@ -74,12 +76,18 @@ def _shape(b) -> str | None:
         return "the bundle's Write log lines are not lines"
     if not isinstance(b.get("keep", False), bool):
         return "keep is not true or false"
+    if not isinstance(b.get("archived", False), bool):
+        return "archived is not true or false"
     return None
 
 
-def land(hub, door, b) -> tuple:
+def land(hub, door, b, peer: str | None = None, deadline: float | None = None) -> tuple:
     """Land bundle `b` for the member its `owner_email` names. (200, {ok, address, hash, origin}) or (409, {ok: False, why, say});
-    a bundle that is not one is a Refuse of the handler's (`ValueError` here, with the reason), never a half-landed page."""
+    a bundle that is not one is a Refuse of the handler's (`ValueError` here, with the reason), never a half-landed page.
+    `peer` is the origin the channel's token names, passed by the caller: a page moves back only from the tiroir the token is of.
+    `deadline` is when the sender stops waiting (`time.monotonic()`): the moment the request arrived, plus the time it waits, so a
+    landing that waited for `transfers.lock` has that wait counted. Without it, from the call."""
+    deadline = time.monotonic() + channel.SECONDS if deadline is None else deadline
     if (bad := _shape(b)) is not None:
         raise ValueError(bad)
     owner, why = owner_for(hub, b.get("owner_email"))
@@ -89,28 +97,49 @@ def land(hub, door, b) -> tuple:
         known = state.read_json(_answers(), {}).get(b["id"])
         if isinstance(known, dict):
             return 200, {"ok": True, **known}
-        return _landed(hub, door, b, owner)
+        try:
+            return _landed(hub, door, b, owner, deadline, peer)
+        except _TooSlow:
+            return _refused("too_slow")
 
 
-def _landed(hub, door, b, owner) -> tuple:
-    """The landing of `land`, with `transfers.lock` held."""
+class _TooSlow(Exception):
+    """The landing ran past the time the sender waits for its answer: what it made is taken back, and nothing is remembered."""
+
+
+def _landed(hub, door, b, owner, deadline, peer: str | None = None) -> tuple:
+    """The landing of `land`, with `transfers.lock` held. The deadline is the sender's: past it the sender has given up and
+    keeps its page, so a page landed after it would be a second one. It is checked between the steps, never inside one."""
     caller = mcp.Caller(owner.name, TokenRow("peer-transfer", owner.name, True, member=owner.id))
     # The Share does not travel: its audience is text, and the people it names are not this tiroir's. The page lands the
     # owner's alone, every Share box unticked and no `shared` line, whatever the sender's text said.
     text = visibility.unshare(visibility.without_ticked_share(b["text"]))
     args = {"doc": b["name"], "folder": b.get("folder"), "text": text, **({"keep": True} if b.get("keep") else {})}
+    # A page that comes back to the address it once left for the tiroir it comes from takes the Forward there away; any other Forward at
+    # the address stays, and refuses the landing as it refuses a create.
+    back = _forward_back(hub, owner, b, peer)
+    lifted = hub.forwards.lift_remote(back) if back is not None else {}
+    kept = hub.writes.lines(back) if back is not None else []      # what `moved_remote` kept at that address: a failed landing leaves it
     try:
         made = door._create(args, caller)
-    except mcp.ToolError as e:
-        return _refused("name_taken") if e.why == "exists" else _refused("not_landed", str(e))
+    except BaseException as e:
+        hub.forwards.put_back(lifted)
+        if isinstance(e, mcp.ToolError):
+            return _refused("name_taken") if e.why == "exists" else _refused("not_landed", str(e))
+        raise
     address = made["doc"]
     try:
         for v in b.get("versions", []):
             hub.versions.put(address, visibility.set_keys(visibility.without_ticked_share(v["text"]), {"shared": None}))     # a version restored brings back no audience
+            _in_time(deadline)
         by = (b.get("from") or {}).get("by") if isinstance(b.get("from"), dict) else None
         came_from = (b.get("from") or {}).get("origin") if isinstance(b.get("from"), dict) else None
         hub.writes.carry(address, b.get("writes", []), came_from if isinstance(came_from, str) else "",
                          by if isinstance(by, str) else owner.name)
+        _in_time(deadline)
+        if b.get("archived"):
+            _archive(hub, owner, address)
+        _in_time(deadline)
         answer = {"address": address, "hash": made["hash"], "origin": hub.proxy.origin}
         state.write_json(_answers(), {**state.read_json(_answers(), {}), b["id"]: answer})
     except BaseException:
@@ -119,11 +148,16 @@ def _landed(hub, door, b, owner) -> tuple:
         with contextlib.suppress(Exception):
             hub.versions.forget(address)
         with contextlib.suppress(Exception):
-            hub.writes.drop(address)
+            hub.writes.restore(address, kept if address == back else [])
         if (loose_root := hub.loose.known(owner)) is not None:
             with contextlib.suppress(loose.Refused, OSError):
                 _unkeep(loose_root, address)
+                _unarchive(loose_root, address)
+        hub.forwards.put_back(lifted)
         raise
+    for earlier, was in lifted.items():     # the addresses the page had before it left lead to where it is again
+        if earlier != address:
+            hub.forwards.add(earlier, address, was.get("by", owner.name))
     return 200, {"ok": True, **answer}
 
 
@@ -134,6 +168,41 @@ def _unkeep(root_path, address: str) -> None:
         held = loose.marks(root_path)
         if rel in held:
             state.write_text_private(root_path / loose.KEEP, json.dumps(sorted(x for x in held if x != rel)) + "\n", inside=True)
+
+
+def _forward_back(hub, owner, b, peer: str | None) -> str | None:
+    """The address when the bundle's page would land at an address that a Forward of this tiroir leads away from, to the
+    tiroir that sent it: the page is moving back. The sender is the origin of the peer token that authenticated the call, never the
+    bundle's own `from.origin`, which any paired tiroir may write as it likes."""
+    held = hub.loose.known(owner)
+    root = hub.roots.lookup(held / "x.md") if held is not None else None
+    if root is None or not peer:
+        return None
+    try:
+        folder = loose.folder_path(b.get("folder"))
+    except ValueError:
+        return None
+    address = f"{root.name}/{folder + '/' if folder else ''}{b['name']}"
+    far = hub.forwards.remote(address)
+    return address if far is not None and root_moves.origin(far["origin"]) == root_moves.origin(peer) else None
+
+
+def _in_time(deadline: float) -> None:
+    if time.monotonic() > deadline:
+        raise _TooSlow
+
+
+def _archive(hub, owner, address: str) -> None:
+    """The page lands archived, as it left: the mark is its landing's, so it is the page's last write that it is not older than."""
+    root = hub.loose.known(owner)
+    rel = address.split("/", 1)[1]
+    with state.file_locked("loose-keep.lock"):
+        loose.stamp_held(root, loose.ARCHIVED, {rel: max(hub.clock(), os.stat(hub.file(address)).st_mtime)})
+
+
+def _unarchive(root_path, address: str) -> None:
+    with state.file_locked("loose-keep.lock"):
+        loose.stamp_held(root_path, loose.ARCHIVED, {address.split("/", 1)[1]: None})
 
 
 # ── a whole root (ticket 21) ─────────────────────────────────────────────────

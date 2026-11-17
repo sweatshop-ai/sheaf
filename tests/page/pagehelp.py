@@ -551,20 +551,25 @@ LEAVING_JS = """window.addEventListener('beforeunload', e => {
 })"""
 
 
+def leaving(page):
+    """Whether the page is leaving for a navigation that has not committed (or its document went away while we asked)."""
+    try:
+        return page.evaluate("window.__leaving === true")
+    except Exception as e:      # a PageStalled is not an Exception
+        return any(said in str(e) for said in RELOADING)
+
+
 def pending_navigations(context):
-    """The URLs of the pages of the context that are leaving for a navigation that has not committed (or whose
-    document went away while we asked)."""
-    out = []
-    for page in context.pages:
-        try:
-            leaving = page.evaluate("window.__leaving === true")
-        except Exception as e:      # a PageStalled is not an Exception
-            if not any(said in str(e) for said in RELOADING):
-                continue
-            leaving = True
-        if leaving:
-            out.append(page.url)
-    return out
+    """The URLs of the pages of the context that are leaving (see `leaving`)."""
+    return [page.url for page in context.pages if leaving(page)]
+
+
+def settled(page, timeout=8.0):
+    """End of a test whose last step may leave a reload of the page in flight (a save the hub answered, a file it
+    wrote): a reload that has begun is waited for, and the page it brings, until its menu is there. close_context fails
+    a test that ends on a navigation."""
+    until(lambda: not leaving(page), timeout, "a reload in flight to land")
+    page.wait_for_selector("#rd-menu-btn", state="attached")
 
 
 def new_context(browser, error=None, **options):

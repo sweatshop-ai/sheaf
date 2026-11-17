@@ -5,7 +5,7 @@ sheaf's owner."""
 import pytest
 
 from helpers import BEA
-from pagehelp import mark, reloaded, toast, until
+from pagehelp import settled, mark, reloaded, toast, until
 from sheafmd.hub import proxy
 
 pytestmark = pytest.mark.page
@@ -75,6 +75,7 @@ def test_a_click_on_the_box_itself_ticks_share_at_once_without_an_undo(opened):
     p, f = t.page, t.site.file
     share_box(p).click()
     until(lambda: "- [x] Shared with the team" in f.read_text(encoding="utf-8"), timeout=3, what="the tick, no 5 s wait")
+    settled(p)
 
 
 def test_the_older_share_line_works_the_same_way(opened):

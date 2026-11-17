@@ -205,7 +205,7 @@ THERE = "https://there.example"
 
 def moved_hub(clone, state=repos_mod.OK, to=THERE):
     h = hub(clone, state)
-    h.repos.moved, h.repos.unmoved = to, []
+    h.repos.moved, h.repos.unmoved, h.repos.slept = to, [], []
     return h
 
 
@@ -435,7 +435,7 @@ def test_one_page_failing_does_not_stop_the_next(clone):
     b["pages"][0]["versions"] = [{"text": "x"}]
     status, answer = incoming.land_root(h, b)
     assert answer["pages"]["a.md"] == {"ok": False, "why": "failed"} and answer["pages"]["b.md"]["ok"] is True
-    assert list(h.repos.rows) == [("o/r", "b.md")]
+    assert h.repos.rows[("o/r", "b.md")][2] == {} and h.repos.rows[("o/r", "a.md")] == ("al", b["tip"], {})     # a.md: the report's row alone
 
 
 def test_a_page_the_check_refused_writes_nothing(clone):

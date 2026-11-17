@@ -274,6 +274,8 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
             return 409, {"why": clone.replace("-", "_")}
         if clone != repos_mod.OK or not said.get("commit_known"):
             return 202, {"state": "cloning"}
+        if not repos.settle(channel.SECONDS / 2):       # the report's own thread writes the page's row and keeps the repo busy: it ends before any page lands or the clone sleeps
+            return 202, {"state": "cloning"}
         named = config.tiroir_named(repos.page_text(b["repo"], config.ROOT_FILE, b["tip"]) or "")
         if named is None or root_moves.origin(named) != root_moves.origin(hub.proxy.origin):
             if unmoved:
@@ -306,7 +308,9 @@ def land_root(hub, b, peer: str | None = None) -> tuple:
     Write log lines, each page whole or not at all. Anything but a 200 of the check is answered as it is. `(200, {pages:
     {path: {ok: True, hash} | {ok: False, why}}})`: a page the check refused keeps its answer and writes nothing; a page
     whose store failed takes back what it made and is `failed`. `transfers.json` keeps the answer to each `id` and path, so a
-    send whose confirmation was lost is answered again and never lands twice. A page that is not one is a `ValueError`."""
+    send whose confirmation was lost is answered again and never lands twice. A page that is not one is a `ValueError`. The check
+    waits for the report's own thread, so no landing is written and then overwritten by it, and a failed page gives back the
+    versions and Write log lines its address kept before, never more or less."""
     if (bad := _root_shape(b) or _page_shape(b)) is not None:
         raise ValueError(bad)
     status, answer = check_root(hub, b, peer)
@@ -331,6 +335,7 @@ def _land_page(hub, b, p, owner, came_from: str, by: str) -> dict:
     if isinstance(known, dict):
         return {"ok": True, **known}
     recorded = False
+    was_versions, was_lines = hub.versions.texts(address), hub.writes.lines(address)     # what the address kept before: a page that came back has them
     try:
         prior = hub.repos.land_record(b["repo"], p["path"], owner.short or owner.id, b["tip"], p.get("record") or {})
         recorded = True
@@ -344,9 +349,9 @@ def _land_page(hub, b, p, owner, came_from: str, by: str) -> dict:
             with contextlib.suppress(Exception):
                 hub.repos.drop_record(b["repo"], p["path"], prior)
         with contextlib.suppress(Exception):
-            hub.versions.forget(address)
+            hub.versions.take_back(address, was_versions)
         with contextlib.suppress(Exception):
-            hub.writes.drop(address)
+            hub.writes.restore(address, was_lines)
         if not isinstance(e, Exception):
             raise
         return {"ok": False, "why": "failed"}

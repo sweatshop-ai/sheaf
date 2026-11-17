@@ -82,3 +82,11 @@ def test_a_page_told_no_team_is_what_it_was(tab, site):
     tab.open()
     f = form(tab)
     assert f.locator("button[data-f=team]").count() == 0 and f.locator("button[data-f=ok]").count() == 1
+
+
+def test_a_reply_on_a_team_comment_shows_its_text(tab, site):
+    told_team(tab.page, [{**TEAM_COMMENT, "replies": [{"by": "Bo", "at": "2026-11-17T11:00", "text": "agreed, for now"}]}])
+    tab.open()
+    until(lambda: "Team (1)" in tab.page.locator("#rd-panel").inner_text(), what="the Team tab")
+    tab.page.locator("#rd-panel button[data-tab=team]").dispatch_event("click")
+    until(lambda: "agreed, for now" in tab.page.locator("#rd-panel").inner_text(), what="the reply in the Team tab")

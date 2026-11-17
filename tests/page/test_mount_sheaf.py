@@ -75,7 +75,7 @@ def agentview():
 
 
 class Gate:
-    """Holds the hub's answers to `/_/doc` while `holding`, and sends them when `release` is called. `answered` counts the ones sent."""
+    """Holds the hub's answers to `/_/mount.css` while `holding`, and sends them when `release` is called. `answered` counts the ones sent."""
 
     def __init__(self):
         self.holding, self.held, self.answered = False, [], 0
@@ -121,7 +121,7 @@ def mounted(chromium, pages, agentview):
         req = route.request
         res = pages.post(path, json.loads(req.post_data or "{}"), member=BEA) if req.method == "POST" else pages.get(path, member=BEA)
         send = lambda: route.fulfill(status=res.status, headers=dict(res.headers), body=res.body)
-        if path.startswith("/_/doc"):
+        if path.startswith("/_/mount.css"):
             return gate.pass_or_hold(route, send)
         send()
 
@@ -256,17 +256,18 @@ def test_the_row_holds_no_script_and_no_address_but_the_hubs_own(mounted):
 
 # ── the byline of an opened page is the same way back (ticket 10) ───────────
 
-def open_page(m, doc, answered=True):
-    """Opens `doc` from its row and waits for its byline in the root the page attached, and (unless `answered` is False) for what
-    the hub says of the document: the byline names the session only when that answer (`/_/doc`, `way_back`) has been taken, so
-    before it the line is the one rendered ("Document prepared by Ada")."""
+def open_page(m, doc, styled=True):
+    """Opens `doc` from its row and waits for its byline in the root the page attached, and (unless `styled` is False) for the page
+    to be built: mount.js puts the rendered html in the root first, then waits for the stylesheet, and only then starts the page,
+    which names the session in the byline (page.js takeAgent). Before that the line is the one rendered ("Document prepared by Ada")."""
     before = m.gate.answered
     m.click(f'.sheaf-row[data-doc="{doc}"] .sheaf-title a')
     until(lambda: m.page.evaluate("window.__roots.length > 1 && !!window.__roots[window.__roots.length - 1].querySelector('p.doc-by')"),
           what="the page's byline")
-    if answered:
-        until(lambda: m.gate.answered > before, what="the hub's answer about the document")
-        m.page.evaluate("new Promise((done) => setTimeout(done, 0))")   # the page takes that answer in a task after it arrives
+    if styled:
+        until(lambda: m.gate.answered > before, what="the page's stylesheet")
+        for _ in range(2):                                              # the page starts in a task after the stylesheet's load event
+            m.page.evaluate("new Promise((done) => setTimeout(done, 0))")
 
 
 def byline(m):
@@ -290,9 +291,9 @@ def test_the_byline_of_an_opened_page_names_the_session_as_its_row_does(mounted)
     assert (b["tag"], b["href"], b["target"], b["rel"]) == ("A", RC, "_blank", "noopener noreferrer")
 
 
-def test_the_byline_is_as_rendered_until_the_hub_has_answered_which_session_wrote_the_page(mounted):
+def test_the_byline_is_as_rendered_until_the_stylesheet_has_loaded_and_the_page_started(mounted):
     mounted.gate.holding = True
-    open_page(mounted, "work/plan.md", answered=False)
+    open_page(mounted, "work/plan.md", styled=False)
     assert byline(mounted)["text"].startswith("Document prepared by ") and "Claude Code" not in byline(mounted)["text"]
     mounted.gate.release()
     until(lambda: byline(mounted)["text"].startswith("Document prepared by Claude Code (Bea)"), what="the session's name")

@@ -351,3 +351,36 @@ def test_a_diagnostic_about_a_page_of_this_tiroir_still_keeps_its_address(agency
     agency, client = agency_and_client
     assert agency.post("/_/diag", {"kind": "toast-red", "doc": "alice-work/own-page.md", "message": "m"}, member=AG_ALICE).status == 204
     assert "alice-work/own-page.md" in agency_log(agency)
+
+
+# ── round 5 (fourth review): the `/_/doc` answer of a client page carries no agent, no Tell target, no Work ─
+
+AGENT_FIELDS = {"target": {"agent": "claude", "display": "Claude"}, "targets": [{"id": "agent:x"}], "capabilities": ["deliver"],
+                "lines": {"tell": "Tell Claude"}, "way_back": {"session": "s1"}, "work": {"sessions": []}, "telling": [{"id": "c1"}]}
+
+
+def assert_no_agent(got):
+    assert got["target"] is None and got["targets"] == [] and got["capabilities"] == [] and got["lines"] == {} and got["telling"] == []
+    assert "way_back" not in got and "work" not in got
+
+
+def test_the_client_answers_doc_for_a_relayed_page_with_no_agent_target_or_work(agency_and_client):
+    agency, client = agency_and_client
+    doc = client.make("alice", f"# Plan\n\n{MARKER}\n")
+    status, env = agency.link("acme", "read", {"as": "alice@example.com", "op": "doc", "doc": doc, "mount": "Clients/acme"})
+    assert status == 200 and env["status"] == 200
+    got = json.loads(env["body"])
+    assert_no_agent(got) and got["hash"]
+
+
+def test_the_agency_strips_them_from_the_doc_answer_of_an_older_client_that_still_sends_them(agency_and_client):
+    agency, client = agency_and_client
+    speaks(agency, json_env(body=json.dumps({"ok": True, "hash": "h1", **AGENT_FIELDS})))
+    got = agency.get("/_/doc?doc=Clients/acme/work/x.md", member=AG_ALICE).json()
+    assert_no_agent(got) and got["hash"] == "h1"
+
+
+def test_a_doc_answer_that_is_not_an_object_is_a_client_that_does_not_answer(agency_and_client):
+    agency, client = agency_and_client
+    speaks(agency, json_env(body="[1]"))
+    assert agency.get("/_/doc?doc=Clients/acme/work/x.md", member=AG_ALICE).status == 502

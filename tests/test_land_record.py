@@ -65,3 +65,17 @@ def test_a_drop_of_the_only_row_leaves_no_empty_repo_entry(repos):
     prior = repos.land_record(REPO, PATH, "bea", "aa", {})
     repos.drop_record(REPO, PATH, prior)
     assert repos._read() == {}
+
+
+def test_the_named_owner_a_report_read_at_the_same_commit_survives_the_landing(repos):
+    """The report that `check_root` waits for read `owner:` from the page's front matter at the tip: that is not the peer's."""
+    repos._write({REPO: {PATH: {"owner": "bea", "commit": "c0ffee", "named": "carl"}}})
+    repos.land_record(REPO, PATH, "dan", "c0ffee", {"session": "s1", "named": "mallory"})
+    assert repos.owner_of(REPO, PATH) == "carl"
+    assert repos._read()[REPO][PATH] == {"owner": "dan", "commit": "c0ffee", "named": "carl", "session": "s1"}
+
+
+def test_a_named_owner_read_at_another_commit_is_not_carried_to_the_landed_one(repos):
+    repos._write({REPO: {PATH: {"owner": "bea", "commit": "old", "named": "carl"}}})
+    repos.land_record(REPO, PATH, "dan", "c0ffee", {})
+    assert repos.owner_of(REPO, PATH) == "dan"

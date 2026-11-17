@@ -717,6 +717,49 @@ def test_a_clone_that_moves_between_the_check_and_the_lock_is_not_marked_awake_b
     assert repos.sleeping(REPO) and repos.moved_to(REPO) == "https://there.example"
 
 
+@DEV
+def test_a_clone_a_write_dated_a_moment_ago_is_not_shrunk_by_the_sleep_step_that_checked_before(hub_repos):
+    """`sleep_idle` judged the clone idle outside the lock; a write took the lock first and dated a use. The shrink that
+    follows re-reads the date under the lock and leaves the folders where they are."""
+    served(hub_repos)
+    repos = hub_repos.hub.repos
+    assert repos.wake(REPO) is True
+    slept = []
+    repos._sleep_one(REPO, repos.clone_dir(REPO), slept)
+    assert slept == [] and hub_repos.hub.file(ADDRESS).exists()
+    assert not repos.sleeping(REPO)
+
+
+@DEV
+def test_the_owner_of_a_sleeping_clones_page_reads_it_with_the_editor_and_the_line_says_a_write_wakes_it(hub_repos):
+    """The page a tab holds (`_fresh_meta`, which a mount and a reload send) of a clone that went to sleep."""
+    hub = hub_repos.hub
+    h = md_hash(served(hub_repos))
+    e, bea = hub.entry(ADDRESS), hub.proxy.members.get(BEA)
+    asleep(hub_repos)
+    meta = hub._fresh_meta(e, {"hash": h, "branch": "dev"}, bea)
+    assert not meta.get("readonly") and meta.get("branch") == "dev", meta
+    line = hub.read_only_line(ADDRESS)                      # whoever may not wake it reads the line
+    assert "asleep" in line and "write" in line, line
+
+
+@DEV
+def test_a_sessions_report_on_a_sleeping_clones_page_wakes_the_clone_first(hub_repos):
+    asleep(hub_repos)
+    hub_repos.post("/_/sessions", {"doc": ADDRESS, "id": "7b0c1c2e-3d4f-4a5b-8c6d-9e0f1a2b3c4d", "machine": "bea-mac"},
+                   member=BEA)                              # whatever the answer: the clone is awake for it
+    assert not hub_repos.hub.repos.sleeping(REPO)
+
+
+@DEV
+def test_a_door_reply_or_resolve_by_a_token_that_may_not_write_wakes_nothing(hub_repos):
+    asleep(hub_repos)
+    hub_repos.tokens["ro"] = Tokens().add("ro", write=False)
+    for tool, args in (("resolve", {"id": "c1"}), ("reply", {"id": "c1", "text": "x"})):
+        door_call(hub_repos, "ro", tool, doc=ADDRESS, **args)           # refused, whatever the words
+        assert hub_repos.hub.repos.sleeping(REPO), tool
+
+
 # ── round 6: a save lands only on the branch it was read on ──────────────────
 
 @NAMED

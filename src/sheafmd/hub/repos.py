@@ -411,6 +411,30 @@ class Repos:
             return {"session": session, "host": host or None, "link": None, "label": f"session {session}"}
         return {"session": None, "host": None, "link": None, "label": f"git · {author}" if author else "git"}
 
+    def land_record(self, repo: str, path: str, owner: str, commit: str, record: dict) -> dict | None:
+        """Write the row of a page that landed from another tiroir, as `_settle` writes one (`owner`, `commit`, and the
+        `named`, `session`, `host`, `link` of `record` that are set). Returns the row it replaced, or None, for `drop_record`."""
+        with self._records:
+            data = self._read()
+            prior = data.get(repo, {}).get(path)
+            data.setdefault(repo, {})[path] = {
+                "owner": owner, "commit": commit,
+                **{k: v for k, v in record.items() if k in ("named", "session", "host", "link") and v}}
+            self._write(data)
+        return prior if isinstance(prior, dict) else None
+
+    def drop_record(self, repo: str, path: str, prior: dict | None):
+        """Undo `land_record`: put back the row it returned, or take the page's row away when there was none."""
+        with self._records:
+            data = self._read()
+            if prior is None:
+                data.get(repo, {}).pop(path, None)
+                if repo in data and not data[repo]:
+                    del data[repo]
+            else:
+                data.setdefault(repo, {})[path] = prior
+            self._write(data)
+
     # ── git ──────────────────────────────────────────────────────────────────
     def _git(self, at, *args, token: str | None = None, seconds: float = GIT_SECONDS, look: bool = False):
         env = {**os.environ, "LC_ALL": "C", "GIT_TERMINAL_PROMPT": "0"}

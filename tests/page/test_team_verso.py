@@ -30,6 +30,8 @@ def told_team(page, team):
 
 
 def form(tab):
+    for p in (P1, P2):          # the selection needs both paragraphs in the page: two of five runs found `main` not yet drawn
+        tab.page.wait_for_selector(p, state="attached")
     select(tab.page, P1, P2)
     open_box(tab.page)
     return tab.page.locator("#rd-popover .rd-form")

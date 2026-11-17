@@ -315,3 +315,39 @@ def test_a_500_from_the_client_is_not_a_page_that_is_not_there(agency_and_client
     agency.hub.clients = readthrough.Clients(agency.hub.proxy.clients, lambda c, v, b: (500, {}))
     got = agency.get("/Clients/acme/work/x.md", member=AG_ALICE)
     assert got.status == 502 and "not reachable" in got.text
+
+
+# ── round 4 (third review): a client page is read, not edited, and its address is not a diagnostics line ─
+
+def test_a_relayed_client_page_offers_no_editor_no_actions_and_no_agent(agency_and_client):
+    agency, client = agency_and_client
+    doc = client.make("alice", f"# Plan\n\n{MARKER}\n")
+    config = agency.get(f"/_/mount?doc=Clients/acme/{doc}", member=AG_ALICE).json()["config"]
+    assert config["edit"] is False and config["actions"] == [] and config["targets"] == [] and config["can"] == []
+    assert "work" not in config and "way_back" not in config and not config.get("readonly")      # a read-only page cannot be commented on
+
+
+@pytest.mark.parametrize("path,extra", [("/_/save", {"hash": "h", "edits": []}), ("/_/tick", {}), ("/_/pin", {}), ("/_/tell", {})])
+def test_a_write_to_a_client_page_other_than_a_comment_is_refused_with_a_sentence_that_says_so(agency_and_client, path, extra):
+    agency, client = agency_and_client
+    doc = client.make("alice", f"# Plan\n\n{MARKER}\n")
+    got = agency.post(path, {"doc": f"Clients/acme/{doc}", **extra}, member=AG_ALICE)
+    assert got.status == 403 and "client" in got.text and "no such document" not in got.text
+    assert client.text(doc) == f"# Plan\n\n{MARKER}\n"
+
+
+def test_a_diagnostic_about_a_client_page_records_the_kind_and_nothing_else(agency_and_client):
+    agency, client = agency_and_client
+    got = agency.post("/_/diag", {"kind": "toast-red", "doc": "Clients/acme/alice-work/secret-merger.md", "message": "secret-merger failed",
+                                  "where": "Clients/acme"}, member=AG_ALICE)
+    assert got.status == 204
+    log = agency_log(agency)
+    assert "toast-red" in log
+    for told in ("Clients/acme", "secret-merger", "alice-work"):
+        assert told not in log, told
+
+
+def test_a_diagnostic_about_a_page_of_this_tiroir_still_keeps_its_address(agency_and_client):
+    agency, client = agency_and_client
+    assert agency.post("/_/diag", {"kind": "toast-red", "doc": "alice-work/own-page.md", "message": "m"}, member=AG_ALICE).status == 204
+    assert "alice-work/own-page.md" in agency_log(agency)

@@ -177,8 +177,10 @@ var create = function (ROOT, CFG, opts) {
   takeAgent();
   // What the hub's answer to /_/doc says of the agent: a rename, or a session that ended, reaches
   // an open page by any of the three places that ask (SPEC 10.5).
+  // A client page, read through this hub (an address under `Clients/`, SPEC 9.9), offers no agent, Tell target or Work, whatever a /_/doc answer says.
+  var THROUGH = /^Clients(\/|$)/.test(CFG.doc || '');
   function takeTarget(j) {
-    if (!j || !('capabilities' in j)) return;
+    if (!j || THROUGH || !('capabilities' in j)) return;
     var before = JSON.stringify([CFG.agent, CFG.can, CFG.lines, CFG.work, CFG.targets]);
     CFG.agent = j.target || null;
     if ('targets' in j) CFG.targets = j.targets || [];
@@ -4348,7 +4350,7 @@ var create = function (ROOT, CFG, opts) {
     };
     // A client page, opened through this hub (an address under `Clients/`, SPEC 9.9), has no stream: the hub keeps nothing of it
     // and says no to `/_/live` for it. The page asks `/_/doc` every 30 s instead, and no stream failing is no "Hub unreachable".
-    var THROUGH = /^Clients(\/|$)/.test(CFG.doc || ''), POLL_MS = 30000;
+    var POLL_MS = 30000;
     var connect = function () {
       if (THROUGH || docGone || unmounted) return;         // an answer that comes after unmount() opens no stream for a page that is gone
       try { live = new EventSource('/_/live?doc=' + encodeURIComponent(CFG.doc)); } catch (e) { return; }

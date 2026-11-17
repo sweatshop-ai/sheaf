@@ -59,6 +59,14 @@ def declared_link(value) -> str:
     return v if v.startswith(("https://", "http://")) and " " not in v else ""
 
 
+class _Own:
+    """The lines one landing added (`lines`) and, per address, what the address held before the landing's first (`before`)."""
+
+    def __init__(self):
+        self.lines: list[Line] = []
+        self.before: dict[str, list[Line]] = {}
+
+
 class WriteLog:
     def __init__(self, keep: int = KEEP, now=None):
         from time import strftime
@@ -71,7 +79,7 @@ class WriteLog:
         self._pulling: set[str] = set()
         self._left: dict[str, str] = {}
         self._own: dict[str, str] = {}
-        self._mine = threading.local()      # the lines the calling thread is adding under `own_lines`
+        self._mine = threading.local()      # `own`: what the calling thread is adding under `own_lines`
         self._load()
 
     def _load(self):
@@ -114,15 +122,18 @@ class WriteLog:
                     session=clean(declared.get("session"), MAX_SESSION), host=clean(declared.get("host")),
                     link=declared_link(declared.get("link")), chat=clean(declared.get("chat")))
         with self._lock:
+            self._noted(line)
             self._lines.setdefault(address, deque(maxlen=self._keep)).append(line)
             self._append(line)
-            self._noted(line)
         return line
 
     def _noted(self, line: Line):
-        mine = getattr(self._mine, "lines", None)
-        if mine is not None:
-            mine.append(line)
+        """Under the lock, before `line` is added: the calling thread's landing notes it, and the lines its address held before the
+        landing's first one."""
+        own = getattr(self._mine, "own", None)
+        if own is not None:
+            own.before.setdefault(line.address, list(self._lines.get(line.address, ())))
+            own.lines.append(line)
 
     def carry(self, address: str, lines: list, came_from: str, by: str) -> int:
         """The Write log lines of a page moved here (ticket 20), as they were, under its new `address`, each kept as the log
@@ -143,9 +154,9 @@ class WriteLog:
                 if held[line] > 0:      # a page that came back brings the lines this address kept when it left: each is kept once
                     held[line] -= 1
                     continue
+                self._noted(line)
                 kept.append(line)
                 self._append(line)
-                self._noted(line)
             n += 1
         self.add(address, by, "tiroir", "transfer", host=came_from)
         return n
@@ -219,27 +230,32 @@ class WriteLog:
 
     @contextlib.contextmanager
     def own_lines(self):
-        """The lines the calling thread adds inside the block, as a list that fills while it runs: a landing holds no writer lock,
-        so what it wrote is told apart from what another writer wrote at the address meanwhile, and `undo` takes back only its own."""
-        mine: list = []
-        before = getattr(self._mine, "lines", None)
-        self._mine.lines = mine
+        """What the calling thread adds to the log inside the block, as a `Landing` that fills while it runs: a landing holds no
+        writer lock, so what it wrote is told apart from what another writer wrote at the address meanwhile, and `undo` takes
+        back the landing's own and no more."""
+        own, outer = _Own(), getattr(self._mine, "own", None)
+        self._mine.own = own
         try:
-            yield mine
+            yield own
         finally:
-            self._mine.lines = before
+            self._mine.own = outer
 
-    def undo(self, address: str, mine: list) -> None:
-        """Take back the `mine` lines (as `own_lines` gave them) from `address`, each once; every other line stays, the ones another
-        writer added meanwhile as well. Written as `restore` writes: one append, a `retracted` line and the lines that remain."""
+    def undo(self, address: str, own: "_Own") -> None:
+        """Take back what `own` added at `address`. The lines are those it held before the landing (a landing can push the oldest
+        out of the `KEEP` the address holds: they come back) then those another writer added meanwhile. Written as `restore`
+        writes: one append, a `retracted` line and the lines that remain."""
         with self._lock:
+            before = own.before.get(address)
+            if before is None:
+                return
             left = list(self._lines.get(address, ()))
-            for line in mine:
+            for line in (*own.lines, *before):
                 if line in left:
                     left.remove(line)
-            self._append(Line(address=address, time=self._now(), writer="", place="", via=RETRACTED), *left)
-            if left:
-                self._lines[address] = deque(left, maxlen=self._keep)
+            kept = [replace(line, address=address) for line in (*before, *left)]     # a line carried by a rename is kept under the address it is at
+            self._append(Line(address=address, time=self._now(), writer="", place="", via=RETRACTED), *kept)
+            if kept:
+                self._lines[address] = deque(kept, maxlen=self._keep)
             else:
                 self._lines.pop(address, None)
             self._own.pop(address, None)

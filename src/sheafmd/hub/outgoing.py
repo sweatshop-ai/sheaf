@@ -53,7 +53,7 @@ def post(origin: str, verb: str, body: dict, token: str, seconds: float | None =
     req = urllib.request.Request(f"{origin}/_/tiroir/{verb}", data=json.dumps(body).encode("utf-8"), method="POST",
                                  headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"})
     try:
-        with urllib.request.urlopen(req, timeout=seconds or channel.SECONDS) as res:
+        with connect._NO_REDIRECT.open(req, timeout=seconds or channel.SECONDS) as res:   # a 3xx is an answer: the bearer goes to the peer alone
             status, raw = res.status, res.read()
     except (urllib.error.HTTPError, http.client.HTTPException) as e:
         if not isinstance(e, urllib.error.HTTPError):       # a reply cut short or not HTTP: no answer, as a cut connection is none

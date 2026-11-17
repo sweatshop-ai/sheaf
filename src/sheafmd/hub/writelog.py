@@ -9,7 +9,7 @@ import json
 import os
 import threading
 from collections import Counter, deque
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 
 from .. import paths
@@ -17,6 +17,7 @@ from .. import paths
 KEEP = 200                  # lines kept in memory per address
 MAX_BYTES = 10 * 1024 * 1024
 RENAMED = "renamed"        # the marker line of `WriteLog.rename`: `writer` is the address the lines went to
+RETRACTED = "retracted"    # the marker line of `WriteLog.restore` and `drop`: the lines the file holds for `address` before it are taken back
 NAME, ROTATED = "write-log.jsonl", "write-log.1.jsonl"
 MAX_SESSION = 100
 MAX_DECLARED = 200
@@ -83,6 +84,9 @@ class WriteLog:
                 line = Line(**{k: v for k, v in got.items() if k in names})
             except (ValueError, TypeError):
                 continue
+            if line.via == RETRACTED:
+                self._lines.pop(line.address, None)
+                continue
             if line.via == RENAMED:
                 self._carry(line.address, line.writer)
                 continue
@@ -138,7 +142,7 @@ class WriteLog:
         return n
 
     @staticmethod
-    def _append(line: Line):
+    def _append(*lines: Line):
         try:
             log = log_path()
             paths.private_dir(log.parent)
@@ -149,7 +153,7 @@ class WriteLog:
                 pass
             fd = os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
             try:
-                os.write(fd, (json.dumps(asdict(line), ensure_ascii=False) + "\n").encode("utf-8"))
+                os.write(fd, "".join(json.dumps(asdict(line), ensure_ascii=False) + "\n" for line in lines).encode("utf-8"))
             finally:
                 os.close(fd)
         except Exception:
@@ -206,8 +210,12 @@ class WriteLog:
 
     def restore(self, address: str, kept: list) -> None:
         """The lines of `address` are `kept`, as `lines` gave them: a landing that wrote some and did not land takes back those, and
-        no more (in memory; the file keeps what was written)."""
+        no more. The file is append-only: a `retracted` line takes back what it holds for `address`, then `kept` is written again."""
         with self._lock:
+            marker = Line(address=address, time=self._now(), writer="", place="", via=RETRACTED)
+            # one write: a cut one leaves the file as it was, never the retraction without the lines it keeps; a line carried by a
+            # rename is written under the address it is kept at
+            self._append(marker, *(replace(line, address=address) for line in kept))
             if kept:
                 self._lines[address] = deque(kept, maxlen=self._keep)
             else:
@@ -215,8 +223,9 @@ class WriteLog:
             self._own.pop(address, None)
 
     def drop(self, address: str):
-        """Forget the in-memory lines of `address`: a page that was moved here and taken back. The file keeps what was written."""
+        """Forget the lines of `address`: a page that was moved here and taken back. A `retracted` line tells a restart."""
         with self._lock:
+            self._append(Line(address=address, time=self._now(), writer="", place="", via=RETRACTED))
             self._lines.pop(address, None)
             self._own.pop(address, None)
 

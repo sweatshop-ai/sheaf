@@ -128,6 +128,8 @@ def carries_this_run(pid: int) -> bool:
     if not run or not _has_proc():
         return False
     env = _environment(str(pid))
+    if env == [b""]:                                     # in the middle of its exec, as when it was found: wait for it
+        env = _after_exec(str(pid))
     return bool(env) and f"{RUN_VAR}={run}".encode() in env
 
 

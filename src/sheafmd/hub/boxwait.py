@@ -31,7 +31,7 @@ from typing import Callable
 
 from .. import comments as rdc
 
-STATES = ("picked-up", "delivered", "failed")      # what the supervisor writes
+STATES = ("picked-up", "delivered", "answered", "failed")      # what the supervisor writes
 ERROR_MAX = 200
 STATUS_MAX = 4096           # bytes: a status is one small object
 BAD = "bad"
@@ -124,6 +124,10 @@ class BoxWaits:
                 self._end(doc, thread)
                 return "failed", was
             d.state = state
+            if state == "answered":         # done: the drop ends with no Tell-wait toast, and a member's orange goes
+                if was == "delivered":
+                    self._cleared.add(doc)
+                self._end(doc, thread)
             return "state", was
 
     def end(self, doc: str, thread: str) -> bool:

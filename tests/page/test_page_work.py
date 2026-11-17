@@ -463,6 +463,25 @@ def test_the_supervisors_word_on_a_drop_replaces_the_sent_line(tab, state, line)
     assert SENT not in tab.page.inner_text("#rd-popover")
 
 
+def test_an_answered_drop_is_done_with_no_dots_and_no_window(tab):
+    # The Starter answered in the thread: the line says so and does not claim anyone is working.
+    cid = told_james(tab, [])
+    tab.site.hub.entry(DOC).bus.publish("box-status", {"id": cid, "kind": "tell", "state": "answered"})
+    until(lambda: "Answered" in tab.page.inner_text("#rd-popover"), what="the answered line")
+    text = tab.page.inner_text("#rd-popover")
+    assert "working on it" not in text and "window" not in text and SENT not in text
+    assert tab.page.locator("#rd-popover .rd-sent .rd-dots").count() == 0
+    assert tab.page.locator("#rd-popover .rd-working").count() == 0
+
+
+def test_an_unknown_drop_status_does_not_say_the_agent_is_working(tab):
+    cid = told_james(tab, [])
+    tab.site.hub.entry(DOC).bus.publish("box-status", {"id": cid, "kind": "tell", "state": "whatever"})
+    tab.page.wait_for_timeout(300)
+    assert "working on it" not in tab.page.inner_text("#rd-popover")
+    assert tab.page.locator("#rd-popover .rd-dots").count() == 0
+
+
 def test_the_supervisors_word_outlasts_a_reload_of_the_browser(tab):
     sent = []
     cid = told_james(tab, sent)

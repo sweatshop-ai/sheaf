@@ -544,7 +544,11 @@ STREAM_JOURNAL_JS = """(() => {
 # The page's side of the guard of close_context: a document that has begun to leave (a reload, a goto) says so in
 # `__leaving`. A navigation that has not committed leaves the old document in place, so the flag is readable until the
 # new one comes; the new document starts without it.
-LEAVING_JS = "window.addEventListener('beforeunload', () => { window.__leaving = true; })"
+# A page that asks before it is left cancels the navigation (a handler's preventDefault): once every handler has run, such a leave is no longer pending.
+LEAVING_JS = """window.addEventListener('beforeunload', e => {
+  window.__leaving = true;
+  setTimeout(() => { if (e.defaultPrevented || e.returnValue) window.__leaving = false; }, 0);
+})"""
 
 
 def pending_navigations(context):

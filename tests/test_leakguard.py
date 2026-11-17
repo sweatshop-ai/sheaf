@@ -242,6 +242,25 @@ def test_a_process_that_is_stopped_is_continued_so_that_it_can_end():
             p.wait(timeout=30)
 
 
+def test_a_process_in_the_middle_of_its_exec_still_carries_the_mark_it_was_found_by(monkeypatch):
+    """`left_running` reads the mark off a shell that has just forked, and the shell's `exec` empties the
+    environment for a moment: the second read, by the guard of the kill, must wait for the exec and not
+    take the empty one for a process that is not this run's."""
+    p = subprocess.Popen(["sleep", "300"])
+    try:
+        real, reads = leakguard._environment, []
+
+        def environment(pid):
+            reads.append(pid)
+            return [b""] if len(reads) == 1 else real(pid)    # the first look falls in the exec
+        monkeypatch.setattr(leakguard, "_environment", environment)
+        assert leakguard.carries_this_run(p.pid)
+        assert len(reads) > 1
+    finally:
+        p.kill()
+        p.wait(timeout=30)
+
+
 # ── the reaper of the suite leaves nothing for the guard ─────────────────────
 
 def test_the_reaper_of_the_suite_stops_what_a_shell_left_to_init(tmp_path):

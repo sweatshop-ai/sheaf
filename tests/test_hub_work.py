@@ -766,7 +766,7 @@ def test_the_supervisors_answered_is_told_to_the_page_and_ends_the_working_dot(t
     assert team.hub.box_waits.working(ADDRESS)
     status(box, "answered")
     team.hub.tick()
-    assert sent(team) == [{"id": cid, "kind": "tell", "state": "answered"}]
+    assert sent(team) == []                       # answered ends the drop: no Tell-wait toast later
     assert [d["state"] for n, d in tab.drain() if n == "box-status"] == ["delivered", "answered"]
     assert not team.hub.box_waits.working(ADDRESS)
     assert hub_rows("drop-status-ignored") == []

@@ -362,3 +362,17 @@ def test_a_restore_is_one_write_to_the_file_so_a_cut_one_takes_back_nothing(monk
     monkeypatch.setattr(os, "write", lambda fd, data: writes.append(data) or real(fd, data))
     log.restore("a.md", kept)
     assert len(writes) == 1                         # the retraction and the lines it keeps reach the file together
+
+
+def test_an_undo_takes_back_only_the_lines_its_thread_added_and_keeps_another_writers_after_a_restart():
+    import threading
+    log = WriteLog()
+    log.add(address="a.md", writer="Bea", place="page", via="save")
+    with log.own_lines() as mine:
+        log.add(address="a.md", writer="Claude", place="tiroir", via="create")
+        other = threading.Thread(target=log.add, kwargs={"address": "a.md", "writer": "Cal", "place": "page", "via": "save"})
+        other.start()
+        other.join()
+    log.undo("a.md", mine)
+    assert [l.writer for l in log.lines("a.md")] == ["Bea", "Cal"]
+    assert [l.writer for l in WriteLog().lines("a.md")] == ["Bea", "Cal"]

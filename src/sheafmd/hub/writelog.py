@@ -7,6 +7,7 @@ write came (`create`, `update`, `save`, `pull`, `disk`) and what the writer decl
 and chat id. What a writer declares is kept as declared and never verified; it never opens a transcript."""
 import json
 import os
+import contextlib
 import threading
 from collections import Counter, deque
 from dataclasses import asdict, dataclass, fields, replace
@@ -70,6 +71,7 @@ class WriteLog:
         self._pulling: set[str] = set()
         self._left: dict[str, str] = {}
         self._own: dict[str, str] = {}
+        self._mine = threading.local()      # the lines the calling thread is adding under `own_lines`
         self._load()
 
     def _load(self):
@@ -114,7 +116,13 @@ class WriteLog:
         with self._lock:
             self._lines.setdefault(address, deque(maxlen=self._keep)).append(line)
             self._append(line)
+            self._noted(line)
         return line
+
+    def _noted(self, line: Line):
+        mine = getattr(self._mine, "lines", None)
+        if mine is not None:
+            mine.append(line)
 
     def carry(self, address: str, lines: list, came_from: str, by: str) -> int:
         """The Write log lines of a page moved here (ticket 20), as they were, under its new `address`, each kept as the log
@@ -137,6 +145,7 @@ class WriteLog:
                     continue
                 kept.append(line)
                 self._append(line)
+                self._noted(line)
             n += 1
         self.add(address, by, "tiroir", "transfer", host=came_from)
         return n
@@ -207,6 +216,33 @@ class WriteLog:
         """Whether a change a page just saw, to the text of `hash_`, is a door write's own."""
         with self._lock:
             return self._own.pop(address, None) == hash_
+
+    @contextlib.contextmanager
+    def own_lines(self):
+        """The lines the calling thread adds inside the block, as a list that fills while it runs: a landing holds no writer lock,
+        so what it wrote is told apart from what another writer wrote at the address meanwhile, and `undo` takes back only its own."""
+        mine: list = []
+        before = getattr(self._mine, "lines", None)
+        self._mine.lines = mine
+        try:
+            yield mine
+        finally:
+            self._mine.lines = before
+
+    def undo(self, address: str, mine: list) -> None:
+        """Take back the `mine` lines (as `own_lines` gave them) from `address`, each once; every other line stays, the ones another
+        writer added meanwhile as well. Written as `restore` writes: one append, a `retracted` line and the lines that remain."""
+        with self._lock:
+            left = list(self._lines.get(address, ()))
+            for line in mine:
+                if line in left:
+                    left.remove(line)
+            self._append(Line(address=address, time=self._now(), writer="", place="", via=RETRACTED), *left)
+            if left:
+                self._lines[address] = deque(left, maxlen=self._keep)
+            else:
+                self._lines.pop(address, None)
+            self._own.pop(address, None)
 
     def restore(self, address: str, kept: list) -> None:
         """The lines of `address` are `kept`, as `lines` gave them: a landing that wrote some and did not land takes back those, and

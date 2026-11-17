@@ -2,12 +2,14 @@
 on `dev` where the remote has it, else on the branch the repo's `.sheaf.toml` names, and with neither the page is read-only
 with a line. Everything runs against local bare repos and a fake App, as test_repo_pages.py does."""
 import base64
+import contextlib
 import dataclasses
 import json
 import os
 import pwd
 import re
 import subprocess
+import sys
 import threading
 
 import pytest
@@ -553,6 +555,209 @@ def test_a_member_whose_id_is_anothers_short_name_does_not_own_that_members_page
     text = doc.read_text(encoding="utf-8")
     got = box.post("/_/share", {"doc": DOC, "hash": md_hash(text)}, member="nell")
     assert got.status != 200 and doc.read_text(encoding="utf-8") == text
+
+
+# ── a write to a sleeping clone wakes it first ───────────────────────────────
+
+def asleep(hub_repos):
+    """The clone made by a report, its page opened, and thirty-one days without use: its folders are out of the work tree."""
+    repos, now = hub_repos.hub.repos, [1_000_000.0]
+    repos.clock = lambda: now[0]
+    text = served(hub_repos)
+    assert hub_repos.get(f"/{ADDRESS}", member=BEA).status == 200       # the page is open: the hub holds its entry
+    now[0] += 31 * 86400
+    assert repos.sleep_idle() == [REPO]
+    assert not hub_repos.hub.file(ADDRESS).exists()
+    return text
+
+
+@DEV
+def test_a_save_on_a_sleeping_clones_page_wakes_the_clone_and_commits_on_dev(hub_repos):
+    text = asleep(hub_repos)
+    i = next(i for i, b in enumerate(split_md_blocks(text)) if b.content.startswith("A plan"))
+    r = hub_repos.post("/_/save", {"doc": ADDRESS, "hash": md_hash(text), "branch": "dev",
+                                   "edits": [{"i": i, "html": "<p>A plan, saved on the page.</p>"}]}, member=BEA)
+    assert r.status == 200, r.text
+    assert not hub_repos.hub.repos.sleeping(REPO)
+    assert hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8").endswith("A plan, saved on the page.\n")
+    assert remote_commits(hub_repos, "dev") == ["Bea|edit: docs/plan.md"]
+
+
+@DEV
+def test_a_door_update_on_a_sleeping_clones_page_wakes_the_clone_and_commits_on_dev(hub_repos):
+    text = asleep(hub_repos)
+    bad, said = door_call(hub_repos, "bea-claude", "update", doc=ADDRESS, expected_hash=md_hash(text),
+                          text=text + "\nA line the door added.\n")
+    assert not bad, said
+    assert not hub_repos.hub.repos.sleeping(REPO)
+    assert hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8").endswith("A line the door added.\n")
+    assert len(remote_commits(hub_repos, "dev")) == 1
+
+
+@DEV
+def test_a_write_to_a_clone_that_moved_to_another_tiroir_does_not_wake_it(hub_repos):
+    text = served(hub_repos)
+    assert hub_repos.hub.repos.sleep_moved(REPO, "https://there.example")
+    hub_repos.post("/_/save", {"doc": ADDRESS, "hash": md_hash(text), "branch": "dev",       # whatever the answer: it stays asleep
+                               "edits": [{"i": 1, "html": "<p>A plan, saved on the page.</p>"}]}, member=BEA)
+    assert hub_repos.hub.repos.sleeping(REPO) and hub_repos.hub.repos.moved_to(REPO) == "https://there.example"
+
+
+@DEV
+def test_a_door_update_by_a_member_who_does_not_own_the_page_wakes_nothing(hub_repos):
+    text = asleep(hub_repos)
+    bad, said = door_call(hub_repos, "cal-claude", "update", doc=ADDRESS, expected_hash=md_hash(text), text=text + "\nx\n")
+    assert bad, said
+    assert hub_repos.hub.repos.sleeping(REPO)
+    assert not hub_repos.hub.file(ADDRESS).exists()
+
+
+@DEV
+def test_a_clone_awake_by_its_flag_but_with_its_folders_out_is_widened_by_a_write(hub_repos):
+    """A write that came while the clone went to sleep (or a widen that failed) leaves the flag awake and `restore` pending:
+    the next write must still bring the folders back."""
+    text = asleep(hub_repos)
+    hub_repos.hub.repos._use(REPO)                  # awake by its flag; the folders are still out, `restore` is kept
+    assert not hub_repos.hub.repos.sleeping(REPO) and not hub_repos.hub.file(ADDRESS).exists()
+    bad, said = door_call(hub_repos, "bea-claude", "update", doc=ADDRESS, expected_hash=md_hash(text), text=text + "\nA line.\n")
+    assert not bad, said
+    assert hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8").endswith("A line.\n")
+
+
+@DEV
+def test_a_door_update_naming_a_sleeping_clones_page_by_its_url_wakes_it(hub_repos):
+    text = asleep(hub_repos)
+    bad, said = door_call(hub_repos, "bea-claude", "update", doc=hub_repos.hub.url(ADDRESS), expected_hash=md_hash(text),
+                          text=text + "\nA line.\n")
+    assert not bad, said
+    assert hub_repos.hub.file(ADDRESS).read_text(encoding="utf-8").endswith("A line.\n")
+
+
+@DEV
+def test_a_clone_going_to_sleep_records_what_to_restore_under_the_lock_of_the_shrink(hub_repos, monkeypatch):
+    """The record of `restore` is made while the clone's lock is held, so a write that takes the lock sees the folders gone
+    and the record together."""
+    repos, held, seen = hub_repos.hub.repos, [0], []
+    real, real_write = repos.holding, repos_mod.write_text_atomic
+
+    class Counting:
+        def __init__(self, inner):
+            self.inner = inner
+
+        def __enter__(self):
+            held[0] += 1
+            return self.inner.__enter__()
+
+        def __exit__(self, *a):
+            held[0] -= 1
+            return self.inner.__exit__(*a)
+
+    repos.holding = lambda dest: Counting(real(dest))
+    monkeypatch.setattr(repos_mod, "write_text_atomic",
+                        lambda path, text, *a, **k: (seen.append(held[0]) if '"restore"' in text else None, real_write(path, text, *a, **k))[1])
+    asleep(hub_repos)
+    assert seen and all(n > 0 for n in seen), seen
+
+
+@DEV
+def test_the_owner_a_page_names_wakes_the_clone_whatever_the_case_and_the_reporter_does_not_when_another_is_named(hub_repos):
+    text = asleep(hub_repos)
+    repos = hub_repos.hub.repos
+    data = repos._read()
+    row = data[REPO]["docs/plan.md"]
+    key = row["owner"]
+    data[REPO]["docs/plan.md"] = {**row, "owner": "someone-else", "named": key.upper()}
+    repos._write(data)
+    bad, said = door_call(hub_repos, "bea-claude", "update", doc=ADDRESS, expected_hash=md_hash(text), text=text + "\nA line.\n")
+    assert not bad, said
+    assert not repos.sleeping(REPO)
+
+
+@DEV
+def test_a_clone_that_is_written_to_is_not_put_to_sleep_thirty_days_after_its_last_report(hub_repos):
+    repos, now = hub_repos.hub.repos, [1_000_000.0]
+    repos.clock = lambda: now[0]
+    text = served(hub_repos)
+    now[0] += 29 * 86400
+    r = hub_repos.post("/_/save", {"doc": ADDRESS, "hash": md_hash(text), "branch": "dev",
+                                   "edits": [{"i": 1, "html": "<p>A plan, saved on the page.</p>"}]}, member=BEA)
+    assert r.status == 200, r.text
+    now[0] += 29 * 86400
+    assert repos.sleep_idle() == []
+    assert not repos.sleeping(REPO)
+
+
+@DEV
+def test_a_write_to_an_awake_clone_asks_the_provider_for_no_token(hub_repos, monkeypatch):
+    """The token may be a command run on the box: it is asked for only when folders are to come back."""
+    served(hub_repos)
+    repos, asked = hub_repos.hub.repos, []
+    monkeypatch.setattr(repos.provider, "token", lambda repo: asked.append(sys._getframe(1).f_code.co_name) or "ghs_faketoken")
+    assert repos.wake(REPO) is True
+    assert "wake" not in asked          # other git work of the clone may ask; the wake does not
+
+
+@DEV
+def test_a_clone_that_moves_between_the_check_and_the_lock_is_not_marked_awake_by_a_write(hub_repos, monkeypatch):
+    asleep(hub_repos)
+    repos = hub_repos.hub.repos
+    holding = repos.holding
+
+    @contextlib.contextmanager
+    def moved_on_entry(dest):                       # the move lands after `wake` checked, before it holds the lock
+        with repos._records:
+            data = repos._usage()
+            data[REPO] = {**data[REPO], "moved": "https://there.example"}
+            repos_mod.write_text_atomic(repos._usage_file, json.dumps(data))
+        with holding(dest):
+            yield
+
+    monkeypatch.setattr(repos, "holding", moved_on_entry)
+    assert repos.wake(REPO) is False
+    assert repos.sleeping(REPO) and repos.moved_to(REPO) == "https://there.example"
+
+
+@DEV
+def test_a_clone_a_write_dated_a_moment_ago_is_not_shrunk_by_the_sleep_step_that_checked_before(hub_repos):
+    """`sleep_idle` judged the clone idle outside the lock; a write took the lock first and dated a use. The shrink that
+    follows re-reads the date under the lock and leaves the folders where they are."""
+    served(hub_repos)
+    repos = hub_repos.hub.repos
+    assert repos.wake(REPO) is True
+    slept = []
+    repos._sleep_one(REPO, repos.clone_dir(REPO), slept)
+    assert slept == [] and hub_repos.hub.file(ADDRESS).exists()
+    assert not repos.sleeping(REPO)
+
+
+@DEV
+def test_the_owner_of_a_sleeping_clones_page_reads_it_with_the_editor_and_the_line_says_a_write_wakes_it(hub_repos):
+    """The page a tab holds (`_fresh_meta`, which a mount and a reload send) of a clone that went to sleep."""
+    hub = hub_repos.hub
+    h = md_hash(served(hub_repos))
+    e, bea = hub.entry(ADDRESS), hub.proxy.members.get(BEA)
+    asleep(hub_repos)
+    meta = hub._fresh_meta(e, {"hash": h, "branch": "dev"}, bea)
+    assert not meta.get("readonly") and meta.get("branch") == "dev", meta
+    line = hub.read_only_line(ADDRESS)                      # whoever may not wake it reads the line
+    assert "asleep" in line and "write" in line, line
+
+
+@DEV
+def test_a_sessions_report_on_a_sleeping_clones_page_wakes_the_clone_first(hub_repos):
+    asleep(hub_repos)
+    hub_repos.post("/_/sessions", {"doc": ADDRESS, "id": "7b0c1c2e-3d4f-4a5b-8c6d-9e0f1a2b3c4d", "machine": "bea-mac"},
+                   member=BEA)                              # whatever the answer: the clone is awake for it
+    assert not hub_repos.hub.repos.sleeping(REPO)
+
+
+@DEV
+def test_a_door_reply_or_resolve_by_a_token_that_may_not_write_wakes_nothing(hub_repos):
+    asleep(hub_repos)
+    hub_repos.tokens["ro"] = Tokens().add("ro", write=False)
+    for tool, args in (("resolve", {"id": "c1"}), ("reply", {"id": "c1", "text": "x"})):
+        door_call(hub_repos, "ro", tool, doc=ADDRESS, **args)           # refused, whatever the words
+        assert hub_repos.hub.repos.sleeping(REPO), tool
 
 
 # ── round 6: a save lands only on the branch it was read on ──────────────────

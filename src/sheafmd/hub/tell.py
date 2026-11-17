@@ -37,7 +37,7 @@ ENDED = "The {product} session that rendered this page has ended. Render it agai
 NO_SOCKET = ("Tell needs the session's message socket, which was not found. Render the page "
              "again from the session.")
 UPGRADING = "The hub is restarting for an upgrade. Try again in a moment."
-MOVING = "This page is being moved. Try again in a moment."
+MOVING = moves.BEING_MOVED
 CANCELLING = "The Tell of this comment is still being cancelled. Try again when that is done."
 WAIT_ENDED = ("This Tell ended before it went out: it was cancelled, answered or failed. "
               "Tell again if you still want it.")
@@ -475,10 +475,10 @@ class Tell:
         # again. A move holds the moves' lock from its checks to the rows' rename, so a Tell either queues before it (and
         # is carried) or finds the Forward and goes round again at the new address.
         for _ in range(3):
-            address = self.hub.forwards.follow(address) or address
+            address = self.hub.forwards.local(address) or address
             thread = self._thread(self._entry(address), cid)
             with moves.exclusive(), self.hub.admit:
-                if (self.hub.forwards.follow(address) or address) != address:
+                if (self.hub.forwards.local(address) or address) != address:
                     continue                    # moved since the thread was read
                 raw = targets.stored(self.hub, address, member)
                 row = targets.live(self.hub, raw, member)

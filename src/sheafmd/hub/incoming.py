@@ -13,7 +13,7 @@ import os
 import time
 from pathlib import Path
 
-from .. import mcp, paths
+from .. import config, mcp, paths
 from . import channel, loose, proxy, root_moves, state, visibility
 from . import repos as repos_mod
 from .state import TokenRow
@@ -235,9 +235,11 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
     page's owner is the member its e-mail names; the page's blob must be what this tiroir's own clone holds at the save
     branch. `(202, {state: cloning})` while the clone is made or the tip not here yet; `(409, {why})` for the whole root;
     else `(200, {pages: {path: {ready: True} | {ok: False, why}}})`. A repo whose root moved away from here is refused whole
-    (`moved`), unless `peer` (the origin the channel's token names, passed by the caller) is the tiroir it moved to: that root is coming back,
-    and is unmoved once nothing in this check refuses it. This writes nothing of its own: the report is the laptop's, so it dates the clone as used and records the first
-    owner's page, as a laptop's would; the page's own state is landing's."""
+    (`moved`), unless `peer` (the origin the channel's token names, passed by the caller) is the tiroir it moved to: that root is
+    coming back, and is unmoved once nothing in this check refuses it. The root's `.sheaf.toml` at the tip must name this tiroir
+    (`not_named` otherwise; a root unmoved by this call then sleeps again). The clone's state is written only by what this calls:
+    the unmove, and the report, which is the laptop's own, so it dates the clone as used and records each owned page, as a
+    laptop's would; the page's own state is landing's."""
     if (bad := _root_shape(b)) is not None:
         raise ValueError(bad)
     repos = getattr(hub, "repos", None)
@@ -245,13 +247,14 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
         return 409, {"why": "no_clones"}
     if getattr(hub, "proxy", None) is None:
         return 409, {"why": "no_origin"}
-    judged, first = {}, None
+    judged, owned, unmoved = {}, [], False
     for p in b["pages"]:
         owner, why = owner_for(hub, p["owner_email"])
         if owner is None:
             judged[p["path"]] = {"ok": False, "why": why}
-        elif first is None:
-            first = (owner, p["path"])
+        else:
+            owned.append((owner, p["path"]))
+    first = owned[0] if owned else None
     if first is not None:
         privates = [(m.short or m.id, m.private_root) for m in hub.proxy.members.values() if m.private_root]
         if peer and root_moves.origin(peer) == repos.moved_to(b["repo"]):
@@ -260,6 +263,7 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
             if (why := repos.refusal(first[0].short or first[0].id, b["repo"], privates)) is not None:
                 return 409, {"why": why.replace("-", "_"), **({"install": repos.install_url(b["repo"])} if why == repos_mod.NO_APP else {})}
             repos.unmove(b["repo"])
+            unmoved = True
         try:
             said = repos.report(first[0].short or first[0].id, b["repo"], first[1], b["tip"], privates, {})
         except repos_mod.Refused:
@@ -271,9 +275,94 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
             return 409, {"why": clone.replace("-", "_")}
         if clone != repos_mod.OK or not said.get("commit_known"):
             return 202, {"state": "cloning"}
+        for owner, path in owned[1:]:       # each owned page is reported for its owner, so each row keeps the owner its front matter names
+            try:
+                later = repos.report(owner.short or owner.id, b["repo"], path, b["tip"], privates, {})
+            except repos_mod.Refused:
+                judged[path] = {"ok": False, "why": "refused"}
+                continue
+            if later.get("clone") != repos_mod.OK:
+                judged[path] = {"ok": False, "why": str(later.get("clone")).replace("-", "_")}
+        if not repos.settle(channel.SECONDS / 2):       # the report's own thread writes the page's row and keeps the repo busy: it ends before any page lands or the clone sleeps
+            return 202, {"state": "cloning"}
+        named = config.tiroir_named(repos.page_text(b["repo"], config.ROOT_FILE, b["tip"]) or "")
+        if named is None or root_moves.origin(named) != root_moves.origin(hub.proxy.origin):
+            if unmoved:
+                repos.sleep_moved(b["repo"], root_moves.origin(peer))       # it was not for this tiroir after all: asleep again
+            return 409, {"why": "not_named"}
         dest = repos.clone_dir(b["repo"])
         for p in b["pages"]:
             if p["path"] not in judged:
                 judged[p["path"]] = {"ready": True} if root_moves.tip_holds(dest, b["branch"], p["path"], p["blob"]) \
                     else {"ok": False, "why": "text_differs"}
     return 200, {"pages": judged}
+
+
+def _page_shape(b) -> str | None:
+    """Why a page of `b` has optional rows that are not what landing takes (`record`, `versions`, `writes`), or None."""
+    for p in b["pages"]:
+        if p.get("record") is not None and not isinstance(p["record"], dict):
+            return "a page's record is not an object"
+        versions, writes = p.get("versions", []), p.get("writes", [])
+        if not (isinstance(versions, list) and len(versions) <= MAX_VERSIONS
+                and all(isinstance(v, dict) and isinstance(v.get("text"), str) for v in versions)):
+            return "a page's versions are not versions"
+        if not (isinstance(writes, list) and len(writes) <= MAX_WRITES and all(isinstance(w, dict) for w in writes)):
+            return "a page's Write log lines are not lines"
+    return None
+
+
+def land_root(hub, b, peer: str | None = None) -> tuple:
+    """Second stage of a root moved here: `check_root`, and for each page it found `ready` the page's record, versions and
+    Write log lines, each page whole or not at all. Anything but a 200 of the check is answered as it is. `(200, {pages:
+    {path: {ok: True, hash} | {ok: False, why}}})`: a page the check refused keeps its answer and writes nothing; a page
+    whose store failed takes back what it made and is `failed`. `transfers.json` keeps the answer to each `id` and path, so a
+    send whose confirmation was lost is answered again and never lands twice. A page that is not one is a `ValueError`. The check
+    waits for the report's own thread, so no landing is written and then overwritten by it, and a failed page gives back the
+    versions and Write log lines its address kept before, never more or less."""
+    if (bad := _root_shape(b) or _page_shape(b)) is not None:
+        raise ValueError(bad)
+    status, answer = check_root(hub, b, peer)
+    if status != 200:
+        return status, answer
+    pages = dict(answer["pages"])
+    came_from = (b.get("from") or {}).get("origin") if isinstance(b.get("from"), dict) else None
+    by = (b.get("from") or {}).get("by") if isinstance(b.get("from"), dict) else None
+    for p in b["pages"]:
+        if pages.get(p["path"]) == {"ready": True}:
+            owner, _ = owner_for(hub, p["owner_email"])
+            with state.file_locked("transfers.lock"):       # held to the end of the page: two sends of one id land one page
+                pages[p["path"]] = _land_page(hub, b, p, owner, came_from if isinstance(came_from, str) else "",
+                                              by if isinstance(by, str) else owner.name)
+    return 200, {"pages": pages}
+
+
+def _land_page(hub, b, p, owner, came_from: str, by: str) -> dict:
+    """The landing of one page of `land_root`, with `transfers.lock` held."""
+    key, address = f"{b['id']}:{p['path']}", f"{repos_mod.root_name(b['repo'])}/{p['path']}"
+    known = state.read_json(_answers(), {}).get(key)
+    if isinstance(known, dict):
+        return {"ok": True, **known}
+    recorded, made = False, []
+    was_versions, was_lines = hub.versions.texts(address), hub.writes.lines(address)     # what the address kept before: a page that came back has them
+    try:
+        prior = hub.repos.land_record(b["repo"], p["path"], owner.short or owner.id, b["tip"], p.get("record") or {})
+        recorded = True
+        for v in p.get("versions", []):
+            made.append(visibility.set_keys(visibility.without_ticked_share(v["text"]), {"shared": None}))
+            hub.versions.put(address, made[-1])
+        hub.writes.carry(address, p.get("writes", []), came_from, by)
+        answer = {"hash": p["blob"]}
+        state.write_json(_answers(), {**state.read_json(_answers(), {}), key: answer})
+    except BaseException as e:
+        if recorded:
+            with contextlib.suppress(Exception):
+                hub.repos.drop_record(b["repo"], p["path"], prior)
+        with contextlib.suppress(Exception):
+            hub.versions.take_back(address, was_versions, made)
+        with contextlib.suppress(Exception):
+            hub.writes.restore(address, was_lines)
+        if not isinstance(e, Exception):
+            raise
+        return {"ok": False, "why": "failed"}
+    return {"ok": True, **answer}

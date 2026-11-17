@@ -262,6 +262,21 @@ class Versions:
                 out.append(text)
         return out
 
+    def take_back(self, address: str, before: list[str], made: list[str]) -> None:
+        """A landing that put the texts `made` among the newest versions of the document and did not land takes back those, and no
+        more: a version of `made` that `before` (as `texts` gave them) did not hold goes, a version it pushed out of the newest
+        comes back, and what someone else wrote meanwhile and the pinned ones are never touched."""
+        folder = self._folder(address)
+        kept = {md_hash(t) for t in before}
+        for h in {md_hash(t) for t in made} - kept:
+            try:
+                (folder / f"{h}.md").unlink()
+            except OSError:
+                pass
+        for text in before:
+            if not (folder / f"{md_hash(text)}.md").is_file():
+                self.put(address, text)
+
     def forget(self, address: str, inside: bool = False):
         """Drop every version of one document. A root that is forgotten takes its documents'
         versions with it: the name may go to another folder, and a page still open on the old

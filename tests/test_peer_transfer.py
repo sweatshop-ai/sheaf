@@ -203,6 +203,7 @@ def test_an_archived_that_is_not_true_or_false_is_not_a_bundle(members):
 
 def test_a_landing_that_outlasts_the_deadline_lands_nothing_and_answers_too_slow(members, monkeypatch):
     import time
+    sender_waits = chan.SECONDS
     monkeypatch.setattr(chan, "SECONDS", 0.05)
     real = members.hub.versions.put
 
@@ -216,6 +217,8 @@ def test_a_landing_that_outlasts_the_deadline_lands_nothing_and_answers_too_slow
     root = members.hub.loose.known(members.hub.proxy.members[BEA])
     assert root is None or not [p for p in root.rglob("notes.md")]
     monkeypatch.setattr(members.hub.versions, "put", real)
+    # the real landing must not race the 0.05 s deadline set above: on a loaded runner it took longer and answered too_slow
+    monkeypatch.setattr(chan, "SECONDS", sender_waits)
     assert transfer(members, token).status == 200            # nothing was remembered of the failed one: the same id lands
 
 

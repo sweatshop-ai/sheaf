@@ -710,6 +710,9 @@ class Hub:
             mt = self.member_target(e.address, member, can)
             meta["agent"], meta["can"], meta["lines"], meta["targets"] = mt.agent, mt.can, mt.lines, mt.picks
             meta["way_back"] = sheaf_view.byline(self, e.address, member)
+            if mount:                           # read through for another tiroir's member (9.9): read and comment, never edit, press or Tell here
+                meta["edit"], meta["actions"], meta["targets"], meta["can"] = False, [], [], []
+                meta.pop("work", None), meta.pop("way_back", None)
         return meta
 
     def member_target(self, address: str, member, can: list) -> MemberTarget:

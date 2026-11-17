@@ -122,8 +122,11 @@ def tree(rows: list[dict]) -> list[dict]:
     one is in its parent's table."""
     nodes: dict = {}
 
-    def node(into: dict, name: str, path: str) -> dict:
-        return into.setdefault(name, {"name": name, "path": path, "children": {}})
+    def node(into: dict, name: str, path: str, rename: bool = False) -> dict:
+        # `rename`: the folder is one of the owner's own loose root, whose pages a folder rename may move (9.11); never the root itself.
+        n = into.setdefault(name, {"name": name, "path": path, "rename": False, "children": {}})
+        n["rename"] = n["rename"] or rename
+        return n
 
     for r in rows:
         if "shared_from" in r:      # the owner's own folders are theirs: the page is one level under its owner's name
@@ -133,7 +136,7 @@ def tree(rows: list[dict]) -> list[dict]:
         top = node(nodes, at.root, at.root)
         here = top
         for part in visible_folders(at.rel):
-            here = node(here["children"], part, f"{here['path']}/{part}")
+            here = node(here["children"], part, f"{here['path']}/{part}", r.get("can_move", False))
 
     def done(level: dict) -> list[dict]:
         return [{**n, "children": done(n["children"])} for _, n in sorted(level.items(), key=lambda kv: kv[0].casefold())]

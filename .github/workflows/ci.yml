@@ -78,6 +78,9 @@ jobs:
         slice: [1, 2, 3, 4, 5, 6]
     env:
       SHEAF_TEST_SLICE: ${{ matrix.slice }}/6
+      # The names no file of this public repository may hold (tests/public_tree.py): a secret, because even a
+      # hash of them would publish them. A run without it fails, and a pull request from a fork has none.
+      SHEAF_PUBLIC_TREE_TERMS: ${{ secrets.SHEAF_PUBLIC_TREE_TERMS }}
     steps:
       - uses: actions/checkout@v4
         with:

@@ -76,6 +76,9 @@ def system_store():
     return SystemStore()
 
 
+_WARNED: set[str] = set()      # the credential files already warned about, by name
+
+
 def peer_credential_name(url: str) -> str:
     """The name of the file that holds the token for the peer tiroir at `url`, in a service's credentials folder (systemd
     `LoadCredential=NAME:PATH` makes it `$CREDENTIALS_DIRECTORY/NAME`): one safe word per origin and port."""
@@ -95,7 +98,9 @@ def _credential_file(url: str) -> str | None:
     except OSError:
         return None
     except UnicodeDecodeError:       # a corrupted file is a missing one; the warning names the file, never what is in it
-        print(f"sheaf: the credential file {name} is not text, so it is ignored and the keyring is asked", file=sys.stderr)
+        if name not in _WARNED:      # said once per process: the hub asks on every send
+            _WARNED.add(name)
+            print(f"sheaf: the credential file {name} is not text, so it is ignored and the keyring is asked", file=sys.stderr)
         return None
     token = text.strip()
     return token if _TOKEN.fullmatch(token) else None
@@ -123,23 +128,28 @@ def use_peer_file(url: str, token: str, folder: Path) -> Path:
     folder = Path(folder)
     target = folder / peer_credential_name(origin)
     tmp = folder / (target.name + ".new")
+    made = False                     # the temp is ours to remove only once we made it: a leftover link is left as it was
     try:
         folder.mkdir(mode=0o700, parents=True, exist_ok=True)
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        made = True
         try:
             os.fchmod(fd, 0o600)
             data = memoryview((token + "\n").encode("ascii"))
             while data:
                 data = data[os.write(fd, data):]
             os.fsync(fd)
-        except BaseException:
+        finally:
             os.close(fd)
-            tmp.unlink(missing_ok=True)
-            raise
-        os.close(fd)
         os.replace(tmp, target)
     except OSError as e:
+        if made:
+            tmp.unlink(missing_ok=True)
         raise ConnectError(f"cannot keep the token in {folder}: {e.strerror or e}; nothing was written") from None
+    except BaseException:
+        if made:
+            tmp.unlink(missing_ok=True)
+        raise
     return target
 
 

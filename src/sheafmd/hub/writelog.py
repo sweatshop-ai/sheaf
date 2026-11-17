@@ -9,7 +9,7 @@ import json
 import os
 import threading
 from collections import Counter, deque
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from pathlib import Path
 
 from .. import paths
@@ -142,7 +142,7 @@ class WriteLog:
         return n
 
     @staticmethod
-    def _append(line: Line):
+    def _append(*lines: Line):
         try:
             log = log_path()
             paths.private_dir(log.parent)
@@ -153,7 +153,7 @@ class WriteLog:
                 pass
             fd = os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
             try:
-                os.write(fd, (json.dumps(asdict(line), ensure_ascii=False) + "\n").encode("utf-8"))
+                os.write(fd, "".join(json.dumps(asdict(line), ensure_ascii=False) + "\n" for line in lines).encode("utf-8"))
             finally:
                 os.close(fd)
         except Exception:
@@ -212,11 +212,12 @@ class WriteLog:
         """The lines of `address` are `kept`, as `lines` gave them: a landing that wrote some and did not land takes back those, and
         no more. The file is append-only: a `retracted` line takes back what it holds for `address`, then `kept` is written again."""
         with self._lock:
-            self._append(Line(address=address, time=self._now(), writer="", place="", via=RETRACTED))
+            marker = Line(address=address, time=self._now(), writer="", place="", via=RETRACTED)
+            # one write: a cut one leaves the file as it was, never the retraction without the lines it keeps; a line carried by a
+            # rename is written under the address it is kept at
+            self._append(marker, *(replace(line, address=address) for line in kept))
             if kept:
                 self._lines[address] = deque(kept, maxlen=self._keep)
-                for line in kept:
-                    self._append(line)
             else:
                 self._lines.pop(address, None)
             self._own.pop(address, None)

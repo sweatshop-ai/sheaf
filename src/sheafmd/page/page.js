@@ -2992,6 +2992,47 @@ var create = function (ROOT, CFG, opts) {
     if (t.closest && t.closest('#rd-panel, #rd-popover, #rd-menu, #rd-work, #rd-menu-btn, #rd-comment-btn, .rd-badge')) return;
     closePanel();
   });
+  // A Team comment's own actions (SPEC 9.11): the hub keeps the rules, the page offers what it would accept. Reply and resolve are any
+  // member's; edit is the author's; delete is the author's while no one else has replied, and asks twice.
+  var teamForm = null;          // {id, kind: 'reply' | 'edit'}: the open form under a Team comment
+  var teamAsk = null;           // the id of the Team comment whose delete waits for a second click
+  function teamActions(c) {
+    var btn = function (act, label) { return '<button data-act="' + act + '">' + label + '</button>'; };
+    if (teamForm && teamForm.id === c.id) {
+      return '<div class="rd-acts"><textarea rows="3">' + esc(teamForm.kind === 'edit' ? c.body || '' : '') + '</textarea>' +
+             btn('send', teamForm.kind === 'edit' ? 'Save' : 'Reply') + btn('cancel', 'Cancel') + '</div>';
+    }
+    var h = btn('reply', 'Reply') + btn('status', c.status === 'resolved' ? 'Reopen' : 'Resolve');
+    if (mine(c)) {
+      h += btn('edit', 'Edit');
+      if (!(c.replies || []).some(function (r) { return r.by !== c.by; })) h += btn('delete', teamAsk === c.id ? 'Confirm delete' : 'Delete');
+    }
+    return '<div class="rd-acts">' + h + '</div>';
+  }
+  async function teamAct(t) {
+    var item = t.closest('[data-team]'), id = item.getAttribute('data-team'), act = t.getAttribute('data-act');
+    var c = TEAM.filter(function (x) { return x.id === id; })[0];
+    if (!c) return;
+    if (act !== 'delete') teamAsk = null;
+    if (act === 'reply' || act === 'edit') { teamForm = { id: id, kind: act }; drawPanel(); var f = panel.querySelector('[data-team="' + id + '"] textarea'); if (f) f.focus(); return; }
+    if (act === 'cancel') { teamForm = null; drawPanel(); return; }
+    var sent = { op: act, id: id };
+    if (act === 'delete') {
+      if (teamAsk !== id) { teamAsk = id; drawPanel(); return; }
+    } else if (act === 'status') {
+      sent.status = c.status === 'resolved' ? 'open' : 'resolved';
+    } else if (act === 'send') {
+      var ta = item.querySelector('textarea'), text = ta ? ta.value.trim() : '';
+      if (!text) return;
+      sent.op = teamForm.kind; sent.body = text;
+    } else return;
+    try {
+      var j = await post('/_/comment', sent);
+      TEAM = j.team || [];
+      teamForm = null; teamAsk = null;
+      drawPanel();
+    } catch (e) { say(e.message, true); }
+  }
   function drawPanel() {
     var authors = [];
     COMMENTS.forEach(function (c) { if (authors.indexOf(c.by) < 0) authors.push(c.by); });
@@ -3015,7 +3056,7 @@ var create = function (ROOT, CFG, opts) {
           return '<div class="rd-item rd-team' + (c.status === 'resolved' ? ' rd-res' : '') + '" data-team="' + esc(c.id) + '"><b>' + esc(c.by) + '</b> ' +
                  esc(c.body || '') + '<span class="rd-q">“' + esc(c.quote) + '”</span>' + (c.replies || []).map(function (r) {
                    return '<div class="rd-reply"><b>' + esc(r.by) + '</b> ' + esc(r.text || '') + '</div>';
-                 }).join('') + '</div>';
+                 }).join('') + teamActions(c) + '</div>';
         }).join('') : '<p class="rd-empty">No Team comments.</p>');
         delete panel.dataset.keeps;
         panel.innerHTML = h;
@@ -3045,6 +3086,7 @@ var create = function (ROOT, CFG, opts) {
     var t = e.target.closest ? e.target.closest('button') : null;
     if (!t) return;
     if (t.classList.contains('rd-close')) { closePanel(); return; }
+    if (t.hasAttribute('data-act')) { teamAct(t); return; }
     if (t.hasAttribute('data-tab')) { teamTab = t.getAttribute('data-tab') === 'team'; drawPanel(); return; }
     if (t.hasAttribute('data-filter')) { filter = t.getAttribute('data-filter'); drawPanel(); return; }
     var id = t.getAttribute('data-id');

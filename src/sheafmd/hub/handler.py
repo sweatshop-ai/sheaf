@@ -1815,6 +1815,9 @@ class Handler:
                 raise self._code_refused(req, code, "order")
             address, fm, _ = self._code_rectoverso(req, b.get("doc"))
         else:
+            # A member's report writes to the page: a clone that sleeps wakes first, as for a save (SPEC 13).
+            self._owned(req, b.get("doc"))
+            self.hub.wake_for_write(b.get("doc"), visibility.owner_key(req.member) if req.member is not None else None)
             address, fm, _ = self._sheaf(req, b.get("doc"))
         self._writable(address)
         sid, machine = b.get("id"), b.get("machine")

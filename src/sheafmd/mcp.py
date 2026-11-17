@@ -430,9 +430,9 @@ class Door:
         to where it is now (9.11), for the page's owner and for a caller bound to no member; the address it was is put in
         `followed`."""
         doc = _named(doc)
-        if write:
+        if write and caller.may_write:
             # A write to a page of a clone that sleeps wakes it before the page is looked for (SPEC 13): for the page's owner
-            # and a caller bound to no member, as the hub judges it.
+            # and a caller bound to no member, as the hub judges it, and only a caller whose token may write.
             member = self._member(caller)
             named = self._address_of_url(doc) if "://" in doc else doc      # a URL names its page by the address it holds
             self.hub.wake_for_write(named, None if member is None else visibility.owner_key(member))

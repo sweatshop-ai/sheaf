@@ -124,6 +124,10 @@ function buildRow(doc, el, r) {
   mb.type = 'button';
   mb.title = 'Put this page in another folder of your loose root';
   t.append(' ', mb);
+  var tb = el('button', 'sheaf-move-tiroir', 'Move to another tiroir…');   // to the shared Sheaf where the owner has an account too
+  tb.type = 'button';
+  tb.title = 'Send this page to another shared Sheaf where you have an account';
+  t.append(' ', tb);
   }
   var w = el('td', 'sheaf-write', r.write);
   if (r.write_tip) w.title = r.write_tip;
@@ -184,6 +188,7 @@ function render(data, target) {
   head.append(hr);
   var body = el('tbody');
   (data.rows || []).forEach(function (r) { body.append(buildRow(doc, el, r)); });
+  if (data.clients_line) main.append(el('p', 'sheaf-clients-line', data.clients_line));      // no Clients folder for a member with no e-mail: the line says why
   table.append(head, body);
   var empty = el('p', 'sheaf-empty', 'No pages here.');
   empty.hidden = true;
@@ -406,6 +411,49 @@ function create(ROOT, opts) {
     });
   }
 
+  // The row's Move to another tiroir… (ticket 20): the address of the other shared Sheaf, typed. The hub sends the page and, once the
+  // other one says it landed, forwards the old address there for ever; the row goes from this list.
+  function moveTiroir(button) {
+    var tr = button.closest('.sheaf-row'), cell = button.parentNode;
+    var open = cell.querySelector('.sheaf-move-tiroir-form');
+    if (open) { open.querySelector('input').focus(); return; }
+    var form = ROOT.ownerDocument.createElement('form');
+    form.className = 'sheaf-move-tiroir-form';
+    var input = ROOT.ownerDocument.createElement('input');
+    input.type = 'url';
+    input.setAttribute('aria-label', 'Address of the other shared Sheaf');
+    input.placeholder = 'https://…';
+    var go = ROOT.ownerDocument.createElement('button'), no = ROOT.ownerDocument.createElement('button');
+    go.type = 'submit'; go.textContent = 'Move';
+    no.type = 'button'; no.textContent = 'Cancel';
+    form.append(input, ' ', go, ' ', no);
+    cell.append(form);
+    input.focus();
+    no.addEventListener('click', function () { form.remove(); });
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      go.disabled = true;
+      say('');
+      fetch('/_/move-tiroir', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ doc: tr.dataset.doc, tiroir: input.value.trim() }) }).then(function (r) {
+        return r.json().then(function (b) { return { ok: r.ok && !(b && b.ok === false), say: b && (b.say || b.error), doc: b && b.doc, origin: b && b.origin }; }, function () { return { ok: r.ok }; });
+      }).then(function (got) {
+        if (gone) return;
+        if (got.ok && got.doc) {
+          tr.remove();
+          say('Moved to ' + got.origin + '/' + got.doc + '. The old address leads there.');
+          return;
+        }
+        go.disabled = false;
+        say(got.say || 'The page could not be moved.');
+      }, function () {
+        if (gone) return;
+        go.disabled = false;
+        say('The page could not be moved: the hub does not answer.');
+      });
+    });
+  }
+
   // Archive now, Restore, Keep, Delete of a row and Restore of a trashed page (SPEC 8.6): the owner's own acts, each a POST of the
   // page's name; the view is drawn again after it. Delete asks a second click, in the button itself, never a dialog.
   function act(button) {
@@ -439,6 +487,8 @@ function create(ROOT, opts) {
     if (!t || !t.closest) return;
     var moving = t.closest('.sheaf-move');
     if (moving) { e.preventDefault(); e.stopPropagation(); move(moving); return; }
+    var movingAway = t.closest('.sheaf-move-tiroir');
+    if (movingAway) { e.preventDefault(); e.stopPropagation(); moveTiroir(movingAway); return; }
     var acting = t.closest('.sheaf-act');
     if (acting && !acting.disabled) { e.preventDefault(); e.stopPropagation(); act(acting); return; }
     var switching = t.closest('.sheaf-viewswitch');
@@ -462,7 +512,6 @@ function create(ROOT, opts) {
   ROOT.addEventListener('click', onClick, true);
   filter.addEventListener('input', show);
   show();
-  if (data.clients_line) say(data.clients_line);       // no Clients folder for a member with no e-mail: the line says why
   return {
     unmount: function () { gone = true; if (handle) handle.unmount(); handle = null; ROOT.removeEventListener('click', onClick, true); },
     dirty: function () { return !!handle && handle.dirty(); },

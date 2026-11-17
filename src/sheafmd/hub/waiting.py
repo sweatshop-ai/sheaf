@@ -307,6 +307,14 @@ class Waiting:
             return None, bool(hit)
         self._change(change)
 
+    def end_page(self, address: str, reason: str):
+        """Every Tell on the page at `address` ends as cancelled: the page is gone from here (it went to another tiroir)."""
+        def change(rows):
+            gone = [t for t in rows if t["doc"] == address]
+            self._end(rows, gone, "cancelled", reason=reason)
+            return gone, bool(gone)
+        self._change(change)
+
     def end_root(self, name: str, reason: str):
         """Every Tell on the documents of the root `name` ends as cancelled (its folder was forgotten), whether the
         hub still holds an entry for the document or not; the other roots' Tells, of any token, stay."""

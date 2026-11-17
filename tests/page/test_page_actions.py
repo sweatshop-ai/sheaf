@@ -470,6 +470,7 @@ def test_a_press_while_the_page_settles_onto_a_change_is_refused_and_the_page_re
     bar(p).nth(0).click()
     p.clock.run_for(5100)
     until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the press on the reloaded page")
+    settled(p)
     assert "# Plan, outside" in f.read_text(encoding="utf-8") and " typed" in f.read_text(encoding="utf-8")
 
 

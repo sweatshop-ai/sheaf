@@ -2025,6 +2025,7 @@ def test_enter_at_the_start_of_a_heading_or_in_a_table_cell_keeps_the_block_what
         assert f.read_text() == HEADED, "Enter at the start of a heading, and nothing typed, changed the file"
         return
     until(lambda: f.read_text() != HEADED, what="the save in the file")
+    settled(p)
     got = f.read_text()
     assert md in got and "<table" not in got and "<div" not in got and "## \n" not in got, got
     if where.startswith("main td"):

@@ -406,8 +406,8 @@ def test_rename_folder_moves_each_page_and_the_old_address_forwards(mounted, pag
     until(lambda: (root.path / "new" / "a.md").exists() and (root.path / "new" / "sub" / "b.md").exists(), what="the pages in the new folder")
     assert not (root.path / "old").exists()
     assert pages.get(f"/{root.name}/old/a.md").status == 302
-    until(lambda: mounted.js("const s = root.querySelector('.sheaf-said'); return !!s && !s.hidden && s.textContent.length > 0;"),
-          what="the sentence that says it moved")
+    until(lambda: mounted.js("return Array.from(root.querySelectorAll('.sheaf-rename-folder')).map((b) => b.dataset.path).includes('" + root.name + "/new');"),
+          what="the tree drawn again with the new folder")
 
 
 def test_rename_folder_onto_a_taken_name_says_which_page_and_moves_nothing(mounted, pages):

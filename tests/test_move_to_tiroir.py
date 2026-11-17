@@ -316,6 +316,38 @@ def test_an_error_reply_that_is_cut_short_is_no_answer_at_all(monkeypatch):
     srv.close()
 
 
+def test_a_redirect_is_an_answer_and_the_peer_token_does_not_follow_it():
+    import socket
+    import threading
+    seen = []
+
+    def serve(srv, reply):
+        conn, _ = srv.accept()
+        seen.append(conn.recv(65536))
+        conn.sendall(reply)
+        conn.close()
+    second = socket.socket()
+    second.bind(("127.0.0.1", 0))
+    second.listen(1)
+    first = socket.socket()
+    first.bind(("127.0.0.1", 0))
+    first.listen(1)
+    target = f"http://127.0.0.1:{second.getsockname()[1]}/_/tiroir/transfer"
+    threading.Thread(target=serve, daemon=True, args=(first, f"HTTP/1.1 302 Found\r\nLocation: {target}\r\nContent-Length: 0\r\n\r\n".encode())).start()
+    threading.Thread(target=serve, daemon=True, args=(second, b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}")).start()
+    status, answer = outgoing.post(f"http://127.0.0.1:{first.getsockname()[1]}", "transfer", {}, "peer-secret", 5)
+    second.settimeout(0.3)
+    try:
+        second.accept()
+        reached = True
+    except OSError:
+        reached = False
+    first.close()
+    second.close()
+    assert status == 302 and answer is None
+    assert not reached and not any(b"peer-secret" in r for r in seen[1:])
+
+
 # ── a move that does not complete leaves everything as it was ────────────────
 
 def test_a_link_that_is_down_leaves_the_page_and_every_store_as_they_were(two):

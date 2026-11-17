@@ -171,6 +171,14 @@ function render(data, target) {
       b.dataset.path = n.path;
       if (n.client) b.dataset.client = n.client;      // a client tiroir of the agency (SPEC 9.9): its rows are read when the node is opened
       row.append(toggle, b);
+      if (n.rename) {                           // a folder of the member's own loose root: Rename folder… moves each page in it
+        var rb = el('button', 'sheaf-rename-folder', 'Rename…');
+        rb.type = 'button';
+        rb.dataset.path = n.path;
+        rb.title = 'Rename this folder of your loose root';
+        rb.setAttribute('aria-label', 'Rename folder ' + n.name);
+        row.append(rb);
+      }
       li.append(row);
       if (kids.length) li.append(branch(kids));
       ul.append(li);
@@ -411,6 +419,46 @@ function create(ROOT, opts) {
     });
   }
 
+  // The tree's Rename folder… (SPEC 9.11, story 100): the folder's new path in the member's loose root, typed; each page below it moves
+  // with its own Forward. The hub's refusal, a name already taken in the new folder, is shown as it answers; the view is drawn again after.
+  function renameFolder(button) {
+    var line = button.closest('.sheaf-line');
+    var open = line.querySelector('.sheaf-rename-form');
+    if (open) { open.querySelector('input').focus(); return; }
+    var at = button.dataset.path.split('/').slice(1).join('/');
+    var form = ROOT.ownerDocument.createElement('form');
+    form.className = 'sheaf-rename-form';
+    var input = ROOT.ownerDocument.createElement('input');
+    input.type = 'text';
+    input.setAttribute('aria-label', 'New path of the folder in your loose root');
+    input.value = at;
+    var go = ROOT.ownerDocument.createElement('button'), no = ROOT.ownerDocument.createElement('button');
+    go.type = 'submit'; go.textContent = 'Rename';
+    no.type = 'button'; no.textContent = 'Cancel';
+    form.append(input, ' ', go, ' ', no);
+    line.append(form);
+    input.focus();
+    no.addEventListener('click', function () { form.remove(); });
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      go.disabled = true;
+      say('');
+      fetch('/_/move-folder', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+        body: JSON.stringify({ folder: at, to: input.value.trim() }) }).then(function (r) {
+        return r.json().then(function (b) { return { ok: r.ok && !(b && b.ok === false), error: b && b.error }; }, function () { return { ok: r.ok }; });
+      }).then(function (got) {
+        if (gone) return;
+        if (got.ok) { if (opts.remount) opts.remount(); return; }
+        go.disabled = false;
+        say(got.error || 'The folder could not be renamed.');
+      }, function () {
+        if (gone) return;
+        go.disabled = false;
+        say('The folder could not be renamed: the hub does not answer.');
+      });
+    });
+  }
+
   // The row's Move to another tiroir… (ticket 20): the address of the other shared Sheaf, typed. The hub sends the page and, once the
   // other one says it landed, forwards the old address there for ever; the row goes from this list.
   function moveTiroir(button) {
@@ -487,6 +535,8 @@ function create(ROOT, opts) {
     if (!t || !t.closest) return;
     var moving = t.closest('.sheaf-move');
     if (moving) { e.preventDefault(); e.stopPropagation(); move(moving); return; }
+    var renaming = t.closest('.sheaf-rename-folder');
+    if (renaming) { e.preventDefault(); e.stopPropagation(); renameFolder(renaming); return; }
     var movingAway = t.closest('.sheaf-move-tiroir');
     if (movingAway) { e.preventDefault(); e.stopPropagation(); moveTiroir(movingAway); return; }
     var acting = t.closest('.sheaf-act');

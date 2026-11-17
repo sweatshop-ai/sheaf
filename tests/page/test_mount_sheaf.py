@@ -373,3 +373,46 @@ def test_the_row_move_to_another_tiroir_button_asks_for_the_address_and_says_why
     until(lambda: mounted.js("const s = root.querySelector('.sheaf-said'); return !!s && !s.hidden && s.textContent.length > 0;"),
           what="the sentence that says why the page did not move")
     assert mine.exists() and pages.get(f"/{root.name}/2026-11/mine.md").status == 200
+
+
+def own_pages(mounted, pages, *names):
+    member = pages.hub.proxy.members[BEA]
+    root, _ = pages.hub.loose.root_for(member)
+    for name in names:
+        path = root.path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# Mine\n\nText.\n", encoding="utf-8")
+    mounted.page.reload()
+    until(lambda: mounted.page.evaluate("!!window.__root"), what="the page after the reload")
+    until(lambda: mounted.js("return !!root.querySelector('.sheaf-row');"), what="the rows in the root")
+    return root
+
+
+def rename_form(mounted, path, to):
+    mounted.js("const b = root.querySelector('.sheaf-rename-folder[data-path=\"" + path + "\"]'); b.click();")
+    until(lambda: mounted.js("return !!root.querySelector('.sheaf-rename-form input');"), what="the folder field")
+    mounted.js("const f = root.querySelector('.sheaf-rename-form'); f.querySelector('input').value = '" + to + "'; f.requestSubmit();")
+
+
+def test_rename_folder_is_offered_on_the_own_loose_folders_only(mounted, pages):
+    root = own_pages(mounted, pages, "2026-11/mine.md")
+    paths = mounted.js("return Array.from(root.querySelectorAll('.sheaf-rename-folder')).map((b) => b.dataset.path);")
+    assert paths == [f"{root.name}/2026-11"]
+
+
+def test_rename_folder_moves_each_page_and_the_old_address_forwards(mounted, pages):
+    root = own_pages(mounted, pages, "old/a.md", "old/sub/b.md")
+    rename_form(mounted, f"{root.name}/old", "new")
+    until(lambda: (root.path / "new" / "a.md").exists() and (root.path / "new" / "sub" / "b.md").exists(), what="the pages in the new folder")
+    assert not (root.path / "old").exists()
+    assert pages.get(f"/{root.name}/old/a.md").status == 302
+    until(lambda: mounted.js("return Array.from(root.querySelectorAll('.sheaf-rename-folder')).map((b) => b.dataset.path).includes('" + root.name + "/new');"),
+          what="the tree drawn again with the new folder")
+
+
+def test_rename_folder_onto_a_taken_name_says_which_page_and_moves_nothing(mounted, pages):
+    root = own_pages(mounted, pages, "old/a.md", "other/a.md")
+    rename_form(mounted, f"{root.name}/old", "other")
+    until(lambda: mounted.js("const s = root.querySelector('.sheaf-said'); return !!s && !s.hidden && s.textContent.includes('a.md');"),
+          what="the refusal names the page")
+    assert (root.path / "old" / "a.md").exists() and (root.path / "other" / "a.md").exists()

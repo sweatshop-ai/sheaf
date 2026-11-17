@@ -16,6 +16,7 @@ test replaces.
 import json
 import os
 import re
+import sys
 import tomllib
 import urllib.error
 import urllib.parse
@@ -88,9 +89,13 @@ def _credential_file(url: str) -> str | None:
     folder = os.environ.get("CREDENTIALS_DIRECTORY")
     if not folder:
         return None
+    name = peer_credential_name(url)
     try:
-        text = (Path(folder) / peer_credential_name(url)).read_text()
+        text = (Path(folder) / name).read_text()
     except OSError:
+        return None
+    except UnicodeDecodeError:       # a corrupted file is a missing one; the warning names the file, never what is in it
+        print(f"sheaf: the credential file {name} is not text, so it is ignored and the keyring is asked", file=sys.stderr)
         return None
     token = text.strip()
     return token if _TOKEN.fullmatch(token) else None
@@ -116,22 +121,25 @@ def use_peer_file(url: str, token: str, folder: Path) -> Path:
     origin = origin_of(url)
     _check_peer_token(token)
     folder = Path(folder)
-    folder.mkdir(mode=0o700, parents=True, exist_ok=True)
     target = folder / peer_credential_name(origin)
     tmp = folder / (target.name + ".new")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
     try:
-        os.fchmod(fd, 0o600)
-        data = memoryview((token + "\n").encode("ascii"))
-        while data:
-            data = data[os.write(fd, data):]
-        os.fsync(fd)
-    except BaseException:
+        folder.mkdir(mode=0o700, parents=True, exist_ok=True)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        try:
+            os.fchmod(fd, 0o600)
+            data = memoryview((token + "\n").encode("ascii"))
+            while data:
+                data = data[os.write(fd, data):]
+            os.fsync(fd)
+        except BaseException:
+            os.close(fd)
+            tmp.unlink(missing_ok=True)
+            raise
         os.close(fd)
-        tmp.unlink(missing_ok=True)
-        raise
-    os.close(fd)
-    os.replace(tmp, target)
+        os.replace(tmp, target)
+    except OSError as e:
+        raise ConnectError(f"cannot keep the token in {folder}: {e.strerror or e}; nothing was written") from None
     return target
 
 

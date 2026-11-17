@@ -683,6 +683,12 @@ class Handler:
         or text sent: no write or move of its file comes between."""
         return place.held(self.hub, doc) if isinstance(doc, str) else contextlib.nullcontext()
 
+    def _entry_to_write(self, req: Req, doc):
+        """`_entry` for a route that writes: a clone that sleeps wakes first, once the caller may see the document."""
+        self._owned(req, doc)
+        self.hub.wake_for_write(doc, visibility.owner_key(req.member) if req.member is not None else None)
+        return self._entry(req, doc)
+
     def _entry(self, req: Req, doc):
         """The document `doc` names. A member of proxy mode is told of no document of another
         root, nor of a root nested inside one of theirs: the same 404 as for one that does not
@@ -996,7 +1002,7 @@ class Handler:
 
     def _save(self, req: Req) -> Response:
         b = req.body
-        e = self._entry(req, b.get("doc"))
+        e = self._entry_to_write(req, b.get("doc"))
         self._writable(e.address)
         h, edits = b.get("hash"), b.get("edits")
         _shape(isinstance(h, str) and h != "", "hash must be the hash of the version the edits were made against")
@@ -1051,7 +1057,7 @@ class Handler:
         """The list's row, or the rectoverso's own page (10.11, `where`), ticks the rectoverso's action (9.10): saved as the
         page saves a tick, so the file, the commit and the open tabs see what a tick in the page makes them see."""
         b = req.body
-        e = self._entry(req, b.get("doc"))
+        e = self._entry_to_write(req, b.get("doc"))
         self._writable(e.address)
         n, word, read, release = b.get("action"), b.get("word"), b.get("hash"), b.get("release", False)
         where = b.get("where", "list")
@@ -1149,7 +1155,7 @@ class Handler:
         row read, then ticked through `_save`, so the guard, the move to the page's home, the commit and the Write log are
         the page's own. A page with an unticked Share line has it ticked, and no second line is added."""
         b = req.body
-        e = self._entry(req, b.get("doc"))
+        e = self._entry_to_write(req, b.get("doc"))
         self._writable(e.address)           # before the first write: the Share line is committed before its tick is saved
         read, names = b.get("hash"), b.get("with", [])
         _shape(isinstance(read, str) and read != "", "hash must be the hash of the version the row read")
@@ -1809,6 +1815,9 @@ class Handler:
                 raise self._code_refused(req, code, "order")
             address, fm, _ = self._code_rectoverso(req, b.get("doc"))
         else:
+            # A member's report writes to the page: a clone that sleeps wakes first, as for a save (SPEC 13).
+            self._owned(req, b.get("doc"))
+            self.hub.wake_for_write(b.get("doc"), visibility.owner_key(req.member) if req.member is not None else None)
             address, fm, _ = self._sheaf(req, b.get("doc"))
         self._writable(address)
         sid, machine = b.get("id"), b.get("machine")
@@ -1863,7 +1872,7 @@ class Handler:
 
     def _comment(self, req: Req) -> Response:
         b = req.body
-        e = self._entry(req, b.get("doc"))
+        e = self._entry_to_write(req, b.get("doc"))
         self._writable(e.address)
         op = b.get("op")
         _shape(op in OPS, f"op must be one of {', '.join(OPS)}")

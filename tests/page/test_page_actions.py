@@ -816,6 +816,7 @@ def test_a_comment_answered_during_the_undo_does_not_move_the_text_the_press_nam
     p.wait_for_timeout(300)
     p.clock.run_for(5100)
     until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the tick")
+    settled(p)
     assert "Why?" in f.read_text(encoding="utf-8")
 
 

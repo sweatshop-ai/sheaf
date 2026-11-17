@@ -572,6 +572,14 @@ def settled(page, timeout=8.0):
     page.wait_for_selector("#rd-menu-btn", state="attached")
 
 
+def landed(page, timeout=8.0):
+    """A reload that has begun is waited for, and the page it brings until its menu is there; nothing to wait for when
+    the page is not leaving. The teardown of a tab: a test that ends on a reload in flight is not told apart from one
+    that does not by its last line, and closing the context under the reload hangs the driver (flake e2)."""
+    if leaving(page):
+        settled(page, timeout)
+
+
 def new_context(browser, error=None, **options):
     """A context of the browser (its clicks, fills and waits for a selector give up after PAGE_TIMEOUT_MS),
     or a failure that says whether the browser is still there. `error` is

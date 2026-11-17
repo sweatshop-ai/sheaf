@@ -38,10 +38,12 @@ from ..mcp import Caller, Door
 from ..render import RenderError
 from ..source import StaleError, md_hash
 from . import archive as archive_mod
-from . import auth, boxwait, channel, codes, events, incoming, laptops, loose, moves, outgoing, peer, place, proxy, readthrough, sheaf_view, targets, the_list, transcribe, visibility, work
+from . import auth, boxwait, channel, codes, events, incoming, laptops, loose, moves, outgoing, peer, place, proxy, readthrough, sheaf_view, targets, team as team_mod, the_list, transcribe, visibility, work
 from . import waiting as waiting_mod
+from .core import _META_RE
 from .tell import NO_AGENT, JobRefused
 from .index import Status
+from ..source import STAMP_FORMAT
 from .live import UNKNOWN, NotAuthor
 from .roots import Address, NotFound, address_of_url, root_of_url, url_path
 from .state import TokenRow
@@ -290,6 +292,8 @@ class Handler:
             ("POST", "/_/laptops/revoke", "laptop-revoke", MEMBER, self._laptop_revoke),
             ("POST", "/_/code", "code", MINT, self._code),
             ("POST", "/_/comment", "comment", COOKIE, self._comment),
+            ("GET", "/_/team", "team", COOKIE, self._team),
+            ("POST", "/_/team", "team-write", COOKIE, self._team_write),
             ("POST", "/_/tell", "tell", COOKIE, self._tell),
             ("POST", "/_/target", "target", COOKIE, self._target),
             ("POST", "/_/cancel", "cancel", COOKIE, self._cancel),
@@ -1042,7 +1046,21 @@ class Handler:
         if found is None:
             raise Refuse(404, "no such document")
         client, rest = found
-        return self._relayed(req, client, op, lambda: clients.relay(client, req.member, op, rest, mount=f"Clients/{client}"))
+        return self._relayed(req, client, op, lambda: clients.relay(client, req.member, op, rest, mount=f"Clients/{client}"), address)
+
+    @staticmethod
+    def _side(b: dict) -> str:
+        """Whose verso a comment on a client page is for (9.11): `team` stays on this hub, `client` goes to the client's hub. A write
+        on a comment names its side by its id (`tN` is a Team comment); an add must name its side."""
+        side = b.get("side")
+        _shape("side" not in b or side in ("team", "client"), "side must be team or client")
+        if b.get("op") == "add":
+            _shape("side" in b, "choose team or client: a comment on a client page names its side")
+            return side
+        cid = b.get("id")
+        mine = "team" if isinstance(cid, str) and team_mod.ID_RE.fullmatch(cid) else "client"
+        _shape(side in (None, mine), f"that comment is a {mine} comment: side must be {mine}")
+        return mine
 
     def _relay_comment(self, req: Req) -> Response:
         clients, found = self.hub.clients, None
@@ -1052,10 +1070,24 @@ class Handler:
             raise Refuse(404, "no such document")
         _shape(not req.body.get("tell"), "Tell is not offered on a client page")
         client, rest = found
-        request = {k: v for k, v in req.body.items() if k not in ("doc", "as", "role")}
+        request = {k: v for k, v in req.body.items() if k not in ("doc", "as", "role", "side")}
         return self._relayed(req, client, "comment", lambda: clients.comment(client, req.member, rest, request))
 
-    def _relayed(self, req: Req, client: str, op: str, ask) -> Response:
+    def _with_team(self, op: str, body: str, doc: str) -> str:
+        """The page's Team comments (9.11) told beside the client's own `comments`: in the doc state, in the mount's config and in the
+        meta block of the page, never merged into the client's list. The client hub's 200 is the gate: the member may open it."""
+        team = self.hub.team.list(doc)
+        if op == "page":
+            return _META_RE.sub(lambda m: m.group(1) + json.dumps({**json.loads(m.group(2)), "team": team}).replace("<", "\\u003c")
+                                     + m.group(3), body)
+        try:
+            got = json.loads(body)
+        except ValueError:
+            return body
+        (got["config"] if op == "mount" else got)["team"] = team
+        return json.dumps(got)
+
+    def _relayed(self, req: Req, client: str, op: str, ask, doc: str | None = None) -> Response:
         try:
             env = ask()
         except readthrough.NoEmail as e:
@@ -1075,6 +1107,8 @@ class Handler:
             body = self._own_build(body)
         if op == "doc" and status == 200:     # what an older client tiroir still says of its agents is not shown here (9.9)
             body = self._read_only_doc(body)
+        if status == 200 and doc is not None and self.hub.team is not None:
+            body = self._with_team(op, body, doc)
         if env.get("type") == "html":
             own = auth.new_nonce()           # the client's nonce is never this origin's: only its own page script runs here
             return _html(status, readthrough.adopt(body, env.get("nonce"), own), own, kept)
@@ -2022,7 +2056,7 @@ class Handler:
     def _comment(self, req: Req) -> Response:
         b = req.body
         if readthrough.is_clients(b.get("doc")):
-            return self._relay_comment(req)
+            return self._team_write(req) if self._side(b) == "team" else self._relay_comment(req)
         e = self._entry_to_write(req, b.get("doc"))
         self._writable(e.address)
         op = b.get("op")
@@ -2147,6 +2181,58 @@ class Handler:
         cid = req.body.get("id")
         _shape(isinstance(cid, str) and _ID_RE.fullmatch(cid), "id is not a comment id")
         return cid
+
+    # ── Team comments (9.11): the agency's own verso on a client page, kept on this hub alone ──
+    def _team_page(self, req: Req, doc) -> str:
+        """The client page `doc` names, when this hub keeps Team comments and the member may open it: otherwise the answer
+        of a page that is not there, so what a member may not open is not told apart from what is missing."""
+        hub, member = self.hub, req.member
+        if (hub.team is None or member is None or not isinstance(doc, str) or not doc.startswith("Clients/")
+                or not hub.team_gate(member, doc)):
+            raise Refuse(404, "no such document")
+        return doc
+
+    def _team(self, req: Req) -> Response:
+        doc = self._team_page(req, req.query.get("doc"))
+        return _ok(team=self.hub.team.list(doc))
+
+    def _team_write(self, req: Req) -> Response:
+        b = req.body
+        doc = self._team_page(req, b.get("doc"))
+        op = b.get("op")
+        _shape(op in OPS, f"op must be one of {', '.join(OPS)}")
+        for k in ("id", "body", "quote", "status", "hash", "side"):
+            _shape(k not in b or isinstance(b[k], str), f"{k} must be text")
+        rid = b.get("rid")
+        _shape(rid is None or (isinstance(rid, str) and _RID_RE.fullmatch(rid)), "rid is not a request id")
+        _shape(not b.get("tell"), "Tell is not for a Team comment: it stays on this tiroir and no agent is asked")
+        _shape(b.get("side", "team") == "team", "this route writes Team comments only")
+        store, name, cid = self.hub.team, req.member.name, b.get("id", "")
+        if op != "add":
+            _shape(team_mod.ID_RE.fullmatch(cid), "id is not a Team comment id")
+        if op in ("add", "reply", "edit"):
+            _shape(b.get("body", "").strip(), "the comment is empty")
+        if op == "add":
+            _shape(b.get("quote", "").strip(), "a Team comment is on a quote: select the text first")
+        at = time.strftime(STAMP_FORMAT)
+        try:
+            if op == "add":
+                store.add(doc, name, b["quote"], b["body"], b.get("hash", ""), at, rid)
+            elif op == "reply":
+                store.reply(doc, cid, name, b["body"], at)
+            elif op == "status":
+                store.status(doc, cid, b.get("status"))
+            elif op == "edit":
+                store.edit(doc, cid, name, b["body"])
+            else:
+                store.delete(doc, cid, name)
+        except NotAuthor as ex:
+            raise Refuse(403, str(ex)) from None
+        except team_mod.NoComment:
+            raise Refuse(410, "that comment is gone") from None
+        except ValueError as ex:
+            raise Refuse(400, str(ex)) from None
+        return _ok(team=store.list(doc))
 
     def _tell(self, req: Req) -> Response:
         e, cid = self._thread_job(req)

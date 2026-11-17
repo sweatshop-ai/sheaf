@@ -110,7 +110,7 @@ def comment(agency, client, doc, member, **extra):
     text = client.text(doc)
     blk, start, end = rdc.find_quote(text, "Plan")
     return agency.post("/_/comment", {"doc": f"Clients/acme/{doc}", "op": "add", "hash": md_hash(text), "block": blk, "start": start,
-                                      "end": end, "quote": "Plan", "body": NOTE, **extra}, member=member)
+                                      "end": end, "quote": "Plan", "body": NOTE, "side": "client", **extra}, member=member)
 
 
 def test_agency_disk_holds_no_client_page(agency_and_client):

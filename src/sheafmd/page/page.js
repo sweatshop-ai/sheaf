@@ -92,6 +92,7 @@ var create = function (ROOT, CFG, opts) {
   function scrollBack(y) { if (MOUNTED) BODY.scrollTop = y; else window.scrollTo(0, y); }
 
   var COMMENTS = CFG.comments || [];
+  var TEAM = Array.isArray(CFG.team) ? CFG.team : null;     // a client page's Team comments (SPEC 9.11), told beside the client's own; null on any other page
   var byId = {};
   COMMENTS.forEach(function (c) { byId[c.id] = c; });
 
@@ -2219,6 +2220,7 @@ var create = function (ROOT, CFG, opts) {
     if (missing) return false;
     var before = counts();
     COMMENTS = d.comments || [];
+    if (TEAM !== null && Array.isArray(d.team)) TEAM = d.team;
     byId = {};
     COMMENTS.forEach(function (c) { byId[c.id] = c; });
     CFG.malformed = d.malformed || [];
@@ -2359,6 +2361,10 @@ var create = function (ROOT, CFG, opts) {
   function sendButtons(label) {
     return canTell ? [{ k: 'tell', label: 'Tell ' + AGENT, cls: 'rd-tell', tip: tellTip() }]
                    : [{ k: 'ok', label: label }, { off: lineOf('tell') }];
+  }
+  // A comment on a client page is for the client or for the team: two buttons, neither the one Enter sends (SPEC 9.11).
+  function addButtons() {
+    return TEAM !== null ? [{ k: 'client', label: 'Comment to client', choose: true }, { k: 'team', label: 'Comment to team' }] : sendButtons('Comment');
   }
   var DOTS = '<span class="rd-dots" aria-hidden="true"><i></i><i></i><i></i></span>';
   // A Tell that waits for an agent: said in the thread, with no spinner and no clock, across a reload and a restart.
@@ -2788,8 +2794,9 @@ var create = function (ROOT, CFG, opts) {
       '<textarea' + NO_FILL + ' placeholder="' + WRITE + '"></textarea><div class="rd-actions">' +
       buttons.map(function (b, i) {
         if (b.off) return '';             // Tell is off: the reason is the menu's Agent line, not a line under the field
-        return '<button data-f="' + b.k + '" class="' + (i ? 'rd-alt ' : 'rd-send ') + (b.cls || '') + '"' +
-               (b.tip || !i ? ' title="' + esc(b.tip || b.label) + '"' : '') + '>' + esc(b.label) + (i ? '' : ARROW) + '</button>';
+        var plain = i || buttons[0].choose;      // a form that makes you choose has no arrow button: each is named
+        return '<button data-f="' + b.k + '" class="' + (plain ? 'rd-alt ' : 'rd-send ') + (b.cls || '') + '"' +
+               (b.tip || !i ? ' title="' + esc(b.tip || b.label) + '"' : '') + '>' + esc(b.label) + (plain ? '' : ARROW) + '</button>';
       }).join('') + (buttons[0].cancel ? '<button class="rd-alt rd-x" data-f="no" title="Cancel">Cancel</button>' : '') +
       '</div>');
     f.kept = kept;
@@ -2943,7 +2950,7 @@ var create = function (ROOT, CFG, opts) {
     });
     ta.addEventListener('keydown', function (e) {
       // Enter sends, as in a chat; on a touch screen it stays a new line, the arrow sends there.
-      if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && (e.metaKey || e.ctrlKey || (!e.shiftKey && !COARSE.matches))) { e.preventDefault(); go(buttons[0].k); }
+      if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229 && !buttons[0].choose && (e.metaKey || e.ctrlKey || (!e.shiftKey && !COARSE.matches))) { e.preventDefault(); go(buttons[0].k); }
     });
   }
   main.addEventListener('click', function (e) {
@@ -2961,6 +2968,7 @@ var create = function (ROOT, CFG, opts) {
 
   // ---- side panel -----------------------------------------------------------
   var filter = 'open', who = '';
+  var teamTab = false;          // the panel shows the Team verso of a client page, not the client's
   function openPanel() { panel.classList.add('open'); drawPanel(); }
   function closePanel() { panel.classList.remove('open'); delete panel.dataset.keeps; }
   // A change in the comments redraws the list when the panel is open, but not over the text of a refused draft
@@ -2997,8 +3005,24 @@ var create = function (ROOT, CFG, opts) {
     };
     var placed = list.filter(function (c) { return !c.orphan; }),
         orphans = list.filter(function (c) { return c.orphan; });
-    var h = '<button class="rd-close" title="Close">×</button><h3>Comments</h3>' +
-      '<div class="rd-filters">' +
+    var h = '<button class="rd-close" title="Close">×</button><h3>Comments</h3>';
+    if (TEAM !== null) {
+      h += '<div class="rd-tabs" role="tablist">' + [['client', 'Client (' + COMMENTS.length + ')'], ['team', 'Team (' + TEAM.length + ')']].map(function (x) {
+        return '<button role="tab" data-tab="' + x[0] + '"' + ((x[0] === 'team') === teamTab ? ' class="on" aria-selected="true"' : '') + '>' + x[1] + '</button>';
+      }).join('') + '</div>';
+      if (teamTab) {
+        h += '<p class="rd-only">Only the agency sees this</p>' + (TEAM.length ? TEAM.map(function (c) {
+          return '<div class="rd-item rd-team' + (c.status === 'resolved' ? ' rd-res' : '') + '" data-team="' + esc(c.id) + '"><b>' + esc(c.by) + '</b> ' +
+                 esc(c.body || '') + '<span class="rd-q">“' + esc(c.quote) + '”</span>' + (c.replies || []).map(function (r) {
+                   return '<div class="rd-reply"><b>' + esc(r.by) + '</b> ' + esc(r.body || '') + '</div>';
+                 }).join('') + '</div>';
+        }).join('') : '<p class="rd-empty">No Team comments.</p>');
+        delete panel.dataset.keeps;
+        panel.innerHTML = h;
+        return;
+      }
+    }
+    h += '<div class="rd-filters">' +
       ['open', 'resolved', 'all'].map(function (f) {
         return '<button data-filter="' + f + '"' + (filter === f ? ' class="on"' : '') + '>' + f + '</button>';
       }).join('') +
@@ -3021,6 +3045,7 @@ var create = function (ROOT, CFG, opts) {
     var t = e.target.closest ? e.target.closest('button') : null;
     if (!t) return;
     if (t.classList.contains('rd-close')) { closePanel(); return; }
+    if (t.hasAttribute('data-tab')) { teamTab = t.getAttribute('data-tab') === 'team'; drawPanel(); return; }
     if (t.hasAttribute('data-filter')) { filter = t.getAttribute('data-filter'); drawPanel(); return; }
     var id = t.getAttribute('data-id');
     if (id) {
@@ -3317,15 +3342,28 @@ var create = function (ROOT, CFG, opts) {
       return (d && x.quote === d.quote && x.at === d.at) || (kept && x.quote === kept.quote && x.at === kept.at) || wrote.indexOf(x.rid) >= 0;
     };
     var mine = function (r) { return r.own === null && r.host === host; };    // this form's entry of `out`
-    textForm(pop, d || '', sendButtons('Comment'),
+    textForm(pop, d || '', addButtons(),
              async function (text, k, rid) {
       if (needClean()) return false;
       wrote.push(rid);
       draftsReplace(own, { quote: t.quote, body: text, block: t.block, head: t.head, tail: t.tail, occ: t.occ, rid: rid });
       try {
-        var j = await post('/_/comment', { op: 'add', block: t.block, start: t.start, end: t.end,
-                                        quote: t.quote, body: text, hash: hash,
-                                        tell: k === 'tell', rid: rid });
+        var team = TEAM !== null && k === 'team';
+        var sent = team ? { op: 'add', side: 'team', quote: t.quote, body: text, hash: hash, rid: rid }
+                        : { op: 'add', block: t.block, start: t.start, end: t.end,
+                            quote: t.quote, body: text, hash: hash,
+                            tell: k === 'tell', rid: rid };
+        if (TEAM !== null && !team) sent.side = 'client';
+        var j = await post('/_/comment', sent);
+        if (team) {      // the Team verso has no anchor in the text and the client's comments are not touched: only its list is told
+          TEAM = j.team || [];
+          getSel().removeAllRanges();
+          draftsReplace(own);
+          closePopover();
+          teamTab = true;
+          openPanel();
+          return true;
+        }
         // The page puts the anchor where the selection ended, as the server did in
         // the file, and moves that block's pristine with it: the block is not edited.
         var c = (j.comments || []).filter(function (x) { return x.id === j.id; })[0];

@@ -448,7 +448,7 @@ class Door:
             try:
                 self.hub.roots.document(address)
             except NotFound:
-                raise _absent(doc) from None
+                raise self._asleep(address, caller) or _absent(doc) from None
             if self._judged(caller):
                 # Before any other check of the call, so no answer tells a rectoverso the caller may not see from none;
                 # each tool judges again on the text it reads.
@@ -463,6 +463,20 @@ class Door:
                 if judged is None or not self._sees(judged[0], address, caller):
                     raise _absent(doc)
         return address
+
+    def _asleep(self, address: str, caller: Caller) -> ToolError | None:
+        """The answer to a page whose file is out because its clone sleeps (SPEC 13), told to a caller that may see the page:
+        the one it was judged to see when the hub last read it, or the key. A write by the page's owner or a render report
+        wakes the clone; a caller that may not write is told so instead of that the page does not exist. None for any other
+        page and caller, which are answered as a document that is not there."""
+        repo = self.hub.clone_of(address)
+        if not repo or not self.hub.repos.sleeping(repo) or self.hub.judged(address) is None:     # a page the hub never read is none
+            return None
+        if self._judged(caller):
+            member = self._member(caller)
+            if member is None or not (self.hub.member_owns(member, address) and self.hub.visible(member, address)):
+                return None
+        return ToolError(self.hub.read_only_line(address), "asleep")
 
     def _forwarded(self, address: str, caller: Caller, followed: list | None) -> str:
         """`address`, or the address its Forward leads to when no page stands at it and the caller may be led there: the

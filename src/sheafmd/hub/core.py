@@ -1241,7 +1241,7 @@ class Hub:
             op = beneath.open_beneath(top, rel)
         except (FileNotFoundError, roots_mod.NotFound):
             hit = self._front.get(kept)
-            return None if hit is None else hit[1:]
+            return None if hit is None else (self.clone_fm(address, hit[1]), hit[2])     # as a page that is there is judged
         with op:
             st = os.fstat(op.fd)
             key = (st.st_ino, st.st_mtime_ns, st.st_ctime_ns, st.st_size)

@@ -119,6 +119,31 @@ def test_only_the_member_deletes_a_clone_nothing_in_the_sweep_removes_it(napping
     assert (the_clone(napping) / ".git").exists()
 
 
+def test_settle_never_joins_a_thread_that_is_registered_and_not_yet_started(napping, monkeypatch):
+    # CI run 43995955723: the fixture's settle() joined the repo's thread between its entry in `_threads` and its start() and
+    # raised "cannot join thread before it is started". Here a settle() is called in exactly that gap, from another thread.
+    repos, errors, helper = napping.hub.repos, [], []
+    real = threading.Thread.start
+
+    def start(self):
+        if self.name == f"repos-{REPO}" and not helper:
+            def look():
+                try:
+                    repos.settle(5.0)
+                except BaseException as e:
+                    errors.append(e)
+            helper.append(threading.Thread(target=look))
+            real(helper[0])
+            helper[0].join(0.5)         # a settle that ran in the gap is over by now; one held back by the guard is not
+        real(self)
+    monkeypatch.setattr(threading.Thread, "start", start)
+    napping.now[0] += 31 * DAY
+    repos.sleep_idle()
+    assert helper, "no thread of the repo was started"
+    helper[0].join(10)
+    assert errors == []
+
+
 def test_the_hub_tick_puts_an_idle_clone_to_sleep(napping):
     napping.now[0] += 31 * DAY
     napping.hub.clock = lambda: napping.now[0]

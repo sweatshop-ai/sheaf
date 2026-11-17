@@ -92,6 +92,7 @@ var create = function (ROOT, CFG, opts) {
   function scrollBack(y) { if (MOUNTED) BODY.scrollTop = y; else window.scrollTo(0, y); }
 
   var COMMENTS = CFG.comments || [];
+  var TEAM_ME = typeof CFG.team_me === 'string' ? CFG.team_me : null;   // the member's name on the agency hub, which signs a Team comment (CFG.me is the client hub's)
   var TEAM = Array.isArray(CFG.team) ? CFG.team : null;     // a client page's Team comments (SPEC 9.11), told beside the client's own; null on any other page
   var byId = {};
   COMMENTS.forEach(function (c) { byId[c.id] = c; });
@@ -2999,17 +3000,19 @@ var create = function (ROOT, CFG, opts) {
   function teamActions(c) {
     var btn = function (act, label) { return '<button data-act="' + act + '">' + label + '</button>'; };
     if (teamForm && teamForm.id === c.id) {
-      return '<div class="rd-acts"><textarea rows="3">' + esc(teamForm.kind === 'edit' ? c.body || '' : '') + '</textarea>' +
+      return '<div class="rd-acts"><textarea rows="3">' + esc(teamForm.text !== undefined ? teamForm.text : teamForm.kind === 'edit' ? c.body || '' : '') + '</textarea>' +
              btn('send', teamForm.kind === 'edit' ? 'Save' : 'Reply') + btn('cancel', 'Cancel') + '</div>';
     }
     var h = btn('reply', 'Reply') + btn('status', c.status === 'resolved' ? 'Reopen' : 'Resolve');
-    if (mine(c)) {
+    if (TEAM_ME !== null && c.by === TEAM_ME) {
       h += btn('edit', 'Edit');
       if (!(c.replies || []).some(function (r) { return r.by !== c.by; })) h += btn('delete', teamAsk === c.id ? 'Confirm delete' : 'Delete');
     }
     return '<div class="rd-acts">' + h + '</div>';
   }
+  var teamBusy = false;         // a Team write is out: a second click sends nothing (a reply has no request id)
   async function teamAct(t) {
+    if (teamBusy) return;
     var item = t.closest('[data-team]'), id = item.getAttribute('data-team'), act = t.getAttribute('data-act');
     var c = TEAM.filter(function (x) { return x.id === id; })[0];
     if (!c) return;
@@ -3026,14 +3029,17 @@ var create = function (ROOT, CFG, opts) {
       if (!text) return;
       sent.op = teamForm.kind; sent.body = text;
     } else return;
+    teamBusy = true;
     try {
       var j = await post('/_/comment', sent);
       TEAM = j.team || [];
       teamForm = null; teamAsk = null;
       drawPanel();
-    } catch (e) { say(e.message, true); }
+    } catch (e) { say(e.message, true); } finally { teamBusy = false; }
   }
   function drawPanel() {
+    var typed = teamForm && panel.querySelector('.rd-team textarea');     // a redraw (a comments update, a tab) keeps what is being written
+    if (typed) teamForm.text = typed.value;
     var authors = [];
     COMMENTS.forEach(function (c) { if (authors.indexOf(c.by) < 0) authors.push(c.by); });
     var list = COMMENTS.filter(function (c) {

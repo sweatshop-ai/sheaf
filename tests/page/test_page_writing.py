@@ -2019,15 +2019,13 @@ def test_enter_at_the_start_of_a_heading_or_in_a_table_cell_keeps_the_block_what
     for k in keys:
         p.keyboard.press(key(k))
     p.keyboard.type(typed)
-    mark(p)
     p.keyboard.press("Control+s")
     if md is None:
         toasted(p, "→ plan.md", on_clock=True)
         assert f.read_text() == HEADED, "Enter at the start of a heading, and nothing typed, changed the file"
         return
     until(lambda: f.read_text() != HEADED, what="the save in the file")
-    reloaded(p)                                         # the page reloads onto its own save; the test ends on the page it brings
-    p.wait_for_selector("#rd-menu-btn", state="attached")
+    settled(p)
     got = f.read_text()
     assert md in got and "<table" not in got and "<div" not in got and "## \n" not in got, got
     if where.startswith("main td"):

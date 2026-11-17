@@ -307,8 +307,8 @@ class Versions:
     def texts(self, address):
         return list(self.before)
 
-    def take_back(self, address, before):
-        self.taken_back.append((address, list(before)))
+    def take_back(self, address, before, made):
+        self.taken_back.append((address, list(before), list(made)))
 
 
 class Writes:
@@ -409,7 +409,7 @@ def test_a_failing_store_leaves_nothing_and_answers_failed_for_that_page(clone):
     b["pages"][0]["versions"] = [{"text": "# old\n"}]
     assert incoming.land_root(h, b) == (200, {"pages": {"a.md": {"ok": False, "why": "failed"}}})
     assert h.repos.rows == {("o/r", "a.md"): ("al", b["tip"], {})}      # the row the report made, and no more
-    assert h.versions.taken_back == [("o--r/a.md", [])] and h.writes.restored == [("o--r/a.md", [])]
+    assert h.versions.taken_back == [("o--r/a.md", [], ["# old\n"])] and h.writes.restored == [("o--r/a.md", [])]
 
 
 def test_a_failed_landing_restores_the_row_the_page_had_and_is_not_remembered(clone):
@@ -557,3 +557,22 @@ def test_a_root_unmoved_by_the_call_goes_back_to_sleep_though_its_report_is_stil
     h = moved_hub(clone)
     assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)), peer=THERE) == (409, {"why": "not_named"})
     assert h.repos.slept == [("o/r", THERE)] and h.repos.moved == THERE and not h.repos.busy
+
+
+def test_a_version_written_at_the_address_during_the_landing_survives_its_failure(clone):
+    """The landing does not hold the page's writer lock: what someone else puts there meanwhile is not the landing's to take back."""
+    from sheafmd.hub import state as hub_state
+    h = land_hub(clone)
+    h.versions = real = hub_state.Versions()
+    address = "o--r/a.md"
+    real.put(address, "# prior\n")
+
+    def meanwhile(*a):
+        real.put(address, "# written meanwhile\n")
+        raise OSError("disk full")
+
+    h.writes.carry = meanwhile
+    b = body(clone, ("a.md", "alice@example.com", None))
+    b["pages"][0]["versions"] = [{"text": "# from there\n"}]
+    incoming.land_root(h, b)
+    assert sorted(real.texts(address)) == sorted(["# prior\n", "# written meanwhile\n"])

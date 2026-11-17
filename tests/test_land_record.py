@@ -23,9 +23,17 @@ def test_a_landed_record_is_read_by_owner_of_and_attribution(repos):
                                              "label": "session s1"}
 
 
-def test_a_named_owner_in_the_record_wins_as_in_a_report(repos):
+def test_a_peer_cannot_name_the_owner_through_the_record(repos):
+    """`named` is what the page's own front matter says at a commit, read from git by a report: never what a peer sends."""
     repos.land_record(REPO, PATH, "bea", "c0ffee", {"named": "carl"})
-    assert repos.owner_of(REPO, PATH) == "carl"
+    assert repos.owner_of(REPO, PATH) == "bea"
+    assert "named" not in repos._read()[REPO][PATH]
+
+
+def test_a_row_the_page_had_with_a_named_owner_does_not_outlive_the_landing(repos):
+    repos._write({REPO: {PATH: {"owner": "bea", "commit": "aa", "named": "carl"}}})
+    repos.land_record(REPO, PATH, "dan", "bb", {})
+    assert repos.owner_of(REPO, PATH) == "dan"
 
 
 def test_only_the_known_fields_of_a_record_are_kept(repos):
@@ -43,7 +51,7 @@ def test_a_drop_restores_a_missing_row_byte_for_byte(repos):
 
 
 def test_a_drop_restores_an_earlier_row_byte_for_byte(repos):
-    repos.land_record(REPO, PATH, "bea", "aa", {"session": "s0", "named": "carl"})
+    repos._write({REPO: {PATH: {"owner": "bea", "commit": "aa", "named": "carl", "session": "s0"}}})
     before = repos._records_file.read_bytes()
     prior = repos.land_record(REPO, PATH, "dan", "bb", {"session": "s1"})
     assert prior == {"owner": "bea", "commit": "aa", "named": "carl", "session": "s0"}

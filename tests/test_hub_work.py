@@ -757,6 +757,21 @@ def status(box, state, **extra):
     tmp.replace(box["tell"] / f"{f.name}.status")
 
 
+def test_the_supervisors_answered_is_told_to_the_page_and_ends_the_working_dot(team, box, work):
+    # A Starter that answers in the thread writes `answered`: the drop is no longer being worked on.
+    tab = team.get(f"/_/live?doc={ADDRESS}", member=BOB).stream
+    cid = comment(team, work, "tell").json()["id"]
+    status(box, "delivered")
+    team.hub.tick()
+    assert team.hub.box_waits.working(ADDRESS)
+    status(box, "answered")
+    team.hub.tick()
+    assert sent(team) == []                       # answered ends the drop: no Tell-wait toast later
+    assert [d["state"] for n, d in tab.drain() if n == "box-status"] == ["delivered", "answered"]
+    assert not team.hub.box_waits.working(ADDRESS)
+    assert hub_rows("drop-status-ignored") == []
+
+
 def test_the_supervisors_picked_up_then_delivered_is_told_to_the_page_once_each(team, box, work):
     tab = team.get(f"/_/live?doc={ADDRESS}", member=BOB).stream
     cid = comment(team, work, "tell").json()["id"]

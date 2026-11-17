@@ -261,6 +261,41 @@ def test_the_owners_row_can_move(team):
     assert [r["can_move"] for r in rows] == [True]
 
 
+def nodes(tree):
+    """Every node of the Sheaf's tree by its path."""
+    out = {}
+    for n in tree:
+        out[n["path"]] = n
+        out.update(nodes(n["children"]))
+    return out
+
+
+def tree_of(team, member):
+    return nodes(team.get("/_/mount?sheaf=1", member=member).json()["sheaf"]["tree"])
+
+
+def test_a_folder_of_the_owners_loose_root_can_be_renamed_and_the_root_itself_cannot(team):
+    in_folder(team, "f/sub")
+    tree = tree_of(team, ALICE)
+    assert tree["loose-alice/f"]["rename"] is True and tree["loose-alice/f/sub"]["rename"] is True
+    assert tree["loose-alice"]["rename"] is False
+
+
+def test_a_folder_of_a_repo_root_and_a_shared_view_has_no_rename(team, tmp_path):
+    doc = tmp_path / "alice-work" / "n.md"
+    doc.write_text(PLAN, encoding="utf-8")
+    team.hub.roots.for_document(doc)
+    (doc.parent / "deep").mkdir()
+    (doc.parent / "deep" / "m.md").write_text(PLAN, encoding="utf-8")
+    shared = made(team, "alice", SHARED)["doc"]
+    tick(team, ALICE, shared, "Share")
+    mine = tree_of(team, ALICE)
+    work = team.hub.roots.lookup(doc).name
+    assert f"{work}/deep" in mine and mine[f"{work}/deep"]["rename"] is False and mine[work]["rename"] is False
+    theirs = tree_of(team, BOB)
+    assert theirs and not any(n["rename"] for n in theirs.values())
+
+
 def test_a_member_who_cannot_see_the_page_gets_the_answer_of_a_page_that_is_not_there(team):
     old = made(team, "alice", PLAN)["doc"]
     never = move(team, CAROL, "loose-alice/nothing/x.md", "mine")

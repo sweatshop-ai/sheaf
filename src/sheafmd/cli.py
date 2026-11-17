@@ -1075,23 +1075,46 @@ def cmd_token(argv: list[str]) -> int:
 
 def cmd_peer(argv: list[str]) -> int:
     from . import connect
-    p = _parser("peer", "peer add ORIGIN [--scope SCOPE]... | use ORIGIN TOKEN",
+    p = _parser("peer", "peer add ORIGIN [--scope SCOPE]... | use ORIGIN [--store file --dir DIR]",
                 "The channel between two shared Sheafs. `add` is run on the one that RECEIVES: it makes the token the "
-                "peer at ORIGIN sends, shown once. `use` is run on the one that SENDS: it keeps that token in the login "
-                "keyring. Pairing goes one way: a shared Sheaf that holds a token for another may send to it, not the reverse.")
+                "peer at ORIGIN sends, shown once. `use` is run on the one that SENDS: it keeps that token, read from the "
+                "standard input, in the login keyring, or with `--store file --dir DIR` in one 0600 file in DIR, for a service "
+                "to load as a credential. Pairing goes one way: a shared Sheaf that holds a token for another may send to it, "
+                "not the reverse.")
     sub = p.add_subparsers(dest="action", required=True, metavar="add|use")
     add = sub.add_parser("add", usage="sheaf peer add ORIGIN [--scope transfer|read]...",
                          help="make a peer token for the shared Sheaf at ORIGIN and print it once")
     add.add_argument("origin", metavar="ORIGIN", help="the other shared Sheaf's address, https://host")
     add.add_argument("--scope", action="append", choices=PEER_SCOPES, metavar="SCOPE",
                      help="what the peer may ask: transfer (move a page here: the default) or read; give it again for both")
-    use = sub.add_parser("use", usage="sheaf peer use ORIGIN TOKEN", help="keep the token the peer at ORIGIN made for this one")
+    use = sub.add_parser("use", usage="sheaf peer use ORIGIN [--store keyring|file] [--dir DIR] [TOKEN]",
+                         help="keep the token the peer at ORIGIN made for this one")
     use.add_argument("origin", metavar="ORIGIN", help="the shared Sheaf that made the token, https://host")
-    use.add_argument("token", metavar="TOKEN", help="the token `sheaf peer add` printed there")
+    use.add_argument("token", metavar="TOKEN", nargs="?",
+                     help="the token `sheaf peer add` printed there. Left out, it is read from the standard input (one line, "
+                          "from a pipe): do that. Given here it is discouraged, because a command line shows in `ps` and "
+                          "in the shell's history")
+    use.add_argument("--store", choices=("keyring", "file"), default="keyring",
+                     help="where to keep it: the login keyring (the default) or a file for a service to load as a credential")
+    use.add_argument("--dir", metavar="DIR", help="with --store file: the folder the 0600 file is written in")
     args = p.parse_args(argv)
     try:
         if args.action == "use":
-            origin = connect.use_peer(args.origin, args.token)
+            if (args.store == "file") != (args.dir is not None):
+                raise connect.UsageError("--store file and --dir DIR go together")
+            token = args.token
+            if token is None:
+                if sys.stdin.isatty():
+                    raise connect.UsageError("pipe the token in on the standard input (it is not read from a terminal)")
+                lines = sys.stdin.read().splitlines()
+                if len(lines) != 1:
+                    raise connect.UsageError("the standard input must hold exactly one line, the token")
+                token = lines[0].strip()
+            if args.store == "file":
+                path = connect.use_peer_file(args.origin, token, Path(args.dir))
+                _out(f"  The token for {connect.origin_of(args.origin)} is in {path}, mode 0600. It is not shown again.")
+                return EXIT_OK
+            origin = connect.use_peer(args.origin, token)
             _out(f"  The token for {origin} is in your login keyring. It is not shown again.")
             return EXIT_OK
         origin = connect.origin_of(args.origin)
@@ -1226,7 +1249,7 @@ COMMAND_HELP.update({
     "connect": ("connect URL TOKEN",
                 "connect this laptop to a shared Sheaf: token in the keyring, door in Claude Code, default address"),
     "peer add": ("peer add ORIGIN [--scope SCOPE]...", "make the token another shared Sheaf sends to this one's channel; shown once"),
-    "peer use": ("peer use ORIGIN TOKEN", "keep, in the login keyring, the token another shared Sheaf made for this one"),
+    "peer use": ("peer use ORIGIN [--store file --dir DIR]", "keep, from the standard input, in the login keyring or a 0600 file, the token another shared Sheaf made for this one"),
     "token add": ("token add NAME [--client CLIENT | --as DISPLAY] [--write]",
                   "make an MCP token for an agent that reaches the hub over HTTP; shown once"),
     "token list": ("token list", "MCP tokens: name, display name, created, last used"),

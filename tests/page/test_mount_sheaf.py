@@ -74,29 +74,9 @@ def agentview():
     return AgentView()
 
 
-class Gate:
-    """Holds the hub's answers to `/_/mount.css` while `holding`, and sends them when `release` is called. `answered` counts the ones sent."""
-
-    def __init__(self):
-        self.holding, self.held, self.answered = False, [], 0
-
-    def pass_or_hold(self, route, send):
-        if self.holding:
-            self.held.append(send)
-        else:
-            send()
-            self.answered += 1
-
-    def release(self):
-        self.holding, held, self.held = False, self.held, []
-        for send in held:
-            send()
-            self.answered += 1
-
-
 class Mounted:
-    def __init__(self, page, errors, gate):
-        self.page, self.errors, self.gate = page, errors, gate
+    def __init__(self, page, errors):
+        self.page, self.errors = page, errors
 
     def js(self, body, arg=None):
         return self.page.evaluate("([arg]) => { const root = window.__root; " + body + " }", [arg])
@@ -112,7 +92,7 @@ class Mounted:
 
 @pytest.fixture
 def mounted(chromium, pages, agentview):
-    errors, gate = [], Gate()
+    errors = []
 
     def answer(route):
         path = route.request.url[len(ORIGIN):]
@@ -120,10 +100,7 @@ def mounted(chromium, pages, agentview):
             return route.fulfill(status=200, content_type="text/html", body=FRONT_HTML)
         req = route.request
         res = pages.post(path, json.loads(req.post_data or "{}"), member=BEA) if req.method == "POST" else pages.get(path, member=BEA)
-        send = lambda: route.fulfill(status=res.status, headers=dict(res.headers), body=res.body)
-        if path.startswith("/_/mount.css"):
-            return gate.pass_or_hold(route, send)
-        send()
+        route.fulfill(status=res.status, headers=dict(res.headers), body=res.body)
 
     context = new_context(chromium)
     context.route(f"{ORIGIN}/**", answer)
@@ -135,7 +112,7 @@ def mounted(chromium, pages, agentview):
     page.goto(ORIGIN + FRONT)
     until(lambda: page.evaluate("!!(window.__page || window.__failed)"), what="the mount")
     assert page.evaluate("window.__failed || null") is None
-    m = Mounted(page, errors, gate)
+    m = Mounted(page, errors)
     until(lambda: m.js("return !!root.querySelector('.sheaf-row');"), what="the rows in the root")
     yield m
     try:
@@ -256,18 +233,14 @@ def test_the_row_holds_no_script_and_no_address_but_the_hubs_own(mounted):
 
 # ── the byline of an opened page is the same way back (ticket 10) ───────────
 
-def open_page(m, doc, styled=True):
-    """Opens `doc` from its row and waits for its byline in the root the page attached, and (unless `styled` is False) for the page
-    to be built: mount.js puts the rendered html in the root first, then waits for the stylesheet, and only then starts the page,
-    which names the session in the byline (page.js takeAgent). Before that the line is the one rendered ("Document prepared by Ada")."""
-    before = m.gate.answered
+def open_page(m, doc):
+    """Opens `doc` from its row and waits for its byline in the root the page attached, and for the page to start in it: mount.js puts
+    the rendered html in the root first, waits for the stylesheet, and only then starts the page, which names the session in the
+    byline (page.js takeAgent, before it appends its menu). Until then the line is the one rendered ("Document prepared by Ada")."""
     m.click(f'.sheaf-row[data-doc="{doc}"] .sheaf-title a')
     until(lambda: m.page.evaluate("window.__roots.length > 1 && !!window.__roots[window.__roots.length - 1].querySelector('p.doc-by')"),
           what="the page's byline")
-    if styled:
-        until(lambda: m.gate.answered > before, what="the page's stylesheet")
-        for _ in range(2):                                              # the page starts in a task after the stylesheet's load event
-            m.page.evaluate("new Promise((done) => setTimeout(done, 0))")
+    until(lambda: m.page.evaluate("!!window.__roots[window.__roots.length - 1].querySelector('#rd-menu')"), what="the page started")
 
 
 def byline(m):
@@ -292,10 +265,15 @@ def test_the_byline_of_an_opened_page_names_the_session_as_its_row_does(mounted)
 
 
 def test_the_byline_is_as_rendered_until_the_stylesheet_has_loaded_and_the_page_started(mounted):
-    mounted.gate.holding = True
-    open_page(mounted, "work/plan.md", styled=False)
+    held = []
+    mounted.page.route("**/_/mount.css*", lambda route: held.append(route))
+    mounted.click('.sheaf-row[data-doc="work/plan.md"] .sheaf-title a')
+    until(lambda: held, what="the page's stylesheet, held")
+    assert mounted.page.evaluate("window.__roots.length") > 1
     assert byline(mounted)["text"].startswith("Document prepared by ") and "Claude Code" not in byline(mounted)["text"]
-    mounted.gate.release()
+    assert not mounted.page.evaluate("!!window.__roots[window.__roots.length - 1].querySelector('#rd-menu')")
+    for route in held:
+        route.continue_()
     until(lambda: byline(mounted)["text"].startswith("Document prepared by Claude Code (Bea)"), what="the session's name")
 
 

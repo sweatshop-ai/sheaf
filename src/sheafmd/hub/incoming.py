@@ -285,3 +285,69 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
                 judged[p["path"]] = {"ready": True} if root_moves.tip_holds(dest, b["branch"], p["path"], p["blob"]) \
                     else {"ok": False, "why": "text_differs"}
     return 200, {"pages": judged}
+
+
+def _page_shape(b) -> str | None:
+    """Why a page of `b` has optional rows that are not what landing takes (`record`, `versions`, `writes`), or None."""
+    for p in b["pages"]:
+        if p.get("record") is not None and not isinstance(p["record"], dict):
+            return "a page's record is not an object"
+        versions, writes = p.get("versions", []), p.get("writes", [])
+        if not (isinstance(versions, list) and len(versions) <= MAX_VERSIONS
+                and all(isinstance(v, dict) and isinstance(v.get("text"), str) for v in versions)):
+            return "a page's versions are not versions"
+        if not (isinstance(writes, list) and len(writes) <= MAX_WRITES and all(isinstance(w, dict) for w in writes)):
+            return "a page's Write log lines are not lines"
+    return None
+
+
+def land_root(hub, b, peer: str | None = None) -> tuple:
+    """Second stage of a root moved here: `check_root`, and for each page it found `ready` the page's record, versions and
+    Write log lines, each page whole or not at all. Anything but a 200 of the check is answered as it is. `(200, {pages:
+    {path: {ok: True, hash} | {ok: False, why}}})`: a page the check refused keeps its answer and writes nothing; a page
+    whose store failed takes back what it made and is `failed`. `transfers.json` keeps the answer to each `id` and path, so a
+    send whose confirmation was lost is answered again and never lands twice. A page that is not one is a `ValueError`."""
+    if (bad := _root_shape(b) or _page_shape(b)) is not None:
+        raise ValueError(bad)
+    status, answer = check_root(hub, b, peer)
+    if status != 200:
+        return status, answer
+    pages = dict(answer["pages"])
+    came_from = (b.get("from") or {}).get("origin") if isinstance(b.get("from"), dict) else None
+    by = (b.get("from") or {}).get("by") if isinstance(b.get("from"), dict) else None
+    for p in b["pages"]:
+        if pages.get(p["path"]) == {"ready": True}:
+            owner, _ = owner_for(hub, p["owner_email"])
+            with state.file_locked("transfers.lock"):       # held to the end of the page: two sends of one id land one page
+                pages[p["path"]] = _land_page(hub, b, p, owner, came_from if isinstance(came_from, str) else "",
+                                              by if isinstance(by, str) else owner.name)
+    return 200, {"pages": pages}
+
+
+def _land_page(hub, b, p, owner, came_from: str, by: str) -> dict:
+    """The landing of one page of `land_root`, with `transfers.lock` held."""
+    key, address = f"{b['id']}:{p['path']}", f"{repos_mod.root_name(b['repo'])}/{p['path']}"
+    known = state.read_json(_answers(), {}).get(key)
+    if isinstance(known, dict):
+        return {"ok": True, **known}
+    recorded = False
+    try:
+        prior = hub.repos.land_record(b["repo"], p["path"], owner.short or owner.id, b["tip"], p.get("record") or {})
+        recorded = True
+        for v in p.get("versions", []):
+            hub.versions.put(address, visibility.set_keys(visibility.without_ticked_share(v["text"]), {"shared": None}))
+        hub.writes.carry(address, p.get("writes", []), came_from, by)
+        answer = {"hash": p["blob"]}
+        state.write_json(_answers(), {**state.read_json(_answers(), {}), key: answer})
+    except BaseException as e:
+        if recorded:
+            with contextlib.suppress(Exception):
+                hub.repos.drop_record(b["repo"], p["path"], prior)
+        with contextlib.suppress(Exception):
+            hub.versions.forget(address)
+        with contextlib.suppress(Exception):
+            hub.writes.drop(address)
+        if not isinstance(e, Exception):
+            raise
+        return {"ok": False, "why": "failed"}
+    return {"ok": True, **answer}

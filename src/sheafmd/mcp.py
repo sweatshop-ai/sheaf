@@ -423,13 +423,19 @@ class Door:
         except Exception:
             self.hub.record_exception("tell-end-failed", address)
 
-    def _address(self, doc: str, caller: Caller, followed: list | None = None) -> str:
+    def _address(self, doc: str, caller: Caller, followed: list | None = None, write: bool = False) -> str:
         """`<root>/<path>` of the document `doc` names: that address itself, the URL of its page,
         or the absolute path of the .md. A caller who may add roots (the key) has the root of a
         path registered; a token (9.7) is held to the roots the hub already has. An address a page moved from is followed
         to where it is now (9.11), for the page's owner and for a caller bound to no member; the address it was is put in
         `followed`."""
         doc = _named(doc)
+        if write and caller.may_write:
+            # A write to a page of a clone that sleeps wakes it before the page is looked for (SPEC 13): for the page's owner
+            # and a caller bound to no member, as the hub judges it, and only a caller whose token may write.
+            member = self._member(caller)
+            named = self._address_of_url(doc) if "://" in doc else doc      # a URL names its page by the address it holds
+            self.hub.wake_for_write(named, None if member is None else visibility.owner_key(member))
         if "://" in doc:
             address = self._address_of_url(doc)
         elif os.path.isabs(doc):
@@ -442,7 +448,7 @@ class Door:
             try:
                 self.hub.roots.document(address)
             except NotFound:
-                raise _absent(doc) from None
+                raise self._asleep(address, caller) or _absent(doc) from None
             if self._judged(caller):
                 # Before any other check of the call, so no answer tells a rectoverso the caller may not see from none;
                 # each tool judges again on the text it reads.
@@ -457,6 +463,20 @@ class Door:
                 if judged is None or not self._sees(judged[0], address, caller):
                     raise _absent(doc)
         return address
+
+    def _asleep(self, address: str, caller: Caller) -> ToolError | None:
+        """The answer to a page whose file is out because its clone sleeps (SPEC 13), told to a caller that may see the page:
+        the one it was judged to see when the hub last read it, or the key. A write by the page's owner or a render report
+        wakes the clone; a caller that may not write is told so instead of that the page does not exist. None for any other
+        page and caller, which are answered as a document that is not there."""
+        repo = self.hub.clone_of(address)
+        if not repo or not self.hub.repos.sleeping(repo) or self.hub.judged(address) is None:     # a page the hub never read is none
+            return None
+        if self._judged(caller):
+            member = self._member(caller)
+            if member is None or not (self.hub.member_owns(member, address) and self.hub.visible(member, address)):
+                return None
+        return ToolError(self.hub.read_only_line(address), "asleep")
 
     def _forwarded(self, address: str, caller: Caller, followed: list | None) -> str:
         """`address`, or the address its Forward leads to when no page stands at it and the caller may be led there: the
@@ -848,7 +868,7 @@ class Door:
                 "malformed": [{"line": m.line, "reason": m.reason} for m in got.malformed]}
 
     def _reply(self, args: dict, caller: Caller):
-        address = self._address(args["doc"], caller)
+        address = self._address(args["doc"], caller, write=True)
         cid, text = args["id"], args["text"]
         if not text.strip():
             raise ToolError("text is empty.")
@@ -861,7 +881,7 @@ class Door:
         return {"id": cid, "status": c.status, "replies": c.as_dict()["replies"]}
 
     def _resolve(self, args: dict, caller: Caller):
-        address = self._address(args["doc"], caller)
+        address = self._address(args["doc"], caller, write=True)
         cid = args["id"]
         if self._comment(address, cid, caller, args["doc"]).status != "resolved":
             self._write(address, caller, args["doc"], "status", {"id": cid, "status": "resolved"})
@@ -1181,7 +1201,7 @@ class Door:
 
     def _update(self, args: dict, caller: Caller):
         followed: list = []
-        address = self._address(args["doc"], caller, followed)
+        address = self._address(args["doc"], caller, followed, write=True)
         self._writable(address)
         text, expected = _as_read(args["text"]), args["expected_hash"]
         if not HASH_RE.fullmatch(expected):
@@ -1204,7 +1224,7 @@ class Door:
                 **({"moved_from": followed[0]} if followed else {})}
 
     def _move(self, args: dict, caller: Caller):
-        address = self._address(args["doc"], caller)
+        address = self._address(args["doc"], caller, write=True)
         if (member := self._member(caller)) is None:
             raise ToolError("a loose page belongs to a member: this caller acts for none.", "no member")
         try:

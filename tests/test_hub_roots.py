@@ -840,3 +840,9 @@ def test_a_roots_file_that_went_missing_or_unreadable_does_not_empty_a_running_r
     assert {r.name for r in hub.all()} == {"first", "second"}
     assert set(json.loads((paths.state_dir() / "roots.json").read_text())) == {"first", "second"}
 
+
+
+@pytest.mark.parametrize("folder", ["Clients", "clients", "CLIENTS"])
+def test_no_root_takes_the_name_clients_which_the_agencys_folder_of_client_tiroirs_holds(tmp_path, folder):
+    r = roots.Roots().for_document(md(tmp_path / folder / "a.md"))
+    assert r.name.casefold() != "clients" and r.name == f"{folder}-2"

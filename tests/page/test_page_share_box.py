@@ -99,7 +99,7 @@ def test_a_click_on_a_box_of_another_word_still_says_to_press_its_button(opened)
 def test_a_member_who_is_not_the_owner_is_told_so_and_nothing_is_written(tab, site, work):
     bea = proxy.Member(BEA, "Bea", (str(work),))
     real = site.hub.page
-    site.hub.page = lambda e, nonce, member=None: real(e, nonce, member=bea)
+    site.hub.page = lambda e, nonce, member=None, **kw: real(e, nonce, member=bea, **kw)
     site.file.write_text(SHEAF, encoding="utf-8")
     tab.open()
     tab.page.wait_for_selector("button.rd-act")

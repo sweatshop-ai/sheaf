@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from helpers import comment, writes_from_outside
-from pagehelp import (DOC, P1, RELOADING, draft_key, P2, T0, at, comment_draft_key, comment_on, kept_entries, kept_json, set_kept, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
+from pagehelp import (settled, DOC, P1, RELOADING, draft_key, P2, T0, at, comment_draft_key, comment_on, kept_entries, kept_json, set_kept, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
                       select, select_by_touch, toast, toast_state, toasted, toasts_to_the_end, type_at_end, until)
 from pagehelp import TOAST_STEP, clock_at, run_clock, stalls_after
 from sheafmd import comments as rdc
@@ -3745,6 +3745,7 @@ def _enter_in_task_list(tab, tasks, item, keys):
     mark(p)
     p.keyboard.press("Control+s")
     until(lambda: f.read_text() != before, what="the save in the file")
+    settled(p)
     return f.read_text()
 
 
@@ -3854,6 +3855,7 @@ def test_enter_on_an_empty_item_then_a_pause_saves_no_comment_marker_between_the
     mark(p)
     p.keyboard.press("Control+s")
     until(lambda: f.read_text() != before, what="the save in the file")
+    settled(p)
     assert "- [ ] first task\n\nbetween\n\n- [ ] second task" in f.read_text()
 
 

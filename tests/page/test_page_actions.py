@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from pagehelp import open_box, DOC, at, comment_on, draft_key, key, mark, reloaded, select, toast, toasted, toasts_to_the_end, type_at_end, until
+from pagehelp import settled, open_box, DOC, at, comment_on, draft_key, key, mark, reloaded, select, toast, toasted, toasts_to_the_end, type_at_end, until
 
 pytestmark = pytest.mark.page
 
@@ -117,6 +117,7 @@ def test_two_lines_of_the_same_word_are_two_buttons_and_each_presses_its_own_box
     bar(p).nth(1).click()
     p.clock.run_for(5100)
     until(lambda: f.read_text(encoding="utf-8") == "# Plan\n\n- [ ] Approve\n- [x] Approve\n", what="the second tick")
+    settled(p)
 
 
 def test_a_selection_on_a_buttons_line_does_not_press_it_and_the_button_is_not_part_of_the_text(tab):
@@ -178,6 +179,7 @@ def test_an_action_typed_in_the_document_gets_its_button_once_the_save_is_answer
     bar(p).nth(3).click()
     p.clock.run_for(5100)
     until(lambda: "- [x] Run it" in f.read_text(encoding="utf-8"), what="the tick of the new action")
+    settled(p)
 
 
 def test_a_refused_press_is_said_and_gives_the_button_back(sheaf):
@@ -699,8 +701,11 @@ def test_a_reload_asked_only_by_an_upgrade_saves_what_was_typed_during_the_press
     p.clock.run_for(4000)
     type_at_end(p, "main p:has-text('Body')", " typed")
     until(lambda: "typed" in p.inner_text("main p:has-text('Body')"), what="the edit on screen")
+    mark(p)
     p.clock.run_for(1100)                               # the press is refused; the edit's autosave is not due yet
     until(lambda: " typed" in f.read_text(encoding="utf-8"), what="the edit, saved before the reload")
+    reloaded(p)                                         # the reload is the end of the test: closing the context under it hung the driver (flake e2)
+    p.wait_for_selector("#rd-menu-btn", state="attached")
 
 
 def merged_once(p, key):
@@ -788,6 +793,7 @@ def test_a_comment_sent_while_the_tick_is_out_waits_for_its_answer(sheaf):
     p.unroute("**/_/tick")
     until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the tick")
     until(lambda: "Why?" in f.read_text(encoding="utf-8"), what="the comment after it")
+    settled(p)
 
 
 def test_a_comment_answered_during_the_undo_does_not_move_the_text_the_press_names(sheaf):
@@ -991,6 +997,7 @@ def test_an_upgrade_while_a_comment_waits_for_the_tick_does_not_ask_to_send_it(s
     p.unroute("**/_/tick")
     until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the tick")
     until(lambda: "Why?" in f.read_text(encoding="utf-8"), what="the comment after it")
+    settled(p)
 
 
 NOTES = SHEAF.replace("- [ ] Share\n", "- [ ] Share\n- [ ] notes\n")

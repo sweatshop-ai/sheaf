@@ -607,16 +607,23 @@ def new_context(browser, error=None, **options):
 def close_context(context):
     """Close a context of new_context. A route of its pages still in `route.fetch` would otherwise fail
     there, and Playwright raises that failure in the next call into the browser: another test's new_context.
-    A test that ends while a page is still navigating fails (flake e2: closing a context under a reload in flight
-    hung the driver, 4 of 85 CI runs), after the context is closed."""
-    pending = pending_navigations(context)
+    A page that is still navigating when the test ends (a reload that begins in the teardown of the test's other
+    fixtures) is waited for first, with the page it brings: closing the context under it hung the driver (flake e2,
+    4 of 85 CI runs). A navigation that does not land fails the test, after the context is closed."""
+    stuck = []
+    for page in context.pages:
+        if leaving(page):
+            try:
+                settled(page)
+            except Exception:       # the wait ran out; a PageStalled is not an Exception and passes
+                stuck.append(page.url)
     try:
         _close_context(context)
     except PageStalled:
-        if not pending:
+        if not stuck:
             raise
-    if pending:
-        pytest.fail(f"the test ended with a navigation still pending on {pending}: wait for the page to load "
+    if stuck:
+        pytest.fail(f"the test ended with a navigation that did not land on {stuck}: wait for the page to load "
                     f"(reloaded(page), then a selector of the new page) before the test ends")
 
 

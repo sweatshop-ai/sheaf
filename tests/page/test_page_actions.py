@@ -995,11 +995,13 @@ def test_an_upgrade_while_a_comment_waits_for_the_tick_does_not_ask_to_send_it(s
     until(lambda: heard(p, "hello"), what="the upgrade")
     p.wait_for_timeout(300)
     assert "Send or cancel" not in p.inner_text("#rd-notice")
+    mark(p)
     held[0].continue_()
     p.unroute("**/_/tick")
     until(lambda: "- [x] Approve" in f.read_text(encoding="utf-8"), what="the tick")
     until(lambda: "Why?" in f.read_text(encoding="utf-8"), what="the comment after it")
-    settled(p)
+    reloaded(p)                                         # the upgrade's reload, held for the tick, is the end of the test
+    p.wait_for_selector("#rd-menu-btn", state="attached")
 
 
 NOTES = SHEAF.replace("- [ ] Share\n", "- [ ] Share\n- [ ] notes\n")

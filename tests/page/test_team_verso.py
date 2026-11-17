@@ -4,7 +4,7 @@ the text and sends no place in it. A page told no `team` is what it was. CI only
 import json
 
 import pytest
-from pagehelp import DOC, P1, P2, at, open_box, select, until
+from pagehelp import DOC, P2, at, open_box, select, until
 
 pytestmark = pytest.mark.page
 
@@ -30,7 +30,7 @@ def told_team(page, team):
 
 
 def form(tab):
-    select(tab.page, at(P1, "apples"), at(P2, "pears", None))
+    select(tab.page, at(P2, "pears"), at(P2, "pears", None))
     open_box(tab.page)
     return tab.page.locator("#rd-popover .rd-form")
 

@@ -304,3 +304,11 @@ def test_a_reply_goes_to_the_side_of_its_thread(agency_and_client):
     assert "to the client" in client.text(mine) and "to the client" not in json.dumps(agency.hub.team.list(f"Clients/acme/{mine}"))
     assert team_op(agency, mine, "reply", id="t1", body="to the team").status == 200
     assert "to the team" not in client.text(mine)
+
+
+def test_the_state_of_a_client_page_names_the_member_who_signs_a_team_comment_there(agency_and_client):
+    agency, client = agency_and_client
+    mine = client.make("alice", "# Plan\n\nsome words here\n")
+    team_post(agency, mine)
+    got = _team_state(agency, mine, "doc").json()
+    assert got["team_me"] == got["team"][0]["by"]

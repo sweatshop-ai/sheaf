@@ -2,7 +2,6 @@
 the agency sees this", and asks the member to choose between two send buttons, neither the one Enter sends. A Team comment puts no anchor in
 the text and sends no place in it. A page told no `team` is what it was. CI only: it needs a browser, never run on the laptop."""
 import json
-import re
 
 import pytest
 from pagehelp import DOC, P2, at, open_box, select, until
@@ -21,7 +20,7 @@ def told_team(page, team, answer=None):
     def serve(route):
         got = route.fetch()
         body = got.text().replace(f'"doc": "{DOC}"', f'"doc": "{DOC}", "team": {json.dumps(team)}')
-        route.fulfill(response=got, body=re.sub(r'"me":\s*(?:null|"[^"]*")', '"me": "Ada"', body))
+        route.fulfill(response=got, body=body.replace('"team":', '"team_me": "Ada", "team":', 1))
 
     def write(route):
         sent.append(json.loads(route.request.post_data))
@@ -165,3 +164,13 @@ def test_edit_and_delete_are_the_authors_and_delete_waits_until_no_one_else_repl
     assert buttons(items.nth(0)) == ["delete", "edit", "reply", "status"]
     assert buttons(items.nth(1)) == ["reply", "status"]
     assert buttons(items.nth(2)) == ["edit", "reply", "status"]
+
+
+def test_a_redraw_of_the_panel_keeps_the_text_of_a_reply_being_written(tab, site):
+    told_team(tab.page, [TEAM_COMMENT])
+    item = team_tab(tab)
+    item.locator("button[data-act=reply]").click()
+    tab.page.fill("#rd-panel .rd-team textarea", "half a thought")
+    tab.page.click("#rd-panel button[data-tab=client]")
+    tab.page.click("#rd-panel button[data-tab=team]")
+    assert tab.page.locator("#rd-panel .rd-team textarea").input_value() == "half a thought"

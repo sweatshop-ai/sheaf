@@ -150,6 +150,12 @@
 #rd-panel.open{visibility:visible;transform:none;transition:transform .18s ease-out}
 @media (prefers-reduced-motion:reduce){#rd-panel,#rd-panel.open{transition:none}}
 #rd-panel h3{font:700 12px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em;margin:18px 0 6px}
+#rd-panel .rd-tabs{display:flex;gap:6px;margin:0 0 8px}
+#rd-panel .rd-tabs button{font:600 11px ui-monospace,monospace;cursor:pointer;background:none;color:inherit;border:1px solid currentColor;border-radius:4px;padding:2px 8px}
+#rd-panel .rd-tabs button.on{background:var(--fg,#000);color:var(--bg,#fff)}
+#rd-panel .rd-only{font:12px/1.4 ui-monospace,monospace;opacity:.8;margin:0 0 8px}
+#rd-panel .rd-team{cursor:default;display:block}
+#rd-panel .rd-reply{margin:4px 0 0 12px;font-size:12px}
 #rd-panel .rd-filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 #rd-panel .rd-filters button,#rd-panel select{font:600 11px ui-monospace,monospace;cursor:pointer;
  background:transparent;color:inherit;border:1.5px solid currentColor;border-radius:2px;padding:3px 7px}

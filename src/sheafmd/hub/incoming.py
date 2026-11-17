@@ -334,13 +334,14 @@ def _land_page(hub, b, p, owner, came_from: str, by: str) -> dict:
     known = state.read_json(_answers(), {}).get(key)
     if isinstance(known, dict):
         return {"ok": True, **known}
-    recorded = False
+    recorded, made = False, []
     was_versions, was_lines = hub.versions.texts(address), hub.writes.lines(address)     # what the address kept before: a page that came back has them
     try:
         prior = hub.repos.land_record(b["repo"], p["path"], owner.short or owner.id, b["tip"], p.get("record") or {})
         recorded = True
         for v in p.get("versions", []):
-            hub.versions.put(address, visibility.set_keys(visibility.without_ticked_share(v["text"]), {"shared": None}))
+            made.append(visibility.set_keys(visibility.without_ticked_share(v["text"]), {"shared": None}))
+            hub.versions.put(address, made[-1])
         hub.writes.carry(address, p.get("writes", []), came_from, by)
         answer = {"hash": p["blob"]}
         state.write_json(_answers(), {**state.read_json(_answers(), {}), key: answer})
@@ -349,7 +350,7 @@ def _land_page(hub, b, p, owner, came_from: str, by: str) -> dict:
             with contextlib.suppress(Exception):
                 hub.repos.drop_record(b["repo"], p["path"], prior)
         with contextlib.suppress(Exception):
-            hub.versions.take_back(address, was_versions)
+            hub.versions.take_back(address, was_versions, made)
         with contextlib.suppress(Exception):
             hub.writes.restore(address, was_lines)
         if not isinstance(e, Exception):

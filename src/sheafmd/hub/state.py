@@ -262,18 +262,17 @@ class Versions:
                 out.append(text)
         return out
 
-    def take_back(self, address: str, before: list[str]) -> None:
-        """The newest versions of the document are `before` (as `texts` gave them) again: a landing that put some in and did not
-        land takes back those, and no more. A version the landing made goes, a version it pushed out of the newest comes back, and
-        the pinned ones, which are not the newest, are never touched."""
+    def take_back(self, address: str, before: list[str], made: list[str]) -> None:
+        """A landing that put the texts `made` among the newest versions of the document and did not land takes back those, and no
+        more: a version of `made` that `before` (as `texts` gave them) did not hold goes, a version it pushed out of the newest
+        comes back, and what someone else wrote meanwhile and the pinned ones are never touched."""
         folder = self._folder(address)
         kept = {md_hash(t) for t in before}
-        for p in folder.glob("*.md"):
-            if _HASH_RE.fullmatch(p.stem) and p.stem not in kept and p.is_file():
-                try:
-                    p.unlink()
-                except OSError:
-                    pass
+        for h in {md_hash(t) for t in made} - kept:
+            try:
+                (folder / f"{h}.md").unlink()
+            except OSError:
+                pass
         for text in before:
             if not (folder / f"{md_hash(text)}.md").is_file():
                 self.put(address, text)

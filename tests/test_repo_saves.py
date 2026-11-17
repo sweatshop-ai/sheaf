@@ -745,14 +745,6 @@ def test_the_owner_of_a_sleeping_clones_page_reads_it_with_the_editor_and_the_li
 
 
 @DEV
-def test_a_sessions_report_on_a_sleeping_clones_page_wakes_the_clone_first(hub_repos):
-    asleep(hub_repos)
-    hub_repos.post("/_/sessions", {"doc": ADDRESS, "id": "7b0c1c2e-3d4f-4a5b-8c6d-9e0f1a2b3c4d", "machine": "bea-mac"},
-                   member=BEA)                              # whatever the answer: the clone is awake for it
-    assert not hub_repos.hub.repos.sleeping(REPO)
-
-
-@DEV
 def test_a_refused_sessions_report_on_a_clone_page_dates_no_use_and_wakes_nothing(hub_repos):
     """A clone page is never a rectoverso (the report's own check refuses it), so the route has nothing to wake: a refused
     report neither wakes the clone nor dates a use of it."""
@@ -798,13 +790,25 @@ def test_a_fresh_get_of_a_page_a_sleeping_clone_does_not_hold_is_a_404(hub_repos
 
 
 @DEV
-def test_a_door_reply_or_resolve_by_a_read_only_token_on_a_sleeping_clone_says_the_clone_sleeps(hub_repos):
+def test_a_door_reply_or_resolve_by_a_read_only_token_on_a_sleeping_clone_says_the_clone_sleeps(hub_repos, rectoversos):
+    """Bea's own token that may not write: the page is hers, so she is told why it is not there, and nothing wakes."""
     asleep(hub_repos)
-    hub_repos.tokens["ro"] = Tokens().add("ro", write=False)
+    hub_repos.tokens["bea-ro"] = Tokens().add("bea-ro", write=False)
+    hub_repos.hub.proxy = proxy_mod.parse({
+        "origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock", "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
+        "members": {BEA: {"name": "Bea", "short": "bea", "roots": [str(rectoversos)], "tokens": ["bea-claude", "bea-ro"]},
+                    CAL: {"name": "Cal", "short": "cal", "roots": [str(rectoversos)], "tokens": ["cal-claude"]}}}, "the test")
     for tool, args in (("resolve", {"id": "c1"}), ("reply", {"id": "c1", "text": "x"})):
-        bad, said = door_call(hub_repos, "ro", tool, doc=ADDRESS, **args)
+        bad, said = door_call(hub_repos, "bea-ro", tool, doc=ADDRESS, **args)
         assert bad and "asleep" in said and REPO in said and "no document" not in said.lower(), (tool, said)
         assert hub_repos.hub.repos.sleeping(REPO), tool
+
+
+@DEV
+def test_a_door_call_on_a_sleeping_clones_page_by_a_token_that_may_not_see_it_says_no_such_document(hub_repos):
+    asleep(hub_repos)
+    bad, said = door_call(hub_repos, "cal-claude", "resolve", doc=ADDRESS, id="c1")
+    assert bad and "no document" in said.lower() and "asleep" not in said, said
 
 
 @DEV

@@ -441,15 +441,18 @@
       wrap.appendChild(list ? render(sheaf ? got.sheaf : got.list, wrap) : rebuild(got.html, wrap));
       if (page) page.unmount();
       page = null;
-      root.replaceChildren(...parts, link, wrap);
-      await new Promise((done) => { link.onload = link.onerror = done; cut = done; });   // the page measures its parts: their styles first
-      if (stale()) return got;
       const again = { body: wrap, navigate: opts.navigate, upgrade: opts.upgrade, remount: () => {
         draw().catch((e) => {
           if (!gone && page && page.failed) page.failed('The page could not be loaded again: ' + e.message + '. Reload to try again.');
         });
       }, setView: (v) => { view = v; again.remount(); } };
-      if (create) page = list ? create(root, again) : create(root, got.config, again);
+      root.replaceChildren(...parts, link, wrap);
+      // The list and the Sheaf measure nothing, so their clicks are taken from the moment their rows stand in the root: a
+      // press while the stylesheet was out found no listener and was lost. The page measures its parts, so it waits.
+      if (create && list) page = create(root, again);
+      await new Promise((done) => { link.onload = link.onerror = done; cut = done; });   // the page measures its parts: their styles first
+      if (stale()) return got;
+      if (create && !list) page = create(root, got.config, again);
       return got;
     }
     handle = {

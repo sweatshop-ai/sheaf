@@ -394,6 +394,25 @@ def rename_form(mounted, path, to):
     mounted.js("const f = root.querySelector('.sheaf-rename-form'); f.querySelector('input').value = '" + to + "'; f.requestSubmit();")
 
 
+def test_a_rename_pressed_before_the_stylesheet_has_loaded_still_opens_its_form(mounted, pages):
+    # The rows stand in the root while the mount waits for its stylesheet; the click listener came after that wait, so a press
+    # in between was lost (CI: test_rename_folder_onto_a_taken_name... timed out at "the folder field", 9 of 240 runs).
+    held = []
+    mounted.page.route("**/_/mount.css*", lambda route: held.append(route))
+    member = pages.hub.proxy.members[BEA]
+    root, _ = pages.hub.loose.root_for(member)
+    (root.path / "old").mkdir(parents=True)
+    (root.path / "old" / "a.md").write_text("# Mine\n\nText.\n", encoding="utf-8")
+    mounted.page.reload()
+    until(lambda: mounted.page.evaluate("!!window.__root"), what="the page after the reload")
+    until(lambda: mounted.js("return !!root.querySelector('.sheaf-rename-folder');"), what="the rows in the root")
+    until(lambda: held, what="the stylesheet's request, held")
+    mounted.js("root.querySelector('.sheaf-rename-folder').click();")
+    for route in held:
+        route.continue_()
+    until(lambda: mounted.js("return !!root.querySelector('.sheaf-rename-form input');"), what="the folder field")
+
+
 def test_rename_folder_is_offered_on_the_own_loose_folders_only(mounted, pages):
     root = own_pages(mounted, pages, "2026-11/mine.md")
     paths = mounted.js("return Array.from(root.querySelectorAll('.sheaf-rename-folder')).map((b) => b.dataset.path);")

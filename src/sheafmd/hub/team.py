@@ -1,4 +1,4 @@
-"""Team comments (SPEC 9.11): the agency's own verso on a client's page. A comment lives here, in one private JSON file of
+"""Team comments (SPEC 9.10b): the agency's own verso on a client's page. A comment lives here, in one private JSON file of
 the agency hub's state folder, keyed by the page's address; it is never written into the client's file and never sent to
 the client tiroir, so the client side holds no trace of it. There is no markdown in it and no anchor: a comment holds
 the quote it was made on. It reuses `comments.Comment` for the shape the page renders, so both versos draw alike.
@@ -29,6 +29,7 @@ class TeamComments:
         self.path = Path(path)
         self._lock = threading.Lock()
         self._data = state.read_json(self.path, {})
+        self._rids = {}              # request id -> (what was sent, the id made): an add sent again is answered, not stored twice
 
     # ── reads ────────────────────────────────────────────────────────────────
     def list(self, address: str) -> list:
@@ -52,12 +53,21 @@ class TeamComments:
                 return c
         raise NoComment(cid)
 
-    def add(self, address: str, by: str, quote: str, body: str, page_hash: str, at: str) -> dict:
+    def add(self, address: str, by: str, quote: str, body: str, page_hash: str, at: str, rid: str | None = None) -> dict:
+        sent = (address, by, quote, body)
         def go(items):
+            if rid is not None and self._rids.get(rid, (None,))[0] == sent:
+                again = [c for c in items if c["id"] == self._rids[rid][1]]
+                if again:
+                    return _shape(again[0])
             n = max([int(c["id"][1:]) for c in items] + [0]) + 1
             c = {"id": f"t{n}", "by": by, "at": at, "status": "open", "quote": quote, "body": body,
                  "replies": [], "page_hash": page_hash}
             items.append(c)
+            if rid is not None:
+                self._rids[rid] = (sent, c["id"])
+                while len(self._rids) > 256:
+                    del self._rids[next(iter(self._rids))]
             return _shape(c)
         return self._change(address, go)
 

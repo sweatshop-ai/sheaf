@@ -124,8 +124,10 @@ class BoxWaits:
                 self._end(doc, thread)
                 return "failed", was
             d.state = state
-            if was == "delivered":          # answered: the session no longer works on it, so a member's orange goes
-                self._cleared.add(doc)
+            if state == "answered":         # done: the drop ends with no Tell-wait toast, and a member's orange goes
+                if was == "delivered":
+                    self._cleared.add(doc)
+                self._end(doc, thread)
             return "state", was
 
     def end(self, doc: str, thread: str) -> bool:

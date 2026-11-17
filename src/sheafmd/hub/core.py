@@ -379,24 +379,33 @@ class Hub:
             if doc.startswith("/") and (root := self.roots.lookup(Path(doc))) is not None:
                 named = [str(roots_mod.Address(root.name, Path(os.path.realpath(doc)).relative_to(root.path).as_posix()))]
             for address in named:
-                a = roots_mod.Address.parse(address)
-                root = self.roots.get(a.root)
-                if root is None or not root.clone:
-                    continue
-                owner = self._repos.owner_of(root.clone, a.rel)      # `named` before the reporter, as the page is judged
-                if isinstance(owner, str) and (key is None or key.casefold() == owner.casefold()):
-                    self._repos.wake(root.clone)
+                if repo := self.may_wake(address, key):
+                    self._repos.wake(repo)
         except Exception:
             return
 
-    def read_only_line(self, address: str) -> str:
+    def may_wake(self, address: str, key=None) -> str:
+        """The repo of the clone page `address` when a write by `key` wakes it: the page's recorded owner (the owner its front
+        matter names, else the reporter, matched without regard to case) or a caller bound to no member (`key` None).
+        "" for any other page and caller."""
+        a = roots_mod.Address.parse(address)
+        root = self.roots.get(a.root)
+        if root is None or not root.clone or self._repos is None:
+            return ""
+        owner = self._repos.owner_of(root.clone, a.rel)      # `named` before the reporter, as the page is judged
+        if isinstance(owner, str) and (key is None or key.casefold() == owner.casefold()):
+            return root.clone
+        return ""
+
+    def read_only_line(self, address: str, waking: bool = False) -> str:
         """Why the page at `address` may not be written, in one sentence naming the `.sheaf.toml` line that would change
         it; "" for a page that may be written. A page of a repo's clone is read-only while the clone has no save branch
-        (no `dev`, and no branch the repo's `.sheaf.toml` names) or its HEAD is not on it (SPEC 14)."""
+        (no `dev`, and no branch the repo's `.sheaf.toml` names) or its HEAD is not on it (SPEC 14). `waking`: the reader's
+        write wakes a sleeping clone (`may_wake`), so its sleep is no reason to refuse the reader."""
         repo = self.clone_of(address)
         if not repo:
             return ""
-        return self._repos.read_only_line(repo)
+        return self._repos.read_only_line(repo, waking)
 
     def committed(self, address: str, member=None, what: str = "edit", by: str | None = None,
                   gone: str | None = None, author: Author | None = None):
@@ -711,7 +720,8 @@ class Hub:
         # so none are drawn on the old text meanwhile (10.11).
         h, text = e.live.current()
         meta["actions"] = self.actions(e, member, text) if h == meta.get("hash") else []
-        if line := self.read_only_line(e.address):
+        key = visibility.owner_key(member) if member is not None else None
+        if line := self.read_only_line(e.address, waking=bool(self.may_wake(e.address, key))):
             meta["readonly"], meta["why_readonly"] = True, line
         if "branch" in meta and meta.get("readonly"):
             del meta["branch"]                  # a read-only page saves nowhere: it carries no branch to save on

@@ -344,20 +344,30 @@ class Repos:
             # The shrink and the record of what to restore are one step under the clone's lock: a write that takes the lock
             # after it finds `restore` and widens, and one before it is dated by `_use`, which the check below reads.
             with self.holding(dest):
+                with self._records:
+                    row = self._usage().get(repo)
+                row = row if isinstance(row, dict) else {}
+                # A write or a report since the check (`_use`) has dated the clone anew: it is no longer idle, and its folders
+                # stay where they are, so the write that dated it finds its file.
+                idle = moved is not None or self.clock() - row.get("last_used", 0) > SLEEP_DAYS * 86400
+                if not idle and row.get("sleeping") is not True:
+                    return
                 listed = self._git(dest, "-c", "core.quotePath=false", "sparse-checkout", "list")
                 shrunk = listed.returncode == 0 and self._git(dest, "sparse-checkout", "set", "--cone").returncode == 0
-                idle = False
                 if shrunk:
                     with self._records:
                         data = self._usage()
                         row = data.get(repo) if isinstance(data.get(repo), dict) else {}
-                        # A report since the check (`_use`) has dated the clone anew: it stays awake, and its folders come back.
+                        # A report that came during the shrink dates the clone anew (it takes no lock): it stays awake and
+                        # the thread's drain widens the set again.
                         idle = moved is not None or self.clock() - row.get("last_used", 0) > SLEEP_DAYS * 86400
                         data[repo] = {**row, "sleeping": idle or row.get("sleeping") is True,
                                       "restore": [f for f in listed.stdout.split("\n") if f]}
                         if moved is not None:
                             data[repo]["moved"] = moved
                         write_text_atomic(self._usage_file, json.dumps(data, indent=1, sort_keys=True) + "\n")
+                else:
+                    idle = False
             if idle:
                 slept.append(repo)
         finally:
@@ -585,14 +595,15 @@ class Repos:
             return None
         return head.removeprefix("ref: refs/heads/") if head.startswith("ref: refs/heads/") else None
 
-    def read_only_line(self, repo: str) -> str:
-        """Why the pages of the clone of `repo` may not be written, "" when they may. A page is writable only when the
+    def read_only_line(self, repo: str, waking: bool = False) -> str:
+        """Why the pages of the clone of `repo` may not be written, "" when they may. `waking`: the reader's write wakes the
+        clone, so its sleep is not a reason (a move is). A page is writable only when the
         clone's HEAD is on the branch saves go on: what a save commits and pushes is HEAD's branch, whatever was decided."""
         if (to := self.moved_to(repo)) is not None:       # first: a moved clone sleeps too, and no report wakes it
             return f"The repo {repo} moved to {to}: its pages are saved there, not here."
-        if self.sleeping(repo):
+        if self.sleeping(repo) and not waking:
             return (f"The clone of {repo} is asleep: nobody reported a page of it for {SLEEP_DAYS} days and its folders are "
-                    "out of the work tree; it wakes at the next render report.")
+                    "out of the work tree; it wakes at the next render report, or at a write by the page's owner.")
         branch, line = self.saves_on(repo)
         if branch is None:
             return line

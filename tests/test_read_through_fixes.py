@@ -327,7 +327,7 @@ def test_a_relayed_client_page_offers_no_editor_no_actions_and_no_agent(agency_a
     assert "work" not in config and "way_back" not in config and not config.get("readonly")      # a read-only page cannot be commented on
 
 
-@pytest.mark.parametrize("path,extra", [("/_/save", {"hash": "h", "edits": []}), ("/_/tick", {}), ("/_/pin", {}), ("/_/tell", {})])
+@pytest.mark.parametrize("path,extra", [("/_/save", {"hash": "h", "edits": []}), ("/_/tick", {}), ("/_/share", {}), ("/_/pin", {}), ("/_/tell", {})])
 def test_a_write_to_a_client_page_other_than_a_comment_is_refused_with_a_sentence_that_says_so(agency_and_client, path, extra):
     agency, client = agency_and_client
     doc = client.make("alice", f"# Plan\n\n{MARKER}\n")

@@ -3038,7 +3038,7 @@ var create = function (ROOT, CFG, opts) {
     } catch (e) { say(e.message, true); } finally { teamBusy = false; }
   }
   function drawPanel() {
-    var typed = teamForm && panel.querySelector('.rd-team textarea');     // a redraw (a comments update, a tab) keeps what is being written
+    var typed = teamForm && panel.querySelector('.rd-team[data-team="' + teamForm.id + '"] textarea');   // that comment's own form: another's text is not carried over     // a redraw (a comments update, a tab) keeps what is being written
     if (typed) teamForm.text = typed.value;
     var authors = [];
     COMMENTS.forEach(function (c) { if (authors.indexOf(c.by) < 0) authors.push(c.by); });

@@ -174,3 +174,13 @@ def test_a_redraw_of_the_panel_keeps_the_text_of_a_reply_being_written(tab, site
     tab.page.click("#rd-panel button[data-tab=client]")
     tab.page.click("#rd-panel button[data-tab=team]")
     assert tab.page.locator("#rd-panel .rd-team textarea").input_value() == "half a thought"
+
+
+def test_opening_a_form_on_another_team_comment_does_not_carry_the_first_forms_text_over(tab, site):
+    told_team(tab.page, [TEAM_COMMENT, {**TEAM_COMMENT, "id": "t2", "by": "Bo"}])
+    team_tab(tab)
+    items = tab.page.locator("#rd-panel .rd-team")
+    items.nth(0).locator("button[data-act=reply]").click()
+    tab.page.fill("#rd-panel .rd-team textarea", "for the first")
+    items.nth(1).locator("button[data-act=reply]").click()
+    assert tab.page.locator("#rd-panel .rd-team[data-team=t2] textarea").input_value() == ""

@@ -24,6 +24,7 @@ import threading
 import time
 import uuid
 from dataclasses import asdict, dataclass, field, replace
+from html import escape
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote
 
@@ -707,6 +708,14 @@ class Handler:
         or text sent: no write or move of its file comes between."""
         return place.held(self.hub, doc) if isinstance(doc, str) else contextlib.nullcontext()
 
+    def _entry_to_write(self, req: Req, doc):
+        """`_entry` for a route that writes: a clone that sleeps wakes first, once the caller may see the document."""
+        if readthrough.is_clients(doc):          # a client page is read through (9.9): only its comments are relayed
+            raise Refuse(403, "A client page is read here: comment on it, or edit it on the client tiroir.")
+        self._owned(req, doc)
+        self.hub.wake_for_write(doc, visibility.owner_key(req.member) if req.member is not None else None)
+        return self._entry(req, doc)
+
     def _entry(self, req: Req, doc):
         """The document `doc` names. A member of proxy mode is told of no document of another
         root, nor of a root nested inside one of theirs: the same 404 as for one that does not
@@ -780,10 +789,27 @@ class Handler:
             # 302 and never 301, and never cached: the page can move back, and a browser that kept a 301 from A to B
             # would then loop between the two. "For ever" is the Forward's, not the redirect's.
             return Response(302, {"Location": to, "Cache-Control": "no-store"})
+        if not self._has_file(address) and (asleep := self._asleep(req, address)) is not None:
+            return asleep
         with self._reading(address):
             e = self._entry(req, address)
             self.hub.catch_up(e)
             return _html(200, self.hub.page(e, nonce, member=req.member, mount=req.mount), nonce)
+
+    def _asleep(self, req: Req, address: str) -> Response | None:
+        """A page of a clone that sleeps has no file (SPEC 13): the clone wakes for the page's owner, who is then served the
+        page, and anyone else who may see it reads a page that says it sleeps and what wakes it, not a 404 for a page that
+        exists. Any other missing page is left to `_entry`'s 404."""
+        self._owned(req, address)
+        key = visibility.owner_key(req.member) if req.member is not None else None
+        self.hub.wake_for_write(address, key)
+        repo = self.hub.clone_of(address)
+        if repo and not self._has_file(address) and self.hub.repos.sleeping(repo) and self.hub.judged(address) is not None:
+            line = escape(self.hub.read_only_line(address))
+            res = _html(503, _sign_in_page("This repo's clone is asleep", line))
+            res.error = "clone asleep"
+            return res
+        return None
 
     def _forwarded(self, req: Req, address: str) -> str | None:
         """The place (a path here, a full address on another tiroir) where the old address `address` of a page now leads, for the one who
@@ -1153,7 +1179,7 @@ class Handler:
 
     def _save(self, req: Req) -> Response:
         b = req.body
-        e = self._entry(req, b.get("doc"))
+        e = self._entry_to_write(req, b.get("doc"))
         self._writable(e.address)
         h, edits = b.get("hash"), b.get("edits")
         _shape(isinstance(h, str) and h != "", "hash must be the hash of the version the edits were made against")
@@ -1208,7 +1234,7 @@ class Handler:
         """The list's row, or the rectoverso's own page (10.11, `where`), ticks the rectoverso's action (9.10): saved as the
         page saves a tick, so the file, the commit and the open tabs see what a tick in the page makes them see."""
         b = req.body
-        e = self._entry(req, b.get("doc"))
+        e = self._entry_to_write(req, b.get("doc"))
         self._writable(e.address)
         n, word, read, release = b.get("action"), b.get("word"), b.get("hash"), b.get("release", False)
         where = b.get("where", "list")
@@ -1306,7 +1332,7 @@ class Handler:
         row read, then ticked through `_save`, so the guard, the move to the page's home, the commit and the Write log are
         the page's own. A page with an unticked Share line has it ticked, and no second line is added."""
         b = req.body
-        e = self._entry(req, b.get("doc"))
+        e = self._entry_to_write(req, b.get("doc"))
         self._writable(e.address)           # before the first write: the Share line is committed before its tick is saved
         read, names = b.get("hash"), b.get("with", [])
         _shape(isinstance(read, str) and read != "", "hash must be the hash of the version the row read")
@@ -2022,7 +2048,7 @@ class Handler:
         b = req.body
         if readthrough.is_clients(b.get("doc")):
             return self._team_write(req) if self._side(b) == "team" else self._relay_comment(req)
-        e = self._entry(req, b.get("doc"))
+        e = self._entry_to_write(req, b.get("doc"))
         self._writable(e.address)
         op = b.get("op")
         _shape(op in OPS, f"op must be one of {', '.join(OPS)}")

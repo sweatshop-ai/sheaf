@@ -434,7 +434,8 @@ class Door:
             # A write to a page of a clone that sleeps wakes it before the page is looked for (SPEC 13): for the page's owner
             # and a caller bound to no member, as the hub judges it.
             member = self._member(caller)
-            self.hub.wake_for_write(doc, None if member is None else visibility.owner_key(member))
+            named = self._address_of_url(doc) if "://" in doc else doc      # a URL names its page by the address it holds
+            self.hub.wake_for_write(named, None if member is None else visibility.owner_key(member))
         if "://" in doc:
             address = self._address_of_url(doc)
         elif os.path.isabs(doc):

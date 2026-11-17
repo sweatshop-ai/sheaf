@@ -341,23 +341,25 @@ class Repos:
         then it settles whatever reports came meanwhile (its `_wake` widens the set again, a moved clone's does not), like
         any thread of the repo."""
         try:
+            # The shrink and the record of what to restore are one step under the clone's lock: a write that takes the lock
+            # after it finds `restore` and widens, and one before it is dated by `_use`, which the check below reads.
             with self.holding(dest):
                 listed = self._git(dest, "-c", "core.quotePath=false", "sparse-checkout", "list")
                 shrunk = listed.returncode == 0 and self._git(dest, "sparse-checkout", "set", "--cone").returncode == 0
-            if shrunk:
                 idle = False
-                with self._records:
-                    data = self._usage()
-                    row = data.get(repo) if isinstance(data.get(repo), dict) else {}
-                    # A report since the check (`_use`) has dated the clone anew: it stays awake, and its folders come back.
-                    idle = moved is not None or self.clock() - row.get("last_used", 0) > SLEEP_DAYS * 86400
-                    data[repo] = {**row, "sleeping": idle or row.get("sleeping") is True,
-                                  "restore": [f for f in listed.stdout.split("\n") if f]}
-                    if moved is not None:
-                        data[repo]["moved"] = moved
-                    write_text_atomic(self._usage_file, json.dumps(data, indent=1, sort_keys=True) + "\n")
-                if idle:
-                    slept.append(repo)
+                if shrunk:
+                    with self._records:
+                        data = self._usage()
+                        row = data.get(repo) if isinstance(data.get(repo), dict) else {}
+                        # A report since the check (`_use`) has dated the clone anew: it stays awake, and its folders come back.
+                        idle = moved is not None or self.clock() - row.get("last_used", 0) > SLEEP_DAYS * 86400
+                        data[repo] = {**row, "sleeping": idle or row.get("sleeping") is True,
+                                      "restore": [f for f in listed.stdout.split("\n") if f]}
+                        if moved is not None:
+                            data[repo]["moved"] = moved
+                        write_text_atomic(self._usage_file, json.dumps(data, indent=1, sort_keys=True) + "\n")
+            if idle:
+                slept.append(repo)
         finally:
             self._drain(repo)
 
@@ -397,16 +399,10 @@ class Repos:
         with self.holding(dest):
             with self._records:
                 row = self._usage().get(repo)
+            self._use(repo)
             if not (isinstance(row, dict) and (row.get("sleeping") is True or row.get("restore"))):
                 return True
-            self._use(repo)
             return self._restore(repo, dest, token)
-
-    def recorded_owner(self, repo: str, path: str) -> tuple | None:
-        """(`owner`, `named`) of the page `path` of `repo` as a render report recorded them; None for a page no report named."""
-        with self._records:
-            row = self._read().get(repo, {}).get(path)
-        return (row.get("owner"), row.get("named")) if isinstance(row, dict) else None
 
     def page_text(self, repo: str, path: str, commit: str) -> str | None:
         """The text of the page `path` at `commit`, read from git and not from the work tree, so a sleeping clone's pages open

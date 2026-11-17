@@ -383,8 +383,8 @@ class Hub:
                 root = self.roots.get(a.root)
                 if root is None or not root.clone:
                     continue
-                seen = self._repos.recorded_owner(root.clone, a.rel)
-                if seen is not None and (key is None or key in seen):
+                owner = self._repos.owner_of(root.clone, a.rel)      # `named` before the reporter, as the page is judged
+                if isinstance(owner, str) and (key is None or key.casefold() == owner.casefold()):
                     self._repos.wake(root.clone)
         except Exception:
             return

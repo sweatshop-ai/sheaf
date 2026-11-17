@@ -9,7 +9,7 @@ pytestmark = pytest.mark.page
 CLIENT_DOC = "Clients/acme/" + DOC
 
 
-def as_client_page(page):
+def as_client_page(page, older_client=False):
     """The page for DOC, with the address of a client page in its meta; a request for that address is answered as the hub of DOC would,
     and a stream for it is refused as the agency refuses it (404). Returns the list of what the page asked, as (path, doc)."""
     seen = []
@@ -23,6 +23,9 @@ def as_client_page(page):
         seen.append(url.split("/_/")[1].split("?")[0])
         if "/_/live" in url:
             route.fulfill(status=404, content_type="application/json", body='{"error": "no such document"}')
+        elif older_client:       # an older client hub still sends its agent, its targets and its Work
+            got = route.fetch(url=url.replace("Clients/acme/", "").replace("Clients%2Facme%2F", "")).json()
+            route.fulfill(json={**got, "work": {}, "targets": [{"id": "agent:x", "name": "x"}], "capabilities": ["deliver"]})
         else:
             route.fulfill(response=route.fetch(url=url.replace("Clients/acme/", "").replace("Clients%2Facme%2F", "")))
     page.route(f"**/{DOC}", serve)
@@ -56,3 +59,15 @@ def test_a_client_page_is_polled_through_doc_every_30_seconds(tab, site):
     run_clock(page, 3_000)
     until(lambda: seen.count("doc") > first, what="the poll through /_/doc")
     assert "live" not in seen and not banner(page)
+
+
+def test_a_poll_never_brings_the_clients_agent_work_or_targets_back_on_the_page(tab, site):
+    page = tab.page
+    seen = as_client_page(page, older_client=True)
+    page.clock.install(time=clock_at(T0))
+    tab.open()
+    run_clock(page, 1_000)
+    first = seen.count("doc")
+    run_clock(page, 31_000)
+    until(lambda: seen.count("doc") > first, what="the poll through /_/doc")
+    assert page.evaluate("document.querySelectorAll('#rd-work-btn, button.rd-target, #rd-target-change').length") == 0

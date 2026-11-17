@@ -178,8 +178,10 @@ var create = function (ROOT, CFG, opts) {
   takeAgent();
   // What the hub's answer to /_/doc says of the agent: a rename, or a session that ended, reaches
   // an open page by any of the three places that ask (SPEC 10.5).
+  // A client page, read through this hub (an address under `Clients/`, SPEC 9.9), offers no agent, Tell target or Work, whatever a /_/doc answer says.
+  var THROUGH = /^Clients(\/|$)/.test(CFG.doc || '');
   function takeTarget(j) {
-    if (!j || !('capabilities' in j)) return;
+    if (!j || THROUGH || !('capabilities' in j)) return;
     var before = JSON.stringify([CFG.agent, CFG.can, CFG.lines, CFG.work, CFG.targets]);
     CFG.agent = j.target || null;
     if ('targets' in j) CFG.targets = j.targets || [];
@@ -1211,7 +1213,7 @@ var create = function (ROOT, CFG, opts) {
         unanswered = req;
         editDraftMirror();
         var was = hash;
-        j = await post('/_/save', { hash: req.hash, edits: sentEdits(sent), rid: req.rid });
+        j = await post('/_/save', { hash: req.hash, edits: sentEdits(sent), rid: req.rid, branch: CFG.branch });
         unanswered = null;
         // A merged or remapped save brings a reload (reloadWhenFree, now or once a form is done with); until
         // then the page shows the old text and its block numbers, so it keeps the hash of that text and what is
@@ -4386,7 +4388,7 @@ var create = function (ROOT, CFG, opts) {
     };
     // A client page, opened through this hub (an address under `Clients/`, SPEC 9.9), has no stream: the hub keeps nothing of it
     // and says no to `/_/live` for it. The page asks `/_/doc` every 30 s instead, and no stream failing is no "Hub unreachable".
-    var THROUGH = /^Clients(\/|$)/.test(CFG.doc || ''), POLL_MS = 30000;
+    var POLL_MS = 30000;
     var connect = function () {
       if (THROUGH || docGone || unmounted) return;         // an answer that comes after unmount() opens no stream for a page that is gone
       try { live = new EventSource('/_/live?doc=' + encodeURIComponent(CFG.doc)); } catch (e) { return; }
@@ -4423,7 +4425,8 @@ var create = function (ROOT, CFG, opts) {
       live.addEventListener('moved', function (ev) {
         var d = data(ev);
         if (typeof d.to !== 'string') return;
-        showHubLine('This page was moved to <code>' + esc(d.to) + '</code>. Open it there; ' +
+        var where = typeof d.origin === 'string' ? d.origin + '/' + d.to : d.to;      // another shared Sheaf: its full address
+        showHubLine('This page was moved to <code>' + esc(where) + '</code>. Open it there; ' +
                     'your edits are safe on screen.');
       });
       live.addEventListener('changed', function (ev) {
@@ -4544,6 +4547,8 @@ var create = function (ROOT, CFG, opts) {
           return x.b.i === edits[n].i && x.html === edits[n].html;
         }) ? unanswered : null;
         var body = { root: CFG.root, hash: mirrors ? mirrors.hash : hash, at: new Date().toISOString(), edits: edits };
+        // The branch of the text it is a draft of: a Restore after a reload sends this one, never the reloaded page's.
+        if (CFG.branch) body.branch = CFG.branch;
         if (mirrors) body.rid = mirrors.rid;
         var text = JSON.stringify(body);
         localStorage.setItem(EDIT_DRAFT_KEY, text);
@@ -4599,7 +4604,9 @@ var create = function (ROOT, CFG, opts) {
         // A Restore the hub did not answer can be pressed again, or a page opened later can offer the draft
         // again: the same edits go under the same id, which the draft keeps (an older entry's has none).
         if (!d.rid) keepRestoreId(d);
-        await post('/_/save', { hash: d.hash, edits: d.edits, rid: d.rid });
+        // On a page of a clone, a draft with no branch is not sent: it cannot say which text its hash is of.
+        if (CFG.branch && !d.branch) throw new Error('These edits do not say which branch they were made on, so they are not restored. Copy them from here.');
+        await post('/_/save', { hash: d.hash, edits: d.edits, rid: d.rid, branch: d.branch });
         decided();
         // The edits are in the file now; the reload that shows them waits for a comment
         // being written, like every other (D23), and says so above its form.

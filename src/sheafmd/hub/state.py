@@ -243,12 +243,33 @@ class Versions:
                 return text
         return None
 
-    def forget(self, address: str):
+    def texts(self, address: str) -> list[str]:
+        """The newest versions of the document, oldest first, each only when it hashes to its name (as `get` believes it)."""
+        found = []
+        for p in self._folder(address).glob("*.md"):
+            try:
+                if _HASH_RE.fullmatch(p.stem) and p.is_file():
+                    found.append((p.stat().st_mtime_ns, p.name, p))
+            except OSError:
+                pass
+        out = []
+        for _, _, p in sorted(found):
+            try:
+                text = p.read_text(encoding="utf-8")
+            except (OSError, ValueError):
+                continue
+            if md_hash(text) == p.stem:
+                out.append(text)
+        return out
+
+    def forget(self, address: str, inside: bool = False):
         """Drop every version of one document. A root that is forgotten takes its documents'
         versions with it: the name may go to another folder, and a page still open on the old
         document must not be merged into the new one. A store inside a root keeps them: they are
-        files of the root, as its documents are (7.4)."""
-        if self._root is None:
+        files of the root, as its documents are (7.4), unless the page itself has left the root
+        (`inside`: it moved to another tiroir, and keeps no versions under the old address).
+        """
+        if self._root is None or inside:
             shutil.rmtree(self._folder(address), ignore_errors=True)
 
     def rename(self, old: str, new: str):
@@ -732,6 +753,11 @@ class SharedIds(_Store):
             data[k] = address
             return k, True
         return self._change(change)
+
+    def known(self, address: str) -> str | None:
+        """The opaque name already made for `address`, else None: never makes one."""
+        with self._lock:
+            return next((k for k, v in self._data.items() if v == address), None)
 
     def address(self, key: str) -> str | None:
         with self._lock:

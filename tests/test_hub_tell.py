@@ -1656,7 +1656,7 @@ def stall_the_rebuild(hub, plan, monkeypatch):
     does not end until the returned event is set, and holds the document's lock meanwhile."""
     rendering, release = threading.Event(), threading.Event()
 
-    def build(e, text):
+    def build(e, text, **kw):
         rendering.set()
         release.wait(30)
         return e.html

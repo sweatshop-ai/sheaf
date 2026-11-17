@@ -72,3 +72,14 @@ def test_two_quick_opens_of_a_client_node_leave_its_rows_once(mounted, answers):
     until(lambda: mounted.js("return root.querySelectorAll('.sheaf-row[data-client=\"acme\"]').length;") >= 1, what="the row")
     mounted.page.evaluate("() => new Promise((done) => setTimeout(done, 1000))")      # in the page: the second answer, if it took it, has landed
     assert mounted.js("return root.querySelectorAll('.sheaf-row[data-client=\"acme\"]').length;") == 1
+
+
+@pytest.fixture
+def no_email(pages):
+    hub = pages.hub
+    hub.proxy.members[BEA] = dataclasses.replace(hub.proxy.members[BEA], email="")
+
+
+def test_a_member_with_no_email_sees_no_clients_folder_and_the_line_that_says_why(no_email, mounted):
+    assert mounted.js("return root.querySelectorAll('.sheaf-folder[data-client]').length;") == 0
+    assert "e-mail" in mounted.js("return root.querySelector('.sheaf-clients-line').textContent;")

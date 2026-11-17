@@ -558,6 +558,11 @@ class Repos:
     def read_only_line(self, repo: str) -> str:
         """Why the pages of the clone of `repo` may not be written, "" when they may. A page is writable only when the
         clone's HEAD is on the branch saves go on: what a save commits and pushes is HEAD's branch, whatever was decided."""
+        if (to := self.moved_to(repo)) is not None:       # first: a moved clone sleeps too, and no report wakes it
+            return f"The repo {repo} moved to {to}: its pages are saved there, not here."
+        if self.sleeping(repo):
+            return (f"The clone of {repo} is asleep: nobody reported a page of it for {SLEEP_DAYS} days and its folders are "
+                    "out of the work tree; it wakes at the next render report.")
         branch, line = self.saves_on(repo)
         if branch is None:
             return line

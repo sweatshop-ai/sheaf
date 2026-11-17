@@ -453,12 +453,13 @@ class Repos:
 
     def land_record(self, repo: str, path: str, owner: str, commit: str, record: dict) -> dict | None:
         """Write the row of a page that landed from another tiroir, as `_settle` writes one (`owner`, `commit`, and the
-        `session`, `host`, `link` of `record` that are set; never its `named`, which only a report reads, from the page's own front matter). Returns the row it replaced, or None, for `drop_record`."""
+        `session`, `host`, `link` of `record` that are set; never its `named`, which only a report reads, from the page's own front matter; the `named` a report read at this same commit is kept). Returns the row it replaced, or None, for `drop_record`."""
         with self._records:
             data = self._read()
             prior = data.get(repo, {}).get(path)
+            named = prior.get("named") if isinstance(prior, dict) and prior.get("commit") == commit else None    # read by a report from this commit's own front matter
             data.setdefault(repo, {})[path] = {
-                "owner": owner, "commit": commit,
+                "owner": owner, "commit": commit, **({"named": named} if isinstance(named, str) and named else {}),
                 **{k: v for k, v in record.items() if k in ("session", "host", "link") and v}}
             self._write(data)
         return prior if isinstance(prior, dict) else None

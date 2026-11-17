@@ -2,6 +2,7 @@
 the agency sees this", and asks the member to choose between two send buttons, neither the one Enter sends. A Team comment puts no anchor in
 the text and sends no place in it. A page told no `team` is what it was. CI only: it needs a browser, never run on the laptop."""
 import json
+import re
 
 import pytest
 from pagehelp import DOC, P2, at, open_box, select, until
@@ -12,18 +13,19 @@ TEAM_COMMENT = {"id": "t1", "by": "Ada", "at": "2026-11-17T10:00", "status": "op
                 "replies": []}
 
 
-def told_team(page, team):
+def told_team(page, team, answer=None):
     """The page for DOC with a `team` list in its meta (what the agency's hub adds to a client page), and the writes it makes to /_/comment
     answered here: the list of bodies sent, in order."""
     sent = []
 
     def serve(route):
         got = route.fetch()
-        route.fulfill(response=got, body=got.text().replace(f'"doc": "{DOC}"', f'"doc": "{DOC}", "team": {json.dumps(team)}'))
+        body = got.text().replace(f'"doc": "{DOC}"', f'"doc": "{DOC}", "team": {json.dumps(team)}')
+        route.fulfill(response=got, body=re.sub(r'"me":\s*(?:null|"[^"]*")', '"me": "Ada"', body))
 
     def write(route):
         sent.append(json.loads(route.request.post_data))
-        route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "team": [TEAM_COMMENT]}))
+        route.fulfill(status=200, content_type="application/json", body=json.dumps({"ok": True, "team": [TEAM_COMMENT] if answer is None else answer}))
     page.route(f"**/{DOC}", serve)
     page.route("**/_/comment", write)
     return sent
@@ -92,3 +94,74 @@ def test_a_reply_on_a_team_comment_shows_its_text(tab, site):
     tab.page.wait_for_selector("#rd-panel.open")
     tab.page.click("#rd-panel button[data-tab=team]")
     until(lambda: "agreed, for now" in tab.page.locator("#rd-panel").inner_text(), what="the reply in the Team tab")
+
+
+def team_tab(tab):
+    tab.open()
+    tab.page.click("#rd-menu-btn")
+    tab.page.click("#rd-show")
+    tab.page.wait_for_selector("#rd-panel.open")
+    tab.page.click("#rd-panel button[data-tab=team]")
+    return tab.page.locator("#rd-panel .rd-team")
+
+
+def buttons(item):
+    return sorted(b.get_attribute("data-act") for b in item.locator("button[data-act]").all())
+
+
+def test_a_member_replies_to_a_team_comment_from_the_page(tab, site):
+    sent = told_team(tab.page, [TEAM_COMMENT], [{**TEAM_COMMENT, "replies": [{"by": "Ada", "at": "2026-11-17T12:00", "text": "noted"}]}])
+    item = team_tab(tab)
+    item.locator("button[data-act=reply]").click()
+    tab.page.fill("#rd-panel .rd-team textarea", "noted")
+    item.locator("button[data-act=send]").click()
+    until(lambda: sent, what="the write")
+    assert sent[0]["op"] == "reply" and sent[0]["id"] == "t1" and sent[0]["body"] == "noted"
+    until(lambda: "noted" in tab.page.locator("#rd-panel").inner_text(), what="the reply in the tab")
+
+
+def test_a_member_resolves_and_reopens_a_team_comment(tab, site):
+    sent = told_team(tab.page, [TEAM_COMMENT], [{**TEAM_COMMENT, "status": "resolved"}])
+    item = team_tab(tab)
+    item.locator("button[data-act=status]").click()
+    until(lambda: sent, what="the write")
+    assert sent[0]["op"] == "status" and sent[0]["id"] == "t1" and sent[0]["status"] == "resolved"
+    until(lambda: tab.page.locator("#rd-panel .rd-team.rd-res").count() == 1, what="the resolved comment")
+    tab.page.locator("#rd-panel .rd-team button[data-act=status]").click()
+    until(lambda: len(sent) == 2, what="the second write")
+    assert sent[1]["status"] == "open"
+
+
+def test_an_author_edits_their_own_team_comment(tab, site):
+    sent = told_team(tab.page, [TEAM_COMMENT], [{**TEAM_COMMENT, "body": "reworded"}])
+    item = team_tab(tab)
+    item.locator("button[data-act=edit]").click()
+    assert tab.page.locator("#rd-panel .rd-team textarea").input_value() == "for the team"
+    tab.page.fill("#rd-panel .rd-team textarea", "reworded")
+    item.locator("button[data-act=send]").click()
+    until(lambda: sent, what="the write")
+    assert sent[0]["op"] == "edit" and sent[0]["id"] == "t1" and sent[0]["body"] == "reworded"
+    until(lambda: "reworded" in tab.page.locator("#rd-panel").inner_text(), what="the new text")
+
+
+def test_an_author_deletes_their_own_team_comment_after_confirming(tab, site):
+    sent = told_team(tab.page, [TEAM_COMMENT], [])
+    item = team_tab(tab)
+    item.locator("button[data-act=delete]").click()
+    tab.page.wait_for_timeout(300)
+    assert sent == []
+    tab.page.locator("#rd-panel .rd-team button[data-act=delete]").click()
+    until(lambda: sent, what="the write")
+    assert sent[0]["op"] == "delete" and sent[0]["id"] == "t1"
+    until(lambda: "No Team comments" in tab.page.locator("#rd-panel").inner_text(), what="the empty tab")
+
+
+def test_edit_and_delete_are_the_authors_and_delete_waits_until_no_one_else_replied(tab, site):
+    theirs = {**TEAM_COMMENT, "id": "t2", "by": "Bo"}
+    answered = {**TEAM_COMMENT, "id": "t3", "replies": [{"by": "Bo", "at": "2026-11-17T11:00", "text": "hm"}]}
+    told_team(tab.page, [TEAM_COMMENT, theirs, answered])
+    team_tab(tab)
+    items = tab.page.locator("#rd-panel .rd-team")
+    assert buttons(items.nth(0)) == ["delete", "edit", "reply", "status"]
+    assert buttons(items.nth(1)) == ["reply", "status"]
+    assert buttons(items.nth(2)) == ["edit", "reply", "status"]

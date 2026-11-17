@@ -3014,7 +3014,7 @@ var create = function (ROOT, CFG, opts) {
         h += '<p class="rd-only">Only the agency sees this</p>' + (TEAM.length ? TEAM.map(function (c) {
           return '<div class="rd-item rd-team' + (c.status === 'resolved' ? ' rd-res' : '') + '" data-team="' + esc(c.id) + '"><b>' + esc(c.by) + '</b> ' +
                  esc(c.body || '') + '<span class="rd-q">“' + esc(c.quote) + '”</span>' + (c.replies || []).map(function (r) {
-                   return '<div class="rd-reply"><b>' + esc(r.by) + '</b> ' + esc(r.body || '') + '</div>';
+                   return '<div class="rd-reply"><b>' + esc(r.by) + '</b> ' + esc(r.text || '') + '</div>';
                  }).join('') + '</div>';
         }).join('') : '<p class="rd-empty">No Team comments.</p>');
         delete panel.dataset.keeps;

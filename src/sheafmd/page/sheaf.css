@@ -9,7 +9,9 @@
 .sheaf-sheaf .sheaf-tree{flex:0 0 220px;overflow:auto;padding:12px 8px;border-right:1px solid var(--ss-line)}
 .sheaf-sheaf .sheaf-tree ul{list-style:none;margin:0;padding:0 0 0 14px}
 .sheaf-sheaf .sheaf-tree>ul{padding-left:0}
-.sheaf-sheaf .sheaf-line{display:flex;align-items:center}
+.sheaf-sheaf .sheaf-line{display:flex;align-items:center;flex-wrap:wrap}
+.sheaf-sheaf .sheaf-rename-folder{margin-left:4px;padding:0 4px;color:var(--ss-muted);font-size:.8em}
+.sheaf-sheaf .sheaf-rename-form{flex:1 0 100%;margin:2px 0}
 .sheaf-sheaf .sheaf-node.collapsed>ul{display:none}
 .sheaf-sheaf button{font:inherit;color:inherit;background:none;border:0;cursor:pointer;text-align:left}
 .sheaf-sheaf .sheaf-toggle{flex:0 0 18px;padding:0;color:var(--ss-muted)}

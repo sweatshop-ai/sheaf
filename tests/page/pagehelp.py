@@ -541,6 +541,60 @@ STREAM_JOURNAL_JS = """(() => {
 })()"""
 
 
+# The page's side of the guard of close_context: a document that has begun to leave (a reload, a goto) says so in
+# `__leaving`. A navigation that has not committed leaves the old document in place, so the flag is readable until the
+# new one comes; the new document starts without it.
+# A page that asks before it is left cancels the navigation (a handler's preventDefault): once every handler has run, such a leave is no longer pending.
+# Only a trusted event counts (a test's own dispatchEvent leaves nothing), and the reset runs on the timer the page had
+# at the start: a test's `page.clock` replaces the page's setTimeout with one that stands still.
+LEAVING_JS = """(() => {
+  const later = window.setTimeout.bind(window);
+  window.addEventListener('beforeunload', e => {
+    if (!e.isTrusted) return;
+    window.__leaving = true;
+    later(() => { if (e.defaultPrevented || e.returnValue) window.__leaving = false; }, 0);
+  });
+})()"""
+
+
+def leaving(page):
+    """Whether the page is leaving for a navigation that has not committed (or its document went away while we asked).
+    `Page.evaluate` takes no timeout: a page that stops answering is a PageStalled, not a wait for ever."""
+    try:
+        with stalls_after(CLOSE_BOUND, "the page to say whether it is leaving"):
+            return page.evaluate("window.__leaving === true")
+    except Exception as e:      # a PageStalled is not an Exception
+        return any(said in str(e) for said in RELOADING)
+
+
+def pending_navigations(context):
+    """The URLs of the pages of the context that are leaving (see `leaving`)."""
+    return [page.url for page in context.pages if leaving(page)]
+
+
+def landed_page(page, timeout=8.0):
+    """A reload that has begun is waited for, and the document it brings until it has loaded (any page: it need not be
+    a sheaf page, so no selector of ours is waited for)."""
+    until(lambda: not leaving(page), timeout, "a reload in flight to land")
+    page.wait_for_load_state("load")
+
+
+def settled(page, timeout=8.0):
+    """End of a test whose last step may leave a reload of the page in flight (a save the hub answered, a file it
+    wrote): a reload that has begun is waited for, and the page it brings, until its menu is there. close_context fails
+    a test whose navigation does not land."""
+    landed_page(page, timeout)
+    page.wait_for_selector("#rd-menu-btn", state="attached")
+
+
+def landed(page, timeout=8.0):
+    """A reload that has begun is waited for, and the page it brings until its menu is there; nothing to wait for when
+    the page is not leaving. The teardown of a tab: a test that ends on a reload in flight is not told apart from one
+    that does not by its last line, and closing the context under the reload hangs the driver (flake e2)."""
+    if leaving(page):
+        settled(page, timeout)
+
+
 def new_context(browser, error=None, **options):
     """A context of the browser (its clicks, fills and waits for a selector give up after PAGE_TIMEOUT_MS),
     or a failure that says whether the browser is still there. `error` is
@@ -551,6 +605,7 @@ def new_context(browser, error=None, **options):
         context = browser.new_context(**options)
         context.set_default_timeout(PAGE_TIMEOUT_MS)
         context.add_init_script(STREAM_JOURNAL_JS)
+        context.add_init_script(LEAVING_JS)
         return context
     except error as e:
         pytest.fail(f"Chromium went away under a new context (connected={browser.is_connected()}):\n{e}")
@@ -558,7 +613,34 @@ def new_context(browser, error=None, **options):
 
 def close_context(context):
     """Close a context of new_context. A route of its pages still in `route.fetch` would otherwise fail
-    there, and Playwright raises that failure in the next call into the browser: another test's new_context."""
+    there, and Playwright raises that failure in the next call into the browser: another test's new_context.
+    A page that is still navigating when the test ends (a reload that begins in the teardown of the test's other
+    fixtures) is waited for first, with the page it brings: closing the context under it hung the driver (flake e2,
+    4 of 85 CI runs). A navigation that does not land fails the test, after the context is closed."""
+    stuck = []
+    raising = False
+    try:
+        for page in context.pages:
+            if leaving(page):
+                try:
+                    landed_page(page)
+                except Exception:       # the wait ran out; a PageStalled is not an Exception and passes
+                    stuck.append(page.url)
+    except BaseException:
+        raising = True
+        raise
+    finally:        # a page that stopped answering (PageStalled) still has its context closed
+        try:
+            _close_context(context)
+        except PageStalled:
+            if not stuck and not raising:       # a close that hangs fails the test; one already failing keeps its own failure
+                raise
+    if stuck:
+        pytest.fail(f"the test ended with a navigation that did not land on {stuck}: wait for the page to load "
+                    f"(reloaded(page), then a selector of the new page) before the test ends")
+
+
+def _close_context(context):
     try:
         with stalls_after(CLOSE_BOUND, "the routes to come off"):
             for page in context.pages:

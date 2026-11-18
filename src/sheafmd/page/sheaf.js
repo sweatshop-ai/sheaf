@@ -210,7 +210,31 @@ function render(data, target) {
     b.dataset.view = v[0];
     switcher.append(b);
   });
+  var lb = el('button', 'sheaf-laptops-open', 'Laptops');         // Connect a laptop and the member's laptops (SPEC 9.7), a panel of the pane
+  lb.type = 'button';
+  lb.setAttribute('aria-expanded', 'false');
+  switcher.append(lb);
   main.append(switcher);
+  var laptops = el('section', 'sheaf-laptops');
+  laptops.hidden = true;
+  var ul = el('ul', 'sheaf-laptop-list');
+  var lform = el('form', 'sheaf-laptop-form'), lin = el('input', 'sheaf-laptop-input');
+  lin.type = 'text';
+  lin.maxLength = 60;
+  lin.required = true;
+  lin.autocomplete = 'off';
+  lin.placeholder = 'Name of the laptop';
+  lin.setAttribute('aria-label', 'Name of the laptop');
+  var lgo = el('button', 'sheaf-laptop-connect', 'Connect a laptop');
+  lgo.type = 'submit';
+  lform.append(lin, ' ', lgo);
+  var made = el('div', 'sheaf-laptop-made');
+  made.hidden = true;
+  var lcopy = el('button', 'sheaf-laptop-copy', 'Copy');
+  lcopy.type = 'button';
+  made.append(el('p', null, 'Run this line on the laptop. It is shown once and cannot be read again.'), el('code', 'sheaf-laptop-line'), ' ', lcopy);
+  laptops.append(el('p', 'sheaf-laptops-intro', 'Each laptop has its own token. Revoke one and the laptop loses access at once.'), ul, lform, made);
+  main.append(laptops);
   if (data.view === 'trash') {                   // the member's own deleted pages, thirty days, Restore each
     var tt = el('table', 'sheaf-trash'), th = el('tbody');
     (data.trash || []).forEach(function (t) {
@@ -291,6 +315,7 @@ function create(ROOT, opts) {
     });
   }
   function choose(path, client) {
+    laptopsClose();
     selected = path;
     if (client) load(client);
     Array.prototype.forEach.call(ROOT.querySelectorAll('.sheaf-folder'), function (b) {
@@ -342,6 +367,111 @@ function create(ROOT, opts) {
       if (gone || mine !== opened) { h.unmount(); return; }
       handle = h;
     }, function (e) { if (mine === opened) { close(); say('The page could not be opened: ' + e.message); } });
+  }
+
+  // Laptops (SPEC 9.7, story 58): the member's laptops from `GET /_/laptops` (names, never a token), "Connect a laptop" posting a
+  // name, and the one line the hub answers with, kept only in the line's text node: not in an attribute, the address, a
+  // storage or the console, and cleared when the panel closes or the Sheaf is drawn again. Revoke asks a second click.
+  var lpanel = ROOT.querySelector('.sheaf-laptops'), lopen = ROOT.querySelector('.sheaf-laptops-open');
+  var lmade = lpanel.querySelector('.sheaf-laptop-made'), lline = lpanel.querySelector('.sheaf-laptop-line');
+  var lseq = 0;
+  function laptopsClose() {
+    lseq++;
+    lline.textContent = '';
+    lmade.hidden = true;
+    lpanel.querySelector('.sheaf-laptop-input').value = '';
+    lpanel.hidden = true;
+    main.classList.remove('laptops');
+    lopen.setAttribute('aria-expanded', 'false');
+  }
+  function laptopsList() {
+    var d = ROOT.ownerDocument, mine = ++lseq;
+    fetch('/_/laptops', { credentials: 'same-origin', headers: { Accept: 'application/json' } }).then(function (r) {
+      return r.ok ? r.json() : null;
+    }).then(function (b) {
+      if (gone || mine !== lseq || lpanel.hidden) return;
+      if (!b || !Array.isArray(b.laptops)) { say('Your laptops could not be read.'); return; }
+      var ul = lpanel.querySelector('.sheaf-laptop-list');
+      ul.textContent = '';
+      b.laptops.forEach(function (l) {
+        var li = d.createElement('li'), name = d.createElement('strong'), rv = d.createElement('button');
+        li.className = 'sheaf-laptop-row';
+        name.className = 'sheaf-laptop-name';
+        name.textContent = String(l.name);
+        var seen = d.createElement('span');
+        seen.className = 'sheaf-laptop-seen';
+        seen.textContent = ' connected ' + String(l.created || '').slice(0, 16) + ', last used ' + (l.last_used ? String(l.last_used).slice(0, 16) : 'never') + ' ';
+        rv.type = 'button';
+        rv.className = 'sheaf-laptop-revoke';
+        rv.dataset.name = String(l.name);
+        rv.textContent = 'Revoke';
+        li.append(name, seen, rv);
+        ul.append(li);
+      });
+      if (!b.laptops.length) { var none = d.createElement('li'); none.className = 'sheaf-laptop-none'; none.textContent = 'No laptop is connected yet.'; ul.append(none); }
+    }, function () { if (!gone && mine === lseq) say('Your laptops could not be read: the hub does not answer.'); });
+  }
+  function laptopsToggle() {
+    if (!lpanel.hidden) { laptopsClose(); return; }
+    say('');
+    lpanel.hidden = false;
+    main.classList.add('laptops');
+    lopen.setAttribute('aria-expanded', 'true');
+    laptopsList();
+  }
+  function laptopMake(form) {
+    var input = form.querySelector('.sheaf-laptop-input'), go = form.querySelector('.sheaf-laptop-connect');
+    var name = input.value.trim();
+    if (!name) return;
+    go.disabled = true;
+    say('');
+    lline.textContent = '';
+    lmade.hidden = true;
+    fetch('/_/laptops', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ name: name }) }).then(function (r) {
+      return r.json().then(function (b) { return { ok: r.ok && !(b && b.ok === false), error: b && b.error, command: b && b.command }; }, function () { return { ok: false }; });
+    }).then(function (got) {
+      go.disabled = false;
+      if (gone || lpanel.hidden) return;
+      if (got.ok && typeof got.command === 'string') {
+        lline.textContent = got.command;
+        lmade.hidden = false;
+        input.value = '';
+        laptopsList();
+        return;
+      }
+      say(got.error || 'The laptop could not be connected.');
+    }, function () {
+      go.disabled = false;
+      if (!gone) say('The laptop could not be connected: the hub does not answer.');
+    });
+  }
+  function laptopRevoke(button) {
+    if (!button.dataset.sure) {
+      button.dataset.sure = '1';
+      button.textContent = 'Really revoke?';
+      return;
+    }
+    button.disabled = true;
+    say('');
+    fetch('/_/laptops/revoke', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ name: button.dataset.name }) }).then(function (r) {
+      return r.json().then(function (b) { return { ok: r.ok && !(b && b.ok === false), error: b && b.error }; }, function () { return { ok: r.ok }; });
+    }).then(function (got) {
+      if (gone) return;
+      if (got.ok) { laptopsList(); return; }
+      button.disabled = false;
+      say(got.error || 'The laptop could not be revoked.');
+    }, function () {
+      if (gone) return;
+      button.disabled = false;
+      say('The laptop could not be revoked: the hub does not answer.');
+    });
+  }
+  function laptopCopy(button) {
+    var text = lline.textContent;
+    if (!text || !navigator.clipboard) { say('Select the line and copy it.'); return; }
+    navigator.clipboard.writeText(text).then(function () { button.textContent = 'Copied'; }, function () { say('Select the line and copy it.'); });
   }
 
   // The row's Share button (SPEC 9.11): the hub writes the page's Share line against the hash the row read, and ticks it.
@@ -541,6 +671,12 @@ function create(ROOT, opts) {
     if (movingAway) { e.preventDefault(); e.stopPropagation(); moveTiroir(movingAway); return; }
     var acting = t.closest('.sheaf-act');
     if (acting && !acting.disabled) { e.preventDefault(); e.stopPropagation(); act(acting); return; }
+    var lo = t.closest('.sheaf-laptops-open');
+    if (lo) { e.preventDefault(); e.stopPropagation(); laptopsToggle(); return; }
+    var lr = t.closest('.sheaf-laptop-revoke');
+    if (lr && !lr.disabled) { e.preventDefault(); e.stopPropagation(); laptopRevoke(lr); return; }
+    var lc = t.closest('.sheaf-laptop-copy');
+    if (lc) { e.preventDefault(); e.stopPropagation(); laptopCopy(lc); return; }
     var switching = t.closest('.sheaf-viewswitch');
     if (switching) { e.preventDefault(); e.stopPropagation(); if (opts.setView) opts.setView(switching.dataset.view); return; }
     var sharing = t.closest('.sheaf-share');
@@ -561,9 +697,10 @@ function create(ROOT, opts) {
   }
   ROOT.addEventListener('click', onClick, true);
   filter.addEventListener('input', show);
+  lpanel.querySelector('.sheaf-laptop-form').addEventListener('submit', function (e) { e.preventDefault(); laptopMake(e.currentTarget); });
   show();
   return {
-    unmount: function () { gone = true; if (handle) handle.unmount(); handle = null; ROOT.removeEventListener('click', onClick, true); },
+    unmount: function () { gone = true; lline.textContent = ''; if (handle) handle.unmount(); handle = null; ROOT.removeEventListener('click', onClick, true); },
     dirty: function () { return !!handle && handle.dirty(); },
     failed: function (text) { say(text); },
   };

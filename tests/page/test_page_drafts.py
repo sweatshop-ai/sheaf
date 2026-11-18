@@ -5,7 +5,7 @@ import re
 import pytest
 
 from helpers import comment
-from pagehelp import clock_at, open_box, P1, P2, T0, at, draft_key, mark, set_kept, reloaded, select, toasted, toasts_to_the_end, type_at_end, until
+from pagehelp import settled, clock_at, open_box, P1, P2, T0, at, draft_key, mark, set_kept, reloaded, select, toasted, toasts_to_the_end, type_at_end, until
 from sheafmd import comments as rdc
 
 pytestmark = pytest.mark.page
@@ -303,6 +303,7 @@ def test_a_draft_that_is_offered_is_not_overwritten_or_removed_by_what_is_typed_
     assert d and "plums" in d["edits"][0]["html"], "the offered draft was overwritten or removed"
     page.click("#rd-notice button[data-d=restore]")
     until(lambda: "and plums" in lost_edit.site.file.read_text(), what="the restored edit")
+    settled(page)
 
 
 def test_restore_with_a_kept_comment_on_screen_reloads_and_the_kept_comment_comes_back(lost_edit, context):

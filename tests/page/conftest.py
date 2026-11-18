@@ -16,7 +16,7 @@ import pytest
 
 from agent_fakes import PID, FakeClaude, Peer, write_record
 from helpers import PLAN
-from pagehelp import DOC, PageStalled, close_context, launch_chromium, new_context, stalls_after, unavailable, use_pump
+from pagehelp import DOC, PageStalled, close_context, landed, launch_chromium, new_context, stalls_after, unavailable, use_pump
 from sheafmd import paths
 from sheafmd.agents.base import Target
 from sheafmd.agents.claude_code import proc_start
@@ -179,7 +179,10 @@ def touch_tab(chromium, site):
 def tab(context, site):
     t = Tab(context.new_page(), site)
     yield t
-    assert t.errors == [], "the page raised script errors"
+    try:
+        landed(t.page)
+    finally:        # a reload that does not land does not hide the script errors the page raised
+        assert t.errors == [], "the page raised script errors"
 
 
 # ── the journal of the event stream (ticket 100) ───────────────────────────────────────────────────────────

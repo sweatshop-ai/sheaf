@@ -36,3 +36,14 @@ color:inherit;background:transparent;border:1px solid var(--ss-line);border-radi
 .sheaf-sheaf .sheaf-crumb{color:var(--ss-muted)}
 .sheaf-sheaf .sheaf-doc-body{flex:1;min-height:0;position:relative}
 .sheaf-sheaf .sheaf-session-link{font:inherit;color:var(--ss-on);background:none;border:0;padding:0;text-decoration:underline;cursor:pointer}
+.sheaf-sheaf .sheaf-views{display:flex;gap:12px;margin-bottom:10px}
+.sheaf-sheaf .sheaf-laptops-open[aria-expanded=true],.sheaf-sheaf .sheaf-viewswitch.on{font-weight:600}
+.sheaf-sheaf .sheaf-main.laptops>:not(.sheaf-views):not(.sheaf-laptops){display:none}
+.sheaf-sheaf .sheaf-laptops[hidden]{display:none}
+.sheaf-sheaf .sheaf-laptop-list{list-style:none;margin:8px 0;padding:0}
+.sheaf-sheaf .sheaf-laptop-row,.sheaf-sheaf .sheaf-laptop-none{padding:6px 0;border-bottom:1px solid var(--ss-line)}
+.sheaf-sheaf .sheaf-laptop-seen,.sheaf-sheaf .sheaf-laptops-intro,.sheaf-sheaf .sheaf-laptop-none{color:var(--ss-muted)}
+.sheaf-sheaf .sheaf-laptop-input{width:100%;max-width:260px;margin-right:6px;padding:5px 8px;font:inherit;color:inherit;background:transparent;border:1px solid var(--ss-line);border-radius:6px}
+.sheaf-sheaf .sheaf-laptop-connect,.sheaf-sheaf .sheaf-laptop-copy,.sheaf-sheaf .sheaf-laptop-revoke{padding:3px 10px;border:1px solid var(--ss-line);border-radius:999px}
+.sheaf-sheaf .sheaf-laptop-made{margin-top:12px}
+.sheaf-sheaf .sheaf-laptop-line{display:block;margin:6px 0;padding:8px;border:1px solid var(--ss-line);border-radius:6px;font:12px/1.4 ui-monospace,monospace;user-select:all;word-break:break-all}

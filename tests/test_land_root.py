@@ -19,6 +19,7 @@ def member(id, email, short="", private_root=""):
 class FakeRepos:
     def __init__(self, clone, dest):
         self.answer, self.dest, self.calls, self.queue = {"clone": clone, "commit_known": True}, dest, [], []
+        self.rest, self.rest_refused, self.settled_for = [], {}, []
 
     busy, settle_ok = False, True
 
@@ -39,10 +40,25 @@ class FakeRepos:
         return self.moved
 
     def page_text(self, repo, path, commit):
+        repos_mod._clean_path(path)         # as the real one: a markdown page's path, never `.sheaf.toml`
+        return self._show(commit, path)
+
+    def root_toml(self, repo, commit):
+        return self._show(commit, ".sheaf.toml")
+
+    def _show(self, commit, path):
         r = subprocess.run(["git", "-C", str(self.dest), "show", f"{commit}:{path}"], capture_output=True, text=True)
         return r.stdout if r.returncode == 0 else None
 
-    def settle(self, seconds=120.0):
+    def report_rest(self, repo, commit, owned, privates=()):
+        self.rest.append((repo, commit, [(m, p) for m, p in owned]))
+        for member, path in owned:
+            if path not in self.rest_refused:
+                self.queue.append((member, repo, path, commit))
+        return dict(self.rest_refused)
+
+    def settle(self, seconds=120.0, repo=None):
+        self.settled_for.append(repo)
         if self.settle_ok and self.busy:
             self.busy = False
             self._settled()
@@ -51,7 +67,12 @@ class FakeRepos:
     def _settled(self):
         pass
 
+    sleep_fails = 0
+
     def sleep_moved(self, repo, to):
+        if self.sleep_fails:
+            self.sleep_fails -= 1
+            return False
         if self.busy:
             return False            # a report is being settled: the caller asks again
         self.slept.append((repo, to))
@@ -122,7 +143,8 @@ def test_a_report_is_made_for_each_owned_page_so_each_keeps_the_owner_its_front_
     h = hub(clone)
     incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None), ("b.md", "bob@example.com", None),
                                 ("c.md", "nobody@example.com", None)))
-    assert [(who, path) for who, _, path, *_ in h.repos.calls] == [("al", "a.md"), ("bob", "b.md")]
+    assert [(who, path) for who, _, path, *_ in h.repos.calls] == [("al", "a.md")]      # the first one clones; the rest are queued whole
+    assert h.repos.rest == [("o/r", git(clone, "rev-parse", "dev"), [("bob", "b.md")])]
 
 
 def test_every_owned_page_has_its_row_settled_before_any_page_lands(clone):
@@ -314,6 +336,9 @@ class Versions:
     def __init__(self, fail=False, before=()):
         self.puts, self.fail, self.before, self.taken_back = [], fail, list(before), []
 
+    def stamps(self, address):
+        return {}
+
     def put(self, address, text):
         if self.fail:
             raise OSError("disk full")
@@ -322,19 +347,25 @@ class Versions:
     def texts(self, address):
         return list(self.before)
 
-    def take_back(self, address, before, made):
+    def take_back(self, address, before, made, stamps=None):
         self.taken_back.append((address, list(before), list(made)))
 
 
 class Writes:
     def __init__(self, before=()):
-        self.carried, self.restored, self.before = [], [], list(before)
+        self.carried, self.restored, self.before, self.made, self.took_back = [], [], list(before), [], []
 
     def lines(self, address):
         return list(self.before)
 
-    def carry(self, address, lines, came_from, by):
+    def carry(self, address, lines, came_from, by, made=None):
         self.carried.append((address, lines, came_from, by))
+        if made is not None:
+            made.append("carried line")
+            self.made = made
+
+    def take_back(self, address, made):
+        self.took_back.append((address, list(made)))
 
     def restore(self, address, kept):
         self.restored.append((address, list(kept)))
@@ -425,7 +456,7 @@ def test_a_failing_store_leaves_nothing_and_answers_failed_for_that_page(clone):
     b["pages"][0]["versions"] = [{"text": "# old\n"}]
     assert incoming.land_root(h, b) == (200, {"pages": {"a.md": {"ok": False, "why": "failed"}}})
     assert h.repos.rows == {("o/r", "a.md"): ("al", b["tip"], {})}      # the row the report made, and no more
-    assert h.versions.taken_back == [("o--r/a.md", [], ["# old\n"])] and h.writes.restored == [("o--r/a.md", [])]
+    assert h.versions.taken_back == [("o--r/a.md", [], ["# old\n"])] and h.writes.took_back == [("o--r/a.md", [])] and h.writes.restored == []
 
 
 def test_a_failed_landing_restores_the_row_the_page_had_and_is_not_remembered(clone):
@@ -509,7 +540,7 @@ def test_a_page_that_comes_back_keeps_its_prior_versions_and_pins_when_its_landi
         real.put(address, text)
     pinned = real.pin(address, "# pinned\n")
     before = real.texts(address)
-    h.writes.carry = lambda *a: (_ for _ in ()).throw(OSError("disk full"))
+    h.writes.carry = lambda *a, **k: (_ for _ in ()).throw(OSError("disk full"))
     b = body(clone, ("a.md", "alice@example.com", None))
     b["pages"][0]["versions"] = [{"text": "# two\n"}, {"text": "# from there\n"}]
     assert incoming.land_root(h, b) == (200, {"pages": {"a.md": {"ok": False, "why": "failed"}}})
@@ -525,20 +556,11 @@ def test_a_page_that_comes_back_keeps_its_prior_versions_when_the_incoming_ones_
     prior = [f"# prior {n}\n" for n in range(hub_state.VERSIONS_KEPT)]
     for text in prior:
         real.put(address, text)
-    h.writes.carry = lambda *a: (_ for _ in ()).throw(OSError("disk full"))
+    h.writes.carry = lambda *a, **k: (_ for _ in ()).throw(OSError("disk full"))
     b = body(clone, ("a.md", "alice@example.com", None))
     b["pages"][0]["versions"] = [{"text": f"# incoming {n}\n"} for n in range(10)]
     incoming.land_root(h, b)
     assert sorted(real.texts(address)) == sorted(prior)
-
-
-def test_a_failed_landing_gives_the_write_log_lines_the_address_had_back(clone):
-    h = land_hub(clone, fail=True)
-    h.writes.before = ["kept line"]
-    b = body(clone, ("a.md", "alice@example.com", None))
-    b["pages"][0]["versions"] = [{"text": "# old\n"}]
-    incoming.land_root(h, b)
-    assert h.writes.restored == [("o--r/a.md", ["kept line"])]
 
 
 def test_the_report_is_settled_before_any_page_lands_so_it_cannot_overwrite_a_landed_row(clone):
@@ -583,7 +605,7 @@ def test_a_version_written_at_the_address_during_the_landing_survives_its_failur
     address = "o--r/a.md"
     real.put(address, "# prior\n")
 
-    def meanwhile(*a):
+    def meanwhile(*a, **k):
         real.put(address, "# written meanwhile\n")
         raise OSError("disk full")
 
@@ -592,3 +614,109 @@ def test_a_version_written_at_the_address_during_the_landing_survives_its_failur
     b["pages"][0]["versions"] = [{"text": "# from there\n"}]
     incoming.land_root(h, b)
     assert sorted(real.texts(address)) == sorted(["# prior\n", "# written meanwhile\n"])
+
+
+# ── the fix round of the fifth review (ticket 21 part 2b) ────────────────────
+
+def test_the_root_toml_is_read_through_the_root_file_and_not_a_markdown_page_path(clone):
+    """`FakeRepos.page_text` refuses a path that is not a page's, as `Repos.page_text` does: the toml cannot go through it."""
+    h = hub(clone)
+    with pytest.raises(repos_mod.Refused):
+        h.repos.page_text("o/r", ".sheaf.toml", git(clone, "rev-parse", "dev"))
+    assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None))) == (200, {"pages": {"a.md": {"ready": True}}})
+
+
+def test_a_repo_named_in_mixed_case_is_cleaned_once_for_everything_the_check_asks(clone):
+    h = moved_hub(clone)
+    status, _ = incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None), repo="O/R"), peer=THERE)
+    assert status == 200 and h.repos.unmoved == ["o/r"]
+    assert {repo for _, repo, *_ in h.repos.calls} == {"o/r"} and {repo for repo, *_ in h.repos.rest} <= {"o/r"}
+
+
+def test_a_repo_that_is_no_repo_name_is_refused_whole(clone):
+    assert incoming.check_root(hub(clone), body(clone, ("a.md", "alice@example.com", None), repo="not a repo")) == (409, {"why": "refused"})
+
+
+def test_the_owned_pages_after_the_first_are_reported_together_and_none_is_dropped(clone):
+    h = hub(clone)
+    pages = [("a.md", "alice@example.com", None)] + [(f"p{n}.md", "bob@example.com", "0" * 40) for n in range(200)]
+    incoming.check_root(h, body(clone, *pages))
+    (repo, commit, owned), = h.repos.rest
+    assert len(owned) == 200 and {m for m, _ in owned} == {"bob"}
+
+
+def test_a_page_whose_owner_may_not_have_the_clone_is_refused_and_the_others_go_on(clone):
+    h = hub(clone)
+    h.repos.rest_refused = {"b.md": repos_mod.PRIVATE_ROOT}
+    status, answer = incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None), ("b.md", "bob@example.com", None)))
+    assert answer["pages"] == {"a.md": {"ready": True}, "b.md": {"ok": False, "why": "private_root"}}
+
+
+def test_the_check_waits_for_this_repos_thread_only(clone):
+    h = land_hub(clone)
+    incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)))
+    assert h.repos.settled_for == ["o/r"]
+
+
+def test_a_root_that_cannot_go_back_to_sleep_at_once_is_put_to_sleep_when_asked_again(clone):
+    set_toml(clone, 'tiroir = "https://other.example"\n')
+    h = moved_hub(clone)
+    h.repos.sleep_fails = 1
+    assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)), peer=THERE) == (409, {"why": "not_named"})
+    assert h.repos.slept == [("o/r", THERE)]
+
+
+def test_a_root_that_will_not_sleep_is_still_refused_not_named(clone):
+    set_toml(clone, 'tiroir = "https://other.example"\n')
+    h = moved_hub(clone)
+    h.repos.sleep_fails = 99
+    assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)), peer=THERE) == (409, {"why": "not_named"})
+    assert h.repos.slept == []
+
+
+class InsideVersions(Versions):
+    pass
+
+
+def hub_with_root(clone, store, strict=False):
+    h = land_hub(clone)
+    root = SimpleNamespace(id="r1", path=clone, name="o--r")
+    h.roots = SimpleNamespace(get=lambda name: root if name == "o--r" else None)
+    h.private_roots = {"r1": "x"} if strict else {}
+    h._versions_of = lambda r, named="", strict=False: store
+    return h
+
+
+def test_the_versions_of_a_page_land_in_the_store_the_roots_page_reads(clone):
+    store = InsideVersions()
+    h = hub_with_root(clone, store)
+    b = body(clone, ("a.md", "alice@example.com", None))
+    b["pages"][0]["versions"] = [{"text": "# one\n"}]
+    incoming.land_root(h, b)
+    assert [a for a, _ in store.puts] == ["o--r/a.md"] and h.versions.puts == []
+
+
+def test_a_private_roots_versions_land_nowhere_and_the_page_still_lands(clone):
+    h = hub_with_root(clone, None, strict=True)
+    b = body(clone, ("a.md", "alice@example.com", None))
+    b["pages"][0]["versions"] = [{"text": "# one\n"}]
+    assert incoming.land_root(h, b)[1]["pages"]["a.md"]["ok"] is True
+    assert h.versions.puts == []
+
+
+def test_a_failed_landing_takes_the_versions_back_from_the_store_it_wrote_to(clone):
+    store = InsideVersions()
+    h = hub_with_root(clone, store)
+    h.writes.carry = lambda *a, **k: (_ for _ in ()).throw(OSError("disk full"))
+    b = body(clone, ("a.md", "alice@example.com", None))
+    b["pages"][0]["versions"] = [{"text": "# one\n"}]
+    incoming.land_root(h, b)
+    assert len(store.taken_back) == 1 and h.versions.taken_back == []
+
+
+def test_a_failed_landing_takes_back_the_write_log_lines_it_carried_and_no_others(clone):
+    h = land_hub(clone, fail=True)
+    b = body(clone, ("a.md", "alice@example.com", None))
+    b["pages"][0]["versions"] = [{"text": "# old\n"}]
+    incoming.land_root(h, b)
+    assert h.writes.took_back == [("o--r/a.md", h.writes.made)] and h.writes.restored == []

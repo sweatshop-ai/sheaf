@@ -116,10 +116,11 @@ class WriteLog:
             self._append(line)
         return line
 
-    def carry(self, address: str, lines: list, came_from: str, by: str) -> int:
+    def carry(self, address: str, lines: list, came_from: str, by: str, made: list | None = None) -> int:
         """The Write log lines of a page moved here (ticket 20), as they were, under its new `address`, each kept as the log
         keeps one (cleaned); then one line of this tiroir's own that says it came by transfer, from `came_from`. Never raises, as
-        `add` does not. Returns how many of the carried lines were kept."""
+        `add` does not. Returns how many of the carried lines were kept. Each line it writes is also put in `made` as it goes, so
+        a caller whose landing fails, even half way through, can `take_back` those and no others."""
         n = 0
         with self._lock:
             held = Counter(self._lines.get(address, ()))      # what the address kept before this call: a carried line matches one of these, once
@@ -137,9 +138,30 @@ class WriteLog:
                     continue
                 kept.append(line)
                 self._append(line)
+                if made is not None:
+                    made.append(line)
             n += 1
-        self.add(address, by, "tiroir", "transfer", host=came_from)
+        added = self.add(address, by, "tiroir", "transfer", host=came_from)
+        if made is not None:
+            made.append(added)
         return n
+
+    def take_back(self, address: str, made: list) -> None:
+        """The lines `made` (as `carry` gave them) are taken back from `address`, one occurrence each, and nothing else: a line
+        someone wrote there meanwhile stays. The file is append-only: a `retracted` line takes back what it holds for `address`,
+        then what is left is written again, in one write, under the lock a write takes."""
+        with self._lock:
+            kept = list(self._lines.get(address, ()))
+            for line in made:
+                if line in kept:
+                    kept.remove(line)
+            marker = Line(address=address, time=self._now(), writer="", place="", via=RETRACTED)
+            self._append(marker, *kept)
+            if kept:
+                self._lines[address] = deque(kept, maxlen=self._keep)
+            else:
+                self._lines.pop(address, None)
+            self._own.pop(address, None)
 
     @staticmethod
     def _append(*lines: Line):

@@ -1064,18 +1064,19 @@ class Handler:
         request = {k: v for k, v in req.body.items() if k not in ("doc", "as", "role", "side")}
         return self._relayed(req, client, "comment", lambda: clients.comment(client, req.member, rest, request))
 
-    def _with_team(self, op: str, body: str, doc: str) -> str:
+    def _with_team(self, op: str, body: str, doc: str, me: str) -> str:
         """The page's Team comments (9.11) told beside the client's own `comments`: in the doc state, in the mount's config and in the
-        meta block of the page, never merged into the client's list. The client hub's 200 is the gate: the member may open it."""
+        meta block of the page, never merged into the client's list. The client hub's 200 is the gate: the member may open it. `team_me` is the
+        member's name on this hub, which signs a Team comment: the page's own `me` is the one the client tiroir gave."""
         team = self.hub.team.list(doc)
         if op == "page":
-            return _META_RE.sub(lambda m: m.group(1) + json.dumps({**json.loads(m.group(2)), "team": team}).replace("<", "\\u003c")
+            return _META_RE.sub(lambda m: m.group(1) + json.dumps({**json.loads(m.group(2)), "team": team, "team_me": me}).replace("<", "\\u003c")
                                      + m.group(3), body)
         try:
             got = json.loads(body)
         except ValueError:
             return body
-        (got["config"] if op == "mount" else got)["team"] = team
+        (got["config"] if op == "mount" else got).update(team=team, team_me=me)
         return json.dumps(got)
 
     def _relayed(self, req: Req, client: str, op: str, ask, doc: str | None = None) -> Response:
@@ -1099,7 +1100,7 @@ class Handler:
         if op == "doc" and status == 200:     # what an older client tiroir still says of its agents is not shown here (9.9)
             body = self._read_only_doc(body)
         if status == 200 and doc is not None and self.hub.team is not None:
-            body = self._with_team(op, body, doc)
+            body = self._with_team(op, body, doc, req.member.name)
         if env.get("type") == "html":
             own = auth.new_nonce()           # the client's nonce is never this origin's: only its own page script runs here
             return _html(status, readthrough.adopt(body, env.get("nonce"), own), own, kept)

@@ -3,6 +3,7 @@ in a closed shadow root from `/_/mount?sheaf=1` (data, never markup) and sheaf.j
 folder that narrows the table, a filter on titles, and a click on a row that takes the pane for the rectoverso under a
 "← Sheaf" button. Every request is answered by the hub's proxy handler as Bea. The page's clock is Playwright's."""
 import json
+import re
 import subprocess
 
 import pytest
@@ -451,3 +452,80 @@ def test_rename_folder_onto_a_taken_name_says_which_page_and_moves_nothing(mount
     until(lambda: mounted.js("const s = root.querySelector('.sheaf-said'); return !!s && !s.hidden && s.textContent.includes('a.md');"),
           what="the refusal names the page")
     assert (root.path / "old" / "a.md").exists() and (root.path / "other" / "a.md").exists()
+
+
+# ── Connect a laptop, in the Sheaf (ticket 33) ──────────────────────────────
+
+TOKEN = re.compile(r"sheaf_mcp_[A-Za-z0-9_-]{43}")
+
+
+def laptops_open(m):
+    m.click(".sheaf-laptops-open")
+    until(lambda: m.js("return !root.querySelector('.sheaf-laptops').hidden;"), what="the Laptops panel")
+
+
+def laptop_names(m):
+    return m.js("return Array.from(root.querySelectorAll('.sheaf-laptop-row .sheaf-laptop-name')).map((n) => n.textContent);")
+
+
+def connect_named(m, name):
+    m.js("const i = root.querySelector('.sheaf-laptop-input'); i.value = arg; i.dispatchEvent(new Event('input'));", name)
+    m.click(".sheaf-laptop-connect")
+
+
+def test_connect_a_laptop_names_it_and_shows_one_line_once(mounted):
+    seen = []
+    mounted.page.on("console", lambda msg: seen.append(msg.text))
+    laptops_open(mounted)
+    connect_named(mounted, "Work MacBook")
+    until(lambda: mounted.js("return !root.querySelector('.sheaf-laptop-made').hidden;"), what="the line")
+    line = mounted.js("return root.querySelector('.sheaf-laptop-line').textContent;")
+    assert re.fullmatch(r"sheaf connect \S+ sheaf_mcp_[A-Za-z0-9_-]{43}", line), line
+    until(lambda: laptop_names(mounted) == ["Work MacBook"], what="the laptop in the list")
+    assert not any(TOKEN.search(t) for t in seen), "the token went to the console"
+
+
+def test_the_token_is_not_kept_once_the_member_leaves_the_panel(mounted):
+    laptops_open(mounted)
+    connect_named(mounted, "Work MacBook")
+    until(lambda: mounted.js("return !root.querySelector('.sheaf-laptop-made').hidden;"), what="the line")
+    token = TOKEN.search(mounted.js("return root.querySelector('.sheaf-laptop-line').textContent;")).group(0)
+    kept = "return [root.innerHTML, root.textContent, document.documentElement.outerHTML, location.href, JSON.stringify(Object.entries(localStorage)), JSON.stringify(Object.entries(sessionStorage))].join('|');"
+    mounted.click(".sheaf-laptops-open")                                   # the same switch closes the panel
+    assert token not in mounted.js(kept)
+    laptops_open(mounted)
+    assert mounted.js("return root.querySelector('.sheaf-laptop-made').hidden;") is True
+    mounted.click('.sheaf-viewswitch[data-view=""]')                       # the Sheaf is drawn again
+    until(lambda: mounted.js("return !!root.querySelector('.sheaf-row') && root.querySelector('.sheaf-laptops').hidden;"), what="the Sheaf again")
+    assert token not in mounted.js(kept)
+
+
+def test_the_list_holds_the_members_laptops_by_name_and_never_a_token(mounted, pages):
+    from helpers import CAL
+    assert pages.post("/_/laptops", {"name": "Old MacBook"}, member=BEA).status == 200
+    assert pages.post("/_/laptops", {"name": "Cal's laptop"}, member=CAL).status == 200
+    laptops_open(mounted)
+    until(lambda: laptop_names(mounted) == ["Old MacBook"], what="the member's laptops")
+    assert not TOKEN.search(mounted.js("return root.innerHTML + root.textContent;"))
+
+
+def test_revoke_asks_a_second_click_then_the_laptop_is_gone(mounted, pages):
+    assert pages.post("/_/laptops", {"name": "Old MacBook"}, member=BEA).status == 200
+    laptops_open(mounted)
+    until(lambda: laptop_names(mounted) == ["Old MacBook"], what="the laptop")
+    mounted.click(".sheaf-laptop-revoke")
+    assert laptop_names(mounted) == ["Old MacBook"]
+    assert "Really revoke" in mounted.js("return root.querySelector('.sheaf-laptop-revoke').textContent;")
+    mounted.click(".sheaf-laptop-revoke")
+    until(lambda: laptop_names(mounted) == [], what="the laptop gone")
+    assert pages.get("/_/laptops", member=BEA).json()["laptops"] == []
+
+
+def test_a_refusal_of_the_hub_is_shown_and_no_line_is_drawn(mounted, pages):
+    assert pages.post("/_/laptops", {"name": "Old MacBook"}, member=BEA).status == 200
+    laptops_open(mounted)
+    until(lambda: laptop_names(mounted) == ["Old MacBook"], what="the laptop")
+    connect_named(mounted, "old macbook")
+    until(lambda: "already have a laptop" in mounted.page.evaluate("window.__root.querySelector('.sheaf-said').textContent"),
+          what="the hub's words")
+    assert mounted.js("return root.querySelector('.sheaf-laptop-made').hidden;") is True

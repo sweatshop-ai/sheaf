@@ -618,6 +618,7 @@ def close_context(context):
     fixtures) is waited for first, with the page it brings: closing the context under it hung the driver (flake e2,
     4 of 85 CI runs). A navigation that does not land fails the test, after the context is closed."""
     stuck = []
+    raising = False
     try:
         for page in context.pages:
             if leaving(page):
@@ -625,11 +626,14 @@ def close_context(context):
                     landed_page(page)
                 except Exception:       # the wait ran out; a PageStalled is not an Exception and passes
                     stuck.append(page.url)
+    except BaseException:
+        raising = True
+        raise
     finally:        # a page that stopped answering (PageStalled) still has its context closed
         try:
             _close_context(context)
         except PageStalled:
-            if not stuck and sys.exc_info()[0] is None:
+            if not stuck and not raising:       # a close that hangs fails the test; one already failing keeps its own failure
                 raise
     if stuck:
         pytest.fail(f"the test ended with a navigation that did not land on {stuck}: wait for the page to load "

@@ -211,6 +211,24 @@ def test_a_route_that_never_comes_off_cannot_hold_the_teardown_of_its_context(mo
     assert time.monotonic() - began < 10, "close_context outlasted its bound"
 
 
+class HangingClose:
+    """A context with no page whose `close` never answers (flake e2: the driver hung under a reload)."""
+
+    pages = []
+
+    def unroute_all(self, **kwargs):
+        pass
+
+    def close(self):
+        threading.Event().wait(60)
+
+
+def test_a_context_that_will_not_close_fails_the_teardown_instead_of_passing_it(monkeypatch):
+    monkeypatch.setattr(pagehelp, "CLOSE_BOUND", 1.0)
+    with pytest.raises(pagehelp.PageStalled, match="the context to close"):
+        close_context(HangingClose())
+
+
 def test_a_launch_on_ci_of_an_engine_the_test_starts_itself_fails_with_the_whole_message_and_the_report(tmp_path):
     exe = dies_by(tmp_path, int(signal.SIGSEGV))
     chromium = FakeBrowserType(str(exe))

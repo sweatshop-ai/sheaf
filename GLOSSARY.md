@@ -182,12 +182,12 @@ _Avoid_: Move to, reassign, client, transfer
 
 **Move** (of a rectoverso):
 The owner putting a loose rectoverso in another folder of its root, from the Sheaf or by their agent; renaming a folder moves each rectoverso in it. A loose rectoverso can also move to another tiroir where its owner has an account; it stays the owner's and arrives as theirs alone, its Share left behind. A repo rectoverso is moved by git, not from the Sheaf, and goes to another tiroir only with its whole root. The old address forwards to the new one. A folder exists only while a rectoverso is in it. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` tickets 20 and 21; built in #405 within a root, #411 and #422 to another tiroir; a root's move is partly built, see Root's tiroir.)
-Built for a loose rectoverso within its root (SPEC 9.11); a move to another tiroir is not.
+Built for a loose rectoverso within its root (SPEC 9.11) and to another tiroir.
 _Avoid_: Move to, refile, rename
 
 **Forward** (of an address):
 The hub's record that an old address of a rectoverso now leads to its new one, after a Move, a git rename or a move to another tiroir. It never expires; links that name the old address are not rewritten. Across tiroirs it leads only someone who can sign in to the new one; an agent at the old address is told where the rectoverso went and what to do. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` tickets 20 and 21; built in #405, #429, #411 and #422.)
-Built for a Move within a root (SPEC 9.11): the rectoverso's owner is led by it, no one else; a stranger is answered as for an address never used. A git rename and a move to another tiroir do not write one yet.
+Built for a Move within a root (SPEC 9.11), a git rename and a move to another tiroir: the rectoverso's owner is led by it, no one else; a stranger is answered as for an address never used.
 _Avoid_: redirect, alias
 
 **One-off action**:

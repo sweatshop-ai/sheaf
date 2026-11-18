@@ -94,6 +94,8 @@ var create = function (ROOT, CFG, opts) {
   var COMMENTS = CFG.comments || [];
   var TEAM_ME = typeof CFG.team_me === 'string' ? CFG.team_me : null;   // the member's name on the agency hub, which signs a Team comment (CFG.me is the client hub's)
   var TEAM = Array.isArray(CFG.team) ? CFG.team : null;     // a client page's Team comments (SPEC 9.11), told beside the client's own; null on any other page
+  var teamForms = {};           // id -> {key, kind: 'reply' | 'edit', text}: the forms open under Team comments, one per comment, each with its own text
+  var teamAsk = null;           // the key of the Team comment whose delete waits for a second click
   var byId = {};
   COMMENTS.forEach(function (c) { byId[c.id] = c; });
 
@@ -2221,7 +2223,7 @@ var create = function (ROOT, CFG, opts) {
     if (missing) return false;
     var before = counts();
     COMMENTS = d.comments || [];
-    if (TEAM !== null && Array.isArray(d.team)) TEAM = d.team;
+    if (TEAM !== null && Array.isArray(d.team)) setTeam(d.team);
     byId = {};
     COMMENTS.forEach(function (c) { byId[c.id] = c; });
     CFG.malformed = d.malformed || [];
@@ -2995,18 +2997,33 @@ var create = function (ROOT, CFG, opts) {
   });
   // A Team comment's own actions (SPEC 9.11): the hub keeps the rules, the page offers what it would accept. Reply and resolve are any
   // member's; edit is the author's; delete is the author's while no one else has replied, and asks twice.
-  var teamForm = null;          // {id, kind: 'reply' | 'edit'}: the open form under a Team comment
-  var teamAsk = null;           // the id of the Team comment whose delete waits for a second click
+  // A comment is told apart by its id and its time: the hub numbers a new comment after the highest, so an id is free again once that
+  // comment is deleted, and a form or a waiting delete must not move on to the comment that takes it.
+  function teamKey(c) { return c.id + '|' + c.at; }
+  function keepTeamText() {     // what is typed in the open forms, before the panel is redrawn or replaced
+    Object.keys(teamForms).forEach(function (id) {
+      var ta = panel.querySelector('.rd-team[data-team="' + id + '"] textarea');
+      if (ta) teamForms[id].text = ta.value;
+    });
+  }
+  function setTeam(list) {      // the Team list is replaced: a form or a waiting delete of a comment that is gone, or is another now, goes
+    TEAM = list;
+    var live = {};
+    TEAM.forEach(function (c) { live[c.id] = teamKey(c); });
+    Object.keys(teamForms).forEach(function (id) { if (live[id] !== teamForms[id].key) delete teamForms[id]; });
+    if (teamAsk !== null && !TEAM.some(function (c) { return teamKey(c) === teamAsk; })) teamAsk = null;
+  }
   function teamActions(c) {
     var btn = function (act, label) { return '<button data-act="' + act + '">' + label + '</button>'; };
-    if (teamForm && teamForm.id === c.id) {
-      return '<div class="rd-acts"><textarea rows="3">' + esc(teamForm.text !== undefined ? teamForm.text : teamForm.kind === 'edit' ? c.body || '' : '') + '</textarea>' +
-             btn('send', teamForm.kind === 'edit' ? 'Save' : 'Reply') + btn('cancel', 'Cancel') + '</div>';
+    var form = teamForms[c.id];
+    if (form) {
+      return '<div class="rd-acts"><textarea rows="3">' + esc(form.text !== undefined ? form.text : form.kind === 'edit' ? c.body || '' : '') + '</textarea>' +
+             btn('send', form.kind === 'edit' ? 'Save' : 'Reply') + btn('cancel', 'Cancel') + '</div>';
     }
     var h = btn('reply', 'Reply') + btn('status', c.status === 'resolved' ? 'Reopen' : 'Resolve');
     if (TEAM_ME !== null && c.by === TEAM_ME) {
       h += btn('edit', 'Edit');
-      if (!(c.replies || []).some(function (r) { return r.by !== c.by; })) h += btn('delete', teamAsk === c.id ? 'Confirm delete' : 'Delete');
+      if (!(c.replies || []).some(function (r) { return r.by !== c.by; })) h += btn('delete', teamAsk === teamKey(c) ? 'Confirm delete' : 'Delete');
     }
     return '<div class="rd-acts">' + h + '</div>';
   }
@@ -3017,29 +3034,31 @@ var create = function (ROOT, CFG, opts) {
     var c = TEAM.filter(function (x) { return x.id === id; })[0];
     if (!c) return;
     if (act !== 'delete') teamAsk = null;
-    if (act === 'reply' || act === 'edit') { teamForm = { id: id, kind: act }; drawPanel(); var f = panel.querySelector('[data-team="' + id + '"] textarea'); if (f) f.focus(); return; }
-    if (act === 'cancel') { teamForm = null; drawPanel(); return; }
+    if (act === 'reply' || act === 'edit') { keepTeamText(); teamForms[id] = { key: teamKey(c), kind: act }; drawPanel(); var f = panel.querySelector('[data-team="' + id + '"] textarea'); if (f) f.focus(); return; }
+    if (act === 'cancel') { keepTeamText(); delete teamForms[id]; drawPanel(); return; }
     var sent = { op: act, id: id };
     if (act === 'delete') {
-      if (teamAsk !== id) { teamAsk = id; drawPanel(); return; }
+      if (teamAsk !== teamKey(c)) { keepTeamText(); teamAsk = teamKey(c); drawPanel(); return; }
     } else if (act === 'status') {
       sent.status = c.status === 'resolved' ? 'open' : 'resolved';
     } else if (act === 'send') {
       var ta = item.querySelector('textarea'), text = ta ? ta.value.trim() : '';
       if (!text) return;
-      sent.op = teamForm.kind; sent.body = text;
+      if (!teamForms[id]) return;
+      sent.op = teamForms[id].kind; sent.body = text;
     } else return;
     teamBusy = true;
     try {
       var j = await post('/_/comment', sent);
-      TEAM = j.team || [];
-      teamForm = null; teamAsk = null;
+      keepTeamText();
+      if (act === 'send') delete teamForms[id];      // the others' forms and their text stay
+      teamAsk = null;
+      setTeam(j.team || []);
       drawPanel();
     } catch (e) { say(e.message, true); } finally { teamBusy = false; }
   }
   function drawPanel() {
-    var typed = teamForm && panel.querySelector('.rd-team[data-team="' + teamForm.id + '"] textarea');   // that comment's own form: another's text is not carried over     // a redraw (a comments update, a tab) keeps what is being written
-    if (typed) teamForm.text = typed.value;
+    keepTeamText();      // a redraw (a comments update, a tab) keeps what is being written
     var authors = [];
     COMMENTS.forEach(function (c) { if (authors.indexOf(c.by) < 0) authors.push(c.by); });
     var list = COMMENTS.filter(function (c) {
@@ -3404,7 +3423,7 @@ var create = function (ROOT, CFG, opts) {
         if (TEAM !== null && !team) sent.side = 'client';
         var j = await post('/_/comment', sent);
         if (team) {      // the Team verso has no anchor in the text and the client's comments are not touched: only its list is told
-          TEAM = j.team || [];
+          setTeam(j.team || []);
           getSel().removeAllRanges();
           draftsReplace(own);
           closePopover();
@@ -4676,6 +4695,7 @@ var create = function (ROOT, CFG, opts) {
           } catch (y) {}
         }
         var why = x.timedOut ? 'The hub did not answer within 2 minutes; what follows may have been saved all the same. The text is kept here.' : x.message;
+        keepTeamText();      // the Team forms come back with their text when the panel is drawn again
         panel.innerHTML = '<h3>Your unsaved edits</h3><p>' + esc(why) + '</p><pre class="rd-draft"></pre>';
         panel.querySelector('pre').textContent = text;
         panel.dataset.keeps = 'draft';

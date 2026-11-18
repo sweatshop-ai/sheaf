@@ -184,3 +184,74 @@ def test_opening_a_form_on_another_team_comment_does_not_carry_the_first_forms_t
     tab.page.fill("#rd-panel .rd-team textarea", "for the first")
     items.nth(1).locator("button[data-act=reply]").click()
     assert tab.page.locator("#rd-panel .rd-team[data-team=t2] textarea").input_value() == ""
+
+
+T2 = {**TEAM_COMMENT, "id": "t2", "by": "Bo"}
+
+
+def test_a_write_on_one_team_comment_leaves_the_open_form_and_text_of_another_alone(tab, site):
+    told_team(tab.page, [TEAM_COMMENT, T2], [TEAM_COMMENT, {**T2, "status": "resolved"}])
+    team_tab(tab)
+    tab.page.locator("#rd-panel .rd-team[data-team=t1] button[data-act=reply]").click()
+    tab.page.fill("#rd-panel .rd-team[data-team=t1] textarea", "for the first")
+    tab.page.locator("#rd-panel .rd-team[data-team=t2] button[data-act=status]").click()
+    until(lambda: tab.page.locator("#rd-panel .rd-team[data-team=t2] button[data-act=status]").inner_text() == "Reopen", what="the resolve to show")
+    assert tab.page.locator("#rd-panel .rd-team[data-team=t1] textarea").input_value() == "for the first"
+
+
+def test_opening_a_form_on_a_second_team_comment_keeps_the_first_forms_text(tab, site):
+    told_team(tab.page, [TEAM_COMMENT, T2])
+    team_tab(tab)
+    tab.page.locator("#rd-panel .rd-team[data-team=t1] button[data-act=reply]").click()
+    tab.page.fill("#rd-panel .rd-team[data-team=t1] textarea", "for the first")
+    tab.page.locator("#rd-panel .rd-team[data-team=t2] button[data-act=reply]").click()
+    assert tab.page.locator("#rd-panel .rd-team[data-team=t1] textarea").input_value() == "for the first"
+    assert tab.page.locator("#rd-panel .rd-team[data-team=t2] textarea").input_value() == ""
+
+
+def test_a_form_open_on_a_comment_that_was_deleted_does_not_move_to_the_one_that_takes_its_id(tab, site):
+    # the hub numbers a new comment after the highest, so t3 deleted and a new t3 added is one id for two comments
+    t3 = {**TEAM_COMMENT, "id": "t3", "at": "2026-11-17T10:00"}
+    new_t3 = {**t3, "by": "Bo", "at": "2026-11-18T09:00", "body": "another"}
+    told_team(tab.page, [TEAM_COMMENT, t3], [TEAM_COMMENT, new_t3])
+    team_tab(tab)
+    tab.page.locator("#rd-panel .rd-team[data-team=t3] button[data-act=reply]").click()
+    tab.page.fill("#rd-panel .rd-team[data-team=t3] textarea", "for the old one")
+    tab.page.locator("#rd-panel .rd-team[data-team=t1] button[data-act=status]").click()
+    until(lambda: "another" in tab.page.locator("#rd-panel").inner_text(), what="the new t3 in the list")
+    assert tab.page.locator("#rd-panel .rd-team[data-team=t3] textarea").count() == 0
+
+
+def test_a_delete_waiting_for_its_second_click_does_not_move_to_the_comment_that_takes_its_id(tab, site):
+    t3 = {**TEAM_COMMENT, "id": "t3"}
+    new_t3 = {**t3, "at": "2026-11-18T09:00", "body": "another"}
+    told_team(tab.page, [T2, t3], [T2, new_t3])
+    team_tab(tab)
+    delete = tab.page.locator("#rd-panel .rd-team[data-team=t3] button[data-act=delete]")
+    delete.click()
+    assert delete.inner_text() == "Confirm delete"
+    tab.page.locator("#rd-panel .rd-team[data-team=t2] button[data-act=status]").click()
+    until(lambda: "another" in tab.page.locator("#rd-panel").inner_text(), what="the new t3 in the list")
+    assert tab.page.locator("#rd-panel .rd-team[data-team=t3] button[data-act=delete]").inner_text() == "Delete"
+
+
+def test_the_text_of_a_team_form_survives_the_panel_of_a_refused_draft(tab, context, site):
+    from test_page_drafts import lose_an_edit
+    lose_an_edit(tab)
+    page = context.new_page()
+    told_team(page, [TEAM_COMMENT])
+    page.route("**/_/save", lambda route: route.fulfill(status=500, content_type="application/json", body='{"error": "refused"}'))
+    page.goto(tab.site.url)
+    page.wait_for_selector("#rd-notice button[data-d=restore]")
+    page.click("#rd-menu-btn")
+    page.click("#rd-show")
+    page.wait_for_selector("#rd-panel.open")
+    page.click("#rd-panel button[data-tab=team]")
+    page.click("#rd-panel .rd-team button[data-act=reply]")
+    page.fill("#rd-panel .rd-team textarea", "half a thought")
+    page.click("#rd-notice button[data-d=restore]")
+    page.wait_for_selector("#rd-panel .rd-draft")
+    page.click("#rd-menu-btn")
+    page.click("#rd-show")
+    page.click("#rd-panel button[data-tab=team]")
+    assert page.locator("#rd-panel .rd-team textarea").input_value() == "half a thought"

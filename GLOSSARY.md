@@ -111,23 +111,23 @@ A member's page of the rectoversos that wait on someone and the ones in progress
 _Avoid_: catalog, index, dashboard
 
 **Sheaf** (of a member):
-A member's browsable tree of folders holding every rectoverso they may open, with or without an issue, and no status; also the product a member reads, tiroir Sheaf, and its sidebar entry. A folder is where the rectoverso lives: its root, then the root's sub-folders; those another member Shared sit apart, under their owner. Not the List: the List says what waits, the Sheaf says where a rectoverso is. The engine and the laptop command carry the same name. (Named the Catalog 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 06; renamed the Sheaf by the maintainer during ticket 19; not built.)
+A member's browsable tree of folders holding every rectoverso they may open, with or without an issue, and no status; also the product a member reads, tiroir Sheaf, and its sidebar entry. A folder is where the rectoverso lives: its root, then the root's sub-folders; those another member Shared sit apart, under their owner. Not the List: the List says what waits, the Sheaf says where a rectoverso is. The engine and the laptop command carry the same name. (Named the Catalog 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 06; renamed the Sheaf by the maintainer during ticket 19; built in #387; Shared rectoversos in #394.)
 _Avoid_: Catalog, list, library, documents
 
 **Rectoverso**:
-One page as a member reads it: a sheet with two sides, the recto the agent writes and the verso where the member answers. What `sheaf FILE.md` sends and what a row of the Sheaf opens. One word, the same in every language, so dictation keeps it. (Named 2026-11-15 by the maintainer during wayfinder `sheaf-in-open-webui` ticket 19, replacing ticket 15's product name Recto; not built.)
+One page as a member reads it: a sheet with two sides, the recto the agent writes and the verso where the member answers. What `sheaf FILE.md` sends and what a row of the Sheaf opens. One word, the same in every language, so dictation keeps it. (Named 2026-11-15 by the maintainer during wayfinder `sheaf-in-open-webui` ticket 19, replacing ticket 15's product name Recto; built in #384, #387 and #397.)
 _Avoid_: Recto, a sheaf (for one page), document, note
 
 **Verso**:
-The side of a page that holds its Comments, as a member reads it: the agent writes the recto of a rectoverso, the member answers on its verso. A word for the place, not for one comment. (Named 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 15; not built.)
+The side of a page that holds its Comments, as a member reads it: the agent writes the recto of a rectoverso, the member answers on its verso. A word for the place, not for one comment. (Named 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 15; the word is in the code since #384; Team comments, the agency's own verso, built in #410.)
 _Avoid_: back, thread panel
 
 **Root's tiroir**:
-The tiroir every page of a root goes to, named in its root config; a root that names none sends its pages to the person's default tiroir. A root moved to another tiroir takes its pages with it, versions and comments, and their old addresses lead to the new ones. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 04; not built.)
+The tiroir every page of a root goes to, named in its root config; a root that names none sends its pages to the person's default tiroir. A root moved to another tiroir takes its pages with it, versions and comments, and their old addresses lead to the new ones. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 04; partly built: a root's `tiroir` is read by `sheaf FILE.md` since #397, and the pieces of a root's move (the notice, the check, `send_root`, `check_root`, the sleeping clone) are in #416 and #428, but nothing calls them yet, so a root does not move; a loose page's old address forwards since #411 and #422.)
 _Avoid_: binding, target
 
 **Client tiroir**:
-A tiroir that belongs to a client of the agency and holds only what is client-facing. Its users' brains, chats and private pages are theirs alone: no agent and no member of the agency reads them. The agency's members on it are members like any other, never its administrators. (Decided 2026-11-16, wayfinder `sheaf-in-open-webui` ticket 22; not built.)
+A tiroir that belongs to a client of the agency and holds only what is client-facing. Its users' brains, chats and private pages are theirs alone: no agent and no member of the agency reads them. The agency's members on it are members like any other, never its administrators. (Decided 2026-11-16, wayfinder `sheaf-in-open-webui` ticket 22; partly built: the hub's rules in #404, Read-through in #415, Team comments in #410; the accounts on a client tiroir are not built.)
 
 **Read-through**:
 How the agency's tiroir shows a client tiroir's pages: its "Clients" folder asks the client tiroir, over the hub-to-hub channel, for what the signed-in agency member may open there, and shows the answer without keeping any of it. The client tiroir does all the judging, as that member. (Decided 2026-11-16, wayfinder `sheaf-in-open-webui` ticket 23.)
@@ -138,11 +138,11 @@ A comment the agency's members leave on a client tiroir's rectoverso that the cl
 _Avoid_: internal comment, private comment, team note
 
 **Default tiroir** (of a person):
-The one tiroir a person's pages go to when their root names none: Alice's is the agency tiroir, Dave's a client tiroir. Each tiroir has its own Sheaf per member; there is no Sheaf across tiroirs, except that the agency's tiroir shows the client tiroirs' rectoversos its members may open. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 04; the exception 2026-11-16, ticket 22; not built.)
+The one tiroir a person's pages go to when their root names none: Alice's is the agency tiroir, Dave's a client tiroir. Each tiroir has its own Sheaf per member; there is no Sheaf across tiroirs, except that the agency's tiroir shows the client tiroirs' rectoversos its members may open. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 04; the exception 2026-11-16, ticket 22; built in #397, #387 and #415.)
 _Avoid_: home tiroir (a rectoverso's home is a path)
 
 **Loose page**:
-A page in no git repo: a session's scratchpad, a temporary folder, or anything a chat client such as Claude.ai or ChatGPT makes. Its original lives on the tiroir; a page in a git repo has git as its original. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 05; not built.)
+A page in no git repo: a session's scratchpad, a temporary folder, or anything a chat client such as Claude.ai or ChatGPT makes. Its original lives on the tiroir; a page in a git repo has git as its original. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 05; built in #386 and #397.)
 _Avoid_: scratch page, orphan page
 
 **Loose root** (of a member):
@@ -150,7 +150,7 @@ The one folder, `loose-<short>`, where a member's Loose pages are written, made 
 _Avoid_: scratch folder, loose folder
 
 **Repo clone** (on a tiroir):
-The tiroir's own copy of a git repo that a member's page came from, made the first time a page of that repo is rendered for that tiroir. One per repo per tiroir, whoever's pages it holds; it holds the folders with pages only. A page in it is still its member's alone until Shared. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 14; not built.)
+The tiroir's own copy of a git repo that a member's page came from, made the first time a page of that repo is rendered for that tiroir. One per repo per tiroir, whoever's pages it holds; it holds the folders with pages only. A page in it is still its member's alone until Shared. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 14; built in #400, #434 and #438.)
 _Avoid_: mirror, checkout
 
 **Archived page**:
@@ -170,7 +170,7 @@ The agent token that "Connect a laptop" makes for one laptop of one member. It s
 _Avoid_: device key, API key
 
 **Write log**:
-The hub's own record of the writes to its pages, one line per write whatever the path: who wrote, from which place (laptop, chat client, tiroir, page), and the agent session when it is known. It is where a row of the Sheaf gets its last write and its last agent session. Not the Diagnostics log, which records what went wrong. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 09; not built.)
+The hub's own record of the writes to its pages, one line per write whatever the path: who wrote, from which place (laptop, chat client, tiroir, page), and the agent session when it is known. It is where a row of the Sheaf gets its last write and its last agent session. Not the Diagnostics log, which records what went wrong. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 09; built in #385.)
 _Avoid_: journal, history, audit log
 
 **Stop James**:
@@ -181,12 +181,12 @@ The action that answers what an unsure thread belongs to: one box per candidate,
 _Avoid_: Move to, reassign, client, transfer
 
 **Move** (of a rectoverso):
-The owner putting a loose rectoverso in another folder of its root, from the Sheaf or by their agent; renaming a folder moves each rectoverso in it. A loose rectoverso can also move to another tiroir where its owner has an account; it stays the owner's and arrives as theirs alone, its Share left behind. A repo rectoverso is moved by git, not from the Sheaf, and goes to another tiroir only with its whole root. The old address forwards to the new one. A folder exists only while a rectoverso is in it. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` tickets 20 and 21; not built.)
+The owner putting a loose rectoverso in another folder of its root, from the Sheaf or by their agent; renaming a folder moves each rectoverso in it. A loose rectoverso can also move to another tiroir where its owner has an account; it stays the owner's and arrives as theirs alone, its Share left behind. A repo rectoverso is moved by git, not from the Sheaf, and goes to another tiroir only with its whole root. The old address forwards to the new one. A folder exists only while a rectoverso is in it. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` tickets 20 and 21; built in #405 within a root, #411 and #422 to another tiroir; a root's move is partly built, see Root's tiroir.)
 Built for a loose rectoverso within its root (SPEC 9.11); a move to another tiroir is not.
 _Avoid_: Move to, refile, rename
 
 **Forward** (of an address):
-The hub's record that an old address of a rectoverso now leads to its new one, after a Move, a git rename or a move to another tiroir. It never expires; links that name the old address are not rewritten. Across tiroirs it leads only someone who can sign in to the new one; an agent at the old address is told where the rectoverso went and what to do. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` tickets 20 and 21; not built.)
+The hub's record that an old address of a rectoverso now leads to its new one, after a Move, a git rename or a move to another tiroir. It never expires; links that name the old address are not rewritten. Across tiroirs it leads only someone who can sign in to the new one; an agent at the old address is told where the rectoverso went and what to do. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` tickets 20 and 21; built in #405, #429, #411 and #422.)
 Built for a Move within a root (SPEC 9.11): the rectoverso's owner is led by it, no one else; a stranger is answered as for an address never used. A git rename and a move to another tiroir do not write one yet.
 _Avoid_: redirect, alias
 

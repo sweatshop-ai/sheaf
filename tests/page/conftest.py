@@ -179,8 +179,10 @@ def touch_tab(chromium, site):
 def tab(context, site):
     t = Tab(context.new_page(), site)
     yield t
-    landed(t.page)
-    assert t.errors == [], "the page raised script errors"
+    try:
+        landed(t.page)
+    finally:        # a reload that does not land does not hide the script errors the page raised
+        assert t.errors == [], "the page raised script errors"
 
 
 # ── the journal of the event stream (ticket 100) ───────────────────────────────────────────────────────────

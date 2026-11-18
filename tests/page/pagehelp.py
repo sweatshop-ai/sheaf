@@ -572,11 +572,18 @@ def pending_navigations(context):
     return [page.url for page in context.pages if leaving(page)]
 
 
+def landed_page(page, timeout=8.0):
+    """A reload that has begun is waited for, and the document it brings until it has loaded (any page: it need not be
+    a sheaf page, so no selector of ours is waited for)."""
+    until(lambda: not leaving(page), timeout, "a reload in flight to land")
+    page.wait_for_load_state("load")
+
+
 def settled(page, timeout=8.0):
     """End of a test whose last step may leave a reload of the page in flight (a save the hub answered, a file it
     wrote): a reload that has begun is waited for, and the page it brings, until its menu is there. close_context fails
-    a test that ends on a navigation."""
-    until(lambda: not leaving(page), timeout, "a reload in flight to land")
+    a test whose navigation does not land."""
+    landed_page(page, timeout)
     page.wait_for_selector("#rd-menu-btn", state="attached")
 
 
@@ -611,17 +618,19 @@ def close_context(context):
     fixtures) is waited for first, with the page it brings: closing the context under it hung the driver (flake e2,
     4 of 85 CI runs). A navigation that does not land fails the test, after the context is closed."""
     stuck = []
-    for page in context.pages:
-        if leaving(page):
-            try:
-                settled(page)
-            except Exception:       # the wait ran out; a PageStalled is not an Exception and passes
-                stuck.append(page.url)
     try:
-        _close_context(context)
-    except PageStalled:
-        if not stuck:
-            raise
+        for page in context.pages:
+            if leaving(page):
+                try:
+                    landed_page(page)
+                except Exception:       # the wait ran out; a PageStalled is not an Exception and passes
+                    stuck.append(page.url)
+    finally:        # a page that stopped answering (PageStalled) still has its context closed
+        try:
+            _close_context(context)
+        except PageStalled:
+            if not stuck and sys.exc_info()[0] is None:
+                raise
     if stuck:
         pytest.fail(f"the test ended with a navigation that did not land on {stuck}: wait for the page to load "
                     f"(reloaded(page), then a selector of the new page) before the test ends")

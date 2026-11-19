@@ -3,9 +3,10 @@ agency tiroir makes. The two ends are tested apart here, in memory through the h
 import io
 import json
 import urllib.error
+from dataclasses import replace
 
 import pytest
-from test_peer_channel import PEER, channel, keyring, members, peer_token  # noqa: F401  (fixtures)
+from test_peer_channel import BEA, PEER, channel, keyring, members, peer_token  # noqa: F401  (fixtures)
 
 from sheafmd import connect
 from sheafmd.hub import channel as channel_mod
@@ -86,3 +87,11 @@ def test_a_refusal_is_its_status_and_no_token_no_answer_or_a_reply_that_is_not_j
 def test_the_hub_calls_only_a_client_it_has_a_name_for(members):  # noqa: F811
     with pytest.raises(OSError, match="no client tiroir"):
         members.hub.peer_call("nowhere", "read", {})
+
+
+def test_a_read_of_the_sheaf_whose_caller_has_gone_is_ended_with_a_499(members):  # noqa: F811
+    members.hub.proxy.members[BEA] = replace(members.hub.proxy.members[BEA], agency=True)
+    token = peer_token(["read"])
+    body = {"as": "bea@example.com", "op": "sheaf"}
+    assert channel(members, "read", body, token, gone=lambda: False).status == 200
+    assert channel(members, "read", body, token, gone=lambda: True).status == 499

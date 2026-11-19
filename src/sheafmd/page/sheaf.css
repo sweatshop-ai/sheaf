@@ -47,3 +47,29 @@ color:inherit;background:transparent;border:1px solid var(--ss-line);border-radi
 .sheaf-sheaf .sheaf-laptop-connect,.sheaf-sheaf .sheaf-laptop-copy,.sheaf-sheaf .sheaf-laptop-revoke{padding:3px 10px;border:1px solid var(--ss-line);border-radius:999px}
 .sheaf-sheaf .sheaf-laptop-made{margin-top:12px}
 .sheaf-sheaf .sheaf-laptop-line{display:block;margin:6px 0;padding:8px;border:1px solid var(--ss-line);border-radius:6px;font:12px/1.4 ui-monospace,monospace;user-select:all;word-break:break-all}
+/* On a phone the tree stacks above the table (its own scroll, a third of the pane at most) and a row is a card: the title,
+   then the other cells, each under its header's name. The Laptops field takes the width and the button goes under it, on one line. */
+@media (max-width:600px){
+.sheaf-sheaf .sheaf-view{flex-direction:column;height:auto;min-height:100%}
+.sheaf-sheaf .sheaf-view:has(.sheaf-doc:not([hidden])){height:100%}
+.sheaf-sheaf .sheaf-tree{flex:0 0 auto;max-height:30vh;border-right:0;border-bottom:1px solid var(--ss-line)}
+.sheaf-sheaf .sheaf-main{flex:1 0 auto;overflow:visible;padding:12px}
+.sheaf-sheaf .sheaf-views{flex-wrap:wrap;row-gap:4px}
+.sheaf-sheaf .sheaf-views button{white-space:nowrap}
+.sheaf-sheaf .sheaf-table,.sheaf-sheaf .sheaf-table tbody,.sheaf-sheaf .sheaf-table tr,.sheaf-sheaf .sheaf-table td,
+.sheaf-sheaf .sheaf-trash,.sheaf-sheaf .sheaf-trash tbody,.sheaf-sheaf .sheaf-trash tr,.sheaf-sheaf .sheaf-trash td{display:block;box-sizing:border-box;width:100%}
+.sheaf-sheaf .sheaf-table[hidden]{display:none}
+.sheaf-sheaf .sheaf-table thead{display:none}
+.sheaf-sheaf .sheaf-table tr{padding:6px 0;border-bottom:1px solid var(--ss-line)}
+.sheaf-sheaf .sheaf-table tr[hidden]{display:none}
+.sheaf-sheaf .sheaf-table td{padding:2px 8px;border-bottom:0}
+.sheaf-sheaf .sheaf-table td:empty,.sheaf-sheaf .sheaf-when:has(time:empty){display:none}
+.sheaf-sheaf .sheaf-trash td{padding:2px 8px}
+.sheaf-sheaf .sheaf-where::before{content:"Folder: "}
+.sheaf-sheaf .sheaf-write::before{content:"Last write: "}
+.sheaf-sheaf .sheaf-session::before{content:"Last agent session: "}
+.sheaf-sheaf .sheaf-when::before{content:"When: "}
+.sheaf-sheaf .sheaf-open::before{content:"Open: "}
+.sheaf-sheaf .sheaf-laptop-input{display:block;box-sizing:border-box;max-width:none;margin:0 0 8px}
+.sheaf-sheaf .sheaf-laptop-connect{white-space:nowrap}
+}

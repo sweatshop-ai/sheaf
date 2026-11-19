@@ -211,10 +211,29 @@ class Loose:
     def __init__(self, hub):
         self.hub = hub
         self._lock = threading.RLock()
+        self._listing = threading.local()       # this thread's `remembered` read of the registry: None outside one
 
     def _read(self) -> dict:
         data = state.read_json(_file(), {})
         return {k: v for k, v in data.items() if isinstance(k, str) and isinstance(v, str)}
+
+    @contextlib.contextmanager
+    def remembered(self):
+        """Within it, this thread reads `loose.json` once for the questions of `owner_of` and `known` (SPEC 8.6): a listing asks
+        them for every page, and the registry does not change inside one listing. The answer is dropped when it ends, so the
+        next listing reads the file again; a nested use shares the outer one's. The writers read it fresh, always."""
+        if getattr(self._listing, "held", None) is not None:
+            yield
+            return
+        self._listing.held = self._read()
+        try:
+            yield
+        finally:
+            self._listing.held = None
+
+    def _registry(self) -> dict:
+        held = getattr(self._listing, "held", None)
+        return held if held is not None else self._read()
 
     def attach(self) -> None:
         """Add the loose root of each member that has one to their roots, so `Hub.owns` finds it: the member of
@@ -270,11 +289,11 @@ class Loose:
     def owner_of(self, root) -> str | None:
         """The id of the member whose loose root `root` is, None for any other root."""
         real = config.realpath(root.path)
-        return next((mid for mid, folder in self._read().items() if os.path.realpath(folder) == real), None)
+        return next((mid for mid, folder in self._registry().items() if config.realpath(folder) == real), None)
 
     def known(self, member) -> Path | None:
         """The loose folder of `member`, when it has one."""
-        folder = self._read().get(member.id)
+        folder = self._registry().get(member.id)
         return Path(folder) if folder is not None else None
 
     def drop(self, member, root) -> None:

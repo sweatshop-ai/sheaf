@@ -173,6 +173,12 @@ CHECK_EVERY = 8
 
 
 def data(hub, member, titles: Titles, view: str = "", gone=None) -> dict:
+    """The listing below, with the loose registry read once for all of it, the rows' own questions included (SPEC 8.6)."""
+    with hub.loose.remembered():
+        return _data(hub, member, titles, view, gone)
+
+
+def _data(hub, member, titles: Titles, view: str = "", gone=None) -> dict:
     """`{tree, rows, more}` for `member`: every document of each of their roots that they may open, newest change first. A row
     is `{doc, url, title, root, folder, share, mtime, when, open, write, write_tip, session, session_tip, session_link}`:
     the folder is the path on disk; `can_move` whether the member may Move it (a page of their own loose root, 9.11); `share` the hash of a page of the member's own loose root that no Share line opens (the

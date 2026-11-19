@@ -130,3 +130,15 @@ def test_an_id_another_member_holds_is_refused_and_their_tabs_stay(front, work):
     assert front.post("/_/live/leave", {"stream": SID, "key": "a"}, member=CAL).status == 404
     assert not bea.closed and front.hub.tabs("work/a.md") == 1
     bea.close()
+
+
+def test_a_key_that_joins_a_new_connection_leaves_the_old_one(world, docs):
+    """A leader hand-over: the old connection is still open here until a write to it fails, and the tab joins the new
+    one under the same key. The hub counts it once."""
+    old = shared(world)
+    join(world, "t1:1", docs[0])
+    new = shared(world, sid="n" * 24)
+    assert join(world, "t1:1", docs[0], sid="n" * 24).status == 200
+    assert world.hub.tabs(docs[0]) == 1 and old.keys() == [] and not old.closed
+    old.close()
+    new.close()

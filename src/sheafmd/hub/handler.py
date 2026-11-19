@@ -914,6 +914,12 @@ class Handler:
         if key not in stream.keys() and len(stream.keys()) >= self.SHARED_MAX:
             raise Refuse(429, "too many streams on this connection")
         stream.join(key, self._joined_sub(req, doc))
+        # A key names one tab. After a leader hand-over the tab joins the new connection while the old one, whose tab
+        # closed, is still open here until a write to it fails: drop the key there, or the hub counts the tab twice.
+        with self._shared_lock:
+            others = [s for s in self._shared.values() if s is not stream and s.owner == stream.owner]
+        for other in others:
+            other.leave(key)
         return _ok()
 
     def _joined_sub(self, req: Req, doc: str):

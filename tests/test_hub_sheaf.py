@@ -323,3 +323,22 @@ def test_the_answer_of_doc_carries_the_way_back_so_an_open_page_follows_a_new_se
     r = two.get("/_/doc?doc=work/plan.md", member=BEA)
     assert r.status == 200, r.text
     assert r.json()["way_back"]["link"] == {"kind": "laptop", "provider": "claude", "session": SESSION, "remote": ""}
+
+
+# ── a caller that has gone ───────────────────────────────────────────────────
+
+def test_a_listing_whose_caller_has_gone_stops_reading_pages(two, monkeypatch):
+    """The server asks `gone()` of the connection; the data run of the Sheaf checks it between pages and ends, so a reload
+    leaves no thread reading every page of every root for a caller that is not there."""
+    read = []
+    from sheafmd.hub import sheaf_view
+    titles = sheaf_view.Titles.read
+    monkeypatch.setattr(sheaf_view.Titles, "read", lambda self, *a: read.append(a) or titles(self, *a))
+    for i in range(40):
+        (two.hub.roots.get("work").path / f"p{i}.md").write_text(f"# p{i}\n", encoding="utf-8")
+    asked = two.get("/_/mount?sheaf=1", member=BEA, gone=lambda: False)
+    assert asked.status == 200
+    full = len(read)
+    read.clear()
+    r = two.get("/_/mount?sheaf=1", member=BEA, gone=lambda: True)
+    assert r.status == 499 and len(read) < full // 2, (r.status, len(read), full)

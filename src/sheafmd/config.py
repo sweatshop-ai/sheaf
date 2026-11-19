@@ -276,6 +276,12 @@ def remembered_fs(kind: str, path, asked: Callable):
     return answers[kind, path]
 
 
+def realpath(path) -> str:
+    """`os.path.realpath(path)`, asked once for each path within `git_places_remembered` (SPEC 8.12): a listing asked for the same
+    few paths, the roots and their folders, for every page and rule, 53,867 times for 1,685 paths, a third of its time."""
+    return remembered_fs("real", os.fspath(path), os.path.realpath)
+
+
 def git_place(folder: Path) -> GitPlace:
     places = getattr(_remembered, "places", None)
     if places is None:
@@ -298,7 +304,7 @@ def _git_place_asked(folder: Path) -> GitPlace:
         return GitPlace(None, False)
     in_git_dir, in_work_tree, top = (r.stdout.split("\n", 2) + ["", ""])[:3]
     if in_work_tree == "true" and r.returncode == 0:
-        return GitPlace(Path(top.removesuffix("\n")).resolve(), False)
+        return GitPlace(Path(realpath(top.removesuffix("\n"))), False)
     if in_git_dir == "true" or re.search(r"^fatal: cannot use bare repository", r.stderr, re.M):
         return GitPlace(None, True)
     g = _rev_parse(folder, "--absolute-git-dir") if in_git_dir == "false" else None

@@ -11,7 +11,7 @@ import threading
 import time
 from pathlib import Path
 
-from .. import paths
+from .. import config, paths
 from . import roots as roots_mod
 from . import state
 
@@ -288,8 +288,8 @@ class Loose:
 
     def owner_of(self, root) -> str | None:
         """The id of the member whose loose root `root` is, None for any other root."""
-        real = os.path.realpath(root.path)
-        return next((mid for mid, folder in self._registry().items() if os.path.realpath(folder) == real), None)
+        real = config.realpath(root.path)
+        return next((mid for mid, folder in self._registry().items() if config.realpath(folder) == real), None)
 
     def known(self, member) -> Path | None:
         """The loose folder of `member`, when it has one."""

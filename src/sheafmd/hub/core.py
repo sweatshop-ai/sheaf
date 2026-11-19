@@ -1126,8 +1126,8 @@ class Hub:
     def owns(member, root) -> bool:
         """Whether `root` is one of the member's: matched by the real path of its folder, never by
         its name, which 8.2 gives to the next folder that takes it."""
-        real = os.path.realpath(root.path)
-        return any(os.path.realpath(f) == real for f in member.roots)
+        real = config.realpath(root.path)
+        return any(config.realpath(f) == real for f in member.roots)
 
     def member_owns(self, member, address: str) -> bool:
         """Whether the document at `address` (it need not exist) is the member's: the root 8.2
@@ -1456,7 +1456,7 @@ class Hub:
         if root is not None and at.plain:
             placed = place.applies(self, at.root)
             try:
-                rel = Path(os.path.realpath(self.file(address, placed))).relative_to(os.path.realpath(root.path))
+                rel = Path(config.realpath(self.file(address, placed))).relative_to(config.realpath(root.path))
                 rel = rel.as_posix()
                 # The list knows a rectoverso by its name (9.11), wherever its file is.
                 address = f"{root.name}/{(place.logical(rel) if placed else None) or rel}"

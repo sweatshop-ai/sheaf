@@ -56,6 +56,7 @@ import threading
 from contextlib import contextmanager
 from pathlib import Path
 
+from .. import config
 from ..beneath import Private
 from ..source import _folder_of, file_lock
 from . import commits as commits_mod
@@ -201,7 +202,7 @@ def _holds(top: Path, rel: str) -> bool:
 
 def _real(top: Path, rel: str) -> bool:
     """Whether `rel` is reached from the root at the real path `top` through no link, itself none (9.11)."""
-    return os.path.realpath(top / rel) == str(top / rel)
+    return config.realpath(top / rel) == str(top / rel)
 
 
 def _holding(top: Path, rels: list) -> list:
@@ -226,10 +227,10 @@ def _holding(top: Path, rels: list) -> list:
 def _found(hub, root, name: str) -> list:
     """The (root, path in it) of each file that holds the name `name`, in `root`, the list's, then in each private
     root."""
-    top = Path(os.path.realpath(root.path))
+    top = Path(config.realpath(root.path))
     found = [(root, rel) for rel in _holding(top, _scan(top, name))]
     for private in _private_roots(hub).values():
-        ptop = Path(os.path.realpath(private.path))
+        ptop = Path(config.realpath(private.path))
         found += [(private, rel) for rel in _holding(ptop, [name] if os.path.lexists(ptop / name) else [])]
     return found
 
@@ -538,7 +539,7 @@ def _where(hub, address: str):
     root = hub.roots.get(at.root)
     if root is None:
         return None
-    return root, Path(os.path.realpath(root.path)), at.rel
+    return root, Path(config.realpath(root.path)), at.rel
 
 
 def where_is(hub, address: str):
@@ -568,7 +569,7 @@ def in_private(hub, real: str, stat=os.stat):
     (st_dev, st_ino) against the identities of the private roots (`hub._private_ids`, recorded with the paths), so a
     spelling that differs in case, on a filesystem that folds it, is the same folder. `stat` is a seam for tests."""
     for private, member in (getattr(hub, "_private_paths", None) or {}).items():
-        top = os.path.realpath(private)
+        top = config.realpath(private)
         if real == top or real.startswith(top.rstrip("/") + "/"):
             return member
     ids = getattr(hub, "_private_ids", None)
@@ -624,7 +625,7 @@ def private_member(hub, address: str, fm: dict | None = None, opened=UNJUDGED):
         # Judged by where the file really is, not by the root the address names: the private root's own name, a root
         # around it and a link into it all reach the same file. The real paths of the private roots, not the roots
         # the registry holds now: one that was forgotten while a root around it stays is private still.
-        if (member := in_private(hub, os.path.realpath(named.path / at.rel))) is not None:
+        if (member := in_private(hub, config.realpath(named.path / at.rel))) is not None:
             return member
     if not getattr(hub, "private_roots", None):
         return hub._private_seen.get(address)

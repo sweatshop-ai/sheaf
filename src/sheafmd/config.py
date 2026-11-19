@@ -257,23 +257,23 @@ def git_places_remembered():
     if getattr(_remembered, "places", None) is not None:
         yield
         return
-    _remembered.places, _remembered.shapes = {}, {}
+    _remembered.places, _remembered.fs = {}, {}
     try:
         yield
     finally:
-        _remembered.places = _remembered.shapes = None
+        _remembered.places = _remembered.fs = None
 
 
 def remembered_fs(kind: str, path, asked: Callable):
     """`asked(path)`, once per `kind` and path within `git_places_remembered` (the same listing, the same lifetime): what a listing
     asks of the file system about a folder (where it really is, whether it is shaped like a git directory) it asked for every page,
     and for every folder above it. Outside one, asked afresh."""
-    shapes = getattr(_remembered, "shapes", None)
-    if shapes is None:
+    answers = getattr(_remembered, "fs", None)
+    if answers is None:
         return asked(path)
-    if (kind, path) not in shapes:
-        shapes[kind, path] = asked(path)
-    return shapes[kind, path]
+    if (kind, path) not in answers:
+        answers[kind, path] = asked(path)
+    return answers[kind, path]
 
 
 def git_place(folder: Path) -> GitPlace:

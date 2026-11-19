@@ -578,3 +578,10 @@ def test_on_a_desktop_the_tree_keeps_its_column_beside_the_table(mounted):
     mounted.page.set_viewport_size(DESKTOP)
     got = mounted.js(MEASURE + " return {tree: box('.sheaf-tree'), main: box('.sheaf-main')};")
     assert 220 <= got["tree"]["width"] < 260 and got["main"]["x"] >= got["tree"]["x"] + got["tree"]["width"] - 1
+
+
+def test_on_a_phone_the_trash_view_shows_no_table_of_pages(mounted):
+    mounted.page.set_viewport_size(PHONE)
+    mounted.click('.sheaf-viewswitch[data-view="trash"]')
+    until(lambda: mounted.js("return !!root.querySelector('.sheaf-viewswitch[data-view=\"trash\"].on');"), what="the Trash view")
+    assert mounted.js("return Array.from(root.querySelectorAll('.sheaf-row')).filter((r) => r.offsetParent !== null).length;") == 0

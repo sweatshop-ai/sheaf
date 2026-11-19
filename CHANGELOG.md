@@ -4,7 +4,7 @@ sheafmd is released by merging a pull request that sets `__version__` in `src/sh
 Its page assets are cached by version (`/_/mount.css?v=<version>`, immutable), so the version
 changes whenever an asset does. The entries name pull requests of sweatshop-ai/sheaf.
 
-## 1.2.0 (not released)
+## 1.2.0 (2026-11-19)
 
 Everything merged since 1.1.0 (#424), up to #464.
 
@@ -22,7 +22,7 @@ Everything merged since 1.1.0 (#424), up to #464.
   in the Sheaf (#415 and the pull requests that followed it).
 - Connect a laptop in the Sheaf: name a laptop, show its connect line once, list and revoke
   laptops (#457).
-- Phone layout of the Sheaf pane: a narrow-screen layout below 600 px, in `sheaf.css` (#463, CSS only).
+- Phone layout of the Sheaf pane: a narrow-screen layout at 600 px and narrower, in `sheaf.css` (#463, CSS only).
 
 ### Changed
 

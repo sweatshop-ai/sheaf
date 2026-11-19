@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from pagehelp import DOC, close_context, new_context, until
+from pagehelp import DOC, RELOADING, close_context, new_context, until
 
 pytestmark = pytest.mark.page
 
@@ -30,6 +30,17 @@ def opened(context, site):
     return p, errors
 
 
+def shows(p, text):
+    """Whether the page shows `text`. A change from outside reloads the page, so a read can fall on the reload:
+    that is not yet."""
+    try:
+        return text in p.evaluate("document.body.textContent")
+    except Exception as e:
+        if any(said in str(e) for said in RELOADING):
+            return False
+        raise
+
+
 def test_seven_tabs_load_count_and_all_hear_a_change(shared, site):
     pages = [opened(shared, site) for _ in range(TABS - 1)]
     until(lambda: site.hub.tabs(DOC) == TABS - 1, what="six tabs counted by the hub")
@@ -40,7 +51,7 @@ def test_seven_tabs_load_count_and_all_hear_a_change(shared, site):
     f = site.file
     f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
     for n, (p, _) in enumerate(pages):
-        until(lambda: "From outside." in p.evaluate("document.body.textContent"),
+        until(lambda: shows(p, "From outside."),
               what=f"the change in tab {n + 1}")
     assert [e for _, e in pages] == [[]] * TABS
 
@@ -53,5 +64,6 @@ def test_a_tab_that_closes_leaves_the_count_and_the_leaders_tab_hands_over(share
     f = site.file
     f.write_text(f.read_text(encoding="utf-8") + "\nAfter the hand-over.\n", encoding="utf-8")
     for p, _ in pages[1:]:
-        until(lambda: "After the hand-over." in p.evaluate("document.body.textContent"), what="the change heard")
-    assert site.hub.tabs(DOC) == 2
+        until(lambda: shows(p, "After the hand-over."), what="the change heard")
+    # A change from outside reloads both pages; the hub drops a closed page's stream within its next read check.
+    until(lambda: site.hub.tabs(DOC) == 2, what="two tabs counted after the reload")

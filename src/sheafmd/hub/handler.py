@@ -1005,7 +1005,10 @@ class Handler:
         and name as text, never markup. A member's alone, as the index is; the hub's own person has the index page."""
         if req.member is None:
             raise Refuse(404, "no such page")
-        sheaf = sheaf_view.data(self.hub, req.member, self._titles, req.query.get("view", ""))
+        try:
+            sheaf = sheaf_view.data(self.hub, req.member, self._titles, req.query.get("view", ""), gone=req.gone)
+        except sheaf_view.Abandoned:
+            raise Refuse(499, "the caller closed the connection") from None
         if self.hub.clients is not None:
             sheaf = sheaf_view.with_clients(sheaf, self.hub.clients.names(), req.member.email)
         return _json(200, {"kind": "sheaf", "title": "Sheaf", "version": self.hub.version, **self.hub.mount_fields(), "sheaf": sheaf},

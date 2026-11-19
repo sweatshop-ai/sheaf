@@ -117,3 +117,16 @@ def test_the_same_id_opened_again_closes_the_old_connection(world, docs):
     join(world, "a", docs[0])
     assert world.hub.tabs(docs[0]) == 1
     second.close()
+
+
+def test_an_id_another_member_holds_is_refused_and_their_tabs_stay(front, work):
+    """An id read from a front's log closes no one's tabs: only its owner opens it again (proxy mode, 9.9)."""
+    from helpers import CAL
+    (work / "a.md").write_text("# A\n\nText.\n", encoding="utf-8")
+    front.hub.render(work / "a.md", {}, None)
+    bea = front.get(f"/_/live?shared={SID}").stream
+    assert front.post("/_/live/join", {"stream": SID, "key": "a", "doc": "work/a.md"}).status == 200
+    assert front.get(f"/_/live?shared={SID}", member=CAL).status == 409
+    assert front.post("/_/live/leave", {"stream": SID, "key": "a"}, member=CAL).status == 404
+    assert not bea.closed and front.hub.tabs("work/a.md") == 1
+    bea.close()

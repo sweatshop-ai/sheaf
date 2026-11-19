@@ -48,7 +48,6 @@ def test_a_tab_that_closes_leaves_the_count_and_the_leaders_tab_hands_over(share
     until(lambda: site.hub.tabs(DOC) == 3, what="three tabs counted")
     pages[0][0].close()          # the first tab took the lock: the stream moves to another
     until(lambda: site.hub.tabs(DOC) == 2, what="two tabs counted")
-    for p, _ in pages[1:]:
     f = site.file
     f.write_text(f.read_text(encoding="utf-8") + "\nAfter the hand-over.\n", encoding="utf-8")
     for p, _ in pages[1:]:

@@ -885,9 +885,13 @@ class Handler:
         sid = req.query.get("shared", "")
         if not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", sid):
             raise Refuse(400, "a shared stream needs an id of 16 to 64 letters, digits, - or _")
-        stream = _SharedStream(self, sid, req.member.id if req.member is not None else None)
+        owner = req.member.id if req.member is not None else None
+        stream = _SharedStream(self, sid, owner)
         with self._shared_lock:
-            old, self._shared[sid] = self._shared.get(sid), stream
+            old = self._shared.get(sid)
+            if old is not None and old.owner != owner:
+                raise Refuse(409, "that stream id is someone else's")   # an id read from a log closes no one's tabs
+            self._shared[sid] = stream
         if old is not None:
             old.close()                  # the same browser came back before the old connection was seen to close
         return _stream(stream)

@@ -19,6 +19,7 @@
   }
   var RETRY = 2000;          // the hub's `retry:`: how soon a stream that ended is asked for again
   var SWEEP = 2000;          // how often the leader drops the streams of tabs that are gone
+  var ENDS = ['hub-stopping', 'signed-out', 'gone'];   // the hub's last event on a stream (events.Shared.ENDS)
   var rnd = function () {
     var a = new Uint8Array(16);
     crypto.getRandomValues(a);
@@ -77,7 +78,7 @@
     if (e === 'refused') { this.readyState = 2; delete mine[this.key]; if (this.onerror) this.onerror(new Event('error')); return; }
     this._fire(e, d);
     // The hub ends a stream after its last event; a browser would ask for it again after `retry`.
-    if (e === 'hub-stopping' || e === 'signed-out' || e === 'gone') {
+    if (ENDS.indexOf(e) >= 0) {
       var self = this;
       this._fail(0);
       this._again = setTimeout(function () {
@@ -98,7 +99,12 @@
       });
     }
     else if (m.t === 'who') {
-      Object.keys(mine).forEach(function (k) { ask({ t: 'join', key: k, doc: mine[k].doc, tab: TAB }); });
+      // A new leader: the connection the open streams were on went with the old one. A browser would
+      // fire `error` and try again, so they do the same before they join the new connection.
+      Object.keys(mine).forEach(function (k) {
+        if (mine[k].readyState === 1) mine[k]._fail(0);
+        ask({ t: 'join', key: k, doc: mine[k].doc, tab: TAB });
+      });
     }
   }
   chan.onmessage = function (ev) {
@@ -125,6 +131,7 @@
   function Leader() {
     this.joined = {};          // key -> {doc, tab, at}: every stream this browser wants
     this.sid = rnd();
+    this.sent = {};            // key -> the last post for it, which the next one waits for
     this.es = null;
     this.open = false;
     this.connect();
@@ -134,43 +141,51 @@
   Leader.prototype.connect = function () {
     var self = this;
     this.open = false;
-    this.es = new EventSource('/_/live?shared=' + this.sid);
+    var es = this.es = new EventSource('/_/live?shared=' + this.sid);
     this.es.onopen = function () {
       self.open = true;
       Object.keys(self.joined).forEach(function (k) { self.post('join', k); });
     };
     this.es.onerror = function () {
-      var s = self.es.readyState === 2 ? 2 : 0;
+      var s = es.readyState === 2 ? 2 : 0;
       self.open = false;
       // Refused (401, 5xx): no browser retry comes. The tabs hear their streams closed, ask the hub why as they
-      // did, and join again; the leader opens the connection again for them.
-      if (s === 2) { self.joined = {}; setTimeout(function () { self.connect(); }, RETRY); }
+      // did, and join again; the first join opens the connection again (`take`), none opens nothing.
+      if (s === 2) { self.joined = {}; self.es = null; }
       tell({ t: 'down', s: s });
     };
     this.es.addEventListener('m', function (ev) {
       var d;
       try { d = JSON.parse(ev.data); } catch (e) { return; }
-      if (d.e === 'refused' || d.e === 'hub-stopping' || d.e === 'signed-out' || d.e === 'gone') delete self.joined[d.k];
+      if (d.e === 'refused' || ENDS.indexOf(d.e) >= 0) delete self.joined[d.k];
       tell({ t: 'ev', k: d.k, e: d.e, d: d.d });
     });
   };
+  // A key's posts go one after another: a leave sent while its join is still on the way would reach the hub first
+  // (join does more work) and find nothing, and the join would then leave a tab the hub counts for ever.
   Leader.prototype.post = function (what, key) {
     var self = this, j = this.joined[key];
     var body = what === 'join' ? { stream: this.sid, key: key, doc: j.doc } : { stream: this.sid, key: key };
-    fetch('/_/live/' + what, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
-      .then(function (r) {
-        // A join the hub would not take (signed out, the connection gone) is that tab's stream refused.
-        if (what === 'join' && !r.ok && self.joined[key] === j) {
-          delete self.joined[key];
-          tell({ t: 'ev', k: key, e: 'refused', d: { status: r.status } });
-        }
-      })
-      .catch(function () {});
+    var send = function () {
+      return fetch('/_/live/' + what, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+        .then(function (r) { return r.status; }, function () { return 0; })
+        .then(function (status) {
+          // A join the hub would not take (signed out, the connection gone, no answer) is that tab's stream refused.
+          if (what === 'join' && (status < 200 || status > 299) && self.joined[key] === j) {
+            delete self.joined[key];
+            tell({ t: 'ev', k: key, e: 'refused', d: { status: status } });
+          }
+        });
+    };
+    var p = (this.sent[key] || Promise.resolve()).then(send);
+    this.sent[key] = p;
+    p.then(function () { if (self.sent[key] === p) delete self.sent[key]; });
   };
   Leader.prototype.take = function (m) {
     if (m.t === 'join') {
       this.joined[m.key] = { doc: m.doc, tab: m.tab, at: Date.now() };
-      if (this.open) this.post('join', m.key);
+      if (!this.es) this.connect();
+      else if (this.open) this.post('join', m.key);
     } else if (m.t === 'leave' && this.joined[m.key]) {
       if (this.open) this.post('leave', m.key);
       delete this.joined[m.key];

@@ -8,6 +8,8 @@ import pytest
 
 from pagehelp import DOC, close_context, new_context, until
 
+pytestmark = pytest.mark.page
+
 TABS = 7
 
 

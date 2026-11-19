@@ -13,7 +13,7 @@ the package is internal.
 """
 from pathlib import Path
 
-__version__ = "1.2.0"
+__version__ = "1.2.1"
 
 # `render` below is the public function, and it hides the module sheafmd/render.py as
 # an attribute of the package: inside the package import from it (`from .render import

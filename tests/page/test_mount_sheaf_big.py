@@ -84,7 +84,7 @@ def second_listing(chromium, thousand):
         page = context.new_page()
         page.on("pageerror", lambda e: errors.append(str(e)))
         page.add_init_script(ROOTS)
-        page.goto(ORIGIN + FRONT)
+        page.goto(ORIGIN + FRONT, wait_until="commit")
         hub.wait(lambda: page.evaluate("!!(window.__page || window.__failed)"), "pane A's mount")
         assert page.evaluate("window.__failed || null") is None
         hub.wait(lambda: rows(page, 0) == PAGES, f"{PAGES} rows in pane A")

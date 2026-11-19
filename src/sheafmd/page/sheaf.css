@@ -51,7 +51,7 @@ color:inherit;background:transparent;border:1px solid var(--ss-line);border-radi
    then the other cells, each under its header's name. The Laptops field takes the width and the button goes under it, on one line. */
 @container sheaf-pane (max-width:600px){
 .sheaf-sheaf .sheaf-view{flex-direction:column;height:100%;min-height:0}
-.sheaf-sheaf .sheaf-tree{flex:0 0 auto;max-height:30%;border-right:0;border-bottom:1px solid var(--ss-line)}
+.sheaf-sheaf .sheaf-tree{flex:0 0 auto;box-sizing:border-box;max-height:30%;border-right:0;border-bottom:1px solid var(--ss-line)}
 .sheaf-sheaf .sheaf-main{flex:1 1 auto;min-height:0;overflow:auto;padding:12px}
 .sheaf-sheaf .sheaf-views{flex-wrap:wrap;row-gap:4px}
 .sheaf-sheaf .sheaf-views button{white-space:nowrap}

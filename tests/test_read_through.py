@@ -229,3 +229,14 @@ def test_a_member_with_no_e_mail_has_no_clients_node_and_is_told_why(side, tmp_p
     got = side.get("/_/mount?sheaf=1", member=ALICE).json()["sheaf"]
     assert all(n["name"] != "Clients" for n in got["tree"]) and "clients" not in got
     assert "e-mail" in got["clients_line"] and side.asked == []
+
+
+# ── a caller that has gone ───────────────────────────────────────────────────
+
+def test_the_sheaf_read_stops_when_the_agency_has_closed_the_connection(side):
+    """The channel's `read` of the sheaf is the same data run as a member's own listing: the connection's `gone()` reaches it."""
+    make(side, "alice", f"# Alice's plan\n\n{MARKER}\n")
+    body = {"as": "alice@example.com", "op": "sheaf"}
+    assert readthrough.answer(side.door.handler, body, gone=lambda: False)[0] == 200
+    with pytest.raises(readthrough.sheaf_view.Abandoned):
+        readthrough.answer(side.door.handler, body, gone=lambda: True)

@@ -196,18 +196,18 @@ def served(hub, email):
     return m if m is not None and m.agency else None
 
 
-def answer(handler, body) -> tuple:
+def answer(handler, body, gone=None) -> tuple:
     """(status, answer) of this hub, the client tiroir, to a `read` of the channel: `body` is `{as, op, ...}`. `as` is the only
     identity: the member it names, when they are an agency member here, is who the op runs as, through the code a member's own
     request runs. Anything else (no `as`, `*`, no member of that e-mail, two, a client member) is the answer of a member with
     nothing to see, with no status that tells whether an account exists. There is no op, field or scope that widens beyond
-    that member."""
+    that member. `gone()`, when given, says the agency has closed the connection: the sheaf's data run then ends with `Abandoned`."""
     hub, op = handler.hub, body.get("op")
     member = served(hub, body.get("as"))
     if op == "sheaf":
         if member is None:
             return 200, {k: type(v)() for k, v in NOTHING.items()}
-        d = sheaf_view.data(hub, member, handler._titles)
+        d = sheaf_view.data(hub, member, handler._titles, gone=gone)
         return 200, {"rows": d["rows"], "tree": d["tree"], "more": d["more"]}
     if op == "open":
         doc = body.get("doc")

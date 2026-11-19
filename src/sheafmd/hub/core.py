@@ -153,6 +153,7 @@ class Hub:
                                lambda: bool(self._private_paths), pulling=self.pulling, pulled=self.pulled, renamed=self.renamed)   # the roots that commit (8.11); the rewrite guard while a private root is configured
         self._told_projects: set = set()         # what check_projects warned of this run (8.12)
         self._projects: dict = {}                # root id -> (stat key, entries | Invalid | None) of its projects.toml
+        self._listing = threading.local()        # per thread: what `projects_remembered` keeps for the listing in progress
         self._grants_seen: dict = {}             # root id -> the projects_of answer the open tabs were last told (8.12)
         self._grants_last: dict = {}             # root id -> what projects_of gave the last tick
         self.told_place: set = set()             # (address, quarantined | "undecided") a place-refused row named this run (9.11)
@@ -1402,6 +1403,29 @@ class Hub:
         """The entries of `root`'s `projects.toml`, None without the file, an `Invalid` for one the hub cannot
         read: read again only when the file changed (its inode, times or size), so an edit takes effect at the
         next request, with no restart."""
+        kept = getattr(self._listing, "projects", None)
+        if kept is not None and root.id in kept:
+            return kept[root.id]
+        got = self._projects_read(root)
+        if kept is not None:
+            kept[root.id] = got
+        return got
+
+    @contextmanager
+    def projects_remembered(self):
+        """Within it, this thread reads each root's `projects.toml` once (SPEC 8.12): a listing asks `projects_of` for every
+        page it checks, and the file does not change inside one listing. The answers are dropped when it ends, so the next
+        listing reads the file again; a nested use shares the outer one's."""
+        if getattr(self._listing, "projects", None) is not None:
+            yield
+            return
+        self._listing.projects = {}
+        try:
+            yield
+        finally:
+            self._listing.projects = None
+
+    def _projects_read(self, root):
         key, got = projects.load(root.path, self)       # one open beneath the root: the key and the text are of one file
         if key is None:
             self._grants_seen.setdefault(root.id, None)

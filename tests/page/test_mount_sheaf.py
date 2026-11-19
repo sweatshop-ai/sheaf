@@ -585,3 +585,12 @@ def test_on_a_phone_the_trash_view_shows_no_table_of_pages(mounted):
     mounted.click('.sheaf-viewswitch[data-view="trash"]')
     until(lambda: mounted.js("return !!root.querySelector('.sheaf-viewswitch[data-view=\"trash\"].on');"), what="the Trash view")
     assert mounted.js("return Array.from(root.querySelectorAll('.sheaf-row')).filter((r) => r.offsetParent !== null).length;") == 0
+
+
+def test_on_a_phone_an_opened_page_keeps_the_height_of_the_pane(mounted):
+    mounted.page.set_viewport_size(PHONE)
+    mounted.click('.sheaf-row[data-doc="work/ideas/first.md"] .sheaf-title a')
+    until(lambda: mounted.js("const d = root.querySelector('.sheaf-doc'); return !!d && !d.hidden;"), what="the page opened")
+    got = mounted.js(MEASURE + " return {view: box('.sheaf-view'), body: box('.sheaf-doc-body')};")
+    assert got["view"]["height"] >= 600, "the view shrinks to its content"
+    assert got["body"]["height"] >= 400, "the opened page has no room to draw or scroll in"

@@ -282,6 +282,16 @@ def realpath(path) -> str:
     return remembered_fs("real", os.fspath(path), os.path.realpath)
 
 
+def real_path(path) -> Path:
+    """Where `path` really is (SPEC 8.2): like `os.path.realpath`, but a file that is no link is placed in its folder's real folder,
+    asked once per folder within `git_places_remembered`, since a listing resolved the same few folders for every page. A link is
+    resolved itself."""
+    path = Path(path)
+    if os.path.islink(path):
+        return Path(os.path.realpath(path))
+    return Path(realpath(path.parent)) / path.name
+
+
 def git_place(folder: Path) -> GitPlace:
     places = getattr(_remembered, "places", None)
     if places is None:

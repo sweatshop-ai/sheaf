@@ -1446,11 +1446,13 @@ def test_tick_edit_ticks_the_move_to_box_of_its_index():
     assert the_list.tick_edit(text, 1, "Approve") is None
 
 
-def test_tick_edit_ticks_a_box_in_a_list_that_holds_an_emoji_shortcode():
+@pytest.mark.parametrize("quoted", ["tests.yml:100: command -v ssh-keygen",
+                                    # pandoc wraps this one between the span's class and its data-emoji
+                                    ".github/workflows/tests.yml:100: command -v ssh-keygen"])
+def test_tick_edit_ticks_a_box_in_a_list_that_holds_an_emoji_shortcode(quoted):
     # The merge desk quotes workflow lines as `tests.yml:100: ...`: pandoc draws `:100:` as a span the save's
     # sanitizer strips of its data-emoji, and every box of that list was refused (2026-11-19).
-    text = ("# Merge desk\n\n- [ ] Deploy a/b#1: one\n  - tests.yml:100: command -v ssh-keygen\n"
-            "- [ ] Merge a/b#2: two\n")
+    text = f"# Merge desk\n\n- [ ] Deploy a/b#1: one\n  - {quoted}\n- [ ] Merge a/b#2: two\n"
     edit = the_list.tick_edit(text, 1, "Merge")
     assert edit is not None
     soup = BeautifulSoup(edit["html"], "html.parser")

@@ -4,6 +4,22 @@ sheafmd is released by merging a pull request that sets `__version__` in `src/sh
 Its page assets are cached by version (`/_/mount.css?v=<version>`, immutable), so the version
 changes whenever an asset does. The entries name pull requests of sweatshop-ai/sheaf.
 
+## 1.2.1 (2026-11-19)
+
+Everything merged since 1.2.0 (#465), up to #470.
+
+### Fixed
+
+- The phone layout of the Sheaf pane follows the pane's own width and height, not the screen's:
+  `sheaf.css` declares the pane a size container and the layout is a container query at 600 px and
+  narrower. The tree's cap counts its padding, the table keeps its content height when the pane has
+  none of its own, and the Laptops test measures from the pane's edge (#470, findings on #463).
+
+### Tests and tooling
+
+- A test for a pane with no height of its own (#470).
+- (open: the 1000-row test, to be added before this release is merged)
+
 ## 1.2.0 (2026-11-19)
 
 Everything merged since 1.1.0 (#424), up to #469.

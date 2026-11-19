@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import quote
 
-from .. import beneath
+from .. import beneath, config
 from .. import comments as rdc
 from . import place
 from . import roots as roots_mod
@@ -577,6 +577,10 @@ class Index:
 
     # ── the whole index ──────────────────────────────────────────────────────
     def data(self, only: str | None = None, rendered: bool = False, member=None, board: bool = False) -> dict:
+        with config.git_places_remembered():            # one answer of git per folder for the whole listing (8.2)
+            return self._data(only, rendered, member, board)
+
+    def _data(self, only: str | None = None, rendered: bool = False, member=None, board: bool = False) -> dict:
         """`{roots: [{name, path, missing, closed, dot, docs: [...]}], more: {root: n}}` (SPEC 8.5).
         Roots go by their most recently changed document; documents by dot, then last change.
         `only` limits it to one root. A document rendered since the hub started is listed even

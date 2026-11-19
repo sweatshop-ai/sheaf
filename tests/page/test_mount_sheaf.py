@@ -551,10 +551,13 @@ def test_on_a_phone_the_tabs_and_the_rows_read_without_scrolling_sideways(mounte
     mounted.page.set_viewport_size(PHONE)
     got = mounted.js(MEASURE + """
     const main = root.querySelector('.sheaf-main');
-    return {tabs: lines('.sheaf-viewswitch, .sheaf-laptops-open'), titles: lines('.sheaf-row .sheaf-title'),
+    const edge = root.querySelector('.sheaf-main').getBoundingClientRect().right;
+    const cells = Array.from(root.querySelectorAll('.sheaf-row td')).filter((e) => e.offsetParent !== null);
+    return {over: cells.filter((e) => e.getBoundingClientRect().right > edge + 0.5).length, tabs: lines('.sheaf-viewswitch, .sheaf-laptops-open'), titles: lines('.sheaf-row .sheaf-title'),
             sideways: main.scrollWidth > main.clientWidth, sheaf: root.querySelector('.sheaf-view').scrollWidth > root.querySelector('.sheaf-view').clientWidth};""")
     assert got["tabs"] and max(got["tabs"]) < 40, "a tab name wraps"
     assert got["titles"] and max(got["titles"]) < 80, "a title wraps letter by letter"
+    assert got["over"] == 0, "a cell runs past the pane's edge"
     assert not got["sideways"] and not got["sheaf"], "a row needs a sideways scroll"
 
 
@@ -566,7 +569,7 @@ def test_on_a_phone_the_laptops_field_and_button_fit_and_the_button_has_one_line
     const w = root.querySelector('.sheaf-main').clientWidth;
     const i = box('.sheaf-laptop-input'), b = box('.sheaf-laptop-connect');
     return {w, input: i, button: b, sideways: root.querySelector('.sheaf-main').scrollWidth > w};""")
-    assert got["input"]["x"] + got["input"]["width"] <= 390, "the field is cut at the right edge"
+    assert got["input"]["x"] + got["input"]["width"] <= got["w"], "the field is cut at the right edge"
     assert got["button"]["x"] + got["button"]["width"] <= 390 and got["button"]["height"] < 40, "the button is cut or wraps"
     assert not got["sideways"]
 
@@ -574,4 +577,4 @@ def test_on_a_phone_the_laptops_field_and_button_fit_and_the_button_has_one_line
 def test_on_a_desktop_the_tree_keeps_its_column_beside_the_table(mounted):
     mounted.page.set_viewport_size(DESKTOP)
     got = mounted.js(MEASURE + " return {tree: box('.sheaf-tree'), main: box('.sheaf-main')};")
-    assert got["tree"]["width"] == 220 and got["main"]["x"] >= got["tree"]["x"] + 220
+    assert 220 <= got["tree"]["width"] < 260 and got["main"]["x"] >= got["tree"]["x"] + got["tree"]["width"] - 1

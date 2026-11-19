@@ -22,7 +22,7 @@ Everything merged since 1.1.0 (#424), up to #464.
   in the Sheaf (#415 and the pull requests that followed it).
 - Connect a laptop in the Sheaf: name a laptop, show its connect line once, list and revoke
   laptops (#457).
-- Phone layout of the Sheaf pane: a narrow-screen layout in `sheaf.css` (#463, CSS only).
+- Phone layout of the Sheaf pane: a narrow-screen layout below 600 px, in `sheaf.css` (#463, CSS only).
 
 ### Changed
 

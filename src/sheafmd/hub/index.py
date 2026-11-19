@@ -581,7 +581,7 @@ class Index:
 
     # ── the whole index ──────────────────────────────────────────────────────
     def data(self, only: str | None = None, rendered: bool = False, member=None, board: bool = False, gone=None) -> dict:
-        with config.git_places_remembered(), self.hub.projects_remembered():     # one answer of git per folder, one read of projects.toml per root, for the whole listing (8.2, 8.12)
+        with config.git_places_remembered(), config.real_paths_remembered(), self.hub.projects_remembered():     # one answer of git per folder, one resolution per path, one read of projects.toml per root, for the whole listing (8.2, 8.12)
             return self._data(only, rendered, member, board, gone)
 
     def _data(self, only: str | None = None, rendered: bool = False, member=None, board: bool = False, gone=None) -> dict:
@@ -605,7 +605,7 @@ class Index:
                 return True
             # A nested root's folder is walked under both roots; a link is judged where it points,
             # as lookup judges it.
-            key = (root.name, path.resolve().parent)
+            key = (root.name, Path(config.realpath(path)).parent)
             if key not in theirs:
                 theirs[key] = hub.roots.lookup(path) == root
             return theirs[key]
@@ -625,7 +625,7 @@ class Index:
                 hub.check_projects(root, (f.rel for f in listing.docs))
             rows, have = [], set()
             placed = not rendered and place.applies(hub, root.name)
-            top = Path(os.path.realpath(root.path))
+            top = Path(config.realpath(root.path))
             for f in listing.docs:
                 # A rectoverso of the list's root is listed by its name (9.11); a private path is none. Each file is
                 # read under its name's lock, as every read.

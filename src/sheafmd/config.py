@@ -283,8 +283,9 @@ def realpath(path) -> str:
 
 
 def real_path(path) -> Path:
-    """`os.path.realpath(path)`, a file that is no link resolved through its folder's real folder, found once per folder within
-    `git_places_remembered`: a listing resolved the same few folders for every page. A link is resolved itself."""
+    """Where `path` really is (SPEC 8.2): like `os.path.realpath`, but a file that is no link is placed in its folder's real folder,
+    asked once per folder within `git_places_remembered`, since a listing resolved the same few folders for every page. A link is
+    resolved itself."""
     path = Path(path)
     if os.path.islink(path):
         return Path(os.path.realpath(path))

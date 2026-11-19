@@ -142,7 +142,7 @@ def _in_git_dir_by_path(folder: Path, top: Path | None) -> bool:
     above it up to `top` (not counted; `/` when None), is shaped like one."""
     at = folder
     while at != top and at != at.parent:
-        if _shaped_like_a_git_dir(at):
+        if config.remembered_fs("shape", at, _shaped_like_a_git_dir):
             return True
         at = at.parent
     return False
@@ -166,13 +166,16 @@ def in_git_dir(md: Path, root: Root) -> bool:
     its folder is in one, by git's answer or by the path's, looked at up to the top of the work tree
     git names, else up to `root`'s folder (that folder counted), and is not `root`'s own folder,
     which rule 3 leaves it. What the door asks of an address (SPEC 12)."""
-    folder, top = Path(os.path.realpath(md)).parent, Path(os.path.realpath(root.path))
+    top = Path(config.remembered_fs("real", root.path, os.path.realpath))
+    # A file that is no link lies in its folder's real folder, found once per folder; a link is resolved itself.
+    folder = (Path(os.path.realpath(md)).parent if os.path.islink(md)
+              else Path(config.remembered_fs("real", Path(md).parent, os.path.realpath)))
     if folder == top:
         return False
     # Every folder git takes for a git directory is shaped like one, so where none is, at the folder or
     # above it (`/` too, which git may answer for), git's answer is no as well and is not asked: the
     # listing of a root and a page's request run no git for an ordinary folder.
-    if not any(_shaped_like_a_git_dir(at) for at in (folder, *folder.parents)):
+    if not any(config.remembered_fs("shape", at, _shaped_like_a_git_dir) for at in (folder, *folder.parents)):
         return False
     at = folder
     while not _enterable(at) and at != at.parent:

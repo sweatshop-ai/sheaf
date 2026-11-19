@@ -22,12 +22,13 @@ Everything merged since 1.1.0 (#424), up to #464.
   in the Sheaf (#415 and the pull requests that followed it).
 - Connect a laptop in the Sheaf: name a laptop, show its connect line once, list and revoke
   laptops (#457).
-- Phone layout of the Sheaf pane: placeholder, lands with #463.
+- Phone layout of the Sheaf pane: a narrow-screen layout in `sheaf.css` (#463, CSS only).
 
 ### Changed
 
 - A listing asks git once per folder, not once per page (#459), and reads each root's
-  `projects.toml` once per listing (#460, #462).
+  `projects.toml` once per listing (#460, #462, merged at 66d47a7b; the realpath and timing parts of that
+  ticket are not in this release).
 - Tell drop status: answered ends the drop (#455).
 - `peer use` takes its token on stdin and reads a file store from `$CREDENTIALS_DIRECTORY`; its
   messages replace tracebacks (#440, #441, #443).

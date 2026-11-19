@@ -6,7 +6,7 @@ changes whenever an asset does. The entries name pull requests of sweatshop-ai/s
 
 ## 1.2.0 (2026-11-19)
 
-Everything merged since 1.1.0 (#424), up to #468.
+Everything merged since 1.1.0 (#424), up to #469.
 
 ### Added
 
@@ -28,8 +28,9 @@ Everything merged since 1.1.0 (#424), up to #468.
 
 - A listing is cheaper to build: it asks git once per folder, not once per page (#459); reads each
   root's `projects.toml` (#460, #462) and `loose.json` (#466) once per listing; resolves each path once
-  (#467); and looks for git directories once per folder (#468, 23,939 to 15,790 `lstat` calls per
-  mount; a count of calls, not a CPU measurement).
+  (#467); looks for git directories once per folder (#468, 23,939 to 15,790 `lstat` calls per
+  mount); and resolves each folder once (#469, 13,239 to 861 `lstat` calls for one Sheaf listing of a
+  150-page fixture). These are counts of calls, not CPU measurements.
 - Tell drop status: answered ends the drop (#455).
 - `peer use` takes its token on stdin and reads a file store from `$CREDENTIALS_DIRECTORY`; its
   messages replace tracebacks (#440, #441, #443).

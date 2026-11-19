@@ -113,3 +113,95 @@ class Bus:
     def count(self) -> int:
         with self._lock:
             return len(self._subs)
+
+
+class Shared:
+    """The streams of every tab of one browser over one connection (ticket 160). A browser opens
+    at most six HTTP/1.1 connections to a host, and every open page held one: with six tabs, the
+    seventh page and every request after it waited for ever. One tab of the browser now holds
+    `/_/live?shared=` for all of them (page/live.js) and adds and drops the others' streams with
+    `/_/live/join` and `/_/live/leave`.
+
+    A tab's stream is a Subscription on its own Bus, as it was: the Bus still counts the tab.
+    What it is sent goes out as the event `m`, `{"k": key, "e": name, "d": data}`: `open` when it
+    is joined (or `refused` with the status a stream of its own was answered with), then its own
+    events. Its last event (`ENDS`) drops it from here; the connection stays open, for the others."""
+    ENDS = ("hub-stopping", "signed-out", "gone")
+    POLL_S = 0.05
+
+    def __init__(self, owner=None):
+        self.owner = owner               # the member id the stream was opened by: no other may join it
+        self._lock = threading.Lock()
+        self._subs: dict = {}            # key -> Subscription
+        self._out: queue.Queue = queue.Queue()
+        self.closed = False
+
+    def join(self, key: str, sub):
+        """Adds the stream `sub` under `key`, or the refusal status a stream of its own was answered
+        with. A key joined again replaces its stream."""
+        with self._lock:
+            old = self._subs.pop(key, None)
+            if self.closed:
+                if not isinstance(sub, int):
+                    sub.close()
+                return
+            if isinstance(sub, int):
+                self._out.put(("m", {"k": key, "e": "refused", "d": {"status": sub}}))
+            else:
+                self._out.put(("m", {"k": key, "e": "open", "d": {}}))
+                self._subs[key] = sub
+        if old is not None:
+            old.close()
+
+    def leave(self, key: str):
+        with self._lock:
+            sub = self._subs.pop(key, None)
+        if sub is not None:
+            sub.close()
+
+    def keys(self) -> list:
+        with self._lock:
+            return list(self._subs)
+
+    def _poll(self):
+        try:
+            return self._out.get_nowait()
+        except queue.Empty:
+            pass
+        with self._lock:
+            subs = list(self._subs.items())
+        for key, sub in subs:
+            got = sub.get(0)
+            if got is None:
+                continue
+            name, data = got
+            if name in self.ENDS:
+                with self._lock:
+                    if self._subs.get(key) is sub:
+                        del self._subs[key]
+                sub.close()
+            return "m", {"k": key, "e": name, "d": data}
+        return None
+
+    def get(self, timeout: float | None = 0):
+        deadline = time.monotonic() + (timeout or 0)
+        while True:
+            got = self._poll()
+            if got is not None or time.monotonic() >= deadline:
+                return got
+            time.sleep(min(self.POLL_S, max(0.0, deadline - time.monotonic())))
+
+    def drain(self) -> list:
+        out = []
+        while (e := self._poll()) is not None:
+            out.append(e)
+        return out
+
+    def close(self):
+        with self._lock:
+            if self.closed:
+                return
+            self.closed = True
+            subs, self._subs = list(self._subs.values()), {}
+        for sub in subs:
+            sub.close()

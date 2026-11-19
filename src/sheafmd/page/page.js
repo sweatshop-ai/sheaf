@@ -4460,7 +4460,7 @@ var create = function (ROOT, CFG, opts) {
     var POLL_MS = 30000;
     var connect = function () {
       if (THROUGH || docGone || unmounted) return;         // an answer that comes after unmount() opens no stream for a page that is gone
-      try { live = new EventSource('/_/live?doc=' + encodeURIComponent(CFG.doc)); } catch (e) { return; }
+      try { live = window.SheafLive ? SheafLive.source(CFG.doc) : new EventSource('/_/live?doc=' + encodeURIComponent(CFG.doc)); } catch (e) { return; }      // one stream for every tab (live.js, ticket 160)
       live.onopen = function () {
         streamBack();
         flushIncidents();

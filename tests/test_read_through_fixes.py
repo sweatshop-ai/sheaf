@@ -54,7 +54,7 @@ def test_a_real_client_page_keeps_its_own_script_under_the_agencys_nonce(agency_
     agency, client = agency_and_client
     doc = client.make("alice", f"# Plan\n\n{MARKER}\n")
     got = agency.get(f"/Clients/acme/{doc}", member=AG_ALICE)
-    own = importlib.import_module("sheafmd.render")._page_asset("page.js")
+    own = importlib.import_module("sheafmd.render").page_script()
     assert got.status == 200 and f'<script nonce="{csp_nonce(got)}">{own}</script>' in got.text
 
 

@@ -183,7 +183,7 @@ def render_page(data: dict, *, version: str, port: int, only: str | None, nonce:
             f'<p class="legend">{legend}</p><p id="live" hidden></p></div>'
             f'<main id="roots" data-only="{html.escape(only or "")}">{body}</main>'
             f'<footer>{CREDIT}</footer>'
-            f'<script nonce="{html.escape(nonce)}">{_asset("index.js")}</script></body></html>')
+            f'<script nonce="{html.escape(nonce)}">{_asset("live.js")}\n{_asset("index.js")}</script></body></html>')
 
 
 class Index:

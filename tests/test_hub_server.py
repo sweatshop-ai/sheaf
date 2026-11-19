@@ -487,6 +487,29 @@ def test_a_closed_tab_is_counted_out_within_two_seconds(live):
     assert hub.tabs("work/plan.md") == 0
 
 
+def test_one_shared_stream_carries_a_tab_and_its_connection_closing_counts_it_out(live):
+    """Ticket 160: the browser's one stream, over a real socket. The tab joins it by a POST on another connection."""
+    hub, port, f, connect = live
+    c = connect()
+    c.request("GET", "/_/live?shared=" + "s" * 24, headers=cookie(hub))
+    r = c.getresponse()
+    assert r.status == 200
+    j = connect()
+    body = json.dumps({"stream": "s" * 24, "key": "t1", "doc": "work/plan.md"})
+    j.request("POST", "/_/live/join", body=body, headers={**cookie(hub), "Content-Type": "application/json",
+                                                         "Origin": f"http://127.0.0.1:{port}", "Host": f"127.0.0.1:{port}"})
+    assert j.getresponse().status == 200
+    got = read_events(r, 2)
+    assert [(n, d["k"], d["e"]) for n, d in got] == [("m", "t1", "open"), ("m", "t1", "hello")]
+    assert hub.tabs("work/plan.md") == 1
+    r.close()
+    c.close()
+    deadline = time.time() + 3
+    while hub.tabs("work/plan.md") and time.time() < deadline:
+        time.sleep(0.05)
+    assert hub.tabs("work/plan.md") == 0
+
+
 def test_a_stream_whose_root_is_forgotten_is_told_the_document_is_gone_and_ended(live):
     hub, port, f, connect = live
     s = connect()

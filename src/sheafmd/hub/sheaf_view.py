@@ -1,10 +1,10 @@
 """The Sheaf view (SPEC 8.6): a member's folders as a tree and their rectoversos as table rows, as data for the front's
 loader to mount from `/_/mount?sheaf=1`. Whose pages these are is the index's to say (9.9); this module only draws what
 `Index.data` hands a member: it adds each row's title and its last write, and keeps no list of its own."""
-import os
 import re
 from pathlib import Path
 
+from .. import config
 from ..source import md_hash
 from . import archive as archive_mod
 from . import index as index_mod
@@ -174,7 +174,7 @@ CHECK_EVERY = 8
 
 def data(hub, member, titles: Titles, view: str = "", gone=None) -> dict:
     """The listing below, with the loose registry read once for all of it, the rows' own questions included (SPEC 8.6)."""
-    with hub.loose.remembered():
+    with config.git_places_remembered(), hub.loose.remembered():      # each folder resolved once for the rows too (8.2)
         return _data(hub, member, titles, view, gone)
 
 
@@ -195,6 +195,13 @@ def _data(hub, member, titles: Titles, view: str = "", gone=None) -> dict:
     rows = []
     marked: dict = {}           # a loose root's name -> its marks, read once; None when they cannot be read
 
+    owned: dict = {}            # a root's name -> whether it is the member's own loose root, asked once
+
+    def own_root(name):
+        if name not in owned:
+            owned[name] = mine(hub, member, name)
+        return owned[name]
+
     def marks_of(name):
         if name not in marked:
             root = hub.roots.get(name)
@@ -209,7 +216,7 @@ def _data(hub, member, titles: Titles, view: str = "", gone=None) -> dict:
             at = roots_mod.Address.parse(address)
             with place.held(hub, address):          # every read of a rectoverso's file holds its name's lock (9.11)
                 try:
-                    path = Path(os.path.realpath(hub.file(address)))
+                    path = config.real_path(hub.file(address))
                 except roots_mod.NotFound:
                     continue
                 title, agent, unshared = titles.read(path, at.rel)
@@ -228,9 +235,9 @@ def _data(hub, member, titles: Titles, view: str = "", gone=None) -> dict:
                 write_tip, session_tip_, link = last.host if last else "", session_tip(session) if session else "", way_back(session, member)
             rows.append({"doc": told, "url": d["url"] if told == address else roots_mod.url_path(told), "title": title, "root": SHARED if given else at.root,
                          "folder": folder, "shared_by": agent, **given,
-                         "share": unshared if mine(hub, member, at.root) and not given else "",
-                         "can_move": mine(hub, member, at.root) and not given, "mtime": d["mtime"], "when": index_mod.when(d["mtime"], now),
-                         "open": d["open"], "own": mine(hub, member, at.root) and not given, "archived": archived, "kept": kept_, "write": say_write(last, session),
+                         "share": unshared if own_root(at.root) and not given else "",
+                         "can_move": own_root(at.root) and not given, "mtime": d["mtime"], "when": index_mod.when(d["mtime"], now),
+                         "open": d["open"], "own": own_root(at.root) and not given, "archived": archived, "kept": kept_, "write": say_write(last, session),
                          "write_tip": write_tip,
                          "session": session.writer if session else "",
                          "session_tip": session_tip_,

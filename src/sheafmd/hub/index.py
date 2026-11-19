@@ -605,7 +605,7 @@ class Index:
                 return True
             # A nested root's folder is walked under both roots; a link is judged where it points,
             # as lookup judges it.
-            key = (root.name, Path(config.realpath(path)).parent)
+            key = (root.name, config.real_path(path).parent)
             if key not in theirs:
                 theirs[key] = hub.roots.lookup(path) == root
             return theirs[key]

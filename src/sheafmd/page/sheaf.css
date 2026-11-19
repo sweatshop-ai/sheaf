@@ -52,7 +52,7 @@ color:inherit;background:transparent;border:1px solid var(--ss-line);border-radi
 @container sheaf-pane (max-width:600px){
 .sheaf-sheaf .sheaf-view{flex-direction:column;height:100%;min-height:0}
 .sheaf-sheaf .sheaf-tree{flex:0 0 auto;max-height:30%;border-right:0;border-bottom:1px solid var(--ss-line)}
-.sheaf-sheaf .sheaf-main{flex:1 1 0;overflow:auto;padding:12px}
+.sheaf-sheaf .sheaf-main{flex:1 1 auto;min-height:0;overflow:auto;padding:12px}
 .sheaf-sheaf .sheaf-views{flex-wrap:wrap;row-gap:4px}
 .sheaf-sheaf .sheaf-views button{white-space:nowrap}
 .sheaf-sheaf .sheaf-table,.sheaf-sheaf .sheaf-table tbody,.sheaf-sheaf .sheaf-table tr,.sheaf-sheaf .sheaf-table td,

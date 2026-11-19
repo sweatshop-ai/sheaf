@@ -12,7 +12,9 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import tomllib
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NamedTuple
@@ -243,7 +245,34 @@ def _rev_parse(folder: Path, *asks: str):
         return None
 
 
+_remembered = threading.local()      # the thread's `git_places_remembered` memo: {folder: GitPlace}, None outside one
+
+
+@contextmanager
+def git_places_remembered():
+    """Within it, this thread asks git once for each folder (SPEC 8.2): a listing judges every page against the same few folders,
+    and a run per page and rule took 48-51 s for 1067 pages. The answers are dropped when it ends, so the next listing, and
+    every other caller, asks git afresh; a nested use shares the outer one's."""
+    if getattr(_remembered, "places", None) is not None:
+        yield
+        return
+    _remembered.places = {}
+    try:
+        yield
+    finally:
+        _remembered.places = None
+
+
 def git_place(folder: Path) -> GitPlace:
+    places = getattr(_remembered, "places", None)
+    if places is None:
+        return _git_place_asked(folder)
+    if folder not in places:
+        places[folder] = _git_place_asked(folder)
+    return places[folder]
+
+
+def _git_place_asked(folder: Path) -> GitPlace:
     """Where `folder` stands to git (SPEC 8.2): inside a work tree, which has a top, or inside a git
     directory: a repository's `.git` folder, a bare repository, a submodule's git directory, or a
     folder in one. Only the top, asked last, can hold a newline. A folder git finds in a repository

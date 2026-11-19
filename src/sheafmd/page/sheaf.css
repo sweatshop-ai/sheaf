@@ -4,7 +4,7 @@
 --ss-on:var(--accent,#1f5fd6);--ss-bg:var(--bg,#fff)}
 @media (prefers-color-scheme:dark){.sheaf-sheaf{--ss-fg:var(--fg,#f2f2f7);--ss-muted:var(--muted,#a1a1a6);
 --ss-line:var(--rule,#38383a);--ss-on:var(--accent,#6ea2ff);--ss-bg:var(--bg,#1c1c1e)}}
-.sheaf-sheaf{padding:0;font:14px/1.4 system-ui,sans-serif;color:var(--ss-fg);background:var(--ss-bg);overflow-wrap:anywhere}
+.sheaf-sheaf{container:sheaf-pane/inline-size;padding:0;font:14px/1.4 system-ui,sans-serif;color:var(--ss-fg);background:var(--ss-bg);overflow-wrap:anywhere}
 .sheaf-sheaf .sheaf-view{display:flex;height:100%;min-height:0}
 .sheaf-sheaf .sheaf-tree{flex:0 0 220px;overflow:auto;padding:12px 8px;border-right:1px solid var(--ss-line)}
 .sheaf-sheaf .sheaf-tree ul{list-style:none;margin:0;padding:0 0 0 14px}
@@ -47,13 +47,12 @@ color:inherit;background:transparent;border:1px solid var(--ss-line);border-radi
 .sheaf-sheaf .sheaf-laptop-connect,.sheaf-sheaf .sheaf-laptop-copy,.sheaf-sheaf .sheaf-laptop-revoke{padding:3px 10px;border:1px solid var(--ss-line);border-radius:999px}
 .sheaf-sheaf .sheaf-laptop-made{margin-top:12px}
 .sheaf-sheaf .sheaf-laptop-line{display:block;margin:6px 0;padding:8px;border:1px solid var(--ss-line);border-radius:6px;font:12px/1.4 ui-monospace,monospace;user-select:all;word-break:break-all}
-/* On a phone the tree stacks above the table (its own scroll, a third of the pane at most) and a row is a card: the title,
-   then the other cells, each under its header's name. The Laptops field takes the width and the button goes under it, on one line. */
-@media (max-width:600px){
-.sheaf-sheaf .sheaf-view{flex-direction:column;height:auto;min-height:100%}
-.sheaf-sheaf .sheaf-view:has(.sheaf-doc:not([hidden])){height:100%}
-.sheaf-sheaf .sheaf-tree{flex:0 0 auto;max-height:30vh;border-right:0;border-bottom:1px solid var(--ss-line)}
-.sheaf-sheaf .sheaf-main{flex:1 0 auto;overflow:visible;padding:12px}
+/* In a narrow pane (the pane's width, not the screen's) the tree stacks above the table (its own scroll, a third of the pane at most) and a row is a card: the title,
+   then the other cells, each under its header's name. A pane with no height of its own leaves the tree uncapped (a percentage of nothing) and the table at its content's height. The Laptops field takes the width and the button goes under it, on one line. */
+@container sheaf-pane (max-width:600px){
+.sheaf-sheaf .sheaf-view{flex-direction:column;height:100%;min-height:0}
+.sheaf-sheaf .sheaf-tree{flex:0 0 auto;box-sizing:border-box;max-height:30%;border-right:0;border-bottom:1px solid var(--ss-line)}
+.sheaf-sheaf .sheaf-main{flex:1 1 auto;min-height:0;overflow:auto;padding:12px}
 .sheaf-sheaf .sheaf-views{flex-wrap:wrap;row-gap:4px}
 .sheaf-sheaf .sheaf-views button{white-space:nowrap}
 .sheaf-sheaf .sheaf-table,.sheaf-sheaf .sheaf-table tbody,.sheaf-sheaf .sheaf-table tr,.sheaf-sheaf .sheaf-table td,

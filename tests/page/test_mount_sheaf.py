@@ -562,15 +562,16 @@ def test_on_a_phone_the_tabs_and_the_rows_read_without_scrolling_sideways(mounte
 
 
 def test_on_a_phone_the_laptops_field_and_button_fit_and_the_button_has_one_line(mounted):
-    mounted.page.set_viewport_size(PHONE)
+    mounted.page.set_viewport_size(DESKTOP)
+    mounted.page.evaluate("const p = document.getElementById('pane'); p.style.width = '390px'; p.style.marginLeft = '24px';")     # a narrow pane that does not start at x=0
     mounted.click(".sheaf-laptops-open")
     until(lambda: mounted.js("return !!root.querySelector('.sheaf-laptops') && !root.querySelector('.sheaf-laptops').hidden;"), what="the Laptops panel")
     got = mounted.js(MEASURE + """
-    const w = root.querySelector('.sheaf-main').clientWidth;
+    const m = root.querySelector('.sheaf-main'), edge = m.getBoundingClientRect().right;
     const i = box('.sheaf-laptop-input'), b = box('.sheaf-laptop-connect');
-    return {w, input: i, button: b, sideways: root.querySelector('.sheaf-main').scrollWidth > w};""")
-    assert got["input"]["x"] + got["input"]["width"] <= got["w"], "the field is cut at the right edge"
-    assert got["button"]["x"] + got["button"]["width"] <= 390 and got["button"]["height"] < 40, "the button is cut or wraps"
+    return {edge, input: i, button: b, sideways: m.scrollWidth > m.clientWidth};""")
+    assert got["input"]["x"] + got["input"]["width"] <= got["edge"] + 0.5, "the field is cut at the right edge"
+    assert got["button"]["x"] + got["button"]["width"] <= got["edge"] + 0.5 and got["button"]["height"] < 40, "the button is cut or wraps"
     assert not got["sideways"]
 
 
@@ -594,3 +595,26 @@ def test_on_a_phone_an_opened_page_keeps_the_height_of_the_pane(mounted):
     got = mounted.js(MEASURE + " return {view: box('.sheaf-view'), body: box('.sheaf-doc-body')};")
     assert got["view"]["height"] >= 600, "the view shrinks to its content"
     assert got["body"]["height"] >= 400, "the opened page has no room to draw or scroll in"
+
+
+def test_on_a_phone_the_tree_takes_a_third_of_the_pane_at_most_not_of_the_screen(mounted):
+    mounted.page.set_viewport_size(PHONE)
+    mounted.page.evaluate("document.getElementById('pane').style.height = '300px';")        # the screen is 844 high, the pane 300
+    got = mounted.js(MEASURE + " return {tree: box('.sheaf-tree'), natural: root.querySelector('.sheaf-tree').scrollHeight};")
+    assert got["natural"] > 91, "the tree is too short to show the cap"
+    assert got["tree"]["height"] <= 91, "the tree is capped by the screen's height, not the pane's"
+
+
+def test_a_narrow_pane_on_a_desktop_screen_gets_the_phone_layout(mounted):
+    mounted.page.set_viewport_size(DESKTOP)
+    mounted.page.evaluate("document.getElementById('pane').style.width = '390px';")
+    got = mounted.js(MEASURE + " return {tree: box('.sheaf-tree'), main: box('.sheaf-main')};")
+    assert got["tree"]["width"] >= 340, "the tree takes a column beside the table"
+    assert got["main"]["y"] >= got["tree"]["y"] + got["tree"]["height"] - 1, "the table is not under the tree"
+
+
+def test_on_a_phone_a_pane_with_no_height_of_its_own_still_shows_the_table(mounted):
+    mounted.page.set_viewport_size(PHONE)
+    mounted.page.evaluate("document.getElementById('pane').style.height = 'auto';")
+    got = mounted.js(MEASURE + " return {main: box('.sheaf-main'), rows: lines('.sheaf-row')};")
+    assert got["rows"] and got["main"]["height"] >= sum(got["rows"]), "the table collapses in a pane with no height"

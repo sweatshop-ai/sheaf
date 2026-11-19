@@ -529,3 +529,49 @@ def test_a_refusal_of_the_hub_is_shown_and_no_line_is_drawn(mounted, pages):
     until(lambda: "already have a laptop" in mounted.page.evaluate("window.__root.querySelector('.sheaf-said').textContent"),
           what="the hub's words")
     assert mounted.js("return root.querySelector('.sheaf-laptop-made').hidden;") is True
+
+
+# The pane on a phone: 390 px wide, the folder tree stacks above the table instead of keeping a column of its own, and the
+# table, the tabs and the Laptops form read in the full width. The desktop layout is unchanged.
+PHONE = {"width": 390, "height": 844}
+DESKTOP = {"width": 1280, "height": 800}
+MEASURE = """const box = (s) => { const e = root.querySelector(s); return e && !e.hidden ? e.getBoundingClientRect() : null; };
+  const lines = (s) => Array.from(root.querySelectorAll(s)).filter((e) => e.offsetParent !== null).map((e) => e.getBoundingClientRect().height);"""
+
+
+def test_on_a_phone_the_tree_stacks_above_the_table_and_the_table_has_the_width(mounted):
+    mounted.page.set_viewport_size(PHONE)
+    got = mounted.js(MEASURE + " return {tree: box('.sheaf-tree'), main: box('.sheaf-main'), view: box('.sheaf-view')};")
+    assert got["tree"]["width"] >= 340, "the tree takes a column beside the table"
+    assert got["main"]["width"] >= 340
+    assert got["main"]["y"] >= got["tree"]["y"] + got["tree"]["height"] - 1, "the table is not under the tree"
+
+
+def test_on_a_phone_the_tabs_and_the_rows_read_without_scrolling_sideways(mounted):
+    mounted.page.set_viewport_size(PHONE)
+    got = mounted.js(MEASURE + """
+    const main = root.querySelector('.sheaf-main');
+    return {tabs: lines('.sheaf-viewswitch, .sheaf-laptops-open'), titles: lines('.sheaf-row .sheaf-title'),
+            sideways: main.scrollWidth > main.clientWidth, sheaf: root.querySelector('.sheaf-view').scrollWidth > root.querySelector('.sheaf-view').clientWidth};""")
+    assert got["tabs"] and max(got["tabs"]) < 40, "a tab name wraps"
+    assert got["titles"] and max(got["titles"]) < 80, "a title wraps letter by letter"
+    assert not got["sideways"] and not got["sheaf"], "a row needs a sideways scroll"
+
+
+def test_on_a_phone_the_laptops_field_and_button_fit_and_the_button_has_one_line(mounted):
+    mounted.page.set_viewport_size(PHONE)
+    mounted.click(".sheaf-laptops-open")
+    until(lambda: mounted.js("return !!root.querySelector('.sheaf-laptops') && !root.querySelector('.sheaf-laptops').hidden;"), what="the Laptops panel")
+    got = mounted.js(MEASURE + """
+    const w = root.querySelector('.sheaf-main').clientWidth;
+    const i = box('.sheaf-laptop-input'), b = box('.sheaf-laptop-connect');
+    return {w, input: i, button: b, sideways: root.querySelector('.sheaf-main').scrollWidth > w};""")
+    assert got["input"]["x"] + got["input"]["width"] <= 390, "the field is cut at the right edge"
+    assert got["button"]["x"] + got["button"]["width"] <= 390 and got["button"]["height"] < 40, "the button is cut or wraps"
+    assert not got["sideways"]
+
+
+def test_on_a_desktop_the_tree_keeps_its_column_beside_the_table(mounted):
+    mounted.page.set_viewport_size(DESKTOP)
+    got = mounted.js(MEASURE + " return {tree: box('.sheaf-tree'), main: box('.sheaf-main')};")
+    assert got["tree"]["width"] == 220 and got["main"]["x"] >= got["tree"]["x"] + 220

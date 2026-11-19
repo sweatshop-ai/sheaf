@@ -970,6 +970,11 @@ def _page_asset(name: str) -> str:
     return (resources.files("sheafmd") / "page" / name).read_text(encoding="utf-8")
 
 
+def page_script() -> str:
+    """The script of a page: the browser's one live stream (live.js, ticket 160), then the page's own."""
+    return _page_asset("live.js") + "\n" + _page_asset("page.js")
+
+
 FRONT_MATTER_TITLE_RE = re.compile(r"\A---\r?\n(?:(?!---\r?\n).*\r?\n)*?title:[ \t]*\S")
 
 
@@ -1170,7 +1175,7 @@ def build(md: Path, *, theme: Theme, share: bool = True, title: str | None = Non
         nonce = f' nonce="{html.escape(script_nonce, quote=True)}"' if script_nonce else ""
         editor = ('<script id="rd-edit-meta" type="application/json">'
                   + json.dumps(meta).replace("<", "\\u003c")
-                  + f"</script>\n<script{nonce}>" + _page_asset("page.js") + "</script>")
+                  + f"</script>\n<script{nonce}>" + page_script() + "</script>")
         if blocks is None:
             log.append("  + export only: no in-page editing")
         else:

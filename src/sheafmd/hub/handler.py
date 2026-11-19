@@ -201,6 +201,17 @@ def _ok(**fields) -> Response:
     return _json(200, {"ok": True, **fields})
 
 
+class _SharedStream(events.Shared):
+    """A shared stream that leaves the handler's list of them when its connection ends."""
+    def __init__(self, handler, sid: str, owner):
+        super().__init__(owner)
+        self._handler, self._sid = handler, sid
+
+    def close(self):
+        super().close()
+        self._handler._shared_closed(self._sid, self)
+
+
 def _stream(sub) -> Response:
     return Response(200, {"Content-Type": "text/event-stream", "Connection": "close"}, stream=sub)
 
@@ -258,12 +269,16 @@ class Handler:
         self._session_seqs: dict = {}       # address -> the seq of James's latest write to it: the newest one wins
         self._pending_lock = threading.Lock()
         self.codes = codes.Codes()          # the sign-in codes, in memory only: a restart drops them (9.13)
+        self._shared: dict = {}             # id -> the events.Shared stream a browser opened under it (ticket 160)
+        self._shared_lock = threading.Lock()
         # path -> method -> (route name, who may call it, function)
         self.routes: dict = {}
         for method, path, name, who, fn in (
             ("GET", "/_/health", "health", OPEN, self._health),
             ("GET", "/_/open", "open", OPEN, self._open),
             ("GET", "/_/live", "live", COOKIE, self._live),
+            ("POST", "/_/live/join", "live-join", COOKIE, self._live_join),
+            ("POST", "/_/live/leave", "live-leave", COOKIE, self._live_leave),
             ("GET", "/_/doc", "doc", EITHER, self._doc),
             ("GET", "/_/writes", "writes", EITHER, self._writes),
             ("GET", "/_/mount", "mount", EITHER, self._mount),
@@ -842,18 +857,96 @@ class Handler:
         return True
 
     def _live(self, req: Req) -> Response:
-        hub, member = self.hub, req.member
+        if "shared" in req.query:
+            return self._shared_stream(req)
         if readthrough.is_clients(req.query.get("doc")):         # a client page is polled through `/_/doc`, never streamed (9.9)
             raise Refuse(404, "no such document")
         if "doc" not in req.query:
-            sub = hub.open_index_stream(lambda _: {"boot": hub.boot, "version": hub.version,
-                                                   "service": hub.service},
-                                        self._index_events(member) if member else None)
-            if member is None and hub.auth is not req.auth:   # a rotation overtook this request, after it told the open streams
-                sub.put("signed-out", {})
-            return _stream(sub)
+            return _stream(self._index_sub(req))
         with self._reading(req.query.get("doc")):
             return self._document_stream(req)
+
+    def _index_sub(self, req: Req):
+        hub, member = self.hub, req.member
+        sub = hub.open_index_stream(lambda _: {"boot": hub.boot, "version": hub.version,
+                                               "service": hub.service},
+                                    self._index_events(member) if member else None)
+        if member is None and hub.auth is not req.auth:   # a rotation overtook this request, after it told the open streams
+            sub.put("signed-out", {})
+        return sub
+
+    # ── one stream for every tab of a browser (ticket 160) ───────────────────
+    # A browser opens six connections to a host at most, and each tab held one. One tab of the
+    # browser now opens `/_/live?shared=ID` and joins the streams of all of them to it, each the
+    # Subscription its own `/_/live` would have been: the same Bus counts it as an open tab.
+    SHARED_MAX = 200         # streams on one connection: far more tabs than a browser holds
+
+    def _shared_stream(self, req: Req) -> Response:
+        sid = req.query.get("shared", "")
+        if not re.fullmatch(r"[A-Za-z0-9_-]{16,64}", sid):
+            raise Refuse(400, "a shared stream needs an id of 16 to 64 letters, digits, - or _")
+        owner = req.member.id if req.member is not None else None
+        stream = _SharedStream(self, sid, owner)
+        with self._shared_lock:
+            old = self._shared.get(sid)
+            if old is not None and old.owner != owner:
+                raise Refuse(409, "that stream id is someone else's")   # an id read from a log closes no one's tabs
+            self._shared[sid] = stream
+        if old is not None:
+            old.close()                  # the same browser came back before the old connection was seen to close
+        return _stream(stream)
+
+    def _shared_of(self, req: Req) -> "events.Shared":
+        sid = req.body.get("stream")
+        with self._shared_lock:
+            stream = self._shared.get(sid) if isinstance(sid, str) else None
+        owner = req.member.id if req.member is not None else None
+        if stream is None or stream.closed or stream.owner != owner:
+            raise Refuse(404, "no such stream")
+        return stream
+
+    def _live_join(self, req: Req) -> Response:
+        """Adds a tab's stream to a shared one: `key` names it there, `doc` is its document, "" the index."""
+        stream = self._shared_of(req)
+        key, doc = req.body.get("key"), req.body.get("doc", "")
+        if not isinstance(key, str) or not key or len(key) > 128 or not isinstance(doc, str):
+            raise Refuse(400, "join needs a key and a doc")
+        if key not in stream.keys() and len(stream.keys()) >= self.SHARED_MAX:
+            raise Refuse(429, "too many streams on this connection")
+        stream.join(key, self._joined_sub(req, doc))
+        # A key names one tab. After a leader hand-over the tab joins the new connection while the old one, whose tab
+        # closed, is still open here until a write to it fails: drop the key there, or the hub counts the tab twice.
+        with self._shared_lock:
+            others = [s for s in self._shared.values() if s is not stream and s.owner == stream.owner]
+        for other in others:
+            other.leave(key)
+        return _ok()
+
+    def _joined_sub(self, req: Req, doc: str):
+        """The Subscription a tab's own `/_/live` would have been given, or the status it would have been refused with."""
+        if not doc:
+            return self._index_sub(req)
+        if readthrough.is_clients(doc):
+            return 404
+        one = replace(req, query={"doc": doc})
+        try:
+            with self._reading(doc):
+                return self._document_stream(one).stream
+        except Refuse as r:
+            return r.status
+        except (FileNotFoundError, NotFound):
+            return 404
+
+    def _live_leave(self, req: Req) -> Response:
+        key = req.body.get("key")
+        if isinstance(key, str):
+            self._shared_of(req).leave(key)
+        return _ok()
+
+    def _shared_closed(self, sid: str, stream):
+        with self._shared_lock:
+            if self._shared.get(sid) is stream:
+                del self._shared[sid]
 
     def _document_stream(self, req: Req) -> Response:
         hub, member = self.hub, req.member

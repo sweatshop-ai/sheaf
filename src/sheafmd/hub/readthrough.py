@@ -51,8 +51,8 @@ def adopt(html: str, client_nonce, nonce: str) -> str:
     """A client page as this origin serves it: a script holds only when it is this version's own page script (the one the hub
     renders every page with) or the page's data block, and the first runs under `nonce`, the one this hub drew. Every other
     script of the client's HTML is dropped, whatever nonce it names, so the client tiroir runs no code of its own here."""
-    from ..render import _page_asset
-    own = _page_asset("page.js")
+    from ..render import page_script
+    own = page_script()
 
     def one(m):
         attrs, body = m.group(1), m.group(2)

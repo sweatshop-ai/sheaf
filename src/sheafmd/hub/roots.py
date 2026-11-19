@@ -166,7 +166,7 @@ def in_git_dir(md: Path, root: Root) -> bool:
     its folder is in one, by git's answer or by the path's, looked at up to the top of the work tree
     git names, else up to `root`'s folder (that folder counted), and is not `root`'s own folder,
     which rule 3 leaves it. What the door asks of an address (SPEC 12)."""
-    folder, top = Path(os.path.realpath(md)).parent, Path(os.path.realpath(root.path))
+    folder, top = Path(config.realpath(md)).parent, Path(config.realpath(root.path))
     if folder == top:
         return False
     # Every folder git takes for a git directory is shaped like one, so where none is, at the folder or
@@ -317,7 +317,7 @@ class Roots:
         with self._lock:
             known = {n: r.path for n, r in self._roots.items()}
         with self._changing():
-            path = Path(path).resolve()
+            path = Path(config.realpath(path))
             for r in self._roots.values():
                 if r.path == path:
                     return r
@@ -404,7 +404,7 @@ class Roots:
         stream judging an event, SPEC 8.6) holds no request, no look, no sweep and no other lookup."""
         with self._lock:
             registered = list(self._roots.values())
-        return self._find(Path(os.path.realpath(md)).parent, registered)[0]
+        return self._find(Path(config.realpath(md)).parent, registered)[0]
 
     def for_document(self, md: Path) -> Root:
         """The root of `md`, first match wins (SPEC 8.2): the top of its git work tree (each
@@ -412,7 +412,7 @@ class Roots:
         it; else its own folder. Registers the root when it is new: the roots it judged against and
         the one it adds are one step, under the lock, so two documents of one new folder make one root."""
         with self._lock:
-            folder = Path(os.path.realpath(md)).parent
+            folder = Path(config.realpath(md)).parent
             root, top = self._find(folder, list(self._roots.values()))
             return root or self._add(top or folder, git=bool(top))
 
@@ -545,7 +545,7 @@ def _stat_inside(top: Path, rel: str, folders: dict) -> tuple[os.stat_result, bo
         if here:
             inside = folders.get(here)
             if inside is None:
-                inside = folders[here] = _servable_at(os.path.realpath(os.path.dirname(full)), top)
+                inside = folders[here] = _servable_at(config.realpath(os.path.dirname(full)), top)
             if not inside:
                 return None
         st = os.lstat(full)
@@ -610,7 +610,7 @@ def _kept(root: Root) -> Callable[[str, bool], bool]:
     directory it lies in (`in_git_dir`); asked once per real folder. `linked` is whether the file is
     a link, which the caller knows from its `lstat`: only a link is resolved file by file, any other
     file lies in its folder's real folder, found once per folder."""
-    top, seen, real_of = os.path.realpath(root.path), {}, {}
+    top, seen, real_of = config.realpath(root.path), {}, {}
 
     def kept(rel: str, linked: bool) -> bool:
         if linked:
@@ -619,7 +619,7 @@ def _kept(root: Root) -> Callable[[str, bool], bool]:
         else:
             here, _, name = rel.rpartition("/")
             if here not in real_of:
-                real_of[here] = os.path.realpath(os.path.join(top, here))
+                real_of[here] = config.realpath(os.path.join(top, here))
             folder = real_of[here]
             real = os.path.join(folder, name)
         if folder not in seen:
@@ -661,7 +661,7 @@ def list_documents(root: Root, cap: int | None = None) -> Listing:
     untracked, minus gitignored; nothing when git gives no answer); any other folder is walked.
     What `resolve` would refuse is not listed, nor what `document` would: a file that 8.2 keeps
     from the root for lying in a git directory, which is its own folder's root (rule 3)."""
-    top = Path(os.path.realpath(root.path))
+    top = Path(config.realpath(root.path))
     if not os.path.isdir(top):              # gone, or the hub may not enter it (`Root.closed`)
         return Listing([], 0)
     names = _git_names(top) if root.git else _NOT_A_REPO

@@ -245,7 +245,7 @@ def _rev_parse(folder: Path, *asks: str):
         return None
 
 
-_remembered = threading.local()      # the thread's `git_places_remembered` memo: {folder: GitPlace}, None outside one
+_remembered = threading.local()      # the thread's memos, `places` (`git_places_remembered`: {folder: GitPlace}) and `real` (`real_paths_remembered`: {path: its real path}), None outside one
 
 
 @contextmanager
@@ -261,6 +261,32 @@ def git_places_remembered():
         yield
     finally:
         _remembered.places = None
+
+
+@contextmanager
+def real_paths_remembered():
+    """Within it, this thread resolves each path once (SPEC 8.12): a listing asks for the same few paths, the roots and their
+    folders, for every page and rule, 53,867 times for 1,685 paths, a third of its time. The answers are dropped when it ends,
+    so the next listing, and every other caller, resolves afresh; a nested use shares the outer one's."""
+    if getattr(_remembered, "real", None) is not None:
+        yield
+        return
+    _remembered.real = {}
+    try:
+        yield
+    finally:
+        _remembered.real = None
+
+
+def realpath(path) -> str:
+    """`os.path.realpath(path)`, asked once for each path inside `real_paths_remembered`."""
+    real = getattr(_remembered, "real", None)
+    if real is None:
+        return os.path.realpath(path)
+    key = os.fspath(path)
+    if key not in real:
+        real[key] = os.path.realpath(key)
+    return real[key]
 
 
 def git_place(folder: Path) -> GitPlace:
@@ -285,7 +311,7 @@ def _git_place_asked(folder: Path) -> GitPlace:
         return GitPlace(None, False)
     in_git_dir, in_work_tree, top = (r.stdout.split("\n", 2) + ["", ""])[:3]
     if in_work_tree == "true" and r.returncode == 0:
-        return GitPlace(Path(top.removesuffix("\n")).resolve(), False)
+        return GitPlace(Path(realpath(top.removesuffix("\n"))), False)
     if in_git_dir == "true" or re.search(r"^fatal: cannot use bare repository", r.stderr, re.M):
         return GitPlace(None, True)
     g = _rev_parse(folder, "--absolute-git-dir") if in_git_dir == "false" else None

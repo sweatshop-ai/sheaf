@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 import tomllib
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -245,7 +246,7 @@ def _rev_parse(folder: Path, *asks: str):
         return None
 
 
-_remembered = threading.local()      # the thread's memos, `places` (`git_places_remembered`: {folder: GitPlace}) and `real` (`real_paths_remembered`: {path: its real path}), None outside one
+_remembered = threading.local()      # the thread's `git_places_remembered` memo: {folder: GitPlace}, None outside one
 
 
 @contextmanager
@@ -256,37 +257,29 @@ def git_places_remembered():
     if getattr(_remembered, "places", None) is not None:
         yield
         return
-    _remembered.places = {}
+    _remembered.places, _remembered.fs = {}, {}
     try:
         yield
     finally:
-        _remembered.places = None
+        _remembered.places = _remembered.fs = None
 
 
-@contextmanager
-def real_paths_remembered():
-    """Within it, this thread resolves each path once (SPEC 8.12): a listing asks for the same few paths, the roots and their
-    folders, for every page and rule, 53,867 times for 1,685 paths, a third of its time. The answers are dropped when it ends,
-    so the next listing, and every other caller, resolves afresh; a nested use shares the outer one's."""
-    if getattr(_remembered, "real", None) is not None:
-        yield
-        return
-    _remembered.real = {}
-    try:
-        yield
-    finally:
-        _remembered.real = None
+def remembered_fs(kind: str, path, asked: Callable):
+    """`asked(path)`, once per `kind` and path within `git_places_remembered` (the same listing, the same lifetime): what a listing
+    asks of the file system about a folder (where it really is, whether it is shaped like a git directory) it asked for every page,
+    and for every folder above it. Outside one, asked afresh."""
+    answers = getattr(_remembered, "fs", None)
+    if answers is None:
+        return asked(path)
+    if (kind, path) not in answers:
+        answers[kind, path] = asked(path)
+    return answers[kind, path]
 
 
 def realpath(path) -> str:
-    """`os.path.realpath(path)`, asked once for each path inside `real_paths_remembered`."""
-    real = getattr(_remembered, "real", None)
-    if real is None:
-        return os.path.realpath(path)
-    key = os.fspath(path)
-    if key not in real:
-        real[key] = os.path.realpath(key)
-    return real[key]
+    """`os.path.realpath(path)`, asked once for each path within `git_places_remembered` (SPEC 8.12): a listing asked for the same
+    few paths, the roots and their folders, for every page and rule, 53,867 times for 1,685 paths, a third of its time."""
+    return remembered_fs("real", os.fspath(path), os.path.realpath)
 
 
 def git_place(folder: Path) -> GitPlace:

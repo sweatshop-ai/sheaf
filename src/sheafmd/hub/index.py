@@ -581,7 +581,7 @@ class Index:
 
     # ── the whole index ──────────────────────────────────────────────────────
     def data(self, only: str | None = None, rendered: bool = False, member=None, board: bool = False, gone=None) -> dict:
-        with config.git_places_remembered(), config.real_paths_remembered(), self.hub.projects_remembered(), self.hub.loose.remembered():     # one answer of git per folder, one resolution per path, one read of projects.toml per root, for the whole listing (8.2, 8.12)
+        with config.git_places_remembered(), self.hub.projects_remembered(), self.hub.loose.remembered():     # one answer of git per folder, one resolution per path, one read of projects.toml per root, for the whole listing (8.2, 8.12)
             return self._data(only, rendered, member, board, gone)
 
     def _data(self, only: str | None = None, rendered: bool = False, member=None, board: bool = False, gone=None) -> dict:

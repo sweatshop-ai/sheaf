@@ -13,7 +13,7 @@ from importlib import resources
 
 # The files each mount asset joins, in order: the loader's own, then the page's and the list's, which their pages of
 # their own inline.
-MOUNT_ASSETS = {"mount.js": ("mount.js", "page.js", "list.js", "sheaf.js"),
+MOUNT_ASSETS = {"mount.js": ("mount.js", "live.js", "page.js", "list.js", "sheaf.js"),
                 "mount.css": ("mount.css", "page.css", "list.css", "sheaf.css")}
 TAG_LENGTH = 16                       # hex digits of the sha256: 64 bits, the name of one body
 VERSION_MARK = b"'@@SHEAF_VERSION@@'"

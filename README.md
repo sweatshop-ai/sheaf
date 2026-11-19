@@ -124,6 +124,13 @@ sign-in page (or, with unsaved edits on it, keeps them and says how to sign in a
 again with `sheaf open FILE.md`, or with `sheaf signin-url` for a browser on another machine. MCP
 tokens are not affected.
 
+## Many tabs open
+
+A browser opens at most six connections to the hub at a time. The sheaf tabs of one browser share
+a single live connection, so any number of them stay up to date. A browser without Web Locks or
+BroadcastChannel (much older than 2022) uses one connection per tab: there, a page that never loads
+while other sheaf tabs are open means the limit is reached, and closing older sheaf tabs frees it.
+
 ## Security
 
 The trust line is your operating-system user: any process running as you is trusted. sheaf defends

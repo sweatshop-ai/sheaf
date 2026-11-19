@@ -595,10 +595,18 @@ def landed(page, timeout=8.0):
         settled(page, timeout)
 
 
-def new_context(browser, error=None, **options):
+# The page's stream as each tab held it before ticket 160: an EventSource of its own. The tests that watch the stream
+# wrap window.EventSource, which the browser's one shared stream (page/live.js) would take out of their tab; only
+# test_page_shared_live.py runs the shared one (new_context's `shared`).
+PLAIN_LIVE_JS = """window.SheafLive = {shared: false, source: d =>
+  new EventSource(d ? '/_/live?doc=' + encodeURIComponent(d) : '/_/live')};"""
+
+
+def new_context(browser, error=None, shared=False, **options):
     """A context of the browser (its clicks, fills and waits for a selector give up after PAGE_TIMEOUT_MS),
     or a failure that says whether the browser is still there. `error` is
-    Playwright's own (the default); any other exception is a bug of the test and passes through."""
+    Playwright's own (the default); any other exception is a bug of the test and passes through. `shared`: the
+    tabs share one stream, as in a browser (page/live.js); otherwise each holds its own."""
     if error is None:
         from playwright.sync_api import Error as error
     try:
@@ -606,6 +614,8 @@ def new_context(browser, error=None, **options):
         context.set_default_timeout(PAGE_TIMEOUT_MS)
         context.add_init_script(STREAM_JOURNAL_JS)
         context.add_init_script(LEAVING_JS)
+        if not shared:
+            context.add_init_script(PLAIN_LIVE_JS)
         return context
     except error as e:
         pytest.fail(f"Chromium went away under a new context (connected={browser.is_connected()}):\n{e}")

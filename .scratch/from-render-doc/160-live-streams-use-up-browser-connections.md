@@ -1,6 +1,6 @@
 # 160: Seven sheaf tabs in one browser: the seventh page never loads
 
-**Status:** open
+**Status:** fix on branch omar/160-shared-stream (one shared stream per browser, page/live.js); closed when merged and the seven-tab page test is green in CI
 
 **From:** render-doc ticket 160 (private archive), triaged 2026-11-12
 

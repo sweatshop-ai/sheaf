@@ -13,7 +13,7 @@ from importlib.resources import files
 import pytest
 
 PAGE = files("sheafmd") / "page"
-ASSETS = ("page.js", "page.css")
+ASSETS = ("page.js", "page.css", "live.js")
 
 # The words the page must not carry.
 FORBIDDEN = ["tiroir", "acme"]

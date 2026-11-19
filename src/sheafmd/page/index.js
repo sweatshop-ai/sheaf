@@ -55,7 +55,7 @@
   }
 
   if (!window.EventSource) return;
-  var es = new EventSource('/_/live');
+  var es = window.SheafLive ? SheafLive.source('') : new EventSource('/_/live');      // one stream for every tab (live.js, ticket 160)
   var stopped = false;   // the hub said it stopped; until its next `hello`
   // `hello` is also what closes the gap between the page being written and the stream being
   // open, and after a reconnect what moved while the hub was away.

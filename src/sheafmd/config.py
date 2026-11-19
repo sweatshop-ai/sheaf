@@ -14,10 +14,10 @@ import subprocess
 import sys
 import threading
 import tomllib
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from collections.abc import Callable
 from typing import NamedTuple
 
 from . import paths

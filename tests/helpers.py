@@ -659,7 +659,7 @@ class Front:
         self.hub, self.handler = hub, handler
 
     def request(self, method, path, *, member=BEA, body=None, host=None, origin=True, uid=None,
-                headers=None, raw=None, conn=True):
+                headers=None, raw=None, conn=True, gone=None):
         from sheafmd.hub import proxy
         cfg = self.hub.proxy
         h = {"Host": host if host is not None else cfg.host}
@@ -673,7 +673,7 @@ class Front:
             h["Content-Type"] = "application/json"
             h["Content-Length"] = str(len(data))
         peer = proxy.Peer(cfg.uid if uid is None else uid) if conn else None
-        return self.handler.handle(method, path, h, data, conn=peer, via="proxy")
+        return self.handler.handle(method, path, h, data, conn=peer, via="proxy", gone=gone)
 
     def get(self, path, **kw):
         return self.request("GET", path, **kw)

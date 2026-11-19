@@ -165,14 +165,26 @@ def mine(hub, member, root_name: str) -> bool:
     return root is not None and hub.loose.owner_of(root) == member.id
 
 
-def data(hub, member, titles: Titles, view: str = "") -> dict:
+Abandoned = index_mod.Abandoned
+
+
+# Pages between two looks at the connection: a look is a system call, so it is not taken on every page.
+CHECK_EVERY = 8
+
+
+def data(hub, member, titles: Titles, view: str = "", gone=None) -> dict:
     """`{tree, rows, more}` for `member`: every document of each of their roots that they may open, newest change first. A row
     is `{doc, url, title, root, folder, share, mtime, when, open, write, write_tip, session, session_tip, session_link}`:
     the folder is the path on disk; `can_move` whether the member may Move it (a page of their own loose root, 9.11); `share` the hash of a page of the member's own loose root that no Share line opens (the
     row's Share button writes against it), else ""; `write` the last write and `session` the writer of the last line that named
     an agent session. The tooltips hold the machine and the session's id, and only what the writer declared. No List status is
-    in it. `more` is `{root: n}`, what the listing's cap (8.6) left out of each root."""
-    found = hub.index.data(member=member)
+    in it. `more` is `{root: n}`, what the listing's cap (8.6) left out of each root. `gone()` says the caller closed the
+    connection: the run is then ended with `Abandoned`, looked at before the listing, at each root and every `CHECK_EVERY` pages."""
+    def check():
+        if gone is not None and gone():
+            raise Abandoned
+    check()
+    found = hub.index.data(member=member, gone=gone)
     now = hub.clock()
     rows = []
     marked: dict = {}           # a loose root's name -> its marks, read once; None when they cannot be read
@@ -183,7 +195,10 @@ def data(hub, member, titles: Titles, view: str = "") -> dict:
             marked[name] = hub.archive.facts(root) if root is not None and hub.loose.owner_of(root) is not None else None
         return marked[name]
     for root in found["roots"]:
-        for d in root["docs"]:
+        check()
+        for n, d in enumerate(root["docs"]):
+            if n and n % CHECK_EVERY == 0:
+                check()
             address = d["doc"]
             at = roots_mod.Address.parse(address)
             with place.held(hub, address):          # every read of a rectoverso's file holds its name's lock (9.11)

@@ -48,7 +48,7 @@ color:inherit;background:transparent;border:1px solid var(--ss-line);border-radi
 .sheaf-sheaf .sheaf-laptop-made{margin-top:12px}
 .sheaf-sheaf .sheaf-laptop-line{display:block;margin:6px 0;padding:8px;border:1px solid var(--ss-line);border-radius:6px;font:12px/1.4 ui-monospace,monospace;user-select:all;word-break:break-all}
 /* In a narrow pane (the pane's width, not the screen's) the tree stacks above the table (its own scroll, a third of the pane at most) and a row is a card: the title,
-   then the other cells, each under its header's name. The Laptops field takes the width and the button goes under it, on one line. */
+   then the other cells, each under its header's name. A pane with no height of its own leaves the tree uncapped (a percentage of nothing) and the table at its content's height. The Laptops field takes the width and the button goes under it, on one line. */
 @container sheaf-pane (max-width:600px){
 .sheaf-sheaf .sheaf-view{flex-direction:column;height:100%;min-height:0}
 .sheaf-sheaf .sheaf-tree{flex:0 0 auto;box-sizing:border-box;max-height:30%;border-right:0;border-bottom:1px solid var(--ss-line)}

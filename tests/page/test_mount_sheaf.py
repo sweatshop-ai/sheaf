@@ -611,3 +611,10 @@ def test_a_narrow_pane_on_a_desktop_screen_gets_the_phone_layout(mounted):
     got = mounted.js(MEASURE + " return {tree: box('.sheaf-tree'), main: box('.sheaf-main')};")
     assert got["tree"]["width"] >= 340, "the tree takes a column beside the table"
     assert got["main"]["y"] >= got["tree"]["y"] + got["tree"]["height"] - 1, "the table is not under the tree"
+
+
+def test_on_a_phone_a_pane_with_no_height_of_its_own_still_shows_the_table(mounted):
+    mounted.page.set_viewport_size(PHONE)
+    mounted.page.evaluate("document.getElementById('pane').style.height = 'auto';")
+    got = mounted.js(MEASURE + " return {main: box('.sheaf-main'), rows: lines('.sheaf-row')};")
+    assert got["rows"] and got["main"]["height"] >= sum(got["rows"]), "the table collapses in a pane with no height"

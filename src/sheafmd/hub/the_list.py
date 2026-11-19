@@ -891,7 +891,7 @@ class TheList:
     def serves(self, name: str) -> bool:
         """Whether `name` is the root whose page is the list; never the git top of a refused list root."""
         r = self.hub.roots.lookup(self.cfg.root / projects.FILE)
-        return r is not None and r.name == name and r.path == Path(os.path.realpath(self.cfg.root))
+        return r is not None and r.name == name and r.path == Path(config.realpath(self.cfg.root))
 
     def data(self, member, show: str) -> dict:
         """The list as `member` reads it, as data: {show, filters, sections}, each section {key, title, count, groups},

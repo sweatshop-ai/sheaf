@@ -6,7 +6,7 @@ changes whenever an asset does. The entries name pull requests of sweatshop-ai/s
 
 ## 1.2.0 (2026-11-19)
 
-Everything merged since 1.1.0 (#424), up to #464.
+Everything merged since 1.1.0 (#424), up to #468.
 
 ### Added
 
@@ -26,9 +26,10 @@ Everything merged since 1.1.0 (#424), up to #464.
 
 ### Changed
 
-- A listing asks git once per folder, not once per page (#459), and reads each root's
-  `projects.toml` once per listing (#460, #462, merged at 66d47a7b; the realpath and timing parts of that
-  ticket are not in this release).
+- A listing is cheaper to build: it asks git once per folder, not once per page (#459); reads each
+  root's `projects.toml` (#460, #462) and `loose.json` (#466) once per listing; resolves each path once
+  (#467); and looks for git directories once per folder (#468, 23,939 to 15,790 `lstat` calls per
+  mount; a count of calls, not a CPU measurement).
 - Tell drop status: answered ends the drop (#455).
 - `peer use` takes its token on stdin and reads a file store from `$CREDENTIALS_DIRECTORY`; its
   messages replace tracebacks (#440, #441, #443).

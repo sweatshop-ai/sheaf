@@ -57,6 +57,7 @@ color:inherit;background:transparent;border:1px solid var(--ss-line);border-radi
 .sheaf-sheaf .sheaf-views button{white-space:nowrap}
 .sheaf-sheaf .sheaf-table,.sheaf-sheaf .sheaf-table tbody,.sheaf-sheaf .sheaf-table tr,.sheaf-sheaf .sheaf-table td,
 .sheaf-sheaf .sheaf-trash,.sheaf-sheaf .sheaf-trash tbody,.sheaf-sheaf .sheaf-trash tr,.sheaf-sheaf .sheaf-trash td{display:block;box-sizing:border-box;width:100%}
+.sheaf-sheaf .sheaf-table[hidden]{display:none}
 .sheaf-sheaf .sheaf-table thead{display:none}
 .sheaf-sheaf .sheaf-table tr{padding:6px 0;border-bottom:1px solid var(--ss-line)}
 .sheaf-sheaf .sheaf-table tr[hidden]{display:none}
@@ -67,6 +68,7 @@ color:inherit;background:transparent;border:1px solid var(--ss-line);border-radi
 .sheaf-sheaf .sheaf-write::before{content:"Last write: "}
 .sheaf-sheaf .sheaf-session::before{content:"Last agent session: "}
 .sheaf-sheaf .sheaf-when::before{content:"When: "}
+.sheaf-sheaf .sheaf-open::before{content:"Open: "}
 .sheaf-sheaf .sheaf-laptop-input{display:block;box-sizing:border-box;max-width:none;margin:0 0 8px}
 .sheaf-sheaf .sheaf-laptop-connect{white-space:nowrap}
 }

@@ -14,6 +14,7 @@ import subprocess
 import sys
 import threading
 import tomllib
+from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -256,11 +257,23 @@ def git_places_remembered():
     if getattr(_remembered, "places", None) is not None:
         yield
         return
-    _remembered.places = {}
+    _remembered.places, _remembered.fs = {}, {}
     try:
         yield
     finally:
-        _remembered.places = None
+        _remembered.places = _remembered.fs = None
+
+
+def remembered_fs(kind: str, path, asked: Callable):
+    """`asked(path)`, once per `kind` and path within `git_places_remembered` (the same listing, the same lifetime): what a listing
+    asks of the file system about a folder (where it really is, whether it is shaped like a git directory) it asked for every page,
+    and for every folder above it. Outside one, asked afresh."""
+    answers = getattr(_remembered, "fs", None)
+    if answers is None:
+        return asked(path)
+    if (kind, path) not in answers:
+        answers[kind, path] = asked(path)
+    return answers[kind, path]
 
 
 def git_place(folder: Path) -> GitPlace:

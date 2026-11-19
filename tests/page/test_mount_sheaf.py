@@ -562,8 +562,8 @@ def test_on_a_phone_the_tabs_and_the_rows_read_without_scrolling_sideways(mounte
 
 
 def test_on_a_phone_the_laptops_field_and_button_fit_and_the_button_has_one_line(mounted):
-    mounted.page.set_viewport_size({"width": 414, "height": 844})
-    mounted.page.evaluate("const p = document.getElementById('pane'); p.style.marginLeft = '24px';")     # a pane that does not start at x=0
+    mounted.page.set_viewport_size(DESKTOP)
+    mounted.page.evaluate("const p = document.getElementById('pane'); p.style.width = '390px'; p.style.marginLeft = '24px';")     # a narrow pane that does not start at x=0
     mounted.click(".sheaf-laptops-open")
     until(lambda: mounted.js("return !!root.querySelector('.sheaf-laptops') && !root.querySelector('.sheaf-laptops').hidden;"), what="the Laptops panel")
     got = mounted.js(MEASURE + """

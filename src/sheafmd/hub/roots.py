@@ -167,9 +167,7 @@ def in_git_dir(md: Path, root: Root) -> bool:
     git names, else up to `root`'s folder (that folder counted), and is not `root`'s own folder,
     which rule 3 leaves it. What the door asks of an address (SPEC 12)."""
     top = Path(config.realpath(root.path))
-    # A file that is no link lies in its folder's real folder, found once per folder; a link is resolved itself.
-    folder = (Path(os.path.realpath(md)).parent if os.path.islink(md)
-              else Path(config.realpath(Path(md).parent)))
+    folder = config.real_path(md).parent
     if folder == top:
         return False
     # Every folder git takes for a git directory is shaped like one, so where none is, at the folder or

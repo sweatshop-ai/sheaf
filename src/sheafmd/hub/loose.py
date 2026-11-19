@@ -287,7 +287,7 @@ class Loose:
             return root, fresh
 
     def owner_of(self, root) -> str | None:
-        """The id of the member whose loose root `root` is, None for any other root."""
+        """The id of the member whose loose root `root` is, None for any other root. Within a listing each folder is resolved once."""
         real = config.realpath(root.path)
         return next((mid for mid, folder in self._registry().items() if config.realpath(folder) == real), None)
 

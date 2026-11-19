@@ -28,6 +28,10 @@ RANK = {d: i for i, d in enumerate(DOTS)}
 SWEEP_SECONDS = 5               # how often every listed file is looked at while an index is open
 
 
+class Abandoned(Exception):
+    """The caller closed the connection while a data run was under way: nobody is left to read the answer."""
+
+
 class Summary(NamedTuple):
     """What a file's comments come to, apart from who has read them."""
     open: int                   # open comments (malformed and foreign ones never count)
@@ -576,11 +580,11 @@ class Index:
             self.touch(address)
 
     # ── the whole index ──────────────────────────────────────────────────────
-    def data(self, only: str | None = None, rendered: bool = False, member=None, board: bool = False) -> dict:
+    def data(self, only: str | None = None, rendered: bool = False, member=None, board: bool = False, gone=None) -> dict:
         with config.git_places_remembered():            # one answer of git per folder for the whole listing (8.2)
-            return self._data(only, rendered, member, board)
+            return self._data(only, rendered, member, board, gone)
 
-    def _data(self, only: str | None = None, rendered: bool = False, member=None, board: bool = False) -> dict:
+    def _data(self, only: str | None = None, rendered: bool = False, member=None, board: bool = False, gone=None) -> dict:
         """`{roots: [{name, path, missing, closed, dot, docs: [...]}], more: {root: n}}` (SPEC 8.5).
         Roots go by their most recently changed document; documents by dot, then last change.
         `only` limits it to one root. A document rendered since the hub started is listed even
@@ -588,7 +592,8 @@ class Index:
         only those, with no listing of any folder: what `sheaf list` asks for. For a `member` of
         proxy mode, only their roots, and in them only their documents: a root nested inside one
         of theirs is another root (9.9), and a rectoverso that is another member's alone is none (9.11). `board` adds every
-        member's private files, for the board that the streams are told from (`_rows`): never for a person's page."""
+        member's private files, for the board that the streams are told from (`_rows`): never for a person's page. `gone()`, when
+        given, is asked before each root and ends the listing with `Abandoned` when the caller has closed the connection."""
         hub = self.hub
         waiting, running = self._live_state()
         named = {a for a, e in list(hub.entries.items()) if e.rendered}
@@ -608,6 +613,8 @@ class Index:
         for root in hub.roots.listed():
             if only is not None and root.name != only:
                 continue
+            if gone is not None and gone():
+                raise Abandoned
             giver = None                            # the member whose loose root this is, when it is another's
             if member is not None and not hub.owns(member, root):
                 giver = hub.giver(member, root)     # only a loose root that Shares a page with this member is listed

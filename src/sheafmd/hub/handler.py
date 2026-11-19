@@ -587,7 +587,10 @@ class Handler:
 
     def _peer_read(self, req: Req) -> Response:
         """A page route of a client's member run here, the client tiroir (ticket 23): `readthrough.answer` says who and what."""
-        return _json(*readthrough.answer(self, req.body))
+        try:
+            return _json(*readthrough.answer(self, req.body, gone=req.gone))
+        except sheaf_view.Abandoned:
+            raise Refuse(499, "the caller closed the connection") from None
 
     def _peer_comment(self, req: Req) -> Response:
         """A comment of an agency member written here under their name (ticket 23)."""

@@ -8,12 +8,13 @@ import re
 
 from helpers import pandoc
 from sheafmd import comments as rdc
-from sheafmd import edit as rde
+from sheafmd import edit as rde, orderedtask
 from sheafmd.blocks import split_md_blocks
 
 
 def page_fragment(block_md):
-    out = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], block_md)
+    # the page's own render, which draws a box for an ordered `[ ]` item (ticket 172)
+    out = orderedtask.show(pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], orderedtask.hide(block_md)))
     return re.sub(rf"<!--\s*{rdc.MARKER}\s+id=(\S+)[\s\S]*?-->",
                   r'<span class="rd-anchor" data-rd-id="\1"></span>', out).strip()
 

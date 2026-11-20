@@ -2146,23 +2146,24 @@ def test_a_task_mark_with_a_cr_inside_its_brackets_ends_after_the_bracket():
     assert src[m.start():m.end()] == "- [ \r]"
 
 
-@pytest.mark.parametrize("src", ["1. [ ] a\n", "1) [x] a\n", "1. [ \r] a\n", "7.\r [ ] a\n"])
-def test_an_ordered_item_is_no_task_mark_because_pandoc_draws_it_no_box(src):
-    # c1 of ticket 128, measured on pandoc 3.9: `1. [ ] a` has no box, with a CR or without. The review put it on the
-    # CR in `1. [ \r] d`; the CR changes nothing, the marks only have to be the ones pandoc draws a box for.
-    from sheafmd import _pandoc
+@pytest.mark.parametrize("src", ["1. [ ] a\n", "1) [x] a\n", "7.\r [ ] a\n"])
+def test_an_ordered_item_is_a_task_mark_as_it_is_a_box(src):
+    # Ticket 172: pandoc 3.9 draws `1. [ ] a` no box (ticket 128), GitHub does, and so does the page now: the mark
+    # is there for the box. The CR changes nothing, the marks are the ones the page draws a box for.
     from sheafmd.edit import task_marks
-    assert "checkbox" not in _pandoc.run(["-f", "gfm", "-t", "html5"], src).stdout
-    assert task_marks(src) == []
+    from sheafmd.render import pandoc_html
+    assert pandoc_html(src.replace("\r", "")).count('type="checkbox"') == 1
+    assert len(task_marks(src)) == 1
 
 
 @pytest.mark.parametrize("src, k, want", [
-    ("- x\n  1. [ ] b\n- [ ] c\n", 0, "- x\n  1. [ ] b\n- [x] c\n"),
-    ("- x\r\n  1. [ ] b\r\n- [ ] c\r\n", 0, "- x\r\n  1. [ ] b\r\n- [x] c\r\n"),
+    ("- x\n  1. [ ] b\n- [ ] c\n", 0, "- x\n  1. [x] b\n- [ ] c\n"),
+    ("- x\n  1. [ ] b\n- [ ] c\n", 1, "- x\n  1. [ ] b\n- [x] c\n"),
+    ("- x\r\n  1. [ ] b\r\n- [ ] c\r\n", 1, "- x\r\n  1. [ ] b\r\n- [x] c\r\n"),
+    ("1. [ ] a\n2. [x] b\n3. [ ] c\n", 2, "1. [ ] a\n2. [x] b\n3. [x] c\n"),
 ])
 def test_a_tick_beside_an_ordered_item_flips_its_line_and_leaves_the_rest(src, k, want):
-    # The ordered item drew no box, so the marks and the boxes had different counts and the tick went through pandoc,
-    # which rewrites the whole list.
+    # An ordered item draws a box (ticket 172): the tick is written in its line and the list is not rewritten.
     from sheafmd.blocks import split_md_blocks
     from sheafmd.edit import _toggle_boxes
     block = split_md_blocks(src)[0]
@@ -2262,7 +2263,7 @@ def test_the_lists_button_never_ticks_another_box_than_its_own():
 
 @pytest.mark.parametrize("body, k", [
     ("- [ ]\n- - [ ] o\n- [ ] Approve\n", 1),        # the box the page draws second
-    ("1. [ ] e\n- [ ] Approve\n", 0),                 # an ordered item draws no box
+    ("1. [ ] e\n- [ ] Approve\n", 1),                 # an ordered item draws a box (ticket 172)
     ("- - [ ]\n  - [ ] Approve\n", 0),                # an empty item draws none
     ("- [ ] a\n- [ ] Approve\n", 1),
 ])
@@ -2294,7 +2295,7 @@ def test_the_page_asks_a_boxs_number_once_per_text(monkeypatch):
     ("- [ ]\r\n- [ ] Approve\r\n", "- [ ]\r\n- [x] Approve\r\n"),
     ("- [ ] Approve\n- <input type=\"checkbox\"> x\n", "- [x] Approve\n- <input type=\"checkbox\"> x\n"),
     ("- <input type=\"checkbox\"> x\n- [ ] Approve\n", "- <input type=\"checkbox\"> x\n- [x] Approve\n"),
-    # an empty item between marks, a box behind a chain, and an ordered item that draws no box, all in one list
+    # an empty item between marks, a box behind a chain, and an ordered item that draws a box, all in one list
     ("- [ ]\n- - [ ] o\n1. [ ] e\n- [ ]\n- [ ] Approve\n", "- [ ]\n- - [ ] o\n1. [ ] e\n- [ ]\n- [x] Approve\n"),
 ])
 def test_the_lists_button_ticks_in_place_where_marks_and_boxes_do_not_follow_one_for_one(body, ticked):

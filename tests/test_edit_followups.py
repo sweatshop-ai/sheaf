@@ -1266,3 +1266,40 @@ def test_a_styled_italic_span_in_a_heading_stays_italic():
 def test_two_breaks_in_a_row_inside_a_pasted_paragraph_are_a_paragraph_break(html, md):
     source = "Alpha\n"
     assert rde.html_block_to_md(html, source) == md
+
+
+# Ticket 172: `1. [ ] one` is a task item with a box, as GitHub draws it; an edit of the block writes the marks back.
+ORDERED_TASKS = "1. [ ] one\n2. [x] two\n"
+
+
+def test_an_ordered_item_with_a_mark_is_drawn_with_a_box():
+    from sheafmd.render import pandoc_html
+    html = pandoc_html(ORDERED_TASKS)
+    assert html.count('<input type="checkbox"') == 2 and html.count('checked=""') == 1
+    assert "[ ]" not in html and "[x]" not in html
+
+
+def test_the_characters_of_an_ordered_mark_stay_where_no_item_draws_a_box():
+    from sheafmd.render import pandoc_html
+    html = pandoc_html("1. [ ]\n2. \\[ \\] escaped\n\n```\n1. [ ] code\n```\n")
+    assert "checkbox" not in html
+    assert "<li>[ ]</li>" in html and "[ ] escaped" in html and "1. [ ] code" in html
+    assert "" not in html and "" not in html
+
+
+@pytest.mark.parametrize("src", [ORDERED_TASKS, "3. [ ] starts at three\n4. [ ] four\n", "1) [ ] paren\n"])
+def test_an_edit_of_an_ordered_task_list_keeps_its_marks(src):
+    from sheafmd.blocks import split_md_blocks
+    from sheafmd.edit import _render_source
+    block = split_md_blocks(src)[0]
+    html = _render_source(block.content).replace("one", "uno").replace("four", "quattro")
+    out = rde.html_block_to_md(html, block.content)
+    assert "\\[" not in out
+    assert [ln.split("]")[0].split("[")[-1] for ln in out.splitlines()] == [
+        ln.split("]")[0].split("[")[-1] for ln in src.splitlines()]
+
+
+def test_the_label_of_an_ordered_task_ends_before_a_block_under_its_words():
+    from sheafmd.render import pandoc_html
+    html = pandoc_html("1. [ ] a\n\n   ```\n   code\n   ```\n")
+    assert html.index("</label>") < html.index("<pre")

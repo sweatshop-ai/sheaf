@@ -4191,23 +4191,24 @@ def test_enter_on_an_empty_nested_task_item_writes_no_html_and_keeps_every_word(
     assert "after" in tab.page.inner_text("main")
 
 
-def test_enter_in_an_ordered_list_whose_items_start_with_a_box_is_an_ordinary_numbered_item(tab):
-    # pandoc reads `1. [ ] one` as a numbered item whose words start with "[ ]": there is no box, so Enter is the browser's.
+def test_enter_in_an_ordered_task_item_makes_a_numbered_item_with_an_unticked_box(tab):
+    # ticket 172: `1. [ ] one` draws a box as GitHub does, so Enter is the task item's, as in a bullet list
     tab.site.file.write_text(tab.site.file.read_text() + "\n1. [ ] one\n2. [ ] two\n", encoding="utf-8")
     tab.open()
     p = tab.page
-    assert p.locator("main ol input[type=checkbox]").count() == 0
+    assert p.locator("main ol input[type=checkbox]").count() == 2
     p.keyboard.press("e")
     _caret_in_last_item(p, "one")
     p.keyboard.press("Enter")
     p.keyboard.type("new one")
-    assert p.locator("main ol li").count() == 3 and p.locator("main ol input").count() == 0
+    assert p.locator("main ol li").count() == 3 and p.locator("main ol input[type=checkbox]").count() == 3
+    assert p.locator("main ol input[type=checkbox]:checked").count() == 0
     before = tab.site.file.read_text()
     mark(p)
     p.keyboard.press("Control+s")
     until(lambda: tab.site.file.read_text() != before, what="the save in the file")
     saved = tab.site.file.read_text()
-    assert "new one" in saved and "<" not in saved.replace("<!--", "").replace("-->", "") and "☐" not in saved
+    assert re.search(r"^\d+\.\s+\[ \] new one$", saved, re.M) and "\\[" not in saved and "<" not in saved.replace("<!--", "").replace("-->", "")
 
 
 def test_enter_at_the_end_of_a_task_item_then_a_comment_on_the_new_words_deleted_keeps_the_comment_and_throws_nothing(tab):

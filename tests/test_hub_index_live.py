@@ -1101,3 +1101,34 @@ def test_the_index_stream_works_over_a_real_socket(work, monkeypatch):
     finally:
         c.close()
         srv.close()
+
+
+def test_a_render_with_new_settings_does_not_hold_the_hubs_lock_while_the_page_is_rebuilt(world, put, work):
+    f = put("a.md")
+    world.hub.render(f, {"title": "One"}, None)
+    e = world.hub.entry("work/a.md")
+    renderer, release = threading.Event(), threading.Event()
+
+    def rebuilding(*a, **k):
+        renderer.set()
+        release.wait(15)
+    e.live.rebuild = rebuilding
+    rendering = threading.Thread(target=lambda: world.hub.render(f, {"title": "Two"}, None), daemon=True)
+    rendering.start()
+    try:
+        assert renderer.wait(5)
+        assert world.hub._lock.acquire(timeout=3), "the hub's lock is held while the page is rebuilt"
+        world.hub._lock.release()
+    finally:
+        release.set()
+        rendering.join(5)
+    assert not rendering.is_alive()
+
+
+def test_a_render_whose_root_is_forgotten_while_the_page_is_rebuilt_makes_no_entry_again(world, put):
+    f = put("a.md")
+    world.hub.render(f, {"title": "One"}, None)
+    e = world.hub.entry("work/a.md")
+    e.live.rebuild = lambda: world.hub.forget_root("work")
+    world.hub.render(f, {"title": "Two"}, None)
+    assert "work/a.md" not in world.hub.entries

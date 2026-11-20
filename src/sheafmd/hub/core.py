@@ -937,40 +937,53 @@ class Hub:
             address = self.roots.address(md)       # a file of a private root has no address of its own (9.11)
         except roots_mod.NotFound:
             raise RenderError(f"{md} is not in a root the hub serves.") from None
-        with place.held(self, address), self._lock:        # the name's lock first (9.11), as `entry` takes it
-            live = self.tell_live(address)         # beside the docs lock, not inside it
-            def settle(new: dict) -> dict:
-                old = dict(new)
-                new["path"] = str(md)
-                new["rendered"] = time.strftime(STAMP_FORMAT)
-                for k in SETTING_KEYS:
-                    new[k] = settings.get(k)
-                # The latest render from an agent session sets the target; a render that finds no agent keeps
-                # it, an agent's too; only `--agent none` clears it (SPEC 8.3, D19). The session an agent's
-                # write took the target from is the new one's, so none is kept beside it, unless a Tell is
-                # running: it was sent to the session the render drops or replaces, and a Cancel stops that one.
-                if target is not None:
-                    kept = self._told_session(old, live or self.tell_live(address))
-                    new["target"] = None if target.get("agent") == "none" else {"kind": "session", **target}
-                    new.pop("session", None)
-                    if kept and (new["target"] or {}).get("session") != kept.get("session"):
-                        new["session"] = kept
-                else:
-                    new.setdefault("target", None)
-                return new
-            old, new = self.docs.change(address, settle)
-            existed = address in self.entries
-            e = self.entry(address)
-            if existed:
-                self._refreshed(e)          # a file written on disk since, seen at this render
-            if existed and (any(old.get(k) != new[k] for k in SETTING_KEYS)
-                            or old.get("target") != new.get("target")):
+        with place.held(self, address):                    # the name's lock first (9.11), as `entry` takes it
+            with self._lock:
+                e, rebuild = self._render_entry(address, md, settings, target)
+            if rebuild:
+                # A render of the page (pandoc, up to 120 s) waits for the document's lock, and every request that needs
+                # the hub would wait with it were the hub's lock still held.
                 e.live.rebuild()
-            e.opened, e.rendered = False, True
-            warnings, e.warnings = e.warnings, []
-            self.index.touch(address)
-            return {"doc": address, "url": self.url(address), "tabs": e.bus.count(),
-                    "log": list(e.log), "warnings": warnings}
+            with self._lock:
+                warnings = []
+                if self.entries.get(address) is e:      # a forget, move or delete in between has taken the entry: nothing to mark
+                    e.opened, e.rendered = False, True
+                    warnings, e.warnings = e.warnings, []
+                    self.index.touch(address)
+                return {"doc": address, "url": self.url(address), "tabs": e.bus.count(),
+                        "log": list(e.log), "warnings": warnings}
+
+    def _render_entry(self, address: str, md: Path, settings: dict, target: dict | None):
+        """The part of `render` that is done with the hub's lock held by the caller: the settings are recorded and the entry is
+        found or made. Returns it and whether the page is to be rebuilt."""
+        live = self.tell_live(address)         # beside the docs lock, not inside it
+        def settle(new: dict) -> dict:
+            old = dict(new)
+            new["path"] = str(md)
+            new["rendered"] = time.strftime(STAMP_FORMAT)
+            for k in SETTING_KEYS:
+                new[k] = settings.get(k)
+            # The latest render from an agent session sets the target; a render that finds no agent keeps
+            # it, an agent's too; only `--agent none` clears it (SPEC 8.3, D19). The session an agent's
+            # write took the target from is the new one's, so none is kept beside it, unless a Tell is
+            # running: it was sent to the session the render drops or replaces, and a Cancel stops that one.
+            if target is not None:
+                kept = self._told_session(old, live or self.tell_live(address))
+                new["target"] = None if target.get("agent") == "none" else {"kind": "session", **target}
+                new.pop("session", None)
+                if kept and (new["target"] or {}).get("session") != kept.get("session"):
+                    new["session"] = kept
+            else:
+                new.setdefault("target", None)
+            return new
+        old, new = self.docs.change(address, settle)
+        existed = address in self.entries
+        e = self.entry(address)
+        if existed:
+            self._refreshed(e)          # a file written on disk since, seen at this render
+        rebuild = existed and (any(old.get(k) != new[k] for k in SETTING_KEYS)
+                               or old.get("target") != new.get("target"))
+        return e, rebuild
 
     @contextmanager
     def page_lock(self, address: str):

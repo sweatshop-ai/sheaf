@@ -415,7 +415,7 @@ def rename_form(mounted, path, to):
 
 def test_a_rename_pressed_before_the_stylesheet_has_loaded_still_opens_its_form(mounted, pages):
     # The rows stand in the root while the mount waits for its stylesheet; the click listener came after that wait, so a press
-    # in between was lost (CI: test_rename_folder_onto_a_taken_name... timed out at "the folder field", 9 of 240 runs).
+    # in between was lost (CI: a folder rename timed out at "the folder field", 9 of 240 runs).
     held = []
     mounted.page.route("**/_/mount.css*", lambda route: held.append(route))
     member = pages.hub.proxy.members[BEA]

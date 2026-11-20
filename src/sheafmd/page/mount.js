@@ -435,6 +435,7 @@
       const css = got.assets && typeof got.assets['mount.css'] === 'string' ? got.assets['mount.css'] : null;
       link.href = css === null ? '/_/mount.css' : '/_/mount.css?v=' + encodeURIComponent(css);
       const wrap = doc.createElement('div');
+      // The Sheaf page deliberately reuses list.css through `sheaf-list`; `sheaf-sheaf` only marks it for the rules that differ.
       wrap.className = sheaf ? 'rd-root sheaf-list sheaf-sheaf' : list ? 'rd-root sheaf-list' : 'rd-root' + (got.toc ? '' : ' notoc');
       wrap.tabIndex = -1;
       wrap.addEventListener('click', follow);
@@ -450,6 +451,7 @@
       // The list and the Sheaf measure nothing, so their clicks are taken from the moment their rows stand in the root: a
       // press while the stylesheet was out found no listener and was lost. The page measures its parts, so it waits.
       if (create && list) page = create(root, again);
+      // `create` for the page must come after this wait: its measuring reads the stylesheet's rules.
       await new Promise((done) => { link.onload = link.onerror = done; cut = done; });   // the page measures its parts: their styles first
       if (stale()) return got;
       if (create && !list) page = create(root, got.config, again);

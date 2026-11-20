@@ -127,6 +127,7 @@ def carries_this_run(pid: int) -> bool:
     run = os.environ.get(RUN_VAR)
     if not run or not _has_proc():
         return False
+    # A known limit, accepted: the wait for an exec to finish is only EXEC_WINDOW from the process's start.
     env = _environment(str(pid))
     if env == [b""]:                                     # in the middle of its exec, as when it was found: wait for it
         env = _after_exec(str(pid))

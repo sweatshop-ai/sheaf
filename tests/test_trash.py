@@ -383,3 +383,15 @@ def test_a_page_that_a_writer_without_the_hubs_locks_puts_there_just_before_a_re
     assert got.status == 409 and "already" in got.text      # the restore is refused: the address is taken
     assert "The door's page" in agents.hub.file(doc).read_text(encoding="utf-8")
     assert len(trash_rows(agents)) == 1                     # and the deleted page is still in the trash
+
+
+def test_a_page_in_a_folder_that_leads_out_of_the_root_is_not_trashed(agents, clock, tmp_path):
+    doc = made(agents, "bea-claude")
+    root = root_of(agents, doc)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "x.md").write_text("# Not the root's\n", encoding="utf-8")
+    os.symlink(outside, root.path / "way-out")
+    with pytest.raises(loose.Refused):
+        agents.hub.archive.trash(root, "way-out/x.md")
+    assert (outside / "x.md").read_text(encoding="utf-8") == "# Not the root's\n"

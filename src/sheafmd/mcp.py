@@ -689,15 +689,6 @@ class Door:
         self._open_threads[address] = (key, threads, visibility.front_matter(text))
         return (*self._open_threads[address][1:], st.st_mtime_ns, private, text if whole else None)
 
-    def _dot(self, address: str, unread: int, open_: int) -> str:
-        """The dot of 8.6, as the index page gives it."""
-        entry = self.hub.entries.get(address)
-        if unread or (entry is not None and entry.live.session_question()):
-            return "red"
-        if self.hub.waiting(address):
-            return "orange"
-        return "blue" if open_ else "green"
-
     def _documents(self, args: dict, caller: Caller):
         hub = self.hub
         member = self._member(caller)
@@ -768,9 +759,8 @@ class Door:
                 tells = self._tells(address, text, agent, member) if text is not None else []
                 if args.get("open_only", True) and not threads and not tells:
                     continue
-                seen = hub.seen.get(address)
-                unread = sum(1 for cid, n, last in threads if last != hub.person and n > seen.get(cid, 0))
-                dot = self._dot(address, unread, len(threads))
+                # the index page's dot, for the member it is asked as (8.6, 9.9)
+                dot, unread = hub.index.dot(address, threads, len(threads), member)
                 told = hub.alias(member, address) != address        # a page Shared with the member: no path on disk (9.9)
                 rows.append((-1 if tells else DOT_ORDER[dot], -mtime, address,
                              {**self._told(address, caller), **({} if told else {"path": str(path)}),

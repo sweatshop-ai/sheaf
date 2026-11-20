@@ -1,6 +1,8 @@
 # 155: Real names and a private host name are back in the public tree, and nothing checks for them
 
-**Status:** open
+**Claimed by:** Felix 2026-11-20 15:56
+
+**Status:** in-progress
 
 **Blocked by:** none
 

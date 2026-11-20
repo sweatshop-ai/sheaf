@@ -19,7 +19,6 @@ import errno
 import json
 import os
 import re
-import subprocess
 import time
 from collections import Counter
 from dataclasses import dataclass, field
@@ -31,7 +30,8 @@ from . import comments as rdc
 from .agents import detect
 from .hub.auth import clean_display
 from .hub.client import HubUnavailable
-from .hub.roots import Address, NotFound, address_of_url, in_git_dir
+from .hub import roots as roots_mod
+from .hub.roots import Address, NotFound, address_of_url, in_git_dir, list_documents
 from .agents import prompts
 from .hub import loose, moves, place, targets, visibility
 from .hub import repos as repos_mod
@@ -51,7 +51,6 @@ INSTRUCTIONS = (
     "`read` gives a document's text and its hash, `create` makes a new page and `update` replaces "
     "the text of one, given the hash you read it with; keep every comment in the text you send.")
 
-WALK_LIMIT = 2000                # files of a root that is not a git work tree (SPEC 8.6, D15)
 DOT_ORDER = {"red": 0, "orange": 1, "blue": 2, "green": 3}
 
 PARSE_ERROR, INVALID_REQUEST, METHOD_NOT_FOUND, INVALID_PARAMS = -32700, -32600, -32601, -32602
@@ -67,7 +66,8 @@ TOOLS = {
                        "Each row: doc, url, path, open (open comments), unread (threads with a "
                        "message the person has not seen) and dot (red, orange, blue or green). A root "
                        "whose folder the hub cannot enter comes last, as a row of its own: root and "
-                       "closed (why, such as Permission denied).",
+                       "closed (why, such as Permission denied); a root with more files than the hub lists "
+                       "gets one too: root and more (how many were left out, past 100,000 files).",
         "annotations": {"readOnlyHint": True},
         "properties": {
             "root": {"type": "string", "description": "Only the documents of this root."},
@@ -256,32 +256,6 @@ def _check(name: str, args: dict) -> dict:
         if "enum" in spec and v not in spec["enum"]:
             raise ToolError(f"{k} must be one of {', '.join(spec['enum'])}.")
     return args
-
-
-def markdown_files(root) -> list[str]:
-    """The `.md` files of a root as paths inside it, by the rules of SPEC 8.6: in a git work
-    tree the files git lists (tracked and untracked, not ignored); elsewhere a walk that skips
-    `.git`, `node_modules` and every folder starting with a dot, and stops at WALK_LIMIT."""
-    if root.git:
-        try:
-            r = subprocess.run(["git", "-C", str(root.path), "ls-files", "-z", "-co",
-                                "--exclude-standard", "--", "*.md", ":!:**/node_modules/**"],
-                               capture_output=True, timeout=10)
-            if r.returncode == 0:
-                # the pathspec above needs a folder over node_modules; a top-level one is dropped here
-                found = (os.fsdecode(p) for p in r.stdout.split(b"\0") if p)
-                return sorted(p for p in found if "node_modules" not in p.split("/"))
-        except (OSError, subprocess.SubprocessError):
-            pass                              # not a work tree any more: walk it like a folder
-    out = []
-    for folder, dirs, files in os.walk(root.path):
-        dirs[:] = sorted(d for d in dirs if d != "node_modules" and not d.startswith("."))
-        for f in sorted(files):
-            if f.endswith(".md"):
-                out.append((Path(folder) / f).relative_to(root.path).as_posix())
-                if len(out) >= WALK_LIMIT:
-                    return out
-    return out
 
 
 def written_from(caller: Caller) -> tuple[str, dict]:
@@ -735,7 +709,7 @@ class Door:
         else:
             wanted = [r for r in hub.roots.listed()
                       if member is None or hub.owns(member, r) or hub.giver(member, r) is not None]
-        rows, shut = [], []
+        rows, shut, left_out = [], [], {}
         agent = caller.token if caller.token is not None and caller.token.client is not None else None
         pending = hub.waiting_tells.pending(agent) if agent is not None else set()    # the Tells that wait for it (9.8)
         in_git = {}                             # (root, real folder) -> whether 8.2 keeps its files from the root
@@ -755,7 +729,13 @@ class Door:
             top = Path(os.path.realpath(root.path)) if placed else None
             # The files of a member's private root are listed to that member alone, under the list root's names (rule D).
             privates = [p for p in place.private_listed(hub, member) if p.closed() is None and not p.missing()] if placed else []
-            for src, found in [(root, f) for f in markdown_files(root)] + [(p, f) for p in privates for f in markdown_files(p)]:
+            files = []
+            for src in (root, *privates):          # the hub's own lister (8.6), past the index's cap: nothing that waits is hidden
+                listing = list_documents(src, cap=roots_mod.COUNT_LIMIT)
+                files += [(src, f.rel) for f in listing.docs]
+                if listing.more and not giving:     # another's loose root is told to no one (9.11)
+                    left_out[root.name] = left_out.get(root.name, 0) + listing.more
+            for src, found in files:
                 # A rectoverso of the list's root is listed by its name (9.11), wherever its file is; a private path is
                 # none. Each file is read under its name's lock, as every read.
                 logical = place.logical(found) if placed else None
@@ -798,7 +778,8 @@ class Door:
         if "root" in args and member is not None and not hub.owns(member, wanted[0]) and wanted[0].name not in reached:
             # Another member's loose root with nothing Shared with the caller is answered as a root that does not exist.
             raise ToolError(f"There is no root named {args['root']}.")
-        return [row[3] for row in sorted(rows, key=lambda r: r[:3])] + shut
+        return ([row[3] for row in sorted(rows, key=lambda r: r[:3])] + shut
+                + [{"root": name, "more": n} for name, n in left_out.items()])
 
     def _tells(self, address: str, text: str, agent: TokenRow, member=None) -> list:
         """The Tells that wait for `agent` on this document, as they are listed to it (SPEC 9.8): the first listing

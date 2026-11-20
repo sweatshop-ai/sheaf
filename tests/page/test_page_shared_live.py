@@ -67,3 +67,23 @@ def test_a_tab_that_closes_leaves_the_count_and_the_leaders_tab_hands_over(share
         until(lambda: shows(p, "After the hand-over."), what="the change heard")
     # A change from outside reloads both pages; the hub drops a closed page's stream within its next read check.
     until(lambda: site.hub.tabs(DOC) == 2, what="two tabs counted after the reload")
+
+
+def test_a_frozen_leader_hands_the_stream_over_and_takes_it_back_on_resume(shared, site):
+    """Chrome freezes a background tab (memory saver, battery saver). A frozen leader keeps its lock and relays
+    nothing, so the visible tabs would stop hearing changes. On `freeze` it lets go; on `resume` it queues again."""
+    pages = [opened(shared, site) for _ in range(3)]
+    until(lambda: site.hub.tabs(DOC) == 3, what="three tabs counted")
+    leader = pages[0][0]         # the first tab took the lock
+    cdp = shared.new_cdp_session(leader)
+    cdp.send("Page.enable")
+    cdp.send("Page.setWebLifecycleState", {"state": "frozen"})
+    f = site.file
+    f.write_text(f.read_text(encoding="utf-8") + "\nWhile frozen.\n", encoding="utf-8")
+    for n, (p, _) in enumerate(pages[1:]):
+        until(lambda: shows(p, "While frozen."), what=f"the change in tab {n + 2} while the leader is frozen")
+    cdp.send("Page.setWebLifecycleState", {"state": "active"})
+    until(lambda: site.hub.tabs(DOC) == 3, what="three tabs counted after the resume")
+    f.write_text(f.read_text(encoding="utf-8") + "\nAfter the resume.\n", encoding="utf-8")
+    for n, (p, _) in enumerate(pages):
+        until(lambda: shows(p, "After the resume."), what=f"the change in tab {n + 1} after the resume")

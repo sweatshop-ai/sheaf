@@ -136,8 +136,14 @@
     this.open = false;
     this.connect();
     var self = this;
-    setInterval(function () { self.sweep(); }, SWEEP);
+    this.timer = setInterval(function () { self.sweep(); }, SWEEP);
   }
+  // This tab stops being the leader: its stream and its sweep end, and the tabs' joins on it go with them.
+  Leader.prototype.stop = function () {
+    clearInterval(this.timer);
+    if (this.es) { this.es.onerror = null; this.es.close(); this.es = null; }
+    this.open = false;
+  };
   Leader.prototype.connect = function () {
     var self = this;
     this.open = false;
@@ -203,12 +209,36 @@
       });
     }).catch(function () {});
   };
-  navigator.locks.request('sheaf-live', function () {
-    lead = new Leader();
-    chan.postMessage({ t: 'who' });
-    hear({ t: 'who' });
-    return new Promise(function () {});        // held until this tab goes
+  // Chrome freezes a background tab (memory saver, battery saver) and a frozen tab keeps its lock while relaying
+  // nothing: the other tabs would stop hearing changes. So the leader lets go on `freeze` (closing its stream) and
+  // queues for the lock again on `resume`; the next leader asks every tab to join its stream.
+  var queued = false;
+  function lock() {
+    queued = true;
+    navigator.locks.request('sheaf-live', function () {
+      queued = false;
+      lead = new Leader();
+      chan.postMessage({ t: 'who' });
+      hear({ t: 'who' });
+      return new Promise(function (release) { lead.release = release; });   // held until this tab goes or freezes
+    });
+  }
+  document.addEventListener('freeze', function () {
+    if (!lead) return;
+    var l = lead;
+    lead = null;
+    l.stop();
+    l.release();
   });
+  document.addEventListener('resume', function () {
+    // Its streams were on the connection it closed, or on another leader's that dropped them while it slept.
+    Object.keys(mine).forEach(function (k) {
+      if (mine[k].readyState === 1) mine[k]._fail(0);
+      ask({ t: 'join', key: k, doc: mine[k].doc, tab: TAB });
+    });
+    if (!lead && !queued) lock();
+  });
+  lock();
 
   window.SheafLive = { source: function (doc) { return new Source(doc || ''); }, shared: true };
 })();

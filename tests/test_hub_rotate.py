@@ -132,7 +132,6 @@ def test_a_hub_that_starts_after_a_rotation_reads_the_new_key_and_the_new_cookie
 
 
 def test_every_open_stream_gets_signed_out_and_the_hub_ends_it(browser, plan):
-    hub = browser.hub
     live = browser.get(f"/_/live?doc={DOC}")
     sub = live.stream
     assert sub.drain()[0][0] == "hello"

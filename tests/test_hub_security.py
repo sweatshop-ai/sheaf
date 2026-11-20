@@ -468,6 +468,22 @@ def test_a_caller_that_did_not_ask_for_html_still_gets_the_json_refusal(browser,
                                             "has expired or is not this hub's"}
 
 
+@pytest.mark.parametrize("accept", ["text/html;q=0", "text/html; q=0.0, application/json", "xtext/html", "application/xhtml+xml"])
+def test_an_accept_that_refuses_html_or_only_looks_like_it_still_gets_the_json_refusal(browser, plan, accept):
+    nonce = sign_in_nonce(browser)
+    assert open_with(browser, nonce).status == 303
+    r = browser.get(f"/_/open?nonce={nonce}&next=/work/plan.md", cookie=False, headers={"Accept": accept})
+    assert r.status == 401 and r.json()["ok"] is False
+
+
+@pytest.mark.parametrize("accept", ["TEXT/HTML", "Text/Html;Q=0.5", "application/json, text/html;q=0.1", "text/html ; charset=utf-8"])
+def test_an_accept_that_asks_for_html_in_any_case_or_with_a_weight_gets_the_page(browser, plan, accept):
+    nonce = sign_in_nonce(browser)
+    assert open_with(browser, nonce).status == 303
+    r = browser.get(f"/_/open?nonce={nonce}&next=/work/plan.md", cookie=False, headers={"Accept": accept})
+    assert r.status == 401 and r.headers["Content-Type"].startswith("text/html")
+
+
 def test_a_nonce_works_for_about_thirty_seconds_and_not_after(browser, plan):
     now = [1000.0]
     browser.hub.auth.clock = lambda: now[0]

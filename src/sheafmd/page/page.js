@@ -3794,15 +3794,15 @@ var create = function (ROOT, CFG, opts) {
   // way. A reload brings them, and is asked for when none is coming. Any other box ticks as a plain one.
   var boxWaits = new WeakSet();       // a box whose block's save is out: a second click would toggle it back
   // The eleven words as the hub reads them (the_list.WORDS and _ACTION_RE), so a box no button names yet can be told.
-  var ACTION_WORDS = ['Approve', 'Run it', 'Don\'t run', 'Undo skip', 'Done', 'Share', 'Stop James', 'Belongs to', 'Move to', 'Merge', 'Deploy', 'Install'];
+  var ACTION_WORDS = ['Approve', 'Run it', 'Don\'t run', 'Undo skip', 'Done', 'Share', 'Stop James', 'Belongs to', 'Merge', 'Deploy', 'Install'];
   // Belongs to (and Move to, its old name) takes `<slug> (ref <thread>)`, Merge, Deploy and Install the rest of the line, the others nothing.
   var MOVE_ARG = '\\s+[A-Za-z0-9._\\\\-]+\\s+\\(ref\\s+[^()\\s]+\\)(?:\\s+@[A-Za-z0-9._-]+)?';
-  var ACTION_ARG = { 'Belongs to': MOVE_ARG, 'Move to': MOVE_ARG,
+  var ACTION_ARG = { 'Belongs to': MOVE_ARG,
                      'Merge': '\\s+\\S.*', 'Deploy': '\\s+\\S.*', 'Install': '\\s+\\S.*' };
   // Share's tick box may say it in its own words (the_list.LABELS).
   var ACTION_LINE = new RegExp('^(?:' + ACTION_WORDS.map(function (w) {
     return w.replace(/'/g, '[\'’]').replace(/^Share$/, 'Share(?:d with the team)?') + (ACTION_ARG[w] || '(?:\\s+@[A-Za-z0-9._-]+)?');
-  }).join('|') + ')$');
+  }).concat('Move to' + MOVE_ARG).join('|') + ')$');     // Move to: the old name, read while an open page carries it
   // The text of a box's own item, its nested lists left out; null for a box in no item.
   function itemLine(t) {
     var li = t.closest && t.closest('li');

@@ -101,7 +101,7 @@ def scan_text(text, terms):
 
 def tracked(root):
     out = subprocess.run(["git", "-C", str(root), "ls-files", "-z"], check=True, capture_output=True).stdout
-    return [p for p in out.decode("utf-8", "replace").split("\0") if p]
+    return [os.fsdecode(p) for p in out.split(b"\0") if p]
 
 
 def scan_tree(root, allow=None, terms=None):

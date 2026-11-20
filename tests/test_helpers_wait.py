@@ -4,7 +4,7 @@ import sys
 import time
 
 import pytest
-from helpers import wait_until_ended
+from helpers import proc_state, wait_until_ended
 
 
 def test_a_process_that_never_ends_fails_the_wait_at_its_deadline():
@@ -22,4 +22,5 @@ def test_a_process_that_never_ends_fails_the_wait_at_its_deadline():
 def test_a_process_that_has_ended_but_is_not_yet_reaped_returns_the_wait():
     done = subprocess.Popen([sys.executable, "-c", "pass"])
     wait_until_ended(done.pid, seconds=10)
+    assert proc_state(done.pid) == "zombie"        # it had ended and nobody had reaped it: the wait returned on that
     done.wait(10)

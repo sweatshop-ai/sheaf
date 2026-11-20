@@ -2,6 +2,8 @@
 
 **Status:** open
 
+**Blocked by:** none
+
 **From:** wayfinder `sheaf-in-open-webui` ticket 20 (Alice, 2026-11-15)
 
 ## Why

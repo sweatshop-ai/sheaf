@@ -2,6 +2,9 @@
 
 **Status:** open (design ruled, probe 2 run, nothing built; one decision open)
 
+**Blocked by:** 
+- External: Thierry chooses (a) or (b) under "Decide first" (not yet asked)
+
 **From:** render-doc ticket 139 (private archive), triaged 2026-11-12
 
 **Where (main 81afdff):** `src/sheafmd/hub/peer.py` (the nonce-only check), `src/sheafmd/hub/handler.py:716-719`, `tests/test_hub_peer.py:308`, `SPEC.md:877`

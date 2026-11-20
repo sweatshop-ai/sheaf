@@ -2,6 +2,8 @@
 
 **Status:** open
 
+**Blocked by:** 101
+
 **From:** render-doc ticket 96 (private archive), triaged 2026-11-12
 
 **Where (main 81afdff):** `.github/workflows/ci.yml:67-70`, `tools/ci/service_macos.py:93-97`, `SPEC.md:1636`, `SPEC.md:1772`, `README.md:80`, `src/sheafmd/cli.py:1161-1175`, `tests/test_windows_gate.py`, `SPEC.md:1026`, `:1071`, `:1229`

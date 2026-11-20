@@ -2,6 +2,8 @@
 
 **Status:** open
 
+**Blocked by:** none
+
 **From:** render-doc ticket 101 (private archive), triaged 2026-11-12
 
 **Where (main 81afdff):** `.github/workflows/ci.yml:15-16`, `:67-69`, `tests/test_hub_upgrade.py:130`

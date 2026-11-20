@@ -2,6 +2,9 @@
 
 **Status:** open (one by-hand check)
 
+**Blocked by:** 
+- External: Thierry pastes from a real web mail client and a real online word processor, by hand (not yet asked)
+
 **From:** render-doc ticket 142 (private archive), triaged 2026-11-12
 
 **Where (main 81afdff):** `tests/page/test_page_writing.py:1937-1975` (`test_rich_text_pasted_into_a_paragraph_is_saved_as_plain_markdown`, `:1953`)

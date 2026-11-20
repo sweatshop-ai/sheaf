@@ -2,6 +2,8 @@
 
 **Status:** open, to check
 
+**Blocked by:** none
+
 **From:** open point of PR #474 (ticket 160), raised by Thierry 2026-11-20
 
 **Where (main a30694be):** `src/sheafmd/page/live.js` (the tab holding the Web Lock `sheaf-live` owns `/_/live?shared=` and relays over a BroadcastChannel)

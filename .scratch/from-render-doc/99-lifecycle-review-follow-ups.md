@@ -2,6 +2,8 @@
 
 **Status:** open
 
+**Blocked by:** none
+
 **From:** render-doc ticket 99 (private archive), triaged 2026-11-12
 
 **Where (main 81afdff):** `src/sheafmd/hub/peer.py`, `src/sheafmd/hub/handler.py:52-68`, `:320`, `:700-725`, `src/sheafmd/lifecycle.py`, `src/sheafmd/hub/core.py:1307-1346`, `src/sheafmd/hub/client.py:381`, `:418`, `src/sheafmd/cli.py`, `src/sheafmd/hub/service.py`, `src/sheafmd/paths.py:71-77`, `SPEC.md:877`

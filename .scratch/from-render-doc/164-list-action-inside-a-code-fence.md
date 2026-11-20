@@ -2,6 +2,8 @@
 
 **Status:** open
 
+**Blocked by:** none
+
 **From:** render-doc ticket 164 (private archive), triaged 2026-11-12
 
 **Where (main 81afdff):** `src/sheafmd/hub/the_list.py:325-343` (`read_sheaf`), `:404-412` (`_boxes`), `:418` (`tick_edit`); `SPEC.md:1003`

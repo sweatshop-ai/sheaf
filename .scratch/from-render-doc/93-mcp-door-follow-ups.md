@@ -2,6 +2,8 @@
 
 **Status:** open
 
+**Blocked by:** none
+
 **From:** render-doc ticket 93 (private archive), triaged 2026-11-12
 
 **Where (main 81afdff):** `src/sheafmd/mcp.py:51`, `:214`, `:554`, `:620-622`; `src/sheafmd/hub/roots.py:541`, `:603`, `:614`; `src/sheafmd/hub/index.py:264-282`; `src/sheafmd/hub/client.py:177`, `:216`, `:325`, `:386`

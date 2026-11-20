@@ -90,6 +90,11 @@ class _Http(BaseHTTPRequestHandler):
     def setup(self):
         self.timeout = IDLE_SECONDS      # read for each connection, so a test can change it
         super().setup()
+        # Who owns this connection is asked once, here, before the request is read: a caller that
+        # sends and closes in one breath has its socket read as no one's from the moment it closes.
+        self._looked = None
+        if self.via == "port" and peer.supported() and not self.handler.peer_off:
+            self._looked = peer.look(self.client_address[:2], self.connection.getsockname()[:2], self.connection)
 
     def _serve(self):
         again, self.served = self.served, True
@@ -161,6 +166,8 @@ class _Http(BaseHTTPRequestHandler):
 
     def _conn(self):
         """The connection, as the handler judges who is at its other end."""
+        if self._looked is not None:
+            return self._looked
         return peer.Conn(self.client_address[:2], self.connection.getsockname()[:2])
 
     def _read_body(self, n: int) -> bytes:
@@ -299,6 +306,13 @@ class HubServer:
         self.stopping = threading.Event()
         self.closing = threading.Event()
         shared = Handler(hub)
+        off = peer.startup()
+        if off:
+            shared.peer_off = off
+            hub.record("peer-check-off", None, error=off)
+            print(f"sheaf: the hub does not check which user of this machine is at the other end of a "
+                  f"connection ({off}); anyone who can read a sign-in link, the key or a cookie can use it.",
+                  file=sys.stderr)
         wired = {"handler": shared, "stopping": self.stopping, "closing": self.closing}
         handler = type("Http", (_Http,), wired)
         self.httpd = ThreadingHTTPServer(sock.getsockname(), handler, bind_and_activate=False)

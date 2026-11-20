@@ -296,26 +296,19 @@ def test_a_bad_nonce_from_the_hubs_own_user_is_still_the_link_that_does_not_work
     assert refused(r) and "used already" in r.text and "another user" not in r.text
 
 
-def test_the_key_link_of_signin_url_is_not_a_connection_check(handler, hub, proc):
-    # `sheaf signin-url` is opened by hand, on any machine; the key is what proves the person (9.3).
-    r = handler.handle("GET", f"/_/open?key={hub.auth.key}&next=/work/plan.md",
-                       {"Host": f"127.0.0.1:{hub.port}"}, conn=conn())
-    assert r.status == 303 and "Set-Cookie" in r.headers
-    r = handler.handle("GET", f"/_/open?key={hub.auth.key}&next=/work/plan.md",
-                       {"Host": f"127.0.0.1:{hub.port}"}, conn=None)
-    assert r.status == 303
-
-
-def test_a_cookie_route_does_not_look_up_the_connection_yet(handler, hub, proc, work):
-    # The same check on every cookie and key request is not made yet.
+def test_a_connection_the_server_did_not_look_at_is_not_judged_by_a_key_or_a_cookie(handler, hub, proc, work):
+    # Only a connection the server looked at when it accepted it (`peer.look`) is judged on a key or a
+    # cookie (tests/test_hub_peer_gate.py); the nonce of a link looks the connection up itself.
     f = work / "plan.md"
     f.write_text(PLAN, encoding="utf-8")
     hub.roots.for_document(f)
-    other_user = [the_row(THEM)]
-    proc.write(v4=other_user)
+    proc.write(v4=[the_row(THEM)])
     cookie = f"{hub.auth.cookie_name}={hub.auth.cookie_value()}"
     r = handler.handle("GET", "/work/plan.md", {"Host": f"127.0.0.1:{hub.port}", "Cookie": cookie}, conn=conn())
     assert r.status == 200
+    r = handler.handle("GET", f"/_/open?key={hub.auth.key}&next=/work/plan.md",
+                       {"Host": f"127.0.0.1:{hub.port}"}, conn=conn())
+    assert r.status == 303 and "Set-Cookie" in r.headers
 
 
 # ── a platform with no /proc/net ─────────────────────────────────────────────

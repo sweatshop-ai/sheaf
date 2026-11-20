@@ -2161,11 +2161,12 @@ var create = function (ROOT, CFG, opts) {
     if (m.role === 'action') return '<span class="rd-who rd-who-tell">' + name + '\u2019s action</span>';
     return '<span class="rd-who">' + name + '</span>';
   }
-  // The band of the box: the passage, then Resolve (a check mark, an open thread only) and Close (×, which keeps everything,
-  // as Escape does). The little else the thread offers waits in the small menu. The check is a thin SVG, not U+2713: that glyph
-  // comes from whichever font the browser falls back to, and draws at another weight and size in each.
+  // Resolve's check is a thin SVG, not U+2713: that glyph comes from whichever font the browser falls back to, and draws at
+  // another weight and size in each.
   var CHECK = '<svg class="rd-check" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" ' +
               'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.8 7.4l2.9 2.9 5.5-6.2"/></svg>';
+  // The band of the box: the passage, then Resolve (a check mark, an open thread only) and Close (×, which keeps everything,
+  // as Escape does). The little else the thread offers waits in the small menu.
   function bandHtml(c) {
     var open = c.status === 'open', more = !open || mine(c);
     return '<div class="rd-head"><div class="rd-quote">“' + esc(c.quote) + '”' +

@@ -174,6 +174,14 @@ class LiveDocument:
             text = store.get(self._address, h)
         return text
 
+    def _stamp(self):
+        """`(mtime_ns, size)` of the file now, or None where it cannot be stat-ed: what a write in flight moves."""
+        try:
+            st = self._entry.stat() if self._entry is not None else self._file().stat()
+        except OSError:
+            return None
+        return st.st_mtime_ns, st.st_size
+
     def _rerender(self):
         # One read for both. Reading the file once for the page and again for the state lets a
         # write land in between (a session's reply right after its own edit, while pandoc
@@ -620,8 +628,14 @@ class LiveDocument:
             if force:
                 self._rerender()
                 return self._snapshot(self._text)
+            seen = self._stamp()
             if rds.md_hash(self._read()) == self._hash:
                 return None
-            before = self._text
+            before, kept = self._text, (self._text, self._hash, self._branch)
             self._rerender()
+            if self._stamp() != seen:
+                # An editor's truncate-then-write landed while this read and render ran: what was read may be a torn
+                # file. Keep what the tabs hold and publish nothing; the watcher sees the file move and comes back.
+                self._text, self._hash, self._branch = kept
+                return None
             return self._announce(self._snapshot(self._text), before)

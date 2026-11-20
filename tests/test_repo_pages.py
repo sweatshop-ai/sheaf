@@ -660,7 +660,8 @@ def test_a_page_of_a_repo_that_is_anothers_private_root_renders_on_the_laptop_wi
     page = laptop / "docs" / "plan.md"
     code, out, err = run(capsys, page)
     assert code == 0 and local == [str(page)]
-    assert err.count("\n") == 1 and "not cloned" in err and "private" not in err and "cal" not in err.lower()
+    said = err.replace(str(page), "")                                   # a temp dir may hold either word (macOS: /private/var)
+    assert err.count("\n") == 1 and "not cloned" in said and "private" not in said and "cal" not in said.lower()
 
 
 def test_a_page_whose_commit_the_tiroir_cannot_find_renders_on_the_laptop_with_one_line(

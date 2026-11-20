@@ -60,14 +60,18 @@ _DOC = {"type": "string", "description": "The document: `<root>/<path>` as the h
         "the URL of its page, or the absolute path of the .md file."}
 _ID = {"type": "string", "description": "The comment's id, such as `c3`."}
 _TEXT = {"type": "string", "description": "The whole text of the page, markdown, at most 1 MiB."}
+DOCUMENTS_SECONDS = 10.0        # what one `documents` call spends walking and opening files before it says it stopped
+
 TOOLS = {
     "documents": {
         "description": "List the documents that have open comments, to find what waits for you. "
                        "Each row: doc, url, path, open (open comments), unread (threads with a "
                        "message the person has not seen) and dot (red, orange, blue or green). A root "
                        "whose folder the hub cannot enter comes last, as a row of its own: root and "
-                       "closed (why, such as Permission denied); a root with more files than the hub lists "
-                       "gets one too: root and more (how many were left out, past 100,000 files).",
+                       "closed (why, such as Permission denied, or that git gave no answer for it); a root with "
+                       "more files than the hub lists gets one too: root and more (at least how many were "
+                       "left out: the count stops at 100,000 files); a root the call had no time to finish "
+                       "gets root and stopped.",
         "annotations": {"readOnlyHint": True},
         "properties": {
             "root": {"type": "string", "description": "Only the documents of this root."},
@@ -716,7 +720,8 @@ class Door:
         else:
             wanted = [r for r in hub.roots.listed()
                       if member is None or hub.owns(member, r) or hub.giver(member, r) is not None]
-        rows, shut, left_out = [], [], {}
+        rows, shut, left_out, late = [], [], {}, set()
+        deadline = time.monotonic() + DOCUMENTS_SECONDS
         agent = caller.token if caller.token is not None and caller.token.client is not None else None
         pending = hub.waiting_tells.pending(agent) if agent is not None else set()    # the Tells that wait for it (9.8)
         in_git = {}                             # (root, real folder) -> whether 8.2 keeps its files from the root
@@ -738,11 +743,19 @@ class Door:
             privates = [p for p in place.private_listed(hub, member) if p.closed() is None and not p.missing()] if placed else []
             files = []
             for src in (root, *privates):          # the hub's own lister (8.6), past the index's cap: nothing that waits is hidden
-                listing = list_documents(src, cap=roots_mod.COUNT_LIMIT)
+                listing = list_documents(src, cap=roots_mod.COUNT_LIMIT, deadline=deadline)
                 files += [(src, f.rel) for f in listing.docs]
+                if listing.failed and not giving and not any(s["root"] == root.name for s in shut):
+                    shut.append({"root": root.name, "closed": "git gave no answer"})   # not nothing: git could not say
+                if listing.stopped and not giving:
+                    late.add(root.name)
                 if listing.more and not giving:     # another's loose root is told to no one (9.11)
                     left_out[root.name] = left_out.get(root.name, 0) + listing.more
             for src, found in files:
+                if time.monotonic() > deadline:
+                    if not giving:
+                        late.add(root.name)
+                    break
                 # A rectoverso of the list's root is listed by its name (9.11), wherever its file is; a private path is
                 # none. Each file is read under its name's lock, as every read.
                 logical = place.logical(found) if placed else None
@@ -785,7 +798,8 @@ class Door:
             # Another member's loose root with nothing Shared with the caller is answered as a root that does not exist.
             raise ToolError(f"There is no root named {args['root']}.")
         return ([row[3] for row in sorted(rows, key=lambda r: r[:3])] + shut
-                + [{"root": name, "more": n} for name, n in left_out.items()])
+                + [{"root": name, "more": n} for name, n in left_out.items()]
+                + [{"root": name, "stopped": "time budget reached"} for name in sorted(late)])
 
     def _tells(self, address: str, text: str, agent: TokenRow, member=None) -> list:
         """The Tells that wait for `agent` on this document, as they are listed to it (SPEC 9.8): the first listing

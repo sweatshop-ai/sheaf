@@ -8,14 +8,15 @@ anywhere else (code, an item with no words) goes back to the characters it was.
 """
 import re
 
-_OPEN, _CLOSE = "", ""
+_OPEN, _CLOSE = "\ue000", "\ue001"   # private-use characters: no document has them
 # The marker of an ordered item, behind any list or quote markers on its line (as `edit.TASK_MARK_RE` for a bullet).
 _MARK = re.compile(
     r"^([ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+|>[ \t]*)*\d{1,9}[.)][ \t]+)\[([ xX])\](?=[ \t]|$)", re.M)
 _STAND_IN = re.compile(_OPEN + r"([ xX])" + _CLOSE)
 # An item opens with the stand-in, then words (or an inline tag): an item with nothing after it stays the characters.
 _ITEM = re.compile(r"(<li>(?:<p>)?)" + _OPEN + r"([ xX])" + _CLOSE + r"[ \t]*(?=[^<\s]|<(?!/))")
-_LABEL_END = re.compile(r"</p>|\n?<[uo]l\b|</li>")
+# the label ends where the item's words do: at the end of the paragraph, or before a block that follows them
+_LABEL_END = re.compile(r"</p>|\n?<(?:[uo]l|pre|blockquote|table|hr|h[1-6]|div|figure|dl)\b|</li>")
 
 
 def hide(src: str) -> str:

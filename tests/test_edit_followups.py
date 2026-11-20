@@ -1296,3 +1296,9 @@ def test_an_edit_of_an_ordered_task_list_keeps_its_marks(src):
     assert "\\[" not in out
     assert [ln.split("]")[0].split("[")[-1] for ln in out.splitlines()] == [
         ln.split("]")[0].split("[")[-1] for ln in src.splitlines()]
+
+
+def test_the_label_of_an_ordered_task_ends_before_a_block_under_its_words():
+    from sheafmd.render import pandoc_html
+    html = pandoc_html("1. [ ] a\n\n   ```\n   code\n   ```\n")
+    assert html.index("</label>") < html.index("<pre")

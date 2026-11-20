@@ -1949,3 +1949,92 @@ def test_a_git_rename_between_two_roots_of_a_repo_writes_no_forward_and_is_a_row
     assert box.hub.forwards.snapshot() == {}
     (row,) = rows("rename-between-roots")
     assert row["doc"] == DOC and row["to"].startswith("elsewhere/")
+
+
+# ── ticket 162: what a commit is made against, read when it is made ──────────────────────────────
+
+def side_repo(parent, name="side", toml='commit = true\n', init=True):
+    """A folder with one document, `a.md`, of two blocks; a git repo with that committed when `init`."""
+    folder = parent / name
+    folder.mkdir(parents=True)
+    (folder / ".sheaf.toml").write_text(toml, encoding="utf-8")
+    (folder / "a.md").write_text("One.\n\nTwo.\n", encoding="utf-8")
+    if init:
+        git_init(folder)
+    return folder
+
+
+def git_init(folder):
+    subprocess.run(["git", "init", "-q", "-b", "main", str(folder)], check=True)
+    git(folder, "config", "user.name", "the box")
+    git(folder, "config", "user.email", "box@example.com")
+    git(folder, "add", "-A")
+    git(folder, "commit", "-q", "-m", "first")
+
+
+def save_two(box, address, folder, words="Two, edited."):
+    text = (folder / "a.md").read_text(encoding="utf-8")
+    r = box.post("/_/save", {"doc": address, "hash": md_hash(text), "edits": [{"i": 1, "html": f"<p>{words}</p>"}]},
+                 member=BEA)
+    assert r.status == 200, r.text
+
+
+def test_a_commit_never_lands_in_a_root_that_took_the_name_of_one_forgotten_under_the_write(
+        box, rectoversos, remote, tmp_path, monkeypatch):
+    """8.11: the root a write went to is the one its commit goes to. `sheaf roots forget` and a new root of the same name,
+    between the write and its commit, commit and push the same path of the other repo."""
+    from sheafmd.hub import place
+    intruder = tmp_path / "again" / "rectoversos"
+    intruder.mkdir(parents=True)
+    (intruder / ".sheaf.toml").write_text("commit = true\n", encoding="utf-8")
+    doc = intruder / "acme" / "blog" / "2026-10-28-plan.md"
+    doc.parent.mkdir(parents=True)
+    doc.write_text("Not the plan.\n", encoding="utf-8")
+    git_init(intruder)
+    doc.write_text("Not the plan, changed by hand.\n", encoding="utf-8")        # a commit of this path would take it
+    first = git(intruder, "rev-parse", "HEAD")
+    real = place.owns
+
+    def swapped(hub, address):
+        monkeypatch.setattr(place, "owns", real)
+        hub.forget_root("rectoversos")
+        assert hub.roots.for_document(doc).name == "rectoversos"
+        return real(hub, address)
+
+    monkeypatch.setattr(place, "owns", swapped)
+    edit(box, rectoversos)
+    assert box.hub.commits.settle()
+    assert git(intruder, "rev-parse", "HEAD") == first
+    assert git(intruder, "log", "--oneline").count("\n") == 1
+    assert len(pushed(box, remote)) == 1                     # nor was the page's own root committed after it was forgotten
+    assert rows("commit-refused")
+
+
+def test_a_folder_registered_before_git_init_commits_once_it_is_a_repo(box, rectoversos, tmp_path):
+    """The root's `git` is read when the write is committed, not kept from the day it was registered."""
+    side = side_repo(tmp_path, init=False)
+    box.hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
+                                 "proxy_user": box.hub.proxy.proxy_user,
+                                 "members": {BEA: {"name": "Bea", "email": "bea@example.com", "short": "bea",
+                                                   "roots": [str(rectoversos), str(side)]}}}, "the test")
+    root = box.hub.roots.for_document(side / "a.md")
+    assert not root.git
+    git_init(side)
+    save_two(box, "side/a.md", side)
+    assert box.hub.commits.settle()
+    assert git(side, "log", "-1", "--format=%s").strip() == "edit: a.md"
+    assert not rows("commit-not-git")
+
+
+def test_a_page_open_when_versions_moves_into_the_root_keeps_its_versions_where_the_root_now_says(
+        box, rectoversos, remote):
+    """4.4: `versions` is read at each write. The commit stages the folder the config names now, so the page writes it."""
+    (rectoversos / ".sheaf.toml").write_text("commit = true\npush = true\n", encoding="utf-8")
+    git(rectoversos, "commit", "-q", "-am", "versions in the state folder")
+    edit(box, rectoversos, words="Second, with the versions in the state folder.")
+    (rectoversos / ".sheaf.toml").write_text('versions = "root"\ncommit = true\npush = true\n', encoding="utf-8")
+    git(rectoversos, "commit", "-q", "-am", "versions in the root")
+    edit(box, rectoversos, words="Second, with the versions in the root.")
+    assert box.hub.commits.settle()
+    assert versions_files(rectoversos)
+    assert any(f.startswith(".sheaf/") for f in pushed(box, remote)[0][1])

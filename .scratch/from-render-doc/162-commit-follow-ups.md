@@ -1,6 +1,6 @@
 # 162: Commit follow-ups: a forgotten root's name, a git flag fixed at registration, a versions store chosen once
 
-**Claimed by:** Habib 2026-11-20 17:44
+**Claimed by:** Tiago 2026-11-20 17:44
 
 **Status:** in-progress
 

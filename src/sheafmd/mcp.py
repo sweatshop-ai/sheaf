@@ -671,6 +671,7 @@ class Door:
                         raise OSError(f"{address} is not the file that was opened")
                     return self._seen(t, address, caller, doc, place.opened_private(self.hub, seen))
             self._seen(t, address, caller, doc, place.opened_private(self.hub, op))
+        rid = self.hub.root_id_of(address)          # the root the write goes to, for its commit (8.11)
         try:
             with place.held(self.hub, address):
                 # Through `Hub.entry` when the hub holds a page, which drops one bound to a root that no longer holds the file.
@@ -684,7 +685,7 @@ class Door:
                         guard(t, o) or t, op, fields, caller.display, now(), role))
                     wrote = new != old
                 if wrote:                               # a write that changed nothing commits nothing (8.11)
-                    self.hub.committed(address, by=caller.display, what="comment")     # under the lock, as every write's
+                    self.hub.committed(address, by=caller.display, what="comment", root_id=rid)     # under the lock, as every write's
                 if not noted:                           # no tab was told (none open, or nothing changed): still under the name
                     self._agent_wrote(address, caller)
         except rdc.AnchorError as e:
@@ -1118,6 +1119,7 @@ class Door:
                     except OSError as e:
                         _unmake(top, made)
                         raise _not_made(address, e) from None
+                rid = self.hub.root_id_of(address)      # before the write: the root its commit goes to (8.11)
                 try:
                     text = self._make(root, top, rel, name, address, text, caller)
                 except BaseException:
@@ -1136,7 +1138,7 @@ class Door:
                 raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path") from None
             self._agent_wrote(address, caller)          # before the tabs and indexes hear of it
             self.hub.wrote(address)
-            self.hub.committed(address, by=caller.display, what="create")
+            self.hub.committed(address, by=caller.display, what="create", root_id=rid)
         out = {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
         if visibility.audience(_as_read(args["text"])) is not None and visibility.audience(text) is None:
             out["note"] = ("The page holds private work, so it is not Shared: its Share line was written unticked. "
@@ -1210,16 +1212,17 @@ class Door:
         self._check_size(text)
         # The name's lock (9.11) from finding the file to the commit: move, write, render, commit, one operation, so
         # no poll moves the file in between and no other writer's commit takes this write.
+        rid = self.hub.root_id_of(address)          # the root the write goes to, for its commit (8.11)
         with place.held(self.hub, address):
             moved = []
             try:
                 before, text, gone = self._updated(address, args, text, expected, caller, moved)
                 if before != text or gone:          # a text that changed nothing may still have moved the file
                     moved.clear()
-                    self.hub.committed(address, by=caller.display, what="update", gone=gone)
+                    self.hub.committed(address, by=caller.display, what="update", gone=gone, root_id=rid)
             finally:
                 if moved:                           # moved, then failed before its commit: the move is committed
-                    self.hub.committed(address, by=caller.display, what="update", gone=moved.pop())
+                    self.hub.committed(address, by=caller.display, what="update", gone=moved.pop(), root_id=rid)
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text), "changed": before != text,
                 **({"moved_from": followed[0]} if followed else {})}
 

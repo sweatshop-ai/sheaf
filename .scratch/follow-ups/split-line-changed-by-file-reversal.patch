@@ -1,0 +1,26 @@
+diff --git a/src/sheafmd/edit.py b/src/sheafmd/edit.py
+index 4a06d840..2d323712 100644
+--- a/src/sheafmd/edit.py
++++ b/src/sheafmd/edit.py
+@@ -2397,11 +2397,16 @@ def _own_merge(region, first: int, rows, own, j: int, html: str, held):
+             edit_block(y)
+         file_row, edit_row = in_file[k], in_edit[k]
+         if file_row.how != "changed" or file_row.other != j:
+-            # A line the file deleted and the edit leaves as the page saved it stays deleted.
+-            if edit_row.how != "gone" and not (file_row.how == "gone" and edit_row.how == "same"):
+-                edit_block(edit_row.other)
+-            if file_row.how == "changed":
+-                beside.append(file_row.other)
++            if file_row.how == "changed" and edit_row.how == "same":
++                # The edit leaves the line as the page saved it: the file's change to it stands, in its place.
++                flush()
++                file_block(file_row.other)
++            else:
++                # A line the file deleted and the edit leaves as the page saved it stays deleted.
++                if edit_row.how != "gone" and not (file_row.how == "gone" and edit_row.how == "same"):
++                    edit_block(edit_row.other)
++                if file_row.how == "changed":
++                    beside.append(file_row.other)
+         elif edit_row.how == "same":
+             flush()
+             file_block(file_row.other)

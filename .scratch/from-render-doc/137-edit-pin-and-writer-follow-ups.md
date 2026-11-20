@@ -24,19 +24,19 @@
 
 ## Merging a split line
 
-- [ ] **Split-line merge edges** (all "same as before", no words lost), in `src/sheafmd/edit.py` `merge_edits` / `_own_rows` (around `:2088-2330`). Not re-probed:
+- [ ] **Split-line merge edges** (all "same as before", no words lost), in `src/sheafmd/edit.py` `merge_edits` / `_own_rows` (around `:2088-2330`). *(Omar 2026-11-20, probed on a grid of 196 scenes: 4 shapes of a split first save x each file change x each second save, 58 with a line twice. (a), (b), (d) are the file deleting one of the page's own lines: fixed in #549, 38 grid cases in tests/test_merge.py. (c) is the file changing a split line: kept beside the edit **by design**, pinned by `test_the_split_line_the_file_changed_stays_beside_the_edit` and its sibling (Kenji's decision, "a duplicate is visible, a lost word is not"); the reversal is one hunk in `_own_merge`, kept as `.scratch/follow-ups/split-line-changed-by-file-reversal.patch` (it applies on top of #549 and turns those two tests red), and takes the grid from 32 duplicates to 6; the owner decides it in the 137 batch.)* Not re-probed:
   - (a) mirror shape: a line typed above plus a line split off below; the file deletes the block before; the second save drops the first line; the split line is written twice.
   - (b) a three-line split whose middle line the file deletes: the next save types on the last line, which is written twice.
   - (c) a line typed above that the file then changes is kept beside the edit with no conflict note.
   - (d) a typed-above line plus a split line, the file deleting the next block: the typed line is left twice. Also 2 of 168 grid scenes with two file changes.
-- [ ] **An agent's comment on a split line that the second save drops** moves to the end of the first line with `quote="off"`, instead of being marked orphan. Not re-probed.
+- [ ] **An agent's comment on a split line that the second save drops** moves to the end of the first line with `quote="off"`, instead of being marked orphan. *(Omar 2026-11-20, probed: the comment is kept, open, on the end of the first line, its quote "Split off" no longer in the line; same as a comment whose words a save takes out, pinned by `test_a_comment_whose_words_the_next_save_takes_out_stays_before_the_split_line_the_file_changed`. Kept by design, no words lost.)*
 
 ## Pins
 
-- [ ] **Pins in memory have no age.** `Live._pins` (`src/sheafmd/hub/live.py:74`, `:486-491`) is capped at `PINS` but never expires; on disk pins expire after 7 days (`src/sheafmd/hub/state.py:37`, `:254`).
-- [ ] **The 16-pin cap is per document, not per member** (`state.py:36`, `:208`; `live.py:490`). One member pinning many versions can push out another member's pin.
-- [ ] **"An Ask answered with unsaved edits keeps the hash without a pin."** Not checked in sheaf's `page.js`: the pin call sites around an Ask answer were not traced. Trace them first.
-- [ ] **Test gap: no page-level test pins the merged-save `was` hash.** The page tests at `tests/page/test_page_writing.py:1276-1350` cover the served hash only; the `was` pin is tested at hub and live level.
+- [ ] **Pins in memory have no age.** *(PR #543)* `Live._pins` (`src/sheafmd/hub/live.py:74`, `:486-491`) is capped at `PINS` but never expires; on disk pins expire after 7 days (`src/sheafmd/hub/state.py:37`, `:254`).
+- [ ] **The 16-pin cap is per document, not per member** *(open: needs the owner's decision: per-member key, proxy members, SPEC change)* (`state.py:36`, `:208`; `live.py:490`). One member pinning many versions can push out another member's pin.
+- [x] **"An Ask answered with unsaved edits keeps the hash without a pin."** *(traced by Omar 2026-11-20, not browser-verified beyond #544: an Ask answer, like any outside change, reaches `reloadWhenFree` (`page.js`). With a form open it goes to `holdReload`, which pins `hash`. With no form it goes to `settle`, which saves each dirty block first (`save(true)`, at most 3 passes, each up to 120 s) and then `reloadKeep`; a merged save there keeps the old hash with no pin, but only for that window, and a form opened during it is sent to `reloadWhenFree` -> `holdReload` (`page.js:1310`), which pins. No unpinned long hold; no change made.)*
+- [ ] **Test gap: no page-level test pins the merged-save `was` hash.** *(PR #544)* The page tests at `tests/page/test_page_writing.py:1276-1350` cover the served hash only; the `was` pin is tested at hub and live level.
 
 ## Writers and Windows
 
@@ -48,7 +48,7 @@
 
 ## Tests and code hygiene
 
-- [ ] **Test duplication:** `tests/test_hub_handler.py:231` builds its own sibling-swap hook (monkeypatching `os.fsync`) beside the shared helper `swap_the_sibling_at` in `tests/test_source.py:258`.
+- [ ] **Test duplication:** *(PR #551)* `tests/test_hub_handler.py:231` builds its own sibling-swap hook (monkeypatching `os.fsync`) beside the shared helper `swap_the_sibling_at` in `tests/test_source.py:258`.
 - [ ] **Test hygiene:** a SIGTERM to a full `tests/page/` run once left "Task was destroyed but it is pending! ... Page._on_route()" and a main thread at 100% CPU for 15 minutes. Every full run showed 2 to 4 `PytestUnraisableExceptionWarning`s from a `Page._on_route` coroutine collected after its loop. Not re-run on sheaf.
 - [ ] **Code smells in `src/sheafmd/edit.py`** (standards only): `_Step` is built by position (`:2217`, `:2225`); `BOTH_NOTE + "\n\n"` is repeated three times (`:2250`, `:2311`, `:2321`); `_PINS` is a folder name (`hub/state.py:40`); the closures use `nonlocal` and bare tuples; the names `own`, `mine`, `span`, `at` and `keeping` each mean several things.
 
@@ -60,7 +60,7 @@
 - [ ] **`\:smile:` typed on the page saves as `\\:smile:` and renders as an emoji** (same family as the emoji item).
 - [ ] **Emoji in a table pandoc writes as raw HTML shows as text** (`:+1:`, from #479): restore the emoji character there, as the backslash and pipe tokens do by depth (`edit.py` end of `html_block_to_md`).
 - [ ] **`_emoji_drawn` caches a failed pandoc run as None** (`lru_cache`, from #479): a name then stays an emoji for the process; do not cache a failure.
-- [ ] **`_without_placeholder_breaks` and `_cell_breaks` can disagree on a backslash** (from #482, `edit.py:555` against `:608`): the first checks the page's fragment before `_text_backslashes` runs, the second after it, so a table can be left to `_cell_breaks` which then does not take it; the old bug (`| x\xa0 |`, the break lost) can still happen. Fix: one shared test.
+- [ ] **`_without_placeholder_breaks` and `_cell_breaks` can disagree on a backslash** *(PR #541)* (from #482, `edit.py:555` against `:608`): the first checks the page's fragment before `_text_backslashes` runs, the second after it, so a table can be left to `_cell_breaks` which then does not take it; the old bug (`| x\xa0 |`, the break lost) can still happen. Fix: one shared test.
 - [ ] **The fallback in `html_block_to_md` keeps a break that used to go** (from #482, `edit.py:721-724`): when pandoc swallows a character of the token, the table is re-run from `clean`, the text from before `_cell_breaks`, which now still holds the end-of-cell `<br>` and no-break space that the first pass used to remove.
 
 ## Found while fixing the bare-URL and math items (PRs #517, #524)
@@ -75,4 +75,8 @@
 - [ ] **A failed emoji lookup writes the shortcode bare** (literal case) or as `:name:` (raw-HTML table): `_emoji_drawn` gives None on a pandoc failure, so the literal text can draw its emoji, or a raw table can show the name, until the next save.
 - [ ] **The table depth counts `<table` anywhere in the output**, also a literal `\<table` in a paragraph or code block, so a `\:name:` after it loses its backslash (same for the pipe and backslash tokens before it).
 
-- [ ] **A wrong comment at `edit.py:689`** (from #517): it says a raw tag's `⟦…⟧` placeholder is "matched above", but `⟦` is not in the ASCII class of `_BACKSLASH_ESCAPES`; tags keep their backslash because pandoc handles it (pinned by the controls in tests/test_edit_backslash_placeholder.py). Fix the comment whoever next touches edit.py there.
+- [ ] **A wrong comment at `edit.py:689`** *(PR #541)* (from #517): it says a raw tag's `⟦…⟧` placeholder is "matched above", but `⟦` is not in the ASCII class of `_BACKSLASH_ESCAPES`; tags keep their backslash because pandoc handles it (pinned by the controls in tests/test_edit_backslash_placeholder.py). Fix the comment whoever next touches edit.py there.
+
+## Found while fixing the split-line merge edges (PR #549)
+
+- [ ] **A line the file deleted comes back when the edit leaves nothing else** (from #549, `edit.py` `_own_merge`): the file deletes line A of the page's split save and the page's next save drops line B, so no block is left and `_own_merge` returns None; the fallback writes the edit, which is A, where the merge put it. Probed on `["Typed above.", "Second paragraph here."]` with line 0 deleted and line 1 dropped, and on the other two shapes. A bug, not a design (Kenji, 2026-11-20); the fix has to write an empty region, which `_splice` and the steps do not yet handle.

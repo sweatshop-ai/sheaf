@@ -858,11 +858,15 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     # that can run, and the .md never holds active markup a tool without a sanitiser
     # of its own would show. Task boxes and comments survive it; a paragraph typed as
     # `- [ ] words` becomes a task item (`_typed_tasks`).
-    clean = _without_placeholder_breaks(_boxes_as_text(_typed_tasks(sanitize(_sanitize(fragment, source, strays)))))
-    if not clean.strip():
-        return ""
+    clean = _boxes_as_text(_typed_tasks(sanitize(_sanitize(fragment, source, strays))))
+    # The backslashes go first: `_without_placeholder_breaks` and `_cell_breaks` each decide whether the table is
+    # one `_cell_breaks` takes, by a backslash in the fragment, and must see the same one. A bare URL is taken before
+    # them, so that its backslashes stay the URL's.
     clean, urls = _bare_urls_as_words(clean)
     clean, slash = _text_backslashes(clean)
+    clean = _without_placeholder_breaks(clean)
+    if not clean.strip():
+        return ""
     clean, pipe = _cell_code_pipes(clean)
     cells, token = _cell_breaks(clean)
     r = _pandoc.run(["-f", "html", "-t", "gfm", "--wrap=none"], cells)

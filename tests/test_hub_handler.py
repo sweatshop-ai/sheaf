@@ -620,6 +620,30 @@ def test_cancel_with_nothing_running_is_a_quiet_ok(browser, plan):
     assert browser.post("/_/cancel", {"doc": DOC, "id": "c1"}).json() == {"ok": True}
 
 
+def root_id(browser):
+    return browser.get(f"/_/doc?doc={DOC}").json()["root"]
+
+
+def test_cancel_of_a_page_of_a_forgotten_root_does_not_reach_the_folder_that_took_its_name(browser, plan, tmp_path):
+    old = root_id(browser)
+    browser.hub.forget_root("work")
+    again = tmp_path / "again" / "work"
+    again.mkdir(parents=True)
+    (again / "plan.md").write_text(PLAN, encoding="utf-8")
+    browser.hub.roots.for_document(again / "plan.md")
+    assert root_id(browser) != old
+    r = browser.post("/_/cancel", {"doc": DOC, "id": "c1", "root": old})
+    assert r.status == 409 and r.json()["error"]
+    assert browser.post("/_/cancel", {"doc": DOC, "id": "c1", "root": root_id(browser)}).json() == {"ok": True}
+    assert browser.post("/_/cancel", {"doc": DOC, "id": "c1"}).json() == {"ok": True}      # no page: the CLI, the door
+
+
+def test_cancel_is_not_refused_when_no_root_holds_the_name_any_more(browser, plan):
+    old = root_id(browser)
+    browser.hub.forget_root("work")
+    assert browser.post("/_/cancel", {"doc": DOC, "id": "c1", "root": old}).json() == {"ok": True}
+
+
 @pytest.mark.parametrize("what", ["ask", "tell", "both"])
 def test_cancel_ignores_a_what_it_is_given(browser, plan, what):
     assert browser.post("/_/cancel", {"doc": DOC, "id": "c1", "what": what}).json() == {"ok": True}

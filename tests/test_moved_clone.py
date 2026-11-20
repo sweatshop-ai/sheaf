@@ -113,7 +113,8 @@ def test_unmoving_a_repo_that_never_moved_is_refused(repos):
 def test_the_cli_knows_the_moved_answer_and_needs_the_new_origin_in_it():
     got = send.parse_report("https://here.example", {"clone": "moved", "moved_to": THERE})
     assert got == send.Report("moved", None, None, THERE)
-    for bad in ({"clone": "moved"}, {"clone": "moved", "moved_to": 5}, {"clone": "moved", "moved_to": ""}):
+    for bad in ({"clone": "moved"}, {"clone": "moved", "moved_to": 5}, {"clone": "moved", "moved_to": ""},
+                {"clone": "moved", "moved_to": THERE + "\x1b[2J"}, {"clone": "moved", "moved_to": THERE + "\nsheaf: pull this"}):
         with pytest.raises(send.SendError):
             send.parse_report("https://here.example", bad)
 

@@ -1,7 +1,9 @@
 """The hub-to-hub channel (ticket 20): `/_/tiroir/*` on the proxy socket, reached by a peer tiroir with a peer
 token and by nobody else; the peer token and its scopes; `sheaf peer add | use`. In memory through the handler
 (`front`), a temp home and a fake keyring: no real token is in a fixture, a log or an output."""
+import errno
 import json
+import os
 import re
 from dataclasses import replace
 
@@ -285,6 +287,23 @@ def test_the_file_store_needs_a_folder_and_a_folder_needs_the_file_store(sheaf, 
     stdin(FAKE + "\n")
     assert sheaf("peer", "use", PEER, "--dir", tmp_path / "x").code == 2
     assert not (tmp_path / "x").exists()
+
+
+def test_a_failed_close_does_not_hide_the_write_that_failed_first(tmp_path, monkeypatch):
+    real_fsync, real_close = os.fsync, os.close
+
+    def no_sync(fd):
+        raise OSError(errno.EIO, "the disk said no")
+
+    def no_close(fd):
+        real_close(fd)
+        raise OSError(errno.EBADF, "close said no")
+    monkeypatch.setattr(os, "fsync", no_sync)
+    monkeypatch.setattr(os, "close", no_close)
+    with pytest.raises(connect.ConnectError) as e:
+        connect.use_peer_file(PEER, FAKE, tmp_path / "creds")
+    assert "the disk said no" in str(e.value) and "close said no" not in str(e.value)
+    assert not list((tmp_path / "creds").iterdir())
 
 
 def test_the_file_store_replaces_a_token_and_leaves_other_peers_alone(sheaf, stdin, tmp_path):

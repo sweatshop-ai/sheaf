@@ -139,8 +139,13 @@ def use_peer_file(url: str, token: str, folder: Path) -> Path:
             while data:
                 data = data[os.write(fd, data):]
             os.fsync(fd)
-        finally:
-            os.close(fd)
+        except BaseException:
+            try:
+                os.close(fd)
+            except OSError:
+                pass                 # what failed first is what is told, not the close that follows it
+            raise
+        os.close(fd)
         os.replace(tmp, target)
     except OSError as e:
         if made:

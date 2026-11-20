@@ -4,6 +4,7 @@ puts the page in the trash, where each row offers Restore; the three views, Page
 list and their count. The page is mounted as in test_mount_sheaf.py, every request answered by the hub's proxy handler as
 Bea; the marks are read from the root's `.sheaf/` folder after each act, so the page and the hub are seen to agree."""
 import json
+import time
 
 import pytest
 from helpers import BEA
@@ -110,7 +111,9 @@ def test_delete_asks_a_second_click_in_the_button_and_then_moves_the_page_to_the
     act(own, "alpha", "delete")
     until(lambda: own.js("return root.querySelector(arg + ' .sheaf-act[data-act=\"delete\"]').textContent;", row("alpha")) == "Really delete?",
           what="the second click asked for")
-    assert own_rows(own) == ["alpha", "beta"] and (own.root_path / "2026-11" / "alpha.md").exists()      # one click deletes nothing
+    for _ in range(5):                  # one click deletes nothing: a POST out after the button changed would show within this half second
+        assert own_rows(own) == ["alpha", "beta"] and (own.root_path / "2026-11" / "alpha.md").exists()
+        time.sleep(0.1)
     act(own, "alpha", "delete")
     wait_rows(own, ["beta"], "alpha gone from Pages")
     assert not (own.root_path / "2026-11" / "alpha.md").exists()

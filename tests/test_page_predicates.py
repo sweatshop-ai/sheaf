@@ -13,7 +13,7 @@ A_FUNCTION = re.compile(r"^\s*(async\s*)?(\(|[\w$]+\s*=>|function\b)")
 
 def string_predicates():
     found = []
-    for path in sorted(PAGE_TESTS.glob("*.py")):
+    for path in sorted(PAGE_TESTS.rglob("*.py")):
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "wait_for_function"):
                 continue

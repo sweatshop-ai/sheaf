@@ -164,3 +164,9 @@ def test_a_page_held_for_its_hash_goes_again_at_the_next_try(move):
     again = Receiver(ok("a.md"))
     assert outgoing.send_root(again, move, "o/r", THERE, HEAD, [row("a.md")]) == {"a.md": "h"}
     assert len(again.calls) == 1
+
+
+@pytest.mark.parametrize("said", [None, [], "ok"])
+def test_an_answer_that_is_not_an_object_holds_the_batch_as_failed(move, said):
+    done = outgoing.send_root(Receiver((200, said)), move, "o/r", THERE, HEAD, [row("a.md")])
+    assert done == {} and move.get("o/r")["held"] == {"a.md": "failed"}

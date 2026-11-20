@@ -938,9 +938,10 @@ class Handler:
             return 404
 
     def _live_leave(self, req: Req) -> Response:
+        stream = self._shared_of(req)
         key = req.body.get("key")
         if isinstance(key, str):
-            self._shared_of(req).leave(key)
+            stream.leave(key)
         return _ok()
 
     def _shared_closed(self, sid: str, stream):
@@ -1439,7 +1440,7 @@ class Handler:
         _shape(names == [] or visibility.valid_names(names), "with must be a list of short names")
         self.hub.catch_up(e)
         with place.held(self.hub, e.address):
-            original = []
+            original, written = [], []
 
             def change(text):
                 # Who may open the page is judged before anything is said about its text, so a hash that does not
@@ -1459,9 +1460,11 @@ class Handler:
                 if visibility.unticked_share_line(text) is not None:
                     if names:
                         raise Refuse(409, "the page already has a Share line: tick it, or edit its names")
-                    return text                 # its own box is ticked below
+                    written.append(text)        # its own box is ticked below
+                    return text
                 original.append(text)
-                return visibility.with_share_line(text, names)
+                written.append(visibility.with_share_line(text, names))
+                return written[-1]
             try:
                 after = e.live.rewrite(change)
             except UnicodeEncodeError:
@@ -1471,7 +1474,7 @@ class Handler:
                 self.hub.committed(e.address, req.member, "edit", root_id=e.root_id)
                 self._page_wrote(req, e, "share")
         try:
-            edit = the_list.share_edit(e.live.current()[1])
+            edit = the_list.share_edit(written[-1])
             _shape(edit is not None, "the Share line was not written")
             return self._save(replace(req, body={"doc": b.get("doc"), "hash": after, "edits": [edit]}))
         except Refuse:

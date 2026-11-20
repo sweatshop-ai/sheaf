@@ -229,3 +229,11 @@ def test_no_page_with_a_known_owner_unmoves_nothing(clone):
     h = moved_hub(clone)
     incoming.check_root(h, body(clone, ("a.md", "nobody@example.com", None)), peer=THERE)
     assert h.repos.unmoved == []
+
+
+def test_the_way_back_refusal_for_no_app_names_the_install_link_only_when_there_is_one(clone):
+    h = moved_hub(clone, repos_mod.NO_APP)
+    assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)), peer=THERE) == (409, {"why": "no_app"})
+    h.repos.answer["install"] = "https://install.example/o/r"
+    assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)), peer=THERE) == \
+        (409, {"why": "no_app", "install": "https://install.example/o/r"})

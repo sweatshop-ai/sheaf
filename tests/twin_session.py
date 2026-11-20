@@ -70,7 +70,7 @@ def tool(name, who=None, **args):
                                      "params": {"name": name, "arguments": args}}).encode(), who or caller)
     got = out["result"]
     assert not got["isError"], got
-    hub.commits.settle()        # the pusher's thread has swept before the next step: its commits are never between two steps by chance
+    assert hub.commits.settle()        # the pusher's thread has swept before the next step: its commits are never between two steps by chance
     return json.loads(got["content"][0]["text"])
 
 
@@ -107,9 +107,9 @@ def by_hand(change):
     with place.held(hub, DOC):
         Path(hub.file(DOC)).write_text(change(now_text()), encoding="utf-8")
         hub.committed(DOC, what="edit", by="Ada")
-    hub.commits.settle()                                                # the sweep of that commit, before the move writes a version
+    assert hub.commits.settle()                                                # the sweep of that commit, before the move writes a version
     place.place(hub, DOC)
-    hub.commits.settle()
+    assert hub.commits.settle()
 
 
 tool("create", doc=DOC, text="---\nclient: acme\nproject: blog\n---\n# Plan\n\n- [ ] Approve\n\nFirst paragraph.\n")
@@ -121,7 +121,7 @@ with place.held(hub, DOC):                                                      
     Path(hub.file(DOC)).write_text(now_text().replace("- [ ] Approve", "- [x] Approve"), encoding="utf-8")
     hub.committed(DOC, cfg.members["id-a"], "tick")
 hub.the_list.ticked(DOC)                                                                # the list's tick, after the handler's
-hub.commits.settle()
+assert hub.commits.settle()
 snapshot("ticked")
 by_hand(lambda t: t.replace("client: acme", "visibility: owner\nowner: a\nclient: acme"))   # closed: to a private home
 snapshot("closed")
@@ -133,7 +133,7 @@ rewrite(lambda t: t.replace("client: acme", "visibility: owner\nowner: b\nclient
 snapshot("door update closing")
 rewrite(lambda t: t.replace("# Plan", "# Plan (revised)"), callers["b"])                          # and a plain edit by the other member's token, on a line the remote edit leaves alone
 snapshot("door update editing")
-hub.commits.settle()
+assert hub.commits.settle()
 
 subprocess.run(["git", "clone", "-q", str(remote), str(other)], check=True, capture_output=True)    # a remote change
 doc = other / "acme" / "blog" / "2026-01-02-plan.md"
@@ -141,6 +141,6 @@ doc.write_text(doc.read_text(encoding="utf-8").replace("Second", "Third"), encod
 git(other, "commit", "-q", "-am", "remote edit")
 git(other, "push", "-q", "origin", "HEAD:main")
 hub.commits.poll(hub.roots.all())                                                       # the watcher's pull
-hub.commits.settle()
+assert hub.commits.settle()
 hub.commits.stop()
 (work / "snapshot.json").write_text(json.dumps(SNAPSHOTS, indent=1, sort_keys=True), encoding="utf-8")

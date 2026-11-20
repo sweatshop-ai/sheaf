@@ -142,3 +142,8 @@ def test_a_key_that_joins_a_new_connection_leaves_the_old_one(world, docs):
     assert world.hub.tabs(docs[0]) == 1 and old.keys() == [] and not old.closed
     old.close()
     new.close()
+
+
+@pytest.mark.parametrize("key", [None, 7, ["a"], ""])
+def test_a_leave_with_no_stream_of_ours_is_refused_whatever_its_key(world, key):
+    assert world.post("/_/live/leave", {"stream": "nope", "key": key}).status == 404

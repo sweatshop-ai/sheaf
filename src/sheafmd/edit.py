@@ -629,6 +629,29 @@ def _cell_code_pipes(fragment: str):
     return str(soup), token
 
 
+_BACKSLASH_ESCAPES = re.compile(r"\\(?=[!-/:-@\[-`{-~\n]|\Z)")
+
+
+def _text_backslashes(fragment: str):
+    """(the fragment with each backslash of its text that the .md would read as an escape as a token, the token
+    or None). Pandoc's gfm writer leaves a backslash bare: two were saved as one, and one before a character
+    the writer escapes swallowed that character. The token comes back as `\\\\`. A backslash before a letter,
+    a digit or a space escapes nothing and stays as it is; code is the code's."""
+    from bs4 import BeautifulSoup, NavigableString
+
+    if "\\" not in fragment:
+        return fragment, None
+    soup = BeautifulSoup(fragment, "html.parser")
+    texts = [t for t in _texts(soup) if "\\" in t and not any(
+        u.name in ("code", "pre", "script", "style") or "math" in (u.get("class") or []) for u in t.parents)]
+    token = next((t for t in (chr(0xF800) + chr(0xF801 + k) for k in range(1024)) if t not in fragment), None)
+    if not texts or token is None:
+        return fragment, None
+    for t in texts:
+        t.replace_with(NavigableString(_BACKSLASH_ESCAPES.sub(token, t)))
+    return str(soup), token
+
+
 def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     """Convert one edited HTML block back to GitHub-flavoured markdown. With `source`, the block's markdown,
     markup the source did not have is unwrapped (`_unwrap_strays`) and named in `strays`."""
@@ -642,6 +665,7 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     clean = _without_placeholder_breaks(_boxes_as_text(_typed_tasks(sanitize(_sanitize(fragment, source, strays)))))
     if not clean.strip():
         return ""
+    clean, slash = _text_backslashes(clean)
     clean, pipe = _cell_code_pipes(clean)
     cells, token = _cell_breaks(clean)
     r = _pandoc.run(["-f", "html", "-t", "gfm", "--wrap=none"], cells)
@@ -652,12 +676,15 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     if r.returncode != 0:
         raise EditError(f"pandoc: {r.stderr.strip()[:200]}")
     out = r.stdout if token is None else r.stdout.replace(token, "<br>")
-    if pipe is not None:
-        # A table pandoc writes as raw HTML has no cell for a bare pipe to end, and `\\|` would show.
+    if pipe is not None or slash is not None:
+        # A table pandoc writes as raw HTML has no cell for a bare pipe to end, and `\\|` would show; nor does
+        # HTML read a backslash as an escape.
         parts, depth = re.split(r"(</?table\b)", out), 0
         for k, part in enumerate(parts):
             depth = depth + 1 if part == "<table" else max(0, depth - 1) if part == "</table" else depth
-            parts[k] = part.replace(pipe, "|" if depth else "\\|")
+            if pipe is not None:
+                part = part.replace(pipe, "|" if depth else "\\|")
+            parts[k] = part if slash is None else part.replace(slash, "\\" if depth else "\\\\")
         out = "".join(parts)
     # Pandoc's gfm writer wraps every bare URL as <https://...>. GFM autolinks a bare
     # URL anyway, so the two render identically - but the angle brackets show up as

@@ -270,6 +270,7 @@ class Handler:
         self.peer_check = peer_check
         self.peer_off: str | None = None    # why the hub does not check who owns a connection (`peer.startup`), once it knows
         self._peer_row_at = float("-inf")   # when `peer-refused` was last written
+        self._peer_row_lock = threading.Lock()
         self.door = Door(hub)
         self._titles = sheaf_view.Titles()
         self.door.called = self._james_called
@@ -788,10 +789,11 @@ class Handler:
         no, mine = conn.refusal, os.geteuid()
         other = no.kind == peer.OTHER_USER
         row = "peer-refused"
-        if time.monotonic() - self._peer_row_at < PEER_ROW_SECONDS:
-            row = False                  # not written: a loop of refused requests is one row a minute
-        else:
-            self._peer_row_at = time.monotonic()
+        with self._peer_row_lock:        # threads refused together write one row, not one each
+            if time.monotonic() - self._peer_row_at < PEER_ROW_SECONDS:
+                row = False              # not written: a loop of refused requests is one row a minute
+            else:
+                self._peer_row_at = time.monotonic()
         detail = no.detail
         if other:
             detail = f"a request from another user of this machine (uid {no.uid}); the hub runs as uid {mine}"
@@ -816,7 +818,7 @@ class Handler:
             # that was read from a command line is good for the user who runs the hub, not for another (9.1).
             if not req.auth.redeem_signin(req.query["nonce"]):
                 raise Refuse(401, "that sign-in link was used already, has expired or is not this hub's",
-                             page=LINK_USED if peer.supported() else f"{LINK_USED} {LINK_LIMIT}")
+                             page=LINK_USED if peer.supported() and not self.peer_off else f"{LINK_USED} {LINK_LIMIT}")
             no = self._owner(req)
             if no is not None:
                 raise Refuse(401, no.message, page=LINK_OTHER_USER if no.kind == peer.OTHER_USER else LINK_UNKNOWN,

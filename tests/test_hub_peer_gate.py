@@ -131,12 +131,28 @@ def test_a_caller_that_closed_before_the_hub_could_say_is_told_to_try_again_and_
         assert len(hub.auth.signins) == before
 
 
-def test_a_caller_already_closed_when_the_hub_looks_is_never_let_through_even_where_the_hub_runs_as_root(monkeypatch):
+def test_a_caller_already_closed_when_the_hub_looks_is_never_let_through_where_the_hub_runs_as_root(monkeypatch):
     # A closed caller's socket reads as uid 0; where the hub is root too, that reads as the hub's own user.
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
     monkeypatch.setattr(peer, "check", lambda conn: None)
     monkeypatch.setattr(peer, "closed", lambda sock: True)
     conn = peer.look(CLIENT, AT_HUB, object())
     assert conn.refusal is not None and conn.closed()
+
+
+def test_a_caller_of_the_hubs_own_user_that_half_closes_is_not_turned_away(monkeypatch):
+    # `nc -N` and some HTTP clients close their sending end after the request: the hub's socket leaves
+    # ESTABLISHED, and the caller's own socket still reads as its owner.
+    monkeypatch.setattr(os, "geteuid", lambda: 1000)
+    monkeypatch.setattr(peer, "check", lambda conn: None)
+    monkeypatch.setattr(peer, "closed", lambda sock: True)
+    assert peer.look(CLIENT, AT_HUB, object()).refusal is None
+
+
+def test_another_user_that_sends_and_closes_is_still_refused_and_leaves_its_row(handler, hub):
+    r = ask(handler, hub, "GET", "/_/index.json", seen(THEM, closed=True), "key")
+    assert r.status == 403 and "Set-Cookie" not in r.headers
+    assert [row["peer_uid"] for row in hub_rows("peer-refused")] == [THEM]
 
 
 def test_a_caller_still_connected_is_refused_not_told_to_try_again(handler, hub):

@@ -78,7 +78,7 @@ REQUEST_OTHER_USER = ("This hub answers only to the user of this machine that ru
 REQUEST_UNKNOWN = ("The hub could not tell which user of this machine sent this request, so it did not answer it. "
                    "Try again; if it keeps happening, run <code>sheaf diag</code> and look at the "
                    "<code>peer-refused</code> rows.")
-PEER_ROW_SECONDS = 60                # `peer-refused` is written at most this often: the rest are counted
+PEER_ROW_SECONDS = 60                # `peer-refused` is written at most this often: the rest are not written
 PROXY_SIGN_IN = ("This browser is not signed in to this site, or its sign-in has ended. Sign in to this "
                  "site again, then reload this page.")
 WRONG_KEY = ("This link does not hold this hub's key. On the machine that runs the hub, run "
@@ -783,7 +783,10 @@ class Handler:
         conn = req.conn
         if self.peer_off or not getattr(conn, "looked", False) or conn.refusal is None:
             return
-        if conn.closed is not None and conn.closed():
+        # A closed caller reads as no one's (uid 0), so only an answer that could be that is a "try again";
+        # another user's uid stays a refusal, with its row, whether or not the caller has closed since.
+        no = conn.refusal
+        if conn.closed is not None and conn.closed() and (no.kind != peer.OTHER_USER or no.uid == 0):
             raise Refuse(503, "try again: the connection closed before the hub could tell who sent this",
                          {"Retry-After": "1"}, row=False)
         no, mine = conn.refusal, os.geteuid()

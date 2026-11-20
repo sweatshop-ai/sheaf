@@ -255,3 +255,15 @@ def test_the_text_of_a_team_form_survives_the_panel_of_a_refused_draft(tab, cont
     page.click("#rd-show")
     page.click("#rd-panel button[data-tab=team]")
     assert page.locator("#rd-panel .rd-team textarea").input_value() == "half a thought"
+
+
+def test_a_delete_the_hub_refuses_is_asked_for_again_from_the_start(tab, site):
+    told_team(tab.page, [{**TEAM_COMMENT, "id": "t3"}])
+    team_tab(tab)
+    tab.page.route("**/_/comment", lambda route: route.fulfill(status=500, content_type="application/json", body='{"error": "refused"}'))
+    delete = tab.page.locator("#rd-panel .rd-team[data-team=t3] button[data-act=delete]")
+    delete.click()
+    assert delete.inner_text() == "Confirm delete"
+    delete.click()
+    until(lambda: "refused" in tab.page.evaluate("document.querySelector('#rd-toast').textContent"), what="the refusal")
+    assert tab.page.locator("#rd-panel .rd-team[data-team=t3] button[data-act=delete]").inner_text() == "Delete"

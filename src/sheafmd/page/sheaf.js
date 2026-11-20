@@ -66,7 +66,7 @@ function bringBack(a) {
     return done(r);
   });
 }
-// The click on a laptop name; `where` is {say(text), live(), plain(a)}: the surface's line, whether it is still there, and
+// The click on a laptop name; `where` is {say(text, err), live(), plain(a)} (`err` false: information, no error toast): the surface's line, whether it is still there, and
 // what a name with no way left becomes.
 function follow(a, e, where) {
   var remote = a.getAttribute('href');
@@ -81,7 +81,7 @@ function follow(a, e, where) {
     absentAt = Date.now();
     if (remote) {
       window.open(remote, '_blank', 'noopener,noreferrer');
-      if (where.live()) where.say('AgentView does not answer on this computer: this name now opens its Remote Control link directly.');
+      if (where.live()) where.say('AgentView does not answer on this computer: this name now opens its Remote Control link directly.', false);
       return;
     }
     where.plain(a);
@@ -571,6 +571,7 @@ function create(ROOT, opts) {
     no.addEventListener('click', function () { form.remove(); });
     form.addEventListener('submit', function (e) {
       e.preventDefault();
+      if (input.value.trim() === at) { form.remove(); return; }      // nothing to move: the hub would answer 409 "into itself"
       go.disabled = true;
       say('');
       fetch('/_/move-folder', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },

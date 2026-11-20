@@ -1250,3 +1250,19 @@ def test_a_styled_bold_span_in_a_heading_is_no_bold_in_the_saved_markdown(tag):
 def test_a_styled_italic_span_in_a_heading_stays_italic():
     out = rde.html_block_to_md('<h2><span style="font-style:italic">Title</span></h2>', source="Title")
     assert out == "## *Title*", out
+
+
+# An online word processor writes Shift+Enter twice as two spans, each holding a <br>, inside one paragraph (captured
+# 2026-11-20): pandoc wrote them as two backslash lines. A blank line is what two breaks in a row mean.
+@pytest.mark.parametrize("html, md", [
+    ('<p><span style="font-weight:400">Alpha </span><span style="font-weight:700">bold</span>'
+     '<span style="font-weight:400"><br></span><span style="font-weight:400"><br></span>'
+     '<span style="font-weight:400">Beta </span><a href="https://example.com/"><span>link</span></a></p>',
+     "Alpha **bold**\n\nBeta [link](https://example.com/)"),
+    ("<p>Alpha<br><br>Beta</p>", "Alpha\n\nBeta"),
+    ("<p>Alpha<br><br><br>Beta</p>", "Alpha\n\nBeta"),
+    ("<p>Alpha<br>Beta<br><br>Gamma</p>", "Alpha\\\nBeta\n\nGamma")],
+    ids=["as the word processor wrote it", "two breaks", "three breaks", "a break kept before two"])
+def test_two_breaks_in_a_row_inside_a_pasted_paragraph_are_a_paragraph_break(html, md):
+    source = "Alpha\n"
+    assert rde.html_block_to_md(html, source) == md

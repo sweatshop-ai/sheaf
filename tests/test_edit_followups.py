@@ -1188,3 +1188,14 @@ def test_a_styled_span_inside_a_mark_of_its_kind_is_marked_once(html, md):
                          ids=["a break before a block", "two breaks before a block", "a break at the end"])
 def test_a_break_before_a_block_or_at_the_end_is_not_a_backslash(html):
     assert "\\" not in rde.html_block_to_md(html, source="Words")
+
+
+def test_a_word_processor_paste_as_the_browser_leaves_it_in_a_paragraph_is_plain_markdown():
+    # The DOM Chrome built from the clipboard (execCommand insertHTML, read back from outerHTML on 2026-11-20): the
+    # wrapper <b> became a <span id>, and the pasted <p> and the <br> between them sit inside the edited <p>.
+    html = ('<p>Last paragraph.<span id="docs-internal-guid-1"><p dir="ltr" style="line-height:1.38">'
+            '<span style="font-size:11pt;font-weight:700">Two</span><span style="font-size:11pt"> paragraphs, this is </span>'
+            '<span style="font-size:11pt;font-weight:700">bold</span></p><br><p dir="ltr"><span style="font-size:11pt">'
+            'Here is a link to </span><a href="https://example.com/"><span style="font-size: 11pt;">the page</span></a>.</p></span></p>')
+    out = rde.html_block_to_md(html, source="Last paragraph.")
+    assert "\\" not in out and out.endswith("**Two** paragraphs, this is **bold**\n\nHere is a link to [the page](https://example.com/)."), out

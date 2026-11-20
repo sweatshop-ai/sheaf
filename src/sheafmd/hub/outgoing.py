@@ -264,6 +264,8 @@ def send_root(post, moves, repo: str, to: str, head: dict, rows, limit: int = BA
             status, answer = post(to, "root", {**head, "pages": batch})
         except OSError:
             status, answer = 0, {}
+        if not isinstance(answer, dict):
+            answer = {}                 # an empty body, or a list: nothing it says is read
         paths = [r["path"] for r in batch]
         if status == 200 and isinstance(answer.get("pages"), dict):
             for p in paths:

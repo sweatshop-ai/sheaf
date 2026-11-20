@@ -1412,6 +1412,19 @@ class Hub:
             return False
         return all(projects.grants(entries, rel, member.short) for rel in {at.rel, os.path.relpath(real, top)})
 
+    def project_refused(self, member, address: str) -> str | None:
+        """The `<client>/<project>` of `address` when `projects.toml` does not let `member` into it by the address alone
+        (8.12), else None: the same for a project the file names without the member, one it does not name, and a file the
+        hub cannot read. Never looks at the file's place on disk, so it tells nothing of a private root (9.11)."""
+        at = roots_mod.Address.parse(address)
+        root = self.roots.get(at.root)
+        if self.proxy is None or root is None:
+            return None
+        entries = self.projects_of(root)
+        if entries is None or projects.grants(entries, at.rel, member.short):
+            return None
+        return projects.project_of(at.rel)       # a path above project depth is granted, so never None here
+
     def projects_of(self, root):
         """The entries of `root`'s `projects.toml`, None without the file, an `Invalid` for one the hub cannot
         read: read again only when the file changed (its inode, times or size), so an edit takes effect at the

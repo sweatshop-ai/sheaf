@@ -9,7 +9,7 @@ from helpers import FRONT, Front
 from test_hub_place import BOB, MISSING, NAME, OPEN, SHARED, ALICE, absent, put, the_list_on, tokens  # noqa: F401
 
 from sheafmd.hub import proxy
-from sheafmd.mcp import NOT_IN_A_ROOT
+from sheafmd.mcp import NOT_IN_A_ROOT, NOT_IN_PROJECT
 
 CAROL = "7c4e2a90-1b3d-4f5e-8a6c-2d9e0f1b3c5a"
 GRANTS = '[projects."acme/tiroir"]\nmembers = ["alice", "carol"]\nstatus = "live"\n'
@@ -110,7 +110,8 @@ def test_a_door_token_bound_to_a_member_the_project_does_not_name_makes_nothing_
     from helpers import call
     is_error, got = call(browser, "create", token=tokens["bob"], doc="work/acme/tiroir/2026-10-29-new.md",
                          text="---\nvisibility: project\n---\n# New\n")
-    assert is_error and NOT_IN_A_ROOT in got and not (work / "acme/tiroir/2026-10-29-new.md").exists(), got
+    assert is_error and NOT_IN_PROJECT.format("acme/tiroir") in got, got
+    assert not (work / "acme/tiroir/2026-10-29-new.md").exists()
     is_error, got = call(browser, "create", token=tokens["alice"], doc="work/acme/tiroir/2026-10-29-new.md",
                          text="---\nvisibility: project\n---\n# New\n")
     assert not is_error, got
@@ -312,3 +313,84 @@ def test_a_name_in_both_members_and_assistants_is_in_both_maps_and_the_library_u
     assert got["assistants"]["james"] == ["group:proj-acme-shop"]
     assert sorted(set(got["members"]["james"]) | set(got["assistants"]["james"])) == [
         "group:proj-acme-blog", "group:proj-acme-shop"]
+
+
+NEW = "# New\n"
+THE_PAGE = "acme/tiroir/2026-10-29-new.md"
+
+
+def made(browser, token, doc=f"work/{THE_PAGE}"):
+    from helpers import call
+    return call(browser, "create", token=token, doc=doc, text=NEW)
+
+
+def test_a_create_by_a_non_member_names_the_project_and_never_a_root(team, work, browser, tokens):
+    is_error, got = made(browser, tokens["bob"])
+    assert is_error and not (work / THE_PAGE).exists()
+    assert got == (f"work/{THE_PAGE} cannot be made: the token's member is not in the project acme/tiroir."), got
+    assert "root" not in got and "alice" not in got.lower() and "carol" not in got.lower()
+
+
+@pytest.mark.parametrize("grants", ['[projects."acme/other"]\nmembers = ["alice"]\nstatus = "live"\n',
+                                    'not toml at all ['])
+def test_a_project_the_file_does_not_name_and_a_file_that_cannot_be_read_answer_as_a_non_member(
+        team, work, browser, tokens, grants):
+    is_error, got = made(browser, tokens["bob"])       # taken before the file changes: the page is the same each time
+    _, absent_project = made(browser, tokens["bob"], doc=f"work/{THE_PAGE}".replace("tiroir", "ghost"))
+    (work / "projects.toml").write_text(grants, encoding="utf-8")
+    is_error, unnamed = made(browser, tokens["alice"])
+    assert is_error and unnamed == got, unnamed
+    assert absent_project == got.replace("acme/tiroir", "acme/ghost")
+
+
+def test_a_refusal_of_the_real_path_alone_keeps_the_old_sentence(team, work, browser, tokens):
+    (work / "projects.toml").write_text(GRANTS + '\n[projects."acme/other"]\nmembers = ["carol"]\nstatus = "live"\n',
+                                        encoding="utf-8")
+    (work / "acme" / "other").mkdir()
+    (work / "acme" / "tiroir" / "link").symlink_to(work / "acme" / "other")
+    is_error, got = made(browser, tokens["alice"], doc="work/acme/tiroir/link/2026-10-29-new.md")
+    assert is_error and NOT_IN_A_ROOT in got and "member" not in got, got
+
+
+def test_the_key_and_an_unbound_token_are_never_told_of_a_member(team, work, browser):
+    from sheafmd.hub.state import Tokens
+    for n, token in enumerate([None, Tokens().add("plain", write=True)]):      # reach every root, whoever the project names
+        is_error, got = made(browser, token, doc=f"work/acme/tiroir/2026-10-29-new{n}.md")
+        assert not is_error, got
+
+
+def test_a_path_in_no_root_and_a_root_of_another_member_keep_the_old_sentence(team, work, browser, tokens, tmp_path):
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    for doc in (str(outside / "new.md"), "nowhere/acme/tiroir/new.md"):
+        is_error, got = made(browser, tokens["bob"], doc=doc)
+        assert is_error and got == f"{doc} {NOT_IN_A_ROOT}", got
+
+
+def test_a_non_member_is_told_the_same_whether_a_private_folder_holds_the_name(team, work, browser, tokens):
+    """The address is judged before the name's homes are looked at, so a private folder that holds the name (which
+    answers every token "exists already") is no tell for a member the project does not name."""
+    _, before = made(browser, tokens["bob"])
+    put(team, work, f"acme/tiroir/private/alice/{THE_PAGE.rsplit('/', 1)[1]}", "# Held\n")
+    is_error, held = made(browser, tokens["bob"])
+    assert is_error and held == before and "exists already" not in held, held
+    is_error, got = made(browser, tokens["alice"])
+    assert is_error and "exists already" in got, got      # a member of the project is told it is taken
+
+
+def test_a_root_of_another_members_keeps_the_old_sentence_for_a_project_it_names_nobody_in(team, work, browser,
+                                                                                         tokens, tmp_path):
+    other = tmp_path / "carols"
+    (other / "acme" / "tiroir").mkdir(parents=True)
+    (other / "top.md").write_text("# Top\n", encoding="utf-8")
+    team.hub.roots.for_document(other / "top.md")
+    ordinary = {ALICE: {"name": "Alice", "short": "alice", "github": "tiroir", "roots": [str(work)],
+                        "tokens": ["james-alice"]},
+                BOB: {"name": "Bob", "short": "bob", "github": "bobsmith", "roots": [str(work)],
+                      "tokens": ["james-bob"]},
+                CAROL: {"name": "Carol", "short": "carol", "github": "carol01", "roots": [str(work), str(other)]}}
+    team.hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
+                                  "proxy_user": pwd.getpwuid(os.getuid()).pw_name, "members": ordinary}, "the test")
+    doc = "carols/acme/tiroir/2026-10-29-new.md"
+    is_error, got = made(browser, tokens["bob"], doc=doc)
+    assert is_error and got == f"{doc} {NOT_IN_A_ROOT}", got

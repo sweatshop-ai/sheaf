@@ -174,6 +174,7 @@ MAX_TEXT = 1024 * 1024           # bytes of UTF-8 a create or an update may writ
 NO_RIGHT = ("This token reads and answers comments; it does not read, make or change pages. A "
             "token that does is made with `sheaf token add NAME --write`.")
 NOT_IN_A_ROOT = "is not inside a root of this hub; a page is made only in a root the hub already has."
+NOT_IN_PROJECT = "the token's member is not in the project {}."
 HASH_RE = re.compile(r"[0-9a-f]{16}")
 
 
@@ -1072,6 +1073,10 @@ class Door:
         if placed and place.names_private(rel):
             raise ToolError(f"{_named(args['doc'])} cannot be made: the hub places owner-only rectoversos itself: name "
                             "`<client>/<project>/<name>.md`.", "path")
+        if member is not None and (project := self.hub.project_refused(member, address)) is not None:
+            # Before any look at a private root or a name's homes, so a member the project does not name learns
+            # nothing from the order of the checks; the project is named, its members never (8.12).
+            raise ToolError(f"{_named(args['doc'])} cannot be made: {NOT_IN_PROJECT.format(project)}", "path")
         try:
             if placed and place.undecided(self.hub, rel):      # a private root that cannot be looked at may hold the name
                 raise NotFound(rel)

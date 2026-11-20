@@ -101,6 +101,9 @@ _NLM_F_REQUEST = 1
 _NOCOOKIE = 0xFFFFFFFF
 _ENOENT = 2
 _NETLINK_TIMEOUT = 2.0
+_HEADER = 16                           # struct nlmsghdr
+_UID_AT = _HEADER + 64                 # inet_diag_msg: 4 bytes, the 48-byte id, then expires, rqueue, wqueue
+_MSG_LEN = _HEADER + 72                # ... and uid, inode
 
 
 def _netlink_request(family: int, local, remote) -> bytes:
@@ -118,8 +121,8 @@ def _netlink_request(family: int, local, remote) -> bytes:
 
 def _netlink_owners(local, remote) -> list[int]:
     """The uid of the TCP socket whose local end is `local` and remote end `remote`, as the kernel
-    names it: a list of none or one. OSError when the kernel cannot
-    be asked or answers with an error other than "no such socket"."""
+    names it: a list of none or one. OSError when the kernel cannot be asked or answers with an
+    error other than "no such socket"."""
     owners = []
     with socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, _NETLINK_SOCK_DIAG) as nl:
         nl.settimeout(_NETLINK_TIMEOUT)
@@ -135,9 +138,9 @@ def _netlink_owners(local, remote) -> list[int]:
                 if code and code != _ENOENT:
                     raise OSError(code, os.strerror(code))
                 continue
-            if kind != _SOCK_DIAG_BY_FAMILY or len(data) < 16 + 72:
+            if kind != _SOCK_DIAG_BY_FAMILY or len(data) < _MSG_LEN:
                 raise OSError(0, "the kernel's answer was not a socket")
-            owners.append(struct.unpack_from("=I", data, 16 + 64)[0])    # idiag_msg: 4 + id 48 + expires, rqueue, wqueue
+            owners.append(struct.unpack_from("=I", data, _UID_AT)[0])
             break
     return owners
 
@@ -156,13 +159,16 @@ def _proc_owners(local, remote) -> list[int]:
 
 def owners(conn) -> list[int]:
     """The uid of every socket that is the client's end of `conn` (a `Conn`): asked of the kernel's
-    socket diagnostics, and of /proc/net/tcp* only where the kernel cannot be asked. An empty list is
-    the kernel saying there is no such socket. OSError, ValueError or TypeError when neither can say."""
+    socket diagnostics, and of /proc/net/tcp* where the kernel cannot be asked or finds nothing (it
+    answers "no such socket" also where no tcp_diag handler is loaded). An empty list is both saying
+    there is no such socket. OSError when neither can say."""
     local, remote = _address(conn.client), _address(conn.hub)
     if NETLINK:
         try:
-            return _netlink_owners(local, remote)
-        except (OSError, struct.error):
+            found = _netlink_owners(local, remote)
+            if found:
+                return found
+        except (OSError, struct.error, AttributeError):    # AttributeError: no AF_NETLINK on this platform
             pass
     return _proc_owners(local, remote)
 
@@ -204,7 +210,7 @@ def check(conn) -> Refusal | None:
     except OSError as e:
         return _unknown(f"the owner of the connection could not be read ({e.strerror or type(e).__name__})")
     if not found:
-        return _unknown("the connection could not be found by the kernel or in /proc/net/tcp or /proc/net/tcp6")
+        return _unknown("the connection could not be found (asked the kernel, or /proc/net/tcp and /proc/net/tcp6 where it cannot answer)")
     if len(set(found)) > 1:
         return _unknown("the connection has rows that name more than one user")
     hub_uid = os.geteuid()

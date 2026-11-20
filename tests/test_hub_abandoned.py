@@ -13,6 +13,8 @@ from sheafmd.hub.handler import Response
 
 class Slow:
     """A handler that builds its answer page by page and asks `gone()` between pages, as the Sheaf listing does."""
+    peer_off = "a stand-in handler: nobody looks at who owns the connection"
+
     def __init__(self):
         self.pages, self.started, self.ended = 0, threading.Event(), threading.Event()
 

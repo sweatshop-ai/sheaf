@@ -284,17 +284,19 @@ def test_a_slow_package_mirror_cannot_hold_the_page_test_step_for_an_hour(text):
     assert re.search(r"for try in 1 2 3; do \$bounded uv run --no-sync playwright install \$deps chromium firefox webkit && break", block)
 
 
-def test_a_try_that_timed_out_waits_for_the_apt_it_left_running_before_the_next_try_starts(text):
+def test_a_try_that_timed_out_ends_the_apt_it_left_running_before_the_next_try_starts(text):
     # Runs 44789430505 (slice 4) and 44790768975 (slice 2): the mirror was slow, `timeout` ended the first try at 600 s and
     # killed playwright, but the apt-get it had started under sudo went on and kept the dpkg lock. Tries 2 and 3 failed in
     # two seconds each on "Could not get lock /var/lib/dpkg/lock-frontend" (exit 100), after every test had passed.
     i = text.index("- name: Page tests (Playwright, Chromium, Firefox, WebKit)")
     j = text.index("\n      - name:", i + 1)
     block = text[i:j]
-    assert "wait_for_apt()" in block
-    assert re.search(r"pgrep -x apt-get", block) and re.search(r"pgrep -x dpkg", block)
-    assert re.search(r"if \[ -n \"\$deps\" \]; then wait_for_apt; fi; done", block), "waits between tries, only where apt is used"
-    assert block.index("wait_for_apt()") < block.index("for try in 1 2 3")
+    assert "stop_apt()" in block
+    assert "sudo pkill -TERM -x apt-get" in block and "sudo pkill -KILL -x apt-get" in block, "root ends it: no signal of ours reaches it"
+    assert "sudo dpkg --configure -a" in block
+    assert re.search(r"timeout 60 bash -c 'while pgrep -x apt-get", block) and "pgrep -x dpkg" in block, "a short safety net"
+    assert re.search(r"if \[ -n \"\$deps\" \]; then stop_apt; fi; done", block), "between tries, only where apt is used"
+    assert block.index("stop_apt()") < block.index("for try in 1 2 3")
 
 
 def test_no_step_name_holds_a_colon_and_a_space_or_a_hash_that_YAML_reads_as_syntax(text):

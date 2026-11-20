@@ -201,6 +201,21 @@ def test_the_byline_names_the_session_and_its_name_opens_it(tab, agent, tmp_path
     assert json.loads(out.read_text(encoding="utf-8")) == ["s-1", "Cosima"]
 
 
+def test_the_remote_control_notice_of_the_byline_is_a_plain_toast_not_an_error(tab, agent, tmp_path):
+    write_record(tmp_path / "claude-config", name="Cosima", messagingSocketPath="", procStart=proc_start(PID))
+    tab.site.hub.render(tab.site.file, {"by": "tiroir"}, None)
+    tab.open()
+    # sheaf.js says it as `where.say(text, false)` when the click opens the Remote Control link (the surface's own `follow` is stood in for here)
+    tab.page.evaluate("""() => {
+      window.sheafSession = window.sheafSession || {};
+      window.sheafSession.follow = (a, e, where) => where.say('This name now opens its Remote Control link directly.', false);
+      const a = document.createElement('a'); a.className = 'sheaf-session-link'; a.setAttribute('data-laptop', '1'); a.textContent = 'Cosima';
+      document.querySelector('p.doc-by').append(a); a.click();
+    }""")
+    tab.page.wait_for_function("() => document.querySelector('#rd-toast').textContent.includes('Remote Control link')")
+    assert tab.page.get_attribute("#rd-toast", "class") == "show"
+
+
 def test_a_running_tell_says_once_who_works_on_it_and_its_button_only_cancels(tab, agent):
     open_with_comment(tab, None, "apples", "Why?")
     tab.page.click(".rd-badge")

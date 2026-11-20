@@ -8,7 +8,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 FILES = ["tests/page/test_mount_page.py", "tests/page/test_user_modify.py", "tests/page/test_page_mobile_composer.py",
-         "tests/page/test_page_boot.py"]
+         "tests/page/test_page_boot.py",
+         "tests/page/test_mount_selection.py", "tests/page/test_mount_allowlist.py"]
 
 
 # The id of a test in another engine starts with the engine's name (ci.yml reads it the same way); a Chromium id can

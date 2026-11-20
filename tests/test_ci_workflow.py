@@ -314,7 +314,7 @@ def test_no_step_name_holds_a_colon_and_a_space_or_a_hash_that_YAML_reads_as_syn
             assert ": " not in m["v"] and " #" not in m["v"], ln
 
 
-def test_the_other_engines_are_installed_only_in_the_page_test_step(text):
+def test_the_other_engines_are_named_and_installed_only_in_the_steps_of_the_page_tests(text):
     # The mount tests (#116) run in Chromium, Firefox and WebKit. The install is scoped to the step that runs
     # them, so a pull request that skips the page tests pays for no extra browser, and the unit-test step is as fast as before.
     i = text.index("- name: Page tests (Playwright)")
@@ -479,30 +479,36 @@ def engine_step(text):
     return text[i:text.index("\n      - name:", i + 1)]
 
 
+def engine_run(text):
+    """The script of that step, unindented from the 10 columns it has under `run: |`."""
+    step = engine_step(text) + "\n      - name:"
+    body = re.search(r"^        run: \|\n(.*?)(?=\n      - name:)", step, flags=re.M | re.S).group(1)
+    return "\n".join(ln[10:] for ln in body.splitlines())
+
+
 def test_a_slice_installs_the_browsers_of_the_page_tests_it_collected_and_chromium_always(text):
     # Run 44788361173: Firefox and WebKit are 126 MB and 181 packages of apt in every slice, and the one slice that
     # holds their tests (tests/conftest.py deals them to the last) is the only one that needs them.
     step = engine_step(text)
     assert "id: engines" in step and "if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'" in step
-    run = re.search(r"^        run: \|\n(.*?)(?=\n      - name:|\Z)", step + "\n      - name:", flags=re.M | re.S).group(1)
-    run = "\n".join(ln[10:] for ln in run.splitlines())
+    run = engine_run(text)
     assert "pytest -m page --collect-only" in run, "what the slice collected decides, not a list kept in two places"
     assert '>> "$GITHUB_OUTPUT"' in run
     assert subprocess.run(["bash", "-n", "-c", run], capture_output=True).returncode == 0, run
 
 
-def run_engine_step(text, tmp_path, collected):
-    step = engine_step(text)
-    run = re.search(r"^        run: \|\n(.*?)(?=\n      - name:|\Z)", step + "\n      - name:", flags=re.M | re.S).group(1)
-    run = "\n".join(ln[10:] for ln in run.splitlines())
+def run_engine_step(text, tmp_path, collected, uv_exit=0):
+    run = engine_run(text)
     fake = tmp_path / "bin"
     fake.mkdir(exist_ok=True)
-    (fake / "uv").write_text("#!/bin/sh\ncat " + str(tmp_path / "collected") + "\n")
+    (fake / "uv").write_text(f"#!/bin/sh\ncat {tmp_path / 'collected'}\nexit {uv_exit}\n")
     (fake / "uv").chmod(0o755)
     (tmp_path / "collected").write_text(collected)
     out = tmp_path / "out"
     r = subprocess.run(["bash", "-c", run], capture_output=True, text=True, env={
         "PATH": f"{fake}:{os.environ['PATH']}", "GITHUB_OUTPUT": str(out)})
+    if uv_exit:
+        return r
     assert r.returncode == 0, r.stderr
     return dict(ln.split("=", 1) for ln in out.read_text().splitlines())
 
@@ -525,5 +531,6 @@ def test_a_slice_with_a_firefox_or_a_webkit_test_installs_that_engine_too(text, 
 
 
 def test_a_collection_that_fails_fails_the_step_instead_of_installing_chromium_alone(text, tmp_path):
-    step = engine_step(text)
-    assert "exit 1" in step or "|| {" in step
+    r = run_engine_step(text, tmp_path, "tests/page/test_mount_page.py::test_b[webkit]\n", uv_exit=2)
+    assert r.returncode == 1 and "did not collect" in r.stdout
+    assert not (tmp_path / "out").exists(), "no answer is written"

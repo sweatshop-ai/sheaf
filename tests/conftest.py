@@ -134,7 +134,7 @@ def lock_order(monkeypatch):
     lockorder.check()
 
 
-def _runs_in_another_engine(item):
+def _runs_in_firefox_or_webkit(item):
     params = getattr(getattr(item, "callspec", None), "params", {})
     return any(v in ("firefox", "webkit") for v in params.values())
 
@@ -142,7 +142,7 @@ def _runs_in_another_engine(item):
 @pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(config, items):
     """SHEAF_TEST_SLICE=i/n keeps the i-th of every n tests that are left after -m: ci.yml runs each
-    Python as three jobs, one slice each. A file with IN_ORDER = True, whose tests read what the test
+    Python as six jobs, one slice each. The tests that run in Firefox or WebKit all go to the last slice. A file with IN_ORDER = True, whose tests read what the test
     before them left, counts as one test and stays whole in one slice. Every xdist worker collects the
     same tests in the same order, so each keeps the same slice. The suites of LOCK_ORDER_SUITES also run with
     the `lock_order` fixture."""
@@ -162,7 +162,7 @@ def pytest_collection_modifyitems(config, items):
                 whole[it.module] = []
                 units.append(whole[it.module])
             whole[it.module].append(it)
-        elif _runs_in_another_engine(it):
+        elif _runs_in_firefox_or_webkit(it):
             other_engine.append(it)
         else:
             units.append([it])
@@ -171,7 +171,7 @@ def pytest_collection_modifyitems(config, items):
         keep += other_engine
     kept = set(keep)
     config.hook.pytest_deselected(items=[it for it in items if it not in kept])
-    items[:] = [it for it in items if it in kept]
+    items[:] = [it for it in items if it in kept]      # in collection order, not deal order
 
 
 @pytest.fixture(autouse=True)

@@ -220,9 +220,14 @@
     var ctl = this.watch[tab] = new AbortController();
     navigator.locks.request('sheaf-tab-' + tab, { signal: ctl.signal }, function () {
       if (self.watch[tab] === ctl) delete self.watch[tab];
-      // The tab asked for its lock before it first joined, so a grant to this request means the tab is gone.
-      Object.keys(self.joined).forEach(function (k) {
-        if (self.joined[k].tab === tab) self.take({ t: 'leave', key: k });
+    }).then(function () {
+      // Granted and let go. A tab that is alive takes its lock back at once (this request can only beat the tab's own
+      // if the two reached the lock manager out of order), so the lock must still be free to drop the tab.
+      return navigator.locks.query().then(function (st) {
+        var held = (st.held || []).concat(st.pending || []).some(function (l) { return l.name === 'sheaf-tab-' + tab; });
+        if (!held) Object.keys(self.joined).forEach(function (k) {
+          if (self.joined[k].tab === tab) self.take({ t: 'leave', key: k });
+        });
       });
     }).catch(function () {});      // aborted
   };

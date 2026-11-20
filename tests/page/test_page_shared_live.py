@@ -107,8 +107,7 @@ def test_a_tab_that_leaves_without_a_leave_is_dropped_when_its_lock_frees(shared
     hidden for five minutes. The tab here says nothing (its `leave` is dropped) and closes."""
     pages = [opened(shared, site) for _ in range(3)]
     until(lambda: site.hub.tabs(DOC) == 3, what="three tabs counted")
+    # Its `pagehide` must not tell the leader: only the freed lock may.
     pages[2][0].evaluate("BroadcastChannel.prototype.postMessage = function () {}")
-    t0 = time.monotonic()
     pages[2][0].close()
     until(lambda: site.hub.tabs(DOC) == 2, timeout=1.0, what="two tabs counted after the tab went")
-    assert time.monotonic() - t0 < 1.0

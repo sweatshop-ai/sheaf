@@ -637,5 +637,7 @@ class LiveDocument:
                 # An editor's truncate-then-write landed while this read and render ran: what was read may be a torn
                 # file. Keep what the tabs hold and publish nothing; the watcher sees the file move and comes back.
                 self._text, self._hash, self._branch = kept
+                branch = self._render(self._text)         # the page the hub serves is the one the tabs hold, not the torn one
+                self._branch = branch if isinstance(branch, str) else None
                 return None
             return self._announce(self._snapshot(self._text), before)

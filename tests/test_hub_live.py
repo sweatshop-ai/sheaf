@@ -953,8 +953,10 @@ def test_a_refresh_that_a_write_moved_under_publishes_nothing_and_the_next_one_t
     torn, whole = "# Title\n\nFirst par", DOC.replace("First paragraph.", "First, reworded.")
     md.write_text(torn, encoding="utf-8")
     writes = iter([lambda: md.write_text(whole, encoding="utf-8")])
-    doc._render = lambda text: next(writes, lambda: None)()
+    served = []
+    doc._render = lambda text: (served.append(text), next(writes, lambda: None)())[1]
     assert doc.refresh() is None and events == []
+    assert served == [torn, DOC]                  # the page served is rendered again from the text the tabs hold
     assert doc.current() == (rds.md_hash(DOC), DOC)
     snap = doc.refresh()
     assert snap["hash"] == rds.md_hash(whole) and snap["base"] == rds.md_hash(DOC)

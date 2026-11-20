@@ -2,7 +2,7 @@
 
 **Claimed by:** Hugo 2026-11-20 17:44
 
-**Status:** in-progress
+**Status:** done
 
 **Blocked by:** none
 
@@ -29,6 +29,6 @@ No checkbox. The round trip of that block as the page would send it back (`pando
 
 ## To do
 
-- [ ] Decide what an ordered `[ ]` item is: a task item with a box (as GitHub draws it), or words. Either way, an edit of the block must not change the file's text.
-- [ ] A test: an ordered list `1. [ ] one` edited elsewhere in the same block is written back with `[ ]` as it was.
-- [ ] If it becomes a task item: Enter in it makes a numbered item with an unticked box (ticket 144's handler and tests for bullet lists are the model; it is the same `TASK_BOX` path in `src/sheafmd/page/page.js`).
+- [x] Decide what (a task item with a box, as GitHub draws it; SPEC 7.2) — #494, merged as 2ec22c6d an ordered `[ ]` item is: a task item with a box (as GitHub draws it), or words. Either way, an edit of the block must not change the file's text.
+- [x] A test (tests/test_edit_followups.py, round trip of `1. [ ] one`; tests/test_anchoring.py, a comment after a box) — #494: an ordered list `1. [ ] one` edited elsewhere in the same block is written back with `[ ]` as it was.
+- [x] (#494, 2ec22c6d; the comment projection fixed after review, round 3 GO) If it becomes a task item: Enter in it makes a numbered item with an unticked box (ticket 144's handler and tests for bullet lists are the model; it is the same `TASK_BOX` path in `src/sheafmd/page/page.js`).

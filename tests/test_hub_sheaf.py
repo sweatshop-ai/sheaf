@@ -342,3 +342,8 @@ def test_a_listing_whose_caller_has_gone_stops_reading_pages(two, monkeypatch):
     read.clear()
     r = two.get("/_/mount?sheaf=1", member=BEA, gone=lambda: True)
     assert r.status == 499 and len(read) < full // 2, (r.status, len(read), full)
+
+
+def test_another_members_session_with_an_id_that_is_not_a_plain_id_still_has_its_remote_control_link(two):
+    two.hub.writes.add("work/plan.md", "Claude Code (Cal)", "laptop", "update", session="not a plain id", link=RC)
+    assert link_of(two) == {"kind": "remote", "href": RC}

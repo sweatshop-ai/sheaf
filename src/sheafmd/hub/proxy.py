@@ -165,6 +165,7 @@ _WORDS = {str: "text", list: "a list", dict: "a table"}
 _HOST_RE = re.compile(r"(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]*[a-z0-9])?|\[[0-9a-f:.]+\]")
 _EMAIL_RE = re.compile(r"[^\s<>@,;\"']+@[^\s<>@,;\"']+")
 _SHORT_RE = re.compile(r"[A-Za-z0-9._-]{1,40}")
+_OWNER_NAME_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")      # what a Share box can name (`visibility._NAMES_RE`)
 _LOGIN_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 OPTIONAL_MEMBER_KEYS = ("email", "short", "github", "shell", "tokens", "private_root", "agency")
 OPTIONAL_TABLE_KEYS = ("client", "clients", "repos")
@@ -472,8 +473,9 @@ def parse(t: dict, where, list_table: dict | None = None) -> ProxyConfig:
                              "or their id when they have none, belongs to one member, in any case")
         named[key] = m
     _check_private_roots(members, where)
-    if client and not any(m.agency and m.short for m in members.values()):
-        raise ProxyError(f"{here} is a client tiroir with no agency member that has a 'short': an agent could Share with nobody")
+    if client and not any(m.agency and _OWNER_NAME_RE.fullmatch(m.short) for m in members.values()):
+        raise ProxyError(f"{here} is a client tiroir with no agency member that has a 'short' a Share box can name "
+                         "(it starts with a letter, a digit or an underscore): an agent could Share with nobody")
     return ProxyConfig(origin, host, Path(sock), t["proxy_user"], acct.pw_uid, acct.pw_gid, members, client, clients, repos)
 
 

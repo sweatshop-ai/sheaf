@@ -7,9 +7,11 @@ import http.client
 import http.server
 import json
 import os
+import ssl
 import subprocess
 import threading
 import time
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -592,3 +594,29 @@ def test_a_certificate_the_laptop_cannot_trust_is_no_outage_and_falls_back_nowhe
     monkeypatch.setattr(connect._NO_REDIRECT, "open", untrusted)
     code, out, err = run(capsys, scratch)
     assert code == 1 and local == [] and "cannot trust" in err and "not on" not in err
+
+
+@pytest.mark.parametrize("error", [
+    lambda: urllib.error.URLError(ssl.SSLEOFError("EOF occurred in violation of protocol")),
+    lambda: ConnectionResetError("reset by peer"),
+    lambda: ssl.SSLError("SSLV3_ALERT_HANDSHAKE_FAILURE"),
+])
+def test_a_reset_or_a_failed_handshake_is_an_outage_not_an_untrusted_certificate(error, monkeypatch):
+    def broken(req, timeout=None):
+        raise error()
+
+    monkeypatch.setattr(connect._NO_REDIRECT, "open", broken)
+    with pytest.raises(send.Unreachable):
+        send.get("https://chat.example.com/x", "t")
+
+
+def test_a_certificate_that_fails_its_check_is_untrusted_whether_the_error_comes_wrapped_or_bare(monkeypatch):
+    for error in (urllib.error.URLError(ssl.SSLCertVerificationError("certificate verify failed")),
+                  ssl.SSLCertVerificationError("certificate verify failed")):
+        def broken(req, timeout=None, error=error):
+            raise error
+
+        monkeypatch.setattr(connect._NO_REDIRECT, "open", broken)
+        with pytest.raises(send.SendError, match="cannot trust") as e:
+            send.get("https://chat.example.com/x", "t")
+        assert not isinstance(e.value, send.Unreachable)

@@ -1382,7 +1382,7 @@ var create = function (ROOT, CFG, opts) {
       if (!stashAll()) return false;
       stopDictation(true);
       unpaintWidened();
-      pop.remove(); pop = null; popId = null; paint(null); setTimeout(flushHold, 0);
+      pop.remove(); pop = null; popId = null; drag = null; paint(null); setTimeout(flushHold, 0);
       setTimeout(function () { if (mouseDown) keptDue = true; else drawKept(); }, 0);
     }
     return true;
@@ -2102,7 +2102,8 @@ var create = function (ROOT, CFG, opts) {
   });
   listen(document, 'pointermove', function (e) {
     if (!drag || e.pointerId !== drag.id) return;
-    if (!pop || pop.classList.contains('rd-docked')) { drag = null; return; }
+    // A press whose release this page never saw (the box closed under it, the button let go outside the window) drags nothing.
+    if (!pop || pop.classList.contains('rd-docked') || (e.pointerType === 'mouse' && !e.buttons)) { drag = null; return; }
     var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
     if (!drag.on) {
       if (Math.abs(dx) < MOVE_SLOP && Math.abs(dy) < MOVE_SLOP) return;

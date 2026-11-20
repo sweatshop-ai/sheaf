@@ -540,6 +540,48 @@ def test_an_upgrade_stop_the_hub_refuses_says_so(port, thread_hub, quick_stop, m
     assert str(e.value) == "the hub did not stop for the upgrade (it refused the stop; see `sheaf diag`)"
 
 
+@pytest.mark.parametrize("under_way", ["stop", "signal"])
+def test_a_newer_command_that_meets_a_stop_under_way_starts_no_hub_and_fails(
+        port, thread_hub, quick_stop, monkeypatch, under_way):
+    """A person's stop wins (8.4): the command does not restart behind it, says the hub is being
+    stopped, and fails, so that a script that called it sees it did not do what was asked."""
+    thread_hub(OLD)
+    spawned = []
+    monkeypatch.setattr(hubclient, "spawn_hub", lambda *a, **k: spawned.append(a))
+    real_call = hubclient.HubClient.call
+
+    def call(self, method, path, body=None):
+        if path == "/_/stop":
+            return 200, {"ok": True, "reason": under_way}
+        return real_call(self, method, path, body)
+    monkeypatch.setattr(hubclient.HubClient, "call", call)
+    with pytest.raises(hubclient.HubDidNotStart) as e:
+        hubclient.ensure_hub("cli", lambda s: None, lambda s: None)
+    assert str(e.value) == (f"the hub is being stopped; this is {__version__}. "
+                            "Run the command again when it has stopped")
+    assert spawned == []
+
+
+def test_a_cancelled_delivery_that_has_not_ended_still_holds_an_upgrade_stop_back(port, work):
+    """A Tell's delivery that was cancelled but whose child is still there, with no stop message
+    started (the session cannot be reached), is no job `active` lists, yet an upgrade stop would kill
+    it half-way (8.4)."""
+    hub = service_hub(port)
+    release, started = threading.Event(), threading.Event()
+
+    def delivery(job):
+        started.set()
+        release.wait(10)
+    try:
+        hub.runner.start("tell", "doc.md", "c1", delivery)
+        assert started.wait(5)
+        hub.runner.cancel("tell", "doc.md", "c1")
+        assert hub.busy() is True
+        assert hub.request_stop("upgrade", force=False) is False
+    finally:
+        release.set()
+
+
 # ── how long a command waits for a stop (8.10: a hub stop waits out the grace of its jobs) ─────
 
 def test_the_wait_for_a_stop_outlasts_what_a_child_that_ignores_sigterm_makes_the_hub_take():

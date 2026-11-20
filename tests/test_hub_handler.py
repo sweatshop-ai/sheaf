@@ -913,7 +913,15 @@ def test_jobs_lists_what_runs_in_every_document(browser, plan):
 def test_stop_asks_the_hub_to_stop_with_a_reason(browser, plan):
     assert browser.hub.stop_requested is None
     r = browser.post("/_/stop", {"reason": "upgrade"}, cookie=False, key=True)
-    assert r.json() == {"ok": True} and browser.hub.stop_requested == "upgrade"
+    assert r.json() == {"ok": True, "reason": "upgrade"} and browser.hub.stop_requested == "upgrade"
+
+
+def test_stop_answers_the_reason_that_is_in_force(browser, plan):
+    """A stop under way is not turned into an upgrade (8.4): the caller is told which reason holds."""
+    r = browser.post("/_/stop", {"reason": "stop"}, cookie=False, key=True)
+    assert r.json() == {"ok": True, "reason": "stop"}
+    r = browser.post("/_/stop", {"reason": "upgrade"}, cookie=False, key=True)
+    assert r.json() == {"ok": True, "reason": "stop"}
 
 
 @pytest.mark.parametrize("body", [{}, {"reason": "because"}, {"reason": 3}])
@@ -1313,7 +1321,7 @@ def test_an_upgrade_stop_never_turns_a_stop_that_was_taken_into_a_restart(browse
     else:
         browser.hub.request_stop("signal")
     r = stop_with(browser, "upgrade")
-    assert r.status == 200 and r.json() == {"ok": True}          # it is stopping, as the caller wanted
+    assert r.status == 200 and r.json() == {"ok": True, "reason": first}          # it is stopping, as the caller wanted
     assert browser.hub.stop_requested == first and seen == [first]
     assert browser.hub.told_restart is False
 

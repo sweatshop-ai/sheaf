@@ -229,7 +229,7 @@ def test_on_a_phone_a_refusal_naming_a_slug_with_no_hyphen_breaks_and_the_list_n
     # The refusal is the list's own line (#130). The hub says this one only when a Belongs to is ticked between the
     # tick's hash check and its lock, so the test answers the tick with it.
     page, _ = phone
-    refusal = f"This thread moves to one client: Belongs to {SLUG} is ticked."
+    refusal = f"This thread belongs to one place: Belongs to {SLUG} is ticked."
     page.route(f"{ORIGIN}/_/tick", lambda route: route.fulfill(status=409, content_type="application/json",
                                                                body=json.dumps({"error": refusal})))
     joey(page).first.click()

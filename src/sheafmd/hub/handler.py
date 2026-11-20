@@ -1665,7 +1665,7 @@ class Handler:
                 raise EditError(f"{word} is pressed once: its tick cannot be taken back.")
             if (slug := the_list.ticks_another_move(text, new)) is not None:
                 # A thread moves to one client (9.10, #109): a rectoverso answers Belongs to once, by whatever edit.
-                raise EditError(f"This thread moves to one client: Belongs to {slug} is ticked.")
+                raise EditError(f"This thread belongs to one place: Belongs to {slug} is ticked.")
             words = visibility.newly_ticked(toggled)
             if visibility.audience(new) is True and isinstance(visibility.audience(text), frozenset):
                 # A box that stays ticked while its words change (`Share with bob` into `Share`) opens the page to more

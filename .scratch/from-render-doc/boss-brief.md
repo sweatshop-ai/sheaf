@@ -18,7 +18,7 @@ The owner asked for "all open sheaf tickets". The main graph is the backlog in
 | Handoffs | none for this track (the `handoff-*.md` files at the repo root belong to other sessions; leave them) |
 | Research | `/home/tiroir/Projects/sheaf/docs/design/` |
 | Code | `/home/tiroir/Projects/sheaf` (branch `main`) |
-| Code, ticket 168 only | `/home/tiroir/Projects/tiroir-mail-replies` (its `MOVE_TO` matchers; read its own rules before touching it) |
+| Code, ticket 168 only | private repo `git@github.com:thinkingtoo/tiroir-mail-replies.git` (its `MOVE_TO` matchers in `tiroir_mail_replies/sheaves.py`). No main checkout exists on the laptop: the worker clones it into its own folder and reads the repo's own rules before touching it |
 
 ## Frontier
 
@@ -165,7 +165,7 @@ how it gets its own copy.
 | Repo | Shared when it runs | Own copy per worker |
 |---|---|---|
 | sheaf | Thierry's installed hub (`~/.local/share/uv/tools/sheafmd`, port 27419, state in `~/.local/state/sheaf`) | `uv run` in the worker's own worktree builds a `.venv` there that imports that worktree's `src/sheafmd` (proved 2026-11-20 in a detached worktree). Tests set their own `SHEAF_HOME` and `SHEAF_PORT` (`tests/conftest.py:191`, `:228`) and refuse port 27419. A hand-run hub sets `SHEAF_HOME` to a scratch folder and `SHEAF_PORT` to a free port, and is stopped by the worker that started it. |
-| tiroir-mail-replies | nothing shared | its own worktree |
+| tiroir-mail-replies | nothing shared | its own clone |
 
 ## Time windows
 

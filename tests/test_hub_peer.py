@@ -7,6 +7,7 @@ section runs the real thing, over a real socket, with the suite's own uid."""
 import http.client
 import ipaddress
 import os
+import socket
 import sys
 
 import pytest
@@ -296,26 +297,19 @@ def test_a_bad_nonce_from_the_hubs_own_user_is_still_the_link_that_does_not_work
     assert refused(r) and "used already" in r.text and "another user" not in r.text
 
 
-def test_the_key_link_of_signin_url_is_not_a_connection_check(handler, hub, proc):
-    # `sheaf signin-url` is opened by hand, on any machine; the key is what proves the person (9.3).
-    r = handler.handle("GET", f"/_/open?key={hub.auth.key}&next=/work/plan.md",
-                       {"Host": f"127.0.0.1:{hub.port}"}, conn=conn())
-    assert r.status == 303 and "Set-Cookie" in r.headers
-    r = handler.handle("GET", f"/_/open?key={hub.auth.key}&next=/work/plan.md",
-                       {"Host": f"127.0.0.1:{hub.port}"}, conn=None)
-    assert r.status == 303
-
-
-def test_a_cookie_route_does_not_look_up_the_connection_yet(handler, hub, proc, work):
-    # The same check on every cookie and key request is not made yet.
+def test_a_connection_the_server_did_not_look_at_is_not_judged_by_a_key_or_a_cookie(handler, hub, proc, work):
+    # Only a connection the server looked at when it accepted it (`peer.look`) is judged on a key or a
+    # cookie (tests/test_hub_peer_gate.py); the nonce of a link looks the connection up itself.
     f = work / "plan.md"
     f.write_text(PLAN, encoding="utf-8")
     hub.roots.for_document(f)
-    other_user = [the_row(THEM)]
-    proc.write(v4=other_user)
+    proc.write(v4=[the_row(THEM)])
     cookie = f"{hub.auth.cookie_name}={hub.auth.cookie_value()}"
     r = handler.handle("GET", "/work/plan.md", {"Host": f"127.0.0.1:{hub.port}", "Cookie": cookie}, conn=conn())
     assert r.status == 200
+    r = handler.handle("GET", f"/_/open?key={hub.auth.key}&next=/work/plan.md",
+                       {"Host": f"127.0.0.1:{hub.port}"}, conn=conn())
+    assert r.status == 303 and "Set-Cookie" in r.headers
 
 
 # ── a platform with no /proc/net ─────────────────────────────────────────────
@@ -363,8 +357,8 @@ def live(work):
     hub.roots.for_document(f)
     conns = []
 
-    def connect():
-        c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    def connect(source_port=0):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=10, source_address=("127.0.0.1", source_port))
         c.connect()
         conns.append(c)
         return c
@@ -372,6 +366,13 @@ def live(work):
     for c in conns:
         c.close()
     srv.close()
+
+
+def free_port():
+    """A port the next connection can come from, so /proc/net can name it before the hub accepts."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 
 def sign_in_over(c, hub):
@@ -391,18 +392,16 @@ def test_the_user_that_runs_the_hub_signs_in_over_a_real_socket_by_the_real_proc
 
 def test_the_server_hands_the_handler_the_address_of_the_connection_it_came_in_on(live, proc):
     hub, port, connect = live
-    c = connect()
-    mine, theirs = c.sock.getsockname(), c.sock.getpeername()
-    proc.write(v4=[row(mine[:2], theirs[:2], ME)])
-    r, _ = sign_in_over(c, hub)
+    src = free_port()    # the hub looks at a connection when it accepts it: the rows are there before it does
+    proc.write(v4=[row(("127.0.0.1", src), ("127.0.0.1", port), ME)])
+    r, _ = sign_in_over(connect(src), hub)
     assert r.status == 303
 
 
 def test_over_a_real_socket_a_row_with_another_uid_refuses_and_a_row_of_the_hubs_end_does_not_help(live, proc):
     hub, port, connect = live
-    c = connect()
-    mine, theirs = c.sock.getsockname()[:2], c.sock.getpeername()[:2]
+    mine, theirs = ("127.0.0.1", free_port()), ("127.0.0.1", port)
     proc.write(v4=[row(mine, theirs, THEM), row(theirs, mine, ME)])
-    r, body = sign_in_over(c, hub)
+    r, body = sign_in_over(connect(mine[1]), hub)
     assert r.status == 401 and r.getheader("Content-Type").startswith("text/html")
     assert r.getheader("Set-Cookie") is None and b"another user" in body

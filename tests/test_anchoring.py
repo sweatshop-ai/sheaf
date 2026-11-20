@@ -140,6 +140,21 @@ def test_a_task_list_box_is_not_text():
     assert block[:at].endswith("Paste the key")
 
 
+def test_an_ordered_task_list_box_is_not_text():
+    # Ticket 172: the page draws a box for `1. [ ] one`, so the `[ ]` is no text there; the projection saw
+    # pandoc's characters `[ ]` and every selection after a box was refused as changed text (#494 review).
+    block = "1. [ ] one\n2. [x] two\n"
+    assert rdc.projection(block).text == "onetwo"
+    at = rdc.anchor_point(block, 3, 6, "two")
+    assert block[:at].endswith("two")
+    assert rdc.anchor_point(block, 0, 3, "one") == block.index("one") + 3
+
+
+def test_a_mark_in_an_ordered_item_with_no_words_or_in_code_is_still_text():
+    assert rdc.projection("1. [ ]\n").text == "[]"
+    assert rdc.projection("1. `[ ] a`\n").text == "[]a"
+
+
 def test_a_box_typed_in_the_text_is_still_text():
     assert rdc.projection("Tick ☐ when done.\n").text == "Tick☐whendone."
     assert rdc.projection("- ☐ is a box\n").text == "☐isabox"

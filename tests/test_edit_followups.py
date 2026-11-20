@@ -1267,6 +1267,7 @@ def test_two_breaks_in_a_row_inside_a_pasted_paragraph_are_a_paragraph_break(htm
     source = "Alpha\n"
     assert rde.html_block_to_md(html, source) == md
 
+
 # Ticket 172: `1. [ ] one` is a task item with a box, as GitHub draws it; an edit of the block writes the marks back.
 ORDERED_TASKS = "1. [ ] one\n2. [x] two\n"
 

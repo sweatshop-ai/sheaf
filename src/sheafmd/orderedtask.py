@@ -9,9 +9,11 @@ anywhere else (code, an item with no words) goes back to the characters it was.
 import re
 
 _OPEN, _CLOSE = "\ue000", "\ue001"   # private-use characters: no document has them
+STAND_IN_OPEN, STAND_IN_CLOSE = _OPEN, _CLOSE
 # The marker of an ordered item, behind any list or quote markers on its line (as `edit.TASK_MARK_RE` for a bullet).
 _MARK = re.compile(
-    r"^([ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+|>[ \t]*)*\d{1,9}[.)][ \t]+)\[([ xX])\](?=[ \t]|$)", re.M)
+    r"^([ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+|>[ \t]*)*\d{1,9}[.)][ \t]+)\[([ xX])\](?=[ \t]+\S)", re.M)
+# (the mark of an item with nothing after it on its line is not swapped: it stays the characters, as `show` leaves it)
 _STAND_IN = re.compile(_OPEN + r"([ xX])" + _CLOSE)
 # An item opens with the stand-in, then words (or an inline tag): an item with nothing after it stays the characters.
 _ITEM = re.compile(r"(<li>(?:<p>)?)" + _OPEN + r"([ xX])" + _CLOSE + r"[ \t]*(?=[^<\s]|<(?!/))")

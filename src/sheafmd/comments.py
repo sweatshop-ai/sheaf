@@ -41,7 +41,7 @@ import html as _html
 import re
 from dataclasses import dataclass, field
 
-from . import copyblock
+from . import copyblock, orderedtask
 from .blocks import SETEXT_RE, TBLSEP_RE, split_md_blocks
 
 CODE_KINDS = {"fence", "indented_code", "frontmatter"}
@@ -699,10 +699,15 @@ def projection(block: str) -> Projection:
     # source span. The page draws a checkbox there, which has no text, so the box
     # must not count: every offset after it would be one character off.
     box = [False]
+    # An ordered item's `[ ]` is a stand-in here (`orderedtask.hide`): where an item opens with it the page draws a
+    # box, so its three characters are no text; anywhere else (code) they are the characters they were.
+    item_at, skip = [], [0]
 
     class P(HTMLParser):
         def handle_starttag(self, tag, attrs):
             box[0] = tag == "li"
+            if tag == "li":
+                item_at.append(len(text))
             if tag in VOID_TAGS:
                 return
             span = None
@@ -721,6 +726,8 @@ def projection(block: str) -> Projection:
         def handle_endtag(self, tag):
             if tag in VOID_TAGS:
                 return
+            if tag == "li" and item_at:
+                item_at.pop()
             while stack:
                 t, _ = stack.pop()
                 if t == tag:
@@ -743,6 +750,14 @@ def projection(block: str) -> Projection:
                 else:
                     data = data.replace(copyblock.STAND_IN, copyblock.MARKER)
             for ch in data:
+                if skip[0]:                  # the mark and the close of an ordered item's box
+                    skip[0] -= 1
+                    continue
+                if ch == orderedtask.STAND_IN_OPEN and item_at and len(text) == item_at[-1] \
+                        and "pre" not in (t for t, _ in stack):
+                    skip[0] = 2
+                    continue
+                ch = {orderedtask.STAND_IN_OPEN: "[", orderedtask.STAND_IN_CLOSE: "]"}.get(ch, ch)
                 if ch.isspace():
                     continue
                 k = len(text)
@@ -754,7 +769,7 @@ def projection(block: str) -> Projection:
                     s.last = k
 
     p = P(convert_charrefs=True)
-    p.feed(_sourcepos_html(copyblock.hide(block)))
+    p.feed(_sourcepos_html(orderedtask.hide(copyblock.hide(block))))
     p.close()
     return Projection("".join(text), chars)
 

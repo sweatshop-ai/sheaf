@@ -505,8 +505,8 @@ def test_open_gives_the_browser_no_link_when_the_hub_cannot_make_one_and_says_wh
     sheaf("start")
     real = hubclient.HubClient.call
 
-    def call(self, method, path, body=None):
-        return (404, {"ok": False, "error": "no such route"}) if path == "/_/signin" else real(self, method, path, body)
+    def call(self, method, path, body=None, **kw):
+        return (404, {"ok": False, "error": "no such route"}) if path == "/_/signin" else real(self, method, path, body, **kw)
 
     monkeypatch.setattr(hubclient.HubClient, "call", call)
     r = sheaf("open", doc)

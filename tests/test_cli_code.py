@@ -17,7 +17,7 @@ class Key:
     def __init__(self, browser):
         self.browser = browser
 
-    def call(self, method, path, body=None):
+    def call(self, method, path, body=None, **kw):
         got = self.browser.request(method, path, body=body, key=True, cookie=False)
         return got.status, got.json()
 

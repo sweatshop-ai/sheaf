@@ -5,12 +5,8 @@ before it was left bare and escaped what came back in its place.
 """
 import pytest
 
-from helpers import pandoc
 from sheafmd import edit as rde
-
-
-def page_fragment(block_md):
-    return pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], block_md).strip()
+from test_edit_backslash import page_fragment
 
 
 def saved(block_md, tail=""):
@@ -27,12 +23,12 @@ def test_a_backslash_before_a_comment_stays_a_backslash():
 
 def test_a_backslash_before_a_footnote_citation_keeps_the_citation():
     out = saved("x\\\\[^1] here", "\n[^1]: note\n")
-    assert out.startswith("x\\\\[^1] there\n")
+    assert out == "x\\\\[^1] there\n\n[^1]: note\n"
 
 
 @pytest.mark.parametrize("src", [
     "a\\\\\\\\<!-- c -->here",
-    "a <!-- c -->here",
+    "a\\\\<span class=\"k\">x</span>here",
 ])
 def test_other_backslash_counts_before_a_comment(src):
     assert saved(src) == src.replace("here", "there") + "\n"

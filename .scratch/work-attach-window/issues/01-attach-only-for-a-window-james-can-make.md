@@ -10,9 +10,13 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** in-progress (claimed 2026-11-20)
+**Status:** done (merged #502, 68065aeb)
 
-- [ ] Test first: `a_b/c` and `a/b_c` each get no `attach` key (evidence: a test with both addresses on a member with a shell and `attach` configured)
-- [ ] A part with an uppercase letter or a leading `-` gets no `attach` key either (evidence: a test for `Acme/tiroir` and `-a/b`)
-- [ ] `acme/tiroir` keeps today's command, and `a--b/c` and `a/b--c` get two different windows (evidence: the attach tests at tests/test_hub_work.py:963-993 stay green and unchanged; a new test for `a-b/c`, `a--b/c` and `a/b--c`)
-- [ ] SPEC 9.12 states the rule and names James's SLUG as its source (evidence: the sentence in "What the page offers", SPEC.md:1066)
+- [x] Test first: `a_b/c` and `a/b_c` each get no `attach` key (evidence: a test with both addresses on a member with a shell and `attach` configured)
+  - Evidence: `tests/test_hub_work.py::test_a_part_james_would_not_name_a_window_for_gets_no_attach[a_b/c]` and `[a/b_c]` (member ALICE with a shell and `attach` configured): red before the fix, green after; merged as 68065aeb (#502)
+- [x] A part with an uppercase letter or a leading `-` gets no `attach` key either (evidence: a test for `Acme/tiroir` and `-a/b`)
+  - Evidence: the same test with `[Acme/tiroir]`, `[-a/b]`, `[a/-b]` and `[a/B]`: red, then green
+- [x] `acme/tiroir` keeps today's command, and `a--b/c` and `a/b--c` get two different windows (evidence: the attach tests at tests/test_hub_work.py:963-993 stay green and unchanged; a new test for `a-b/c`, `a--b/c` and `a/b--c`)
+  - Evidence: `test_a_member_with_a_shell_gets_the_attach_command_for_the_projects_window` and the tmux prefix test are unchanged and green; `test_a_part_of_dashes_and_letters_gets_its_own_window` asserts the windows `a-b_c`, `a--b_c` and `a_b--c` (green before and after, as the fix does not change them)
+- [x] SPEC 9.12 states the rule and names James's SLUG as its source (evidence: the sentence in "What the page offers", SPEC.md:1066)
+  - Evidence: SPEC.md 9.12 "What the page offers" (line 1156 at the merge): the attach command is offered only when both parts match the SLUG of James's `project_window`, `[a-z0-9][a-z0-9-]*`; the check is `hub/core.py` `work_meta` (`all(re.fullmatch(...))`, line 858 on main)

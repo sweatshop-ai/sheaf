@@ -460,10 +460,11 @@ def children() -> list[str]:
     me = os.getpid()
     found = []
     if not Path("/proc").is_dir():
-        out = subprocess.run(["ps", "-A", "-o", "pid=,ppid=,stat="], capture_output=True, text=True, check=True).stdout
+        ps = subprocess.Popen(["ps", "-A", "-o", "pid=,ppid=,stat="], stdout=subprocess.PIPE, text=True)
+        out = ps.communicate()[0]
         for line in out.splitlines():
             pid, ppid, state = line.split()[:3]
-            if int(ppid) == me and not state.startswith("Z"):
+            if int(ppid) == me and int(pid) != ps.pid and not state.startswith("Z"):      # ps is our child too
                 found.append(pid)
         return found
     for p in Path("/proc").iterdir():

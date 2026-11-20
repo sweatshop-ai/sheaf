@@ -1,9 +1,8 @@
 # 156: A page a job generates is read-only for text edits in the hub
 
-**Status:** open (feature not built; where the mark lives is still to decide)
+**Status:** open (feature not built; mark lives in docs.json, decided 2026-11-20)
 
-**Blocked by:** 
-- External: The owner decides where the per-document "generated" mark lives (not yet asked)
+**Blocked by:** none
 
 **From:** render-doc ticket 156 (private archive), triaged 2026-11-12
 
@@ -13,7 +12,7 @@
 
 - [ ] **The problem.** A page that a job rebuilds through the MCP door's `update` (with a fresh `expected_hash`) silently overwrites an edit a person saved in the hub a few seconds earlier; nothing tells the person. Add a per-document "generated" mark that makes the page read-only for text edits while keeping comments, replies, resolve, Ask and Tell working. Nothing in SPEC or in the door sets such a mark today (`git grep -i generat -- SPEC.md` finds nothing about it).
 
-- [ ] **Decide where the mark lives.**
+- [x] **Decide where the mark lives.** The owner chose (1), hub state in `docs.json`, on 2026-11-20. A `docs.json` without the field must still load (no mark), with a test.
   - (1) hub state in `docs.json` (SPEC 4.2, 8.3), set by `create`/`update` with `generated: true|false` and recording the setting token's name. Recommended, so "only that token or the key may change it" is enforceable.
   - (2) front matter `generated: true`: visible in git, but any writer can set or clear it.
 

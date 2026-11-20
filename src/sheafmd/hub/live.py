@@ -657,7 +657,7 @@ class LiveDocument:
                 return None
             before, kept = self._text, (self._text, self._hash, self._branch)
             self._rerender(remember=False)      # a read that may be torn is no version: kept once the file has not moved under it
-            if self._stamp() != seen:
+            if seen is None or self._stamp() != seen:       # a file that cannot be stat-ed is not known to have held still
                 # An editor's truncate-then-write landed while this read and render ran: what was read may be a torn
                 # file. Keep what the tabs hold and publish nothing; the watcher sees the file move and comes back.
                 self._text, self._hash, self._branch = kept

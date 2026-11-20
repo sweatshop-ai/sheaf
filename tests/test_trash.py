@@ -426,10 +426,6 @@ def test_purge_does_not_follow_a_linked_sheaf_folder(agents, clock, tmp_path):
     old.mkdir(parents=True)
     (old / "page.md").write_text("kept\n", encoding="utf-8")
     sheaf = root.path / ".sheaf"
-    if sheaf.is_symlink() or not sheaf.exists():
-        sheaf.unlink(missing_ok=True)
-    else:
-        sheaf.rename(tmp_path / "moved-sheaf")
     sheaf.symlink_to(tmp_path / "elsewhere")
     clock.now += 60 * DAY
     agents.hub.archive.purge()

@@ -267,10 +267,10 @@ class WriteLog:
             marker = Line(address=address, time=self._now(), writer="", place="", via=RETRACTED)
             # one write: a cut one leaves the file as it was, never the retraction without the lines it keeps; a line carried by a
             # rename is written under the address it is kept at
-            kept = [replace(line, address=address) for line in kept]
-            self._append(marker, *kept)
+            relabelled = [replace(line, address=address) for line in kept]
+            self._append(marker, *relabelled)
             if kept:
-                self._lines[address] = deque(kept, maxlen=self._keep)
+                self._lines[address] = deque(relabelled, maxlen=self._keep)
             else:
                 self._lines.pop(address, None)
             self._own.pop(address, None)

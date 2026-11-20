@@ -47,3 +47,9 @@ def test_a_bare_url_with_a_backslash_and_a_pipe_in_a_cell_keeps_its_row():
     src = "| a | b |\n|---|---|\n| http://x.com/a\\\\\\|c | here |"
     out = saved(src)
     assert all(line.count("|") - line.count("\\|") == 3 for line in out.strip().splitlines())
+
+
+@pytest.mark.parametrize("src", ["see ftp://x.com/a\\b here", "see <http://x.com/a\\b.> here"])
+def test_a_url_gfm_would_not_write_back_bare_is_left_to_pandoc(src):
+    # Another scheme, or a trailing mark GFM trims: not swapped for a word, and saved as before.
+    assert words(page_fragment(saved(src))) == words(page_fragment(src.replace("here", "there")))

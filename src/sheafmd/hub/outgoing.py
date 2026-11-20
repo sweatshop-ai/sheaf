@@ -253,7 +253,7 @@ def _reason(said) -> str:
 def send_root(post, moves, repo: str, to: str, head: dict, rows, limit: int = BATCH_LIMIT, diag=None) -> dict:
     """Send the pages of a root that is moving to `to`, one `root` call per batch. `post(to, verb, body)` answers
     `(status, body)` or raises `OSError`. Each page the receiver confirms is marked sent with its hash (the caller then writes
-    its Forward);     every other page is held with a reason, written to the move and, when it changed, to the diagnostics. Returns `{path: the
+    its Forward); every other page is held with a reason, written to the move and, when it changed, to the diagnostics. Returns `{path: the
     receiver's hash}` for the pages confirmed this time."""
     todo = [r for r in rows if r["path"] not in (moves.get(repo) or {}).get("sent", [])]
     held = {p: "too_big" for p in too_big(todo, limit)}

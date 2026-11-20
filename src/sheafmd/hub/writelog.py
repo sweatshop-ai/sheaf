@@ -5,9 +5,9 @@ wrong: this one is where a row of the Sheaf gets its last write and its last age
 A line holds the address, the time, who wrote (a member, or an agent's `<client> (<member>)`), the place class, how the
 write came (`create`, `update`, `save`, `pull`, `disk`) and what the writer declared: session, machine, Remote Control link
 and chat id. What a writer declares is kept as declared and never verified; it never opens a transcript."""
+import contextlib
 import json
 import os
-import contextlib
 import threading
 from collections import Counter, deque
 from dataclasses import asdict, dataclass, fields, replace
@@ -230,7 +230,7 @@ class WriteLog:
 
     @contextlib.contextmanager
     def own_lines(self):
-        """What the calling thread adds to the log inside the block, as a `Landing` that fills while it runs: a landing holds no
+        """What the calling thread adds to the log inside the block, as an `_Own` that fills while it runs: a landing holds no
         writer lock, so what it wrote is told apart from what another writer wrote at the address meanwhile, and `undo` takes
         back the landing's own and no more."""
         own, outer = _Own(), getattr(self._mine, "own", None)

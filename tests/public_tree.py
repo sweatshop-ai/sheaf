@@ -1,7 +1,7 @@
 """No client, person, company or host of ours stands in a file of this public repository.
 
 `scan_tree` reads every tracked file, and every tracked path, and reports what it finds as `path:line key`,
-never as the text that matched. Two kinds of thing are found:
+never as the text that matched (a name found in a path is the path itself, printed as `path:0 key`). Two kinds of thing are found:
 
   a name       one of the terms in SHEAF_PUBLIC_TREE_TERMS (comma or line separated; a term is one word or
                several), in any case, as a whole word or inside a longer one or a one-word spelling

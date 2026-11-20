@@ -207,8 +207,7 @@ def test_the_messages_name_both_tokens_that_clash_and_the_token_that_signs_the_p
 
 
 def test_the_token_set_of_stage_sheaf_agents_hub_2026_11_07_passes_the_start_check(folder, sheaf, work, monkeypatch):
-    """The members and tokens that agency-tiroir's stage sheaf-agents-hub-2026-11-07 writes on agency-tiroir (files/params.toml,
-    lib.sh AGENT_TOKENS): the person `Alice`, four members, the eight live old tokens (names and displays read off the box's tokens.json on 2026-11-08), and the eight agents made by
+    """The members and tokens of a hub set up for several agents: the person `Alice`, four members, the eight live old tokens (names and displays as they stood on 2026-11-08), and the eight agents made by
     `sheaf token add NAME --client CLIENT --write` once the config is in place. A hub that refuses this is an outage."""
     monkeypatch.delenv("SHEAF_NAME")                           # `add` reads the person from the config, as on the box
     ids = {"alice": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "carol": "cccccccc-cccc-4ccc-8ccc-cccccccccccc",

@@ -402,3 +402,39 @@ def test_a_failed_unkeep_does_not_skip_the_unarchive_of_a_failed_landing(members
     monkeypatch.setattr(members.hub.versions, "put", boom)
     assert transfer(members, peer_token()).status == 500
     assert seen
+
+
+def versions_inside(members):
+    """The owner's loose root holds its versions in itself (`versions = "root"`); a first landing makes the root."""
+    landed(members, transfer(members, peer_token(), id="00000000-0000-4000-8000-000000000001", name="first.md"))
+    root = members.hub.loose.known(members.hub.proxy.members[BEA])
+    (root / ".sheaf.toml").write_text('versions = "root"\n', encoding="utf-8")
+    return root, members.hub.roots.lookup(root / "x.md")
+
+
+def test_the_versions_of_a_landed_page_go_where_the_roots_toml_keeps_them(members):
+    root, held = versions_inside(members)
+    out, _ = landed(members, transfer(members, peer_token(), id="00000000-0000-4000-8000-000000000002", name="second.md"))
+    older = "# Notes\n\nOlder.\n"
+    assert members.hub._versions_of(held).get(out["address"], md_hash(older)) == older
+    assert members.hub.versions.get(out["address"], md_hash(older)) is None
+
+
+def test_a_failed_landing_takes_its_versions_back_from_the_store_inside_the_root(members, monkeypatch):
+    root, held = versions_inside(members)
+
+    def boom(*a, **k):
+        raise OSError("disk")
+    monkeypatch.setattr(type(members.hub.writes), "carry", boom)
+    res = transfer(members, peer_token(), id="00000000-0000-4000-8000-000000000003", name="third.md")
+    assert res.status == 500
+    address = "loose-bea/projects/blog/third.md"
+    assert members.hub._versions_of(held).texts(address) == []
+
+
+def test_an_id_that_was_answered_is_answered_again_when_its_owner_has_no_email_any_more(members):
+    token = peer_token()
+    first = transfer(members, token).json()
+    members.hub.proxy.members[BEA] = replace(members.hub.proxy.members[BEA], email="")
+    again = transfer(members, token)
+    assert again.status == 200 and again.json() == first

@@ -2038,3 +2038,16 @@ def test_a_page_open_when_versions_moves_into_the_root_keeps_its_versions_where_
     assert box.hub.commits.settle()
     assert versions_files(rectoversos)
     assert any(f.startswith(".sheaf/") for f in pushed(box, remote)[0][1])
+
+
+def test_a_rename_whose_stores_fail_before_the_move_is_one_row_for_its_pair_and_the_pull_goes_on(box, rectoversos, remote, tmp_path, monkeypatch):
+    """The checks and the mark of an address are inside the pair's own try: a failure there is `move-store-failed` for that
+    pair, never `write-log-failed` of the whole pull, and nothing stays marked as moving."""
+    def broken(address):
+        raise RuntimeError("tell state unreadable")
+    monkeypatch.setattr(box.hub, "tell_live", broken)
+    rename_pull(box, rectoversos, remote, tmp_path)
+    (row,) = rows("move-store-failed")
+    assert row["doc"] == NEW
+    assert rows("write-log-failed") == []
+    assert DOC not in box.hub.moving

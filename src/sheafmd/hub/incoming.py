@@ -90,13 +90,13 @@ def land(hub, door, b, peer: str | None = None, deadline: float | None = None) -
     deadline = time.monotonic() + channel.SECONDS if deadline is None else deadline
     if (bad := _shape(b)) is not None:
         raise ValueError(bad)
-    owner, why = owner_for(hub, b.get("owner_email"))
-    if owner is None:
-        return _refused(why)
     with state.file_locked("transfers.lock"):     # held to the end: two sends of one id land one page, the second told the first's answer
         known = state.read_json(_answers(), {}).get(b["id"])
-        if isinstance(known, dict):
+        if isinstance(known, dict):             # before the owner is looked for: an owner that went since is no reason to forget the answer
             return 200, {"ok": True, **known}
+        owner, why = owner_for(hub, b.get("owner_email"))
+        if owner is None:
+            return _refused(why)
         try:
             return _landed(hub, door, b, owner, deadline, peer)
         except _TooSlow:
@@ -134,9 +134,10 @@ def _land_steps(hub, door, b, owner, deadline, peer: str | None, mine) -> tuple:
             return _refused("name_taken") if e.why == "exists" else _refused("not_landed", str(e))
         raise
     address = made["doc"]
+    store = _versions_store(hub, owner)
     try:
         for v in b.get("versions", []):
-            hub.versions.put(address, visibility.set_keys(visibility.without_ticked_share(v["text"]), {"shared": None}))     # a version restored brings back no audience
+            store.put(address, visibility.set_keys(visibility.without_ticked_share(v["text"]), {"shared": None}))     # a version restored brings back no audience
             _in_time(deadline)
         by = (b.get("from") or {}).get("by") if isinstance(b.get("from"), dict) else None
         came_from = (b.get("from") or {}).get("origin") if isinstance(b.get("from"), dict) else None
@@ -152,7 +153,7 @@ def _land_steps(hub, door, b, owner, deadline, peer: str | None, mine) -> tuple:
         with contextlib.suppress(OSError):
             os.unlink(hub.file(address))
         with contextlib.suppress(Exception):
-            hub.versions.forget(address)
+            store.forget(address, inside=True)
         with contextlib.suppress(Exception):
             hub.writes.undo(address, mine)
         if (loose_root := hub.loose.known(owner)) is not None:
@@ -192,6 +193,13 @@ def _forward_back(hub, owner, b, peer: str | None) -> str | None:
     address = f"{root.name}/{folder + '/' if folder else ''}{b['name']}"
     far = hub.forwards.remote(address)
     return address if far is not None and root_moves.origin(far["origin"]) == root_moves.origin(peer) else None
+
+
+def _versions_store(hub, owner):
+    """Where the versions of the owner's loose root are kept: inside the root with `versions = "root"`, else the state folder's."""
+    held = hub.loose.known(owner)
+    root = hub.roots.lookup(held / "x.md") if held is not None else None
+    return (hub._versions_of(root) if root is not None else None) or hub.versions
 
 
 def _in_time(deadline: float) -> None:

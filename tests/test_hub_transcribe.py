@@ -775,6 +775,9 @@ def test_a_key_file_over_the_cap_is_refused_without_reading_it_whole(browser, ro
     assert len(rows) == 1 and "too large" in rows[0]["reason"]
 
 
+FD_DIR = "/proc/self/fd" if os.path.isdir("/proc/self/fd") else "/dev/fd"                # macOS has no /proc
+
+
 def test_a_failure_inside_fdopen_neither_leaks_nor_double_closes_a_descriptor(browser, row_relay, key_file, monkeypatch):
     """The library is never given a descriptor to own: whether `os.fdopen` closes what it was given before it raises is
     its business, and the hub's own number is closed once, so no number another thread was given is closed twice and
@@ -788,9 +791,9 @@ def test_a_failure_inside_fdopen_neither_leaks_nor_double_closes_a_descriptor(br
         closed.append(fd)
         real_close(fd)
     monkeypatch.setattr(transcribe.os, "close", close)
-    before = set(os.listdir("/proc/self/fd"))
+    before = set(os.listdir(FD_DIR))
     assert row_relay._key() is None
-    assert set(os.listdir("/proc/self/fd")) == before                       # nothing left open, the log's own file included
+    assert set(os.listdir(FD_DIR)) == before                       # nothing left open, the log's own file included
     assert len(closed) == len(set(closed))                                  # no number closed twice: a repeat would be swallowed as EBADF
     rows = [r for r in diagnostics.read() if r["kind"] == "transcribe-key-file"]
     assert len(rows) == 1 and "cannot be read" in rows[0]["reason"]

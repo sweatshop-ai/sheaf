@@ -1410,7 +1410,7 @@ class Hub:
         entries = self.projects_of(root)
         if entries is None or projects.grants(entries, at.rel, member.short):
             return None
-        return projects.project_of(at.rel)
+        return projects.project_of(at.rel)       # a path above project depth is granted, so never None here
 
     def projects_of(self, root):
         """The entries of `root`'s `projects.toml`, None without the file, an `Invalid` for one the hub cannot

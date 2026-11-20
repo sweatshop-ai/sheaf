@@ -136,6 +136,8 @@ def _holds_bytes(name: Path, data: bytes) -> bool:
     waiting, so a pipe put at the name answers no instead of hanging the write."""
     try:
         fd = os.open(name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    except PermissionError:
+        raise              # the writer cannot read it back (owner bits without read): no swap, and _replace_if_ours says so
     except OSError:
         return False
     try:
@@ -159,7 +161,12 @@ def _replace_if_ours(tmp: Path, target: Path, data: bytes):
     once closed, its inode number can pass to a file made at its name; and some file systems (an
     rclone mount) number a file by its name. A file of someone else's holding exactly those bytes
     costs nothing."""
-    if not _holds_bytes(tmp, data):
+    try:
+        ours = _holds_bytes(tmp, data)
+    except PermissionError:
+        raise OSError(f"{tmp} cannot be read back to check it, because the document's mode leaves its owner "
+                      f"no read, so {target} is left as it was") from None
+    if not ours:
         raise OSError(f"{tmp} was replaced while the new text was written to it, "
                       f"so {target} is left as it was")
     os.replace(tmp, target)

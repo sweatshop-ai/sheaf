@@ -4,7 +4,7 @@
 
 **Blocked by:** 169, 170 (same file, page/live.js; its items build on both)
 
-**From:** open points of PR #474 (ticket 160), raised by Thierry 2026-11-20. The two larger ones are tickets 169 and 170.
+**From:** open points of PR #474 (ticket 160), raised by the owner 2026-11-20. The two larger ones are tickets 169 and 170.
 
 **Where (main a30694be):** `src/sheafmd/hub/events.py:118` (`Shared`), `:130` (`POLL_S`), `:186` (`Shared.get`), `:63` (`accept`); `src/sheafmd/page/live.js:125` (`pagehide`); `src/sheafmd/hub/handler.py:280` (`/_/live/join`)
 

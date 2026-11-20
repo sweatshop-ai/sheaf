@@ -73,7 +73,6 @@ jobs:
         os: [macos-26]
         python: ['3.13']
         slice: [1]
-    env:
     steps:
       - uses: actions/checkout@v4
         with:

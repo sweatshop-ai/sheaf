@@ -161,6 +161,14 @@ def test_a_scope_that_does_not_exist_is_refused():
 
 # ── sheaf peer add | use ─────────────────────────────────────────────────────
 
+def test_peer_add_does_not_tell_the_token_onto_a_command_line(sheaf):
+    """The hint a person copies must not put the token in `ps` and the shell history: it pipes it in."""
+    r = sheaf("peer", "add", PEER)
+    [token] = TOKEN.findall(r.out)
+    hint = next(ln for ln in r.out.splitlines() if "peer use" in ln)
+    assert "<token>" not in hint and token not in hint
+    assert "standard input" in hint
+
 def test_peer_add_prints_the_token_once_and_stores_transfer_only(sheaf):
     r = sheaf("peer", "add", PEER)
     assert r.code == 0 and r.err == ""

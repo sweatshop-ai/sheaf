@@ -1,9 +1,8 @@
 # 139: Check the connection's OS user on every cookie and key request
 
-**Status:** open (design ruled, probe 2 run, nothing built; one decision open)
+**Status:** open (design ruled, probe 2 run, option (b) chosen, nothing built)
 
-**Blocked by:** 
-- External: The owner chooses (a) or (b) under "Decide first" (not yet asked)
+**Blocked by:** none
 
 **From:** render-doc ticket 139 (private archive), triaged 2026-11-12
 
@@ -13,7 +12,7 @@
 
 Today only `/_/open?nonce=` checks who owns the connection. `SPEC.md:877` says the cookie and the key are not checked against the connection's user, and `tests/test_hub_peer.py:308` (`test_a_cookie_route_does_not_look_up_the_connection_yet`) pins that.
 
-- [ ] **Decide first.** Probe 2 (a Playwright test that sends a comment and navigates away in the same tick, against a hub that checks the peer uid on every cookie request) showed typed text is lost when the hub reaches the lookup about 0.3 s late: the closed client's socket reads as uid 0 in FIN_WAIT2 and the save gets 403 (30 of 30 lost). Choose between:
+- [x] **Decide first.** The owner chose (b), the accept()-time lookup with `503 try again`, on 2026-11-20. Probe 2 (a Playwright test that sends a comment and navigates away in the same tick, against a hub that checks the peer uid on every cookie request) showed typed text is lost when the hub reaches the lookup about 0.3 s late: the closed client's socket reads as uid 0 in FIN_WAIT2 and the save gets 403 (30 of 30 lost). Choose between:
   - (a) accept the limit and write in SPEC 9.6 that a cookie or key leaked to another local user works from that user's account, or
   - (b) an accept()-time variant: look up the owner before reading the request, and answer a client that already closed with `503 try again` and the write not applied, never 403.
 

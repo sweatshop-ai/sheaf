@@ -265,6 +265,26 @@ class Index:
                 waiting.add(address)
         return waiting, running
 
+    def dot(self, address: str, threads, open_: int, member=None, live=None) -> tuple[str, int]:
+        """(the dot of 8.6, the unread threads) of a document for `member`, None for the hub account: the one
+        cascade the index page and the door's `documents` both ask. `threads` is `[(id, messages, last by)]` of the
+        open threads, `live` the `(waiting, running)` of `_live_state`, which a caller with many documents asks once."""
+        hub = self.hub
+        waiting, running = live if live is not None else self._live_state(address)
+        seen = hub.member_seen.get(member.id, address) if member else hub.seen.get(address)
+        me = member.name if member else hub.person
+        # SPEC 8.7: unread is an open thread whose last message is not the person's and that has
+        # more messages than they have seen. A member is the person of their own index (9.9), and
+        # is told nothing of the hub account's agent session: neither that it waits on its person
+        # nor that a Tell of it runs.
+        unread = sum(1 for cid, n, by in threads if by != me and n > seen.get(cid, 0))
+        sees_session = member is None
+        # A member's orange is James's session working on a drop of their own, by its supervisor's word (9.15).
+        works = (sees_session and address in running) or (member is not None and hub.box_waits.working(address, member.id))
+        dot = ("red" if (sees_session and address in waiting) or unread else
+               "orange" if works else "blue" if open_ else "green")
+        return dot, unread
+
     def _row(self, address: str, path: Path, st: os.stat_result, waiting: set, running: set,
              member=None, op=None, private_ok: bool = False) -> dict | None:
         """The row of a file, or None when what was opened to count its comments is a private root's and the row is
@@ -272,18 +292,7 @@ class Index:
         hub = self.hub
         if (s := self.summary(address, path, st, member, op, private_ok)) is None:
             return None
-        seen = hub.member_seen.get(member.id, address) if member else hub.seen.get(address)
-        me = member.name if member else hub.person
-        # SPEC 8.7: unread is an open thread whose last message is not the person's and that has
-        # more messages than they have seen. A member is the person of their own index (9.9), and
-        # is told nothing of the hub account's agent session: neither that it waits on its person
-        # nor that a Tell of it runs.
-        unread = sum(1 for cid, n, by in s.threads if by != me and n > seen.get(cid, 0))
-        sees_session = member is None
-        # A member's orange is James's session working on a drop of their own, by its supervisor's word (9.15).
-        works = (sees_session and address in running) or (member is not None and hub.box_waits.working(address, member.id))
-        dot = ("red" if (sees_session and address in waiting) or unread else
-               "orange" if works else "blue" if s.open else "green")
+        dot, unread = self.dot(address, s.threads, s.open, member, (waiting, running))
         e = hub.entries.get(address)
         url = roots_mod.url_path(address) if member else hub.url(address)     # the front's origin (9.9)
         return {"doc": address, "url": url, "dot": dot, "open": s.open,

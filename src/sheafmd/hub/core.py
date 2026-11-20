@@ -1022,14 +1022,11 @@ class Hub:
                 self.session_tells.end_root(name, "the folder was forgotten")
             except Exception:
                 self.record_exception("tell-end-failed")
+            popped = []
             for address in [a for a in self.entries if a.startswith(roots_mod.Address.prefix(name))]:
                 e = self.entries.pop(address)
-                # Its versions go under its own lock: a write still under way would put its text among
-                # them after they went, and the document that takes the address next would know it,
-                # and take the old page's requests as made against a version it handed out.
-                e.live.forget()
-                # After that write's own `changed`, which the page takes in first.
-                e.bus.publish("gone", {"doc": address})
+                e.live.detach()         # no wait for its lock here: a render holds it for up to 120 s
+                popped.append((address, e))
             # A Tell still running on a document that is gone: its dot, its
             # answer and its wait have nowhere to go, and the name may be taken at once. Also
             # when the registry no longer holds the root (another process forgot it, and this hub
@@ -1037,7 +1034,14 @@ class Hub:
             self.runner.cancel_under(roots_mod.Address.prefix(name))
             if root is not None:
                 self.index.forgot(name)
-            return root
+        # Outside the hub's lock: each waits for its document's, which a render holds for a long while, and a request
+        # that needs the hub in that time (any page, any entry) would wait with it. What each document wrote goes from
+        # the store (`LiveDocument.detach`), never the versions of the folder that takes the name meanwhile.
+        for address, e in popped:
+            e.live.forget()
+            # After that write's own `changed`, which the page takes in first.
+            e.bus.publish("gone", {"doc": address})
+        return root
 
     def moved_page(self, old: str, new: str, by: str):
         """The page at `old` is now at `new`, its file moved (9.11): the Forward is written, and every store that is keyed by

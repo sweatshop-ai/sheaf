@@ -62,3 +62,9 @@
 - [ ] **`_emoji_drawn` caches a failed pandoc run as None** (`lru_cache`, from #479): a name then stays an emoji for the process; do not cache a failure.
 - [ ] **`_without_placeholder_breaks` and `_cell_breaks` can disagree on a backslash** (from #482, `edit.py:555` against `:608`): the first checks the page's fragment before `_text_backslashes` runs, the second after it, so a table can be left to `_cell_breaks` which then does not take it; the old bug (`| x\xa0 |`, the break lost) can still happen. Fix: one shared test.
 - [ ] **The fallback in `html_block_to_md` keeps a break that used to go** (from #482, `edit.py:721-724`): when pandoc swallows a character of the token, the table is re-run from `clean`, the text from before `_cell_breaks`, which now still holds the end-of-cell `<br>` and no-break space that the first pass used to remove.
+
+## Found while fixing the bare-URL and math items (PRs #517, #524)
+
+- [ ] **A bare URL in a table that pandoc writes as raw HTML lands as plain text in the `<td>`** (from #524, `edit.py` where the words come back): it is not escaped and is no longer a link. Probed for markup: it cannot carry live markup, because `_BARE_URL` takes no `<`, `>` or white space and a `&name;` in the text reads as the character, never as a tag; `"` and `'` are text there, and a probed `http://x.com/a\&amp;lt;img&amp;gt;` and `http://x.com/a\b&amp;c` came out as the page's own text. A minor loss of the link, not an injection.
+- [ ] **A bare URL ending in a mark GFM trims** (`.`, `)`, `,`) that holds a backslash goes through pandoc as before; pandoc writes `<url.>` and the unwrap at the end of `html_block_to_md` then drops the brackets, so the address loses the mark. Also fails on main.
+- [ ] **A link with a backslash in its address that is not a bare URL** (`[x](http://a\\b)`, other schemes): the address is written as pandoc leaves it, so `\\` reads back as one backslash and `\*` as a star. Also fails on main.

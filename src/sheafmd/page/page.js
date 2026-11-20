@@ -152,7 +152,7 @@ var create = function (ROOT, CFG, opts) {
   }
   // The same click as a row's (sheaf.js): AgentView on the member's laptop, else the Remote Control link, else text.
   var wayBackWhere = {
-    say: function (t) { say(t, true); }, live: function () { return !unmounted; },
+    say: function (t, err) { say(t, err !== false); }, live: function () { return !unmounted; },
     plain: function (b) { b.replaceWith(byline.ownerDocument.createTextNode(b.textContent)); },
   };
   if (byline) listen(byline, 'click', function (e) {
@@ -3105,7 +3105,7 @@ var create = function (ROOT, CFG, opts) {
       teamAsk = null;
       setTeam(j.team || []);
       drawPanel();
-    } catch (e) { say(e.message, true); } finally { teamBusy = false; }
+    } catch (e) { teamAsk = null; say(e.message, true); drawPanel(); } finally { teamBusy = false; }      // a refused delete is asked for again from the first click
   }
   function drawPanel() {
     keepTeamText();      // a redraw (a comments update, a tab) keeps what is being written

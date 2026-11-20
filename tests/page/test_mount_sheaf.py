@@ -448,6 +448,17 @@ def test_rename_folder_moves_each_page_and_the_old_address_forwards(mounted, pag
           what="the tree drawn again with the new folder")
 
 
+def test_rename_folder_submitted_unchanged_sends_nothing_and_closes_the_form(mounted, pages):
+    root = own_pages(mounted, pages, "old/a.md")
+    sent = []
+    mounted.page.route("**/_/move-folder", lambda route: (sent.append(route.request.post_data), route.continue_()))
+    mounted.js("root.querySelector('.sheaf-rename-folder[data-path=\"" + f"{root.name}/old" + "\"]').click();")
+    until(lambda: mounted.js("return !!root.querySelector('.sheaf-rename-form input');"), what="the folder field")
+    mounted.js("root.querySelector('.sheaf-rename-form').requestSubmit();")
+    until(lambda: mounted.js("return !root.querySelector('.sheaf-rename-form');"), what="the form closed")
+    assert sent == [] and (root.path / "old" / "a.md").exists()
+
+
 def test_rename_folder_onto_a_taken_name_says_which_page_and_moves_nothing(mounted, pages):
     root = own_pages(mounted, pages, "old/a.md", "other/a.md")
     rename_form(mounted, f"{root.name}/old", "other")

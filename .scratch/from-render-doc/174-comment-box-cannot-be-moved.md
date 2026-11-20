@@ -17,9 +17,9 @@ An open comment box can cover the text the owner wants to read. They want to gra
 
 ## To do
 
-- [ ] Decide how the drag behaves where the box is docked to the head of the visual viewport (a touch screen with the keyboard up, `dock()`): the box is fixed there and `replace()` rewrites its position on every `visualViewport` event.
+- [x] Decision (the boss, 2026-11-20): the box is draggable everywhere except while it is docked to the keyboard (`dock()`: a touch screen with the keyboard up). While docked the band shows no move cursor and a drag does nothing. `undock()` brings back the place the box was dragged to. Reason: `replace()` re-applies the docked position on every `visualViewport` resize or scroll, so a drag would snap back, and overriding the dock fights the keyboard handling on iOS. `touch-action: none` goes on the band only, never on the passage text, so the page still scrolls under a finger that starts elsewhere.
 - [ ] Drag the box by its band with pointer events, so mouse and touch both work. A press on a band button (Resolve, Close, the ⋯ menu) or on a link in the band must still act as a click and start no drag. A drag that did not move past a few pixels is a click.
 - [ ] Keep the box inside the viewport while dragging and on drop. The band gets a `move` cursor (not on its buttons).
 - [ ] A drag starts no text selection and opens no comment button for one (`selectionchange` and `mouseup` offers, the touch release path in SPEC 9).
 - [ ] The box stays where it was dropped for as long as it is open, including while the page re-renders (`replace()` calls `place()`) and while a reply arrives. The next open places it as today; nothing is stored.
-- [ ] Tests in the page suite, run in CI or on t-compute only: a drag moves the box; a click on a band button still works; the box keeps its place across a re-render.
+- [ ] Tests in the page suite, run in CI or on t-compute only: a drag moves the box; a click on a band button still works; the box keeps its place across a re-render; the dragged place comes back after `undock()`; a drag while docked does nothing.

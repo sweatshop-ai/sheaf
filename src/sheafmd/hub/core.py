@@ -837,12 +837,12 @@ class Hub:
         if st.forkable and work_mod.serves(st.cfg, st.member):
             out["fork"] = (f"uvx --from {work_mod.FORK_CLIENT} tiroir work "
                            f"{self.proxy.origin}{roots_mod.url_path(e.address)}")
-        # James names a project's window <client>_<project>: with a dash, a-b/c and a/b-c would share one.
+        # James names a project's window <client>_<project>, and only when both parts are his SLUG
+        # (agency-tiroir james.py `project_window`): a part with `_` would let a_b/c and a/b_c share one window,
+        # and the `_` between the parts keeps a-b/c and a/b-c apart.
         parts = roots_mod.Address.parse(e.address).rel.split("/")[:2]
         window = "_".join(parts)
-        # James makes a window only when both parts are his SLUG (agency-tiroir james.py `project_window`); with
-        # `_` in a part, a_b/c and a/b_c would name one window. Two shells and tmux read the command: a name with
-        # another character (`.`, `:`, a space) is left out.
+        # Kept as a guard: tmux and two shells read the command, so no `.`, `:` or space gets through.
         if (member.shell and st.cfg.attach and all(re.fullmatch(r"[a-z0-9][a-z0-9-]*", p) for p in parts)
                 and re.fullmatch(r"[A-Za-z0-9_-]+", window)):
             out["attach"] = st.cfg.attach.replace("{window}", window)

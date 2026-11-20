@@ -863,6 +863,21 @@ def test_a_restart_the_manager_refused_says_what_the_manager_said_whatever_the_h
     assert asked == [("POST", "/_/restarting"), ("DELETE", "/_/restarting")]
 
 
+def test_a_restart_announcement_whose_answer_was_lost_is_taken_back(sheaf, monkeypatch):
+    """The hub may have applied `POST /_/restarting` though its answer never came: the command stops
+    there, the service is not asked, and the announcement is taken back (a token it never read is
+    not needed: the hub forgets whatever it holds)."""
+    stand_in, controlled = StandInHub(service=True), []
+    stand_in.on_request["/_/restarting"] = "close"
+    monkeypatch.setenv("SHEAF_PORT", str(stand_in.port))
+    monkeypatch.setattr("sheafmd.lifecycle.service.installed", lambda: True)
+    monkeypatch.setattr("sheafmd.lifecycle.service.control", controlled.append)
+    r = sheaf("restart")
+    assert r.code == 1 and controlled == []
+    asked = [(m, p) for _, m, p in stand_in.log if p != "/_/health"]
+    assert asked == [("POST", "/_/restarting"), ("DELETE", "/_/restarting")]
+
+
 # ── a request that loses the hub after its proof ─────────────────────────────
 
 @pytest.mark.parametrize("how", ["close", "hold"])

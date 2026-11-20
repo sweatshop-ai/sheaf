@@ -2551,11 +2551,13 @@ class Handler:
         return _ok()                       # never the key: the caller reads the file it owns
 
     def _restarting(self, req: Req) -> Response:
-        self.hub.expect_restart()
-        return _ok()
+        return _ok(token=self.hub.expect_restart())
 
     def _forget_restart(self, req: Req) -> Response:
-        self.hub.forget_restart()
+        token = req.query.get("token")
+        if token is not None:
+            _shape(token.isdigit(), "token must be the number the announcement returned")
+        self.hub.forget_restart(None if token is None else int(token))
         return _ok()
 
     def _stop(self, req: Req) -> Response:

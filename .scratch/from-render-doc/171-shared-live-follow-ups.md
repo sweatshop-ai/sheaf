@@ -1,6 +1,8 @@
 # 171: Shared live stream: five smaller follow-ups of #474
 
-**Status:** open, to check
+**Claimed by:** Sigurd 2026-11-20
+
+**Status:** in progress
 
 **Blocked by:** 169, 170 (same file, page/live.js; its items build on both)
 

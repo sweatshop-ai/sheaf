@@ -80,10 +80,22 @@ def test_a_frozen_leader_hands_the_stream_over_and_takes_it_back_on_resume(share
     cdp.send("Page.setWebLifecycleState", {"state": "frozen"})
     f = site.file
     f.write_text(f.read_text(encoding="utf-8") + "\nWhile frozen.\n", encoding="utf-8")
-    for n, (p, _) in enumerate(pages[1:]):
-        until(lambda: shows(p, "While frozen."), what=f"the change in tab {n + 2} while the leader is frozen")
+    for n, (p, _) in enumerate(pages[1:], 2):
+        until(lambda: shows(p, "While frozen."), what=f"the change in tab {n} while the leader is frozen")
     cdp.send("Page.setWebLifecycleState", {"state": "active"})
     until(lambda: site.hub.tabs(DOC) == 3, what="three tabs counted after the resume")
     f.write_text(f.read_text(encoding="utf-8") + "\nAfter the resume.\n", encoding="utf-8")
     for n, (p, _) in enumerate(pages):
         until(lambda: shows(p, "After the resume."), what=f"the change in tab {n + 1} after the resume")
+
+
+def test_a_frozen_tab_that_waits_for_the_lock_is_not_handed_it(shared, site):
+    """The leader and a second tab freeze together: the lock must pass to the third, not to the frozen second,
+    whose request was queued and could never run."""
+    pages = [opened(shared, site) for _ in range(3)]
+    until(lambda: site.hub.tabs(DOC) == 3, what="three tabs counted")
+    for p, _ in pages[:2]:
+        shared.new_cdp_session(p).send("Page.setWebLifecycleState", {"state": "frozen"})
+    f = site.file
+    f.write_text(f.read_text(encoding="utf-8") + "\nWith two tabs frozen.\n", encoding="utf-8")
+    until(lambda: shows(pages[2][0], "With two tabs frozen."), what="the change in the third tab")

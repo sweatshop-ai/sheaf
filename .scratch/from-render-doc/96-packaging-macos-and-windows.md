@@ -2,7 +2,7 @@
 
 **Status:** open
 
-**Blocked by:** 101
+**Blocked by:** 173
 
 **From:** render-doc ticket 96 (private archive), triaged 2026-11-12
 

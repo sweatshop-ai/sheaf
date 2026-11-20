@@ -743,6 +743,21 @@ def test_a_document_keeps_the_versions_pinned_last_and_no_more(made):
     assert [doc.knows(h) for h in pinned] == [True, False] + [True] * (rdl.PINS - 1)
 
 
+def test_a_pin_in_memory_expires_when_a_pin_on_disk_does(made):
+    """On disk a pin goes after PINS_MAX_AGE since a page last pinned it; the one in memory goes with it, and
+    pinned again, a version counts from then."""
+    doc, md, _, _, clock = made()
+    old, kept = doc.current()[0], None
+    assert doc.pin(old) is True
+    writes_from_outside(md, doc, 1)
+    kept = doc.current()[0]
+    clock.t += state.PINS_MAX_AGE / 2
+    assert doc.pin(kept) is True
+    clock.t += state.PINS_MAX_AGE / 2 + 1
+    writes_from_outside(md, doc, rdl.VERSIONS + 1)
+    assert doc.knows(kept) is True and doc.knows(old) is False
+
+
 @pytest.mark.parametrize("h", ["0" * 16, "../../hub.key", ""])
 def test_a_version_the_document_does_not_know_cannot_be_pinned(stored, h):
     doc, md, *_ = stored()

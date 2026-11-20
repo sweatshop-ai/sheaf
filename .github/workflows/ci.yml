@@ -104,7 +104,7 @@ jobs:
         # from a fork has none.
         env:
           SHEAF_PUBLIC_TREE_TERMS: ${{ secrets.SHEAF_PUBLIC_TREE_TERMS }}
-        run: uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v -p no:xdist -s -m "not page" -rfE tests/test_hub_visibility.py tests/test_isolation.py tests/test_real_hub_untouched.py tests/test_hub_commits.py tests/test_repo_pages.py
+        run: uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v -n 4 -m "not page" -rfE tests/test_isolation.py tests/test_hub_pusher_settles.py tests/test_hub_built_outside_the_fixture_settles.py tests/test_agent_tokens.py tests/test_acting_races_move.py tests/test_answer_replies_survive.py
 
       # The page tests drive Chromium through Playwright (tests/page) and take about half of a pull
       # request's run. A pull request that changes no path they load skips them, and says so here

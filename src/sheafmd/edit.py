@@ -610,6 +610,31 @@ def _without_placeholder_breaks(fragment: str) -> str:
     return str(soup)
 
 
+def _split_code_at_breaks(soup):
+    """Chromium's Enter inside inline code in a table cell leaves a <br> in the <code>, which a cell cannot hold
+    and which sent the whole table to raw HTML. The code is cut there into two spans with the break between
+    them, as a break between words is. A break with nothing but white space after it in the code is the
+    placeholder at its end, which stays where it is."""
+    from bs4 import NavigableString
+
+    codes = soup.find_all("code")
+    for code in codes:
+        if not code.find_parent(["td", "th"]) or code.find_parent("pre"):
+            continue
+        for br in code.find_all("br", recursive=False):
+            after = [x for x in br.next_siblings]
+            if not any(str(x.get_text() if hasattr(x, "get_text") else x).strip(" \t\n\r\f\xa0") for x in after):
+                continue
+            tail = soup.new_tag("code", attrs=code.attrs)
+            for x in after:
+                tail.append(x.extract())
+            br.extract()
+            code.insert_after(tail)
+            code.insert_after(br)
+            codes.append(tail)         # a second break in the same code is cut in its turn
+            break
+
+
 def _cell_breaks(fragment: str):
     """(the fragment with each line break in a table cell as a token, the token or None). A GFM table cell
     holds one line, so pandoc writes a table with a break in a cell as raw HTML, a block the page cannot
@@ -637,6 +662,7 @@ def _cell_breaks(fragment: str):
     if "<br" not in fragment:
         return fragment, None
     soup = BeautifulSoup(fragment, "html.parser")
+    _split_code_at_breaks(soup)
     breaks = [br for br in soup.find_all("br") if br.find_parent(["td", "th"]) and not br.find_parent(["code", "pre"])]
     # Pandoc's writer leaves two backslashes as they are, which the .md reads as one, and takes a character
     # after one it escapes, in every cell of a table alike; and the pipe table is read with GFM's emoji

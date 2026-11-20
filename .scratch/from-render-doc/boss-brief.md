@@ -18,7 +18,7 @@ The owner asked for "all open sheaf tickets". The main graph is the backlog in
 | Handoffs | none for this track (the `handoff-*.md` files at the repo root belong to other sessions; leave them) |
 | Research | `/home/tiroir/Projects/sheaf/docs/design/` |
 | Code | `/home/tiroir/Projects/sheaf` (branch `main`) |
-| Code, ticket 168 only | private repo `git@github.com:thinkingtoo/tiroir-mail-replies.git` (its `MOVE_TO` matchers in `tiroir_mail_replies/sheaves.py`). No main checkout exists on the laptop: the worker clones it into its own folder and reads the repo's own rules before touching it |
+| Code, ticket 168 only | private repo the mail-replies repo (private org; clone URL in the tracker, not here) (its `MOVE_TO` matchers in `tiroir_mail_replies/sheaves.py`). No main checkout exists on the laptop: the worker clones it into its own folder and reads the repo's own rules before touching it |
 
 ## Frontier
 
@@ -150,7 +150,7 @@ cannot be verified yet stays unticked with one line saying why.
 Quoted from the rules that bind this work. The source is named on each line; the
 source wins where this summary is short.
 
-- Public repo: "`sweatshop-ai/sheaf` is a PUBLIC repo … never put client names, hosts, IPs, people or client-box security facts there; write them in tiroir-clients or thinkingtoo (private)." (`/home/tiroir/.claude/projects/-home-tiroir-Projects-sheaf/memory/tiroir-layer-is-private.md`). Commits use the noreply identity already set in the checkout ("Git identity for anything PUBLIC: `tiroir <202564+tiroir@users.noreply.github.com>`", `/home/tiroir/.claude/CLAUDE.md`).
+- Public repo: "`sweatshop-ai/sheaf` is a PUBLIC repo … never put client names, hosts, IPs, people or client-box security facts there; write them in a private repo." (`/home/tiroir/.claude/projects/-home-tiroir-Projects-sheaf/memory/tiroir-layer-is-private.md`). Commits use the noreply identity already set in the checkout ("Git identity for anything PUBLIC: `tiroir <202564+tiroir@users.noreply.github.com>`", `/home/tiroir/.claude/CLAUDE.md`).
 - Shared tree: "Another session may share this checkout. Before a commit, `git status` and stage only your own paths by name; for more than a small edit, use a worktree." (`/home/tiroir/.claude/CLAUDE.md`). "Never `git checkout` in a shared working directory when other workers are in the same project." (same file)
 - Tests: "Locally, run only the test files your change touches. Never the full suite, never `pytest -n auto`/xdist, unless `uptime` shows load under 8." "Browser tests (Playwright, headless Chrome e2e) never run on the laptop, not even one file: run them on t-compute over ssh or in CI." (`/home/tiroir/.claude/CLAUDE.md`)
 - Reviews: "One review round per PR … A PR gets Matt's `code-review` plus `/codex-review` once." "NO-GO only for a serious defect … minor findings are fixed in the same push, with no new round." (`/home/tiroir/.claude/CLAUDE.md`)

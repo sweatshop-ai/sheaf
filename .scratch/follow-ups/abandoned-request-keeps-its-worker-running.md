@@ -4,7 +4,7 @@
 
 **Blocked by:** None. Most valuable after #459, but not dependent on it.
 
-**Status:** ready
+**Status:** done
 
 ## Problem
 
@@ -17,7 +17,7 @@
 
 ## Acceptance criteria
 
-- [ ] A test starts a listing request, closes the client socket, and asserts the handler stops within one checkpoint (counts the pages visited after the close, bounded).
-- [ ] The listing loop (`Index.data`, `core.py` `visible` loop) checks `gone()` at least once per page batch and returns early without a raise that logs as an error.
-- [ ] No BrokenPipeError is logged for an abandoned listing.
-- [ ] A normal request is unchanged (existing tests pass; touched test files only on the laptop, the rest in CI).
+- [x] A test starts a listing request, closes the client socket, and asserts the handler stops within one checkpoint (counts the pages visited after the close, bounded). `tests/test_hub_abandoned.py::test_a_caller_that_closes_the_connection_ends_the_run_and_logs_no_broken_pipe` (#505, e2df41e4): a real socket closed with a reset, fewer than 20 pages read; the in-memory stop is `tests/test_hub_sheaf.py::test_a_listing_whose_caller_has_gone_stops_reading_pages` (#461, 5a5a8a30)
+- [x] The listing loop checks `gone()` at each root and every 8 pages (`sheaf_view.CHECK_EVERY`) and ends with a 499 (#461, 5a5a8a30; the channel read in #464, 2863a308)
+- [x] No BrokenPipeError is logged for an abandoned listing: the 499 written to the closed socket is dropped quietly in `server.py` (#505, e2df41e4), same test as box 1
+- [x] A normal request is unchanged: CI green on #461, #464 and #505

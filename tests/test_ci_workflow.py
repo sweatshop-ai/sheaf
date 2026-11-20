@@ -180,7 +180,7 @@ def test_an_ubuntu_job_of_this_repository_runs_on_the_organisations_runners_and_
 def test_the_organisations_runners_run_sixteen_workers_that_steal_work_and_github_four(text):
     runs = [ln for ln in text.splitlines() if "pytest -v" in ln and "-m page" not in ln]
     assert len(runs) == 1
-    assert "${{ runner.environment == 'self-hosted' && '-n 16 --dist worksteal' || '-n 4' }}" in runs[0]
+    assert "${{ runner.environment == 'self-hosted' && '-n 16 --dist loadgroup' || '-n 4' }}" in runs[0]
 
 
 def test_a_self_hosted_job_installs_no_package_and_no_service_and_keeps_no_token(text):

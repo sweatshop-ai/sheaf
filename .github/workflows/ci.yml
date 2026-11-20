@@ -117,7 +117,8 @@ jobs:
           SHEAF_PUBLIC_TREE_TERMS: ${{ secrets.SHEAF_PUBLIC_TREE_TERMS }}
         # The organisation's machine has 32 cores for three runners: 16 workers cut a full run there from 137 s to 98 s, and 32 is no faster
         # alone and slower with three runs at once (measured on another suite, 2026-11-16). GitHub's runner has 4 cores.
-        run: uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v ${{ runner.environment == 'self-hosted' && '-n 16 --dist worksteal' || '-n 4' }} --durations=25 -m "not page"
+        # `loadgroup`, not `worksteal`: only `loadgroup` keeps a file with IN_ORDER = True on one worker (tests/conftest.py).
+        run: uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v ${{ runner.environment == 'self-hosted' && '-n 16 --dist loadgroup' || '-n 4' }} --durations=25 -m "not page"
 
       # The page tests drive Chromium through Playwright (tests/page) and take about half of a pull
       # request's run. A pull request that changes no path they load skips them, and says so here

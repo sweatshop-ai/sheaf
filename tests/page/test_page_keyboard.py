@@ -228,3 +228,36 @@ def test_the_thread_floor_follows_a_resize_with_a_mouse_too(tab):
         const m = [...s.querySelectorAll('.rd-msg')].pop();
         return [parseFloat(s.style.minHeight), Math.min(s.scrollHeight, Math.max(84, Math.min(m.offsetHeight + 8, 160)))]; })()""")
     assert abs(got[0] - got[1]) < 1 and got[1] > 80, got
+
+
+def drag_band(page, dx, dy):
+    b = page.locator(POP + " .rd-head .rd-quote").bounding_box()
+    x, y = b["x"] + b["width"] / 2, b["y"] + b["height"] / 2
+    page.mouse.move(x, y)
+    page.mouse.down()
+    for i in range(1, 9):
+        page.mouse.move(x + dx * i / 8, y + dy * i / 8)
+    page.mouse.up()
+    page.wait_for_timeout(100)
+
+
+def test_a_docked_box_is_not_moved_by_its_band_and_shows_no_move_cursor(phone):
+    """Ticket 174: while the keyboard holds the box at the head of the screen, a drag does nothing."""
+    page = composer(phone)
+    keyboard(page, 844 - KEYBOARD)
+    before = rects(page)["pop"]
+    drag_band(page, -30, 120)
+    assert rects(page)["pop"] == pytest.approx(before, abs=1 / 64 + 1e-6)
+    assert page.evaluate("getComputedStyle(document.querySelector('#rd-popover .rd-head')).cursor") != "move"
+
+
+def test_the_dragged_place_comes_back_when_the_keyboard_closes(phone):
+    """Ticket 174: undock() restores the place the box was dragged to, not the one place() gave it."""
+    page = composer(phone)
+    start = rects(page)["pop"]
+    drag_band(page, -20, 60)
+    dragged = rects(page)["pop"]
+    assert dragged[1] > start[1] + 40, (start, dragged)
+    keyboard(page, 844 - KEYBOARD)
+    keyboard(page, 844)
+    assert rects(page)["pop"] == pytest.approx(dragged, abs=1 / 64 + 1e-6)

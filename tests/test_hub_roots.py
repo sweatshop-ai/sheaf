@@ -846,3 +846,10 @@ def test_a_roots_file_that_went_missing_or_unreadable_does_not_empty_a_running_r
 def test_no_root_takes_the_name_clients_which_the_agencys_folder_of_client_tiroirs_holds(tmp_path, folder):
     r = roots.Roots().for_document(md(tmp_path / folder / "a.md"))
     assert r.name.casefold() != "clients" and r.name == f"{folder}-2"
+
+
+@pytest.mark.parametrize("name", ["Clients", "clients", "CLIENTS"])
+def test_a_root_added_under_a_name_is_not_named_clients_either(tmp_path, name):
+    (tmp_path / "x").mkdir()
+    with pytest.raises(roots.NameTaken):
+        roots.Roots()._add(tmp_path / "x", False, name=name)

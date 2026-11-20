@@ -100,10 +100,10 @@ class Moves:
         with self._lock:
             data = self._read()
             row = data.get(repo)
-            if isinstance(row, dict) and page not in row["sent"]:
-                row["sent"] = sorted({*row["sent"], page})
+            if isinstance(row, dict) and page not in row.get("sent", []):
+                row["sent"] = sorted({*row.get("sent", []), page})
                 row["hashes"] = {**row.get("hashes", {}), page: hash}
-                row["held"].pop(page, None)
+                row["held"] = {k: v for k, v in row.get("held", {}).items() if k != page}
                 self._write(data)
 
     def forwarded(self, repo: str, page: str):
@@ -120,7 +120,7 @@ class Moves:
         row = self.get(repo)
         if row is None:
             return {}
-        return {p: row.get("hashes", {}).get(p, "") for p in row["sent"] if p not in row.get("forwarded", [])}
+        return {p: row.get("hashes", {}).get(p, "") for p in row.get("sent", []) if p not in row.get("forwarded", [])}
 
     def cancel(self, repo: str) -> bool:
         """A move that has confirmed no page is dropped (its `.sheaf.toml` was put back before the first confirm); False when
@@ -128,7 +128,7 @@ class Moves:
         with self._lock:
             data = self._read()
             row = data.get(repo)
-            if not isinstance(row, dict) or row["sent"]:
+            if not isinstance(row, dict) or row.get("sent"):
                 return False
             del data[repo]
             self._write(data)
@@ -140,7 +140,7 @@ class Moves:
         with self._lock:
             data = self._read()
             row = data.get(repo)
-            if not isinstance(row, dict) or not row["sent"] or set(row["sent"]) - set(row.get("forwarded", [])):
+            if not isinstance(row, dict) or not row.get("sent") or set(row["sent"]) - set(row.get("forwarded", [])):
                 return False
             del data[repo]
             self._write(data)
@@ -151,7 +151,7 @@ class Moves:
         with self._lock:
             data = self._read()
             row = data.get(repo)
-            if not isinstance(row, dict) or row["held"] == why:
+            if not isinstance(row, dict) or row.get("held", {}) == why:
                 return False
             row["held"] = dict(why)
             self._write(data)

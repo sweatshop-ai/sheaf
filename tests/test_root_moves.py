@@ -343,3 +343,15 @@ def test_a_sent_page_with_no_hash_goes_back_to_unsent_at_the_next_start(tmp_path
     moves.sent("o/r", "c.md", "h3")
     moves.start("o/r", THERE, "id3")
     assert moves.get("o/r")["sent"] == ["c.md"] and moves.pending_forward("o/r") == {"c.md": "h3"}
+
+
+def test_a_row_from_before_the_held_and_sent_lists_is_read_whole(tmp_path):
+    moves = root_moves.Moves(tmp_path)
+    moves.path.write_text(json.dumps({"o/r": {"to": THERE, "id": "m1"}}))
+    assert moves.hold("o/r", {"a.md": "unpushed"})
+    moves.sent("o/r", "a.md", "h1")
+    assert moves.get("o/r")["sent"] == ["a.md"] and moves.get("o/r")["held"] == {}
+    moves.path.write_text(json.dumps({"o/r": {"to": THERE, "id": "m1"}}))
+    assert moves.cancel("o/r")
+    moves.path.write_text(json.dumps({"o/r": {"to": THERE, "id": "m1"}}))
+    assert not moves.done("o/r") and moves.pending_forward("o/r") == {}

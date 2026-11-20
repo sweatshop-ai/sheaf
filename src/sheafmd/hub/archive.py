@@ -201,6 +201,9 @@ class Archive:
         src = Path(root.path) / rel
         if not stat.S_ISREG(os.lstat(src).st_mode):
             raise loose.Refused("the page is not a plain file: refused")
+        base = os.path.realpath(root.path)
+        if os.path.commonpath([os.path.realpath(src), base]) != base:      # lstat looks at the last part of the path only
+            raise loose.Refused("the page is in a folder that leads out of the root: refused")
         at = int(self.hub.clock())
         # The page's file lock first, as a writer takes it (the order of the hub's locks: a file lock, then the state stores'):
         # a door write of a page the hub holds no entry for comes before the move or finds the page gone.

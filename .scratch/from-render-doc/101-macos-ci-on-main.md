@@ -2,7 +2,7 @@
 
 **Claimed by:** Wanda 2026-11-20 17:44
 
-**Status:** in-progress
+**Status:** in-progress (box 1 waits on ticket 173, box 3 on a real Mac)
 
 **Blocked by:** none
 
@@ -16,7 +16,7 @@
 
   **Result (2026-11-20, run 44776626154 on main 438fb0e9, `python=all macos=true`):** all 18 macOS slices (py3.11, py3.13, py3.14, slices 1 to 6) failed at the Tests step: xdist workers die (`node down: Not properly terminated`) and the run ends in `INTERNALERROR> KeyError: <WorkerController gwN>` after 3 to 7 percent of the tests. The failing tests, per Python and slice, are in ticket 173. The py3.11 case of `tests/test_hub_upgrade.py:130` is NOT settled: no macOS slice got far enough to run it. The wheel smoke and the launchd service steps did not run (the job stops at Tests). This box stays open until ticket 173 gives a macOS run that reaches the end.
 
-- [ ] **The workflow comments say macOS has never been green.** `.github/workflows/ci.yml:15-16` and `:67-69` ("no macOS run has been green yet"). Run 41025108862 was green. Reword them after the main run above.
+- [x] **The workflow comments say macOS has never been green.** `.github/workflows/ci.yml:15-16` and `:67-69` ("no macOS run has been green yet"). Run 41025108862 was green. Reword them after the main run above. Done: PR 499, merged as 71261793; `.github/workflows/ci.yml` on main now says "green once on a branch (41025108862), red on main (44776626154)" in both places.
 
 - [ ] **Readings of real-world data not verified on a real Mac.** Stays open; each reading, and why a CI run cannot settle it:
   - The `procStart` format a coding agent's session record carries on macOS, read by `proc_start` through `ps -o lstart=`: CI has no coding agent session, so only a Mac with a live agent shows the real string.

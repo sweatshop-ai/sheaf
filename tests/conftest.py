@@ -126,6 +126,21 @@ LOCK_ORDER_SUITES = {"test_move_forward", "test_hub_tell", "test_hub_waiting", "
 
 
 @pytest.fixture
+def no_gc():
+    """A test that times computation reads `time.process_time()` under this: wall time counts the other xdist workers
+    of the machine (CI runs 16 of them on a shared one), and a collection of the worker's large heap inside the
+    timing costs far more CPU than the code under test."""
+    import gc
+    was = gc.isenabled()
+    gc.disable()
+    try:
+        yield
+    finally:
+        if was:
+            gc.enable()
+
+
+@pytest.fixture
 def lock_order(monkeypatch):
     """The hub's locks recorded and held to `sheafmd.hub.lockorder.ORDER` (tests/lockorder.py)."""
     import lockorder

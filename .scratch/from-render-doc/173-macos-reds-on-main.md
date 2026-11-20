@@ -36,7 +36,22 @@ Run 44776626154 (manual, `python=all macos=true`, main 438fb0e9, 2026-11-20): al
 
 Which parametrised cases fail differs from run to run of the slice, as expected when a worker dies mid-test. All of these start a hub (a subprocess); no test outside that group was reported failed.
 
-- [ ] **Get a clean failure list.** Start a manual run on a branch for one Python (py3.13) with xdist off (`-p no:xdist`) or at `-n 2`, on the failing slices only, and read the first real traceback of each test. Cost: macOS minutes count ten times, so one Python, only the slices above.
+**Finding (2026-11-20).** Run 44788583073 (branch run, macos-26 py3.13, `-p no:xdist`, the six files above): pytest itself died on its first test, `test_agent_tokens.py::test_a_reply_by_an_agent_of_a_member_is_signed_client_and_member`, with exit code 140 (128 + 12, SIGSYS). Under xdist the same death kills a worker, and xdist's `loadscope` scheduler then raises `KeyError: <WorkerController gwN>` on the replacement worker. Cause: `src/sheafmd/beneath.py` `_openat2` calls `libc.syscall(437, ...)`, Linux's `openat2`; only the check `hasattr(_LIBC, "syscall")` guarded it, and macOS has `syscall`. Fix: PR 514 (`openat2` only where `sys.platform` starts with `linux`; `tests/test_beneath_platform.py` red before, green after). Proof on a macOS runner: run 44789641813 (fix applied, same six files, no xdist): 106 passed in 91.7 s, then the job was cancelled by the 40 minute cap of the diagnosis branch while in the page tests (that cap is not in main).
+
+**The list with the crash gone (run 44797348240: main plus PR 514, macos-26 py3.13, all six slices, xdist on).** Each slice now runs to its end (about 1,700 tests, 8 to 10 minutes) and 1 to 4 tests fail per slice, 16 in all. By cause:
+
+| Cause | Tests | Evidence |
+|---|---|---|
+| A. A test reads `/proc`, which macOS has not | `test_send.py::test_a_tiroir_that_hangs_or_fails_leaves_the_page_on_the_laptop_hub_with_the_loud_line` ([500], [503], [hang]); `test_hub_transcribe.py::test_a_failure_inside_fdopen_neither_leaks_nor_double_closes_a_descriptor` | `FileNotFoundError: '/proc'`, `'/proc/self/fd'` |
+| B. Counts of path resolutions and `lstat` calls differ, under `/private/var/folders` (a symlinked temp dir) | `test_listing_realpath_calls.py` (two tests), `test_listing_resolves_once.py::test_the_sheaf_listing_resolves_folders_once_per_listing_not_per_page` | `153 resolutions of 55 paths`; `494 folder lstat calls for 10 pages` |
+| C. The "file cannot be read" message differs from the expected one | `test_hub_visibility.py::test_a_token_that_saw_a_sheaf_is_told_when_its_file_cannot_be_read` ([read-args0], [threads-args1], [reply-args2] with `unreadable`) | the answer ends in "`sheaf diag`." where the test expects "... not be read." |
+| D. A test hub is not stopped, or not started on its port | `test_isolation.py` (two tests) | `assert ([])` |
+| E. The guard that finds a signalled foreign pid fires | `test_real_hub_untouched.py` (two tests), `test_hub_commits.py::test_a_git_that_failed_before_the_stop_signalled_it_is_a_failure_...` | `a test signalled pid 3791 (15), a process it did not start` |
+| F. A message differs | `test_repo_pages.py::test_a_page_of_a_repo_that_is_anothers_private_root_renders_on_the_laptop_with_one_line_naming_no_one` | `'not cloned'` expected in the output |
+
+Causes are read from the assertion text only: none of A to F is diagnosed yet. One PR per cause.
+
+- [x] **Get a clean failure list.** Start a manual run on a branch for one Python (py3.13) with xdist off (`-p no:xdist`) or at `-n 2`, on the failing slices only, and read the first real traceback of each test. Cost: macOS minutes count ten times, so one Python, only the slices above.
 
 - [ ] **Group the failures by cause, fix only what a macOS runner proves.** One cause per PR. Cause of the worker deaths: not yet read.
 

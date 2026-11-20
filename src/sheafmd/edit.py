@@ -708,6 +708,10 @@ def _text_backslashes(fragment: str):
     return str(soup), token
 
 
+# What GFM links again when written bare: an http(s) address with no `|`, and none of the marks it trims off the end.
+_BARE_URL = re.compile(r"https?://[^|\s<>]*[^|\s<>.,:;!?*_~'\")]")
+
+
 def _bare_urls_as_words(fragment: str):
     """(the fragment with each bare URL that holds a backslash as a word, {word: the URL}). A bare URL is its own
     text and address, read as written: pandoc writes it as a link, whose label and address are read with escapes,
@@ -718,7 +722,7 @@ def _bare_urls_as_words(fragment: str):
         return fragment, {}
     soup, put = BeautifulSoup(fragment, "html.parser"), {}
     for a in soup.find_all("a", href=True):
-        if "\\" in a["href"] and "|" not in a["href"] and a.get_text() == a["href"] and not a.find_parent(["code", "pre"]) and not a.find(True):
+        if _BARE_URL.fullmatch(a["href"]) and "\\" in a["href"] and a.get_text() == a["href"] and not a.find_parent(["code", "pre"]) and not a.find(True):
             word = "RDURL" + os.urandom(5).hex().upper()
             while word in fragment or word in put:
                 word = "RDURL" + os.urandom(5).hex().upper()

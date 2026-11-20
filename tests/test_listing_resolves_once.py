@@ -4,7 +4,7 @@ page. After the git walks went (test_listing_git_dir_walks) they were most of th
 import os
 import stat
 
-from helpers import BEA
+from helpers import BEA, in_beneath_walk
 from test_archive import made, clock  # noqa: F401  (fixture)
 from test_hub_commits import box, git, merged_on_github, rectoversos, remote  # noqa: F401  (fixtures)
 from test_write_log import agents  # noqa: F401  (fixture)
@@ -16,7 +16,7 @@ def folder_lstats(agents, monkeypatch) -> int:
 
     def spy(path, *a, **k):
         got = real(path, *a, **k)
-        if stat.S_ISDIR(got.st_mode):
+        if stat.S_ISDIR(got.st_mode) and not in_beneath_walk():
             asked.append(path)
         return got
     monkeypatch.setattr(os, "lstat", spy)

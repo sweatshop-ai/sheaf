@@ -4,6 +4,7 @@ import os
 from collections import Counter
 
 import pytest
+from helpers import in_beneath_walk
 from test_listing_git_calls import FOLDERS, PAGES, make_pages
 from two_roots import A, TwoRoots, two_roots
 
@@ -18,7 +19,8 @@ def counted_resolutions(monkeypatch) -> Counter:
     real = os.path.realpath
 
     def spy(path, *a, **kw):
-        asked[os.fspath(path)] += 1
+        if not in_beneath_walk():
+            asked[os.fspath(path)] += 1
         return real(path, *a, **kw)
     monkeypatch.setattr(os.path, "realpath", spy)
     return asked

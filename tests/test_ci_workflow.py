@@ -270,6 +270,20 @@ def test_the_browsers_system_packages_are_installed_by_the_job_only_where_it_can
     assert 'playwright install $deps chromium firefox webkit' in block
 
 
+def test_a_slow_package_mirror_cannot_hold_the_page_test_step_for_an_hour(text):
+    # Run 44765451025, slice 4: `playwright install --with-deps` sat in apt for 45 min 14 s (125 MB at 46 kB/s from the
+    # runner's mirror) and the page tests, 4 minutes of work, ended 50 minutes in, 10 under the job's limit. The same install took
+    # 2 min 13 s in another slice of the same run. The install is bounded, tried again (apt keeps what it fetched), and the step
+    # has a limit of its own, so a job names the install when it is the one that stands still.
+    i = text.index("- name: Page tests (Playwright, Chromium, Firefox, WebKit)")
+    j = text.index("\n      - name:", i + 1)
+    block = text[i:j]
+    assert re.search(r"^        timeout-minutes: (\d+)$", block, flags=re.M), "the step has a limit of its own"
+    assert int(re.search(r"^        timeout-minutes: (\d+)$", block, flags=re.M).group(1)) < 60
+    assert re.search(r'command -v timeout >/dev/null; then bounded="timeout -k 30 \d+"', block), "macOS has no timeout: the bound is there only where it exists"
+    assert re.search(r"for try in 1 2 3; do \$bounded uv run --no-sync playwright install \$deps chromium firefox webkit && break", block)
+
+
 def test_no_step_name_holds_a_colon_and_a_space_or_a_hash_that_YAML_reads_as_syntax(text):
     # GitHub refuses a file it cannot parse ("workflow file issue", a run that fails in the second it starts), and the tests
     # above read the text only: a step name "Page tests (Playwright: Chromium, ...)" passed them all (2026-10-31, 56d4a5b).

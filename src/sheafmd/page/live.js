@@ -143,6 +143,9 @@
     clearInterval(this.timer);
     if (this.es) { this.es.onerror = null; this.es.close(); this.es = null; }
     this.open = false;
+    this.joined = {};          // a join still on the way must not refuse a stream on the next leader
+    this.sent = {};
+    if (this.release) this.release();
   };
   Leader.prototype.connect = function () {
     var self = this;
@@ -212,23 +215,24 @@
   // Chrome freezes a background tab (memory saver, battery saver) and a frozen tab keeps its lock while relaying
   // nothing: the other tabs would stop hearing changes. So the leader lets go on `freeze` (closing its stream) and
   // queues for the lock again on `resume`; the next leader asks every tab to join its stream.
-  var queued = false;
+  var waiting = null;        // the abort of this tab's queued request for the lock, while it waits
   function lock() {
-    queued = true;
-    navigator.locks.request('sheaf-live', function () {
-      queued = false;
+    var ctl = waiting = new AbortController();
+    navigator.locks.request('sheaf-live', { signal: ctl.signal }, function () {
+      waiting = null;
       lead = new Leader();
       chan.postMessage({ t: 'who' });
       hear({ t: 'who' });
       return new Promise(function (release) { lead.release = release; });   // held until this tab goes or freezes
-    });
+    }).catch(function () {});        // aborted
   }
   document.addEventListener('freeze', function () {
+    // A frozen tab queued for the lock must not be handed it either: its callback could not run.
+    if (waiting) { waiting.abort(); waiting = null; }
     if (!lead) return;
     var l = lead;
     lead = null;
     l.stop();
-    l.release();
   });
   document.addEventListener('resume', function () {
     // Its streams were on the connection it closed, or on another leader's that dropped them while it slept.
@@ -236,7 +240,7 @@
       if (mine[k].readyState === 1) mine[k]._fail(0);
       ask({ t: 'join', key: k, doc: mine[k].doc, tab: TAB });
     });
-    if (!lead && !queued) lock();
+    if (!lead && !waiting) lock();
   });
   lock();
 

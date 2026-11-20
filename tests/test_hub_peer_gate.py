@@ -124,6 +124,14 @@ def test_a_caller_that_closed_before_the_hub_could_say_is_told_to_try_again_and_
         assert len(hub.auth.signins) == before
 
 
+def test_a_caller_already_closed_when_the_hub_looks_is_never_let_through_even_where_the_hub_runs_as_root(monkeypatch):
+    # A closed caller's socket reads as uid 0; where the hub is root too, that reads as the hub's own user.
+    monkeypatch.setattr(peer, "check", lambda conn: None)
+    monkeypatch.setattr(peer, "closed", lambda sock: True)
+    conn = peer.look(CLIENT, AT_HUB, object())
+    assert conn.refusal is not None and conn.closed()
+
+
 def test_a_caller_still_connected_is_refused_not_told_to_try_again(handler, hub):
     assert ask(handler, hub, "GET", "/_/index.json", seen(closed=False), "key").status == 403
 

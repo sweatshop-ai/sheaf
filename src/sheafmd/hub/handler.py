@@ -789,7 +789,7 @@ class Handler:
         other = no.kind == peer.OTHER_USER
         row = "peer-refused"
         if time.monotonic() - self._peer_row_at < PEER_ROW_SECONDS:
-            row = False                  # counted, not written: a loop of refused requests is one row a minute
+            row = False                  # not written: a loop of refused requests is one row a minute
         else:
             self._peer_row_at = time.monotonic()
         detail = no.detail

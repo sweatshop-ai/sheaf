@@ -244,7 +244,12 @@ def look(client, hub, sock) -> Conn:
     """The connection `sock` came in on, with the answer to who is at its other end: asked once, as
     soon as it is accepted, before a byte of the request is read."""
     conn = Conn(client, hub)
-    return Conn(client, hub, True, check(conn), lambda: closed(sock))
+    no = check(conn)
+    if no is None and closed(sock):
+        # Asked after the caller closed, the lookup reads root, which is the hub's own user where the hub
+        # runs as root: a closed caller is never let through on that answer.
+        no = _unknown("the connection closed before the hub could tell who sent this")
+    return Conn(client, hub, True, no, lambda: closed(sock))
 
 
 def startup() -> str | None:

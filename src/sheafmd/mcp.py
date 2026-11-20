@@ -174,6 +174,7 @@ MAX_TEXT = 1024 * 1024           # bytes of UTF-8 a create or an update may writ
 NO_RIGHT = ("This token reads and answers comments; it does not read, make or change pages. A "
             "token that does is made with `sheaf token add NAME --write`.")
 NOT_IN_A_ROOT = "is not inside a root of this hub; a page is made only in a root the hub already has."
+NOT_IN_PROJECT = "the token's member is not in the project {}."
 HASH_RE = re.compile(r"[0-9a-f]{16}")
 
 
@@ -1083,6 +1084,10 @@ class Door:
             # A root of another member's. Root ownership alone, not rule A: `_new_address` already refused a real path
             # inside a private root, and a list name a private root holds falls to `place.taken` below, as a shared one.
             raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")
+        if member is not None and (project := self.hub.project_refused(member, address)) is not None:
+            # Before any look at a private root or a name's homes, so a member the project does not name learns
+            # nothing from the order of the checks; the project is named, its members never (8.12).
+            raise ToolError(f"{_named(args['doc'])} cannot be made: {NOT_IN_PROJECT.format(project)}", "path")
         self._writable(address)         # a clone with no save branch is not written to, whoever's token
         if self.hub.forwards.follow(address) is not None:
             raise ToolError(f"{_named(args['doc'])} cannot be made: a page moved away from that address, and its "

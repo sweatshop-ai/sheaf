@@ -141,7 +141,7 @@
 279	439	b	src/sheafmd/hub/writelog.py:270	restore writes `replace(line, address=address)` to the file but keeps `deque(kept, ...)` with the old addresses in memory; build the deque from the replaced lines, as undo does at :256.	2
 280	439	c	src/sheafmd/hub/writelog.py:263	restore re-appends up to KEEP lines plus a marker per failed landing; bounded by rotation and lossless, so any change (diffing the lines) is a design decision.	
 284	440	FIXED	src/sheafmd/connect.py:134-153	use_peer_file now wraps mkdir/os.open/replace in `except OSError` and raises ConnectError("cannot keep the token in ... nothing was written").	
-285	440	b	src/sheafmd/cli.py:1134	`peer add` still prints `sheaf peer use <address> <token>` although the `use` help (cli.py:1093-1096) calls a token argument discouraged; print the stdin form (token piped on the standard input).	0
+285	440	FIXED	src/sheafmd/cli.py:1134	`peer add` still prints `sheaf peer use <address> <token>` although the `use` help (cli.py:1093-1096) calls a token argument discouraged; print the stdin form (token piped on the standard input).	0
 286	440	c	src/sheafmd/connect.py:82	peer_credential_name still maps every non [A-Za-z0-9._-] to '-', so a:8443 and a-8443 share a file; a different encoding renames credential files already deployed, a decision.	
 287	440	c	src/sheafmd/connect.py:133	mkdir(mode=0o700, exist_ok=True) leaves an existing folder's mode; chmod-ing a folder the user named is a decision (the file is 0600 either way).	
 291	441	FIXED	src/sheafmd/connect.py:134-153	Both except branches (OSError :146, BaseException :149) unlink the temp when `made`, so no .new token is left after a failed os.replace.	

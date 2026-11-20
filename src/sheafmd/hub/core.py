@@ -1729,7 +1729,11 @@ class Hub:
         """A pull of the repo at `folder` is about to change `files`, (absolute path, last author): the page open on one
         sees it change: until `pulled`, what it sees of the file is the pull's, not a disk write."""
         for path, _ in files:
-            address = self._page_of(path)
+            try:
+                address = self._page_of(path)
+            except Exception:       # one file the hub cannot name leaves the others' pull as it is
+                self.record_exception("pull-page-failed")
+                continue
             if address in self.entries:
                 self.writes.expect_pull(address)
 
@@ -1738,7 +1742,11 @@ class Hub:
         pull's locks; read now when not given), so the page's next sight of it is the pull's; when the pull went through, a
         line each, `git · <author>`, for each that is a page of a root the hub serves."""
         for path, author in files:
-            address = self._page_of(path)
+            try:
+                address = self._page_of(path)
+            except Exception:       # a file that cannot be named holds no pull open: the others' end all the same
+                self.record_exception("pull-page-failed")
+                continue
             if address is None:
                 continue
             if address in self.entries and ok:

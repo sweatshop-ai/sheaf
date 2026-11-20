@@ -301,10 +301,15 @@ class Loose:
         in `loose.json`, its folder, and the root it added to the member. A root that holds anything stays."""
         with self._lock, state.file_locked("loose.lock"):
             folder = self._read().get(member.id)
-            if folder is None or os.path.realpath(folder) != os.path.realpath(root.path) or os.listdir(folder):
+            if folder is None or os.path.realpath(folder) != os.path.realpath(root.path):
+                return
+            try:
+                if os.listdir(folder):
+                    return
+                os.rmdir(folder)            # first: a folder that cannot go leaves the root and its entry as they were
+            except OSError:
                 return
             self.hub.forget_root(root.name)
-            os.rmdir(folder)
             state.write_json(_file(), {k: v for k, v in self._read().items() if k != member.id})
             proxy = getattr(self.hub, "proxy", None)
             m = proxy.members.get(member.id) if proxy is not None else None

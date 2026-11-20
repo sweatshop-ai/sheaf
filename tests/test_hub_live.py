@@ -988,3 +988,40 @@ def test_a_torn_read_that_a_refresh_gives_up_is_not_kept_as_a_version(made):
     doc._render = lambda text: next(writes, lambda: None)()
     assert doc.refresh() is None
     assert rds.md_hash(torn) not in doc._versions
+
+
+def test_a_refresh_whose_second_look_at_the_file_cannot_decide_it_keeps_what_the_tabs_hold(made):
+    from sheafmd.hub import place
+    doc, md, rendered, events, _ = made()
+    changed = DOC.replace("First paragraph.", "First, reworded.")
+    md.write_text(changed, encoding="utf-8")
+    stat_calls = []
+
+    class Entry:
+        def read(self):
+            return md.read_text(encoding="utf-8")
+
+        def stat(self):
+            stat_calls.append(1)
+            if len(stat_calls) > 1:
+                raise place.Undecided("a private root cannot be looked at")
+            return md.stat()
+    doc._entry = Entry()
+    assert doc.refresh() is None and events == []
+    assert doc.current() == (rds.md_hash(DOC), DOC)
+
+
+def test_a_refresh_whose_first_look_at_the_file_cannot_decide_it_either_publishes_nothing(made):
+    from sheafmd.hub import place
+    doc, md, rendered, events, _ = made()
+    md.write_text(DOC.replace("First paragraph.", "First, reworded."), encoding="utf-8")
+
+    class Entry:
+        def read(self):
+            return md.read_text(encoding="utf-8")
+
+        def stat(self):
+            raise place.Undecided("a private root cannot be looked at")
+    doc._entry = Entry()
+    assert doc.refresh() is None and events == []
+    assert doc.current() == (rds.md_hash(DOC), DOC)

@@ -105,3 +105,23 @@ def test_a_write_between_the_pull_and_its_telling_keeps_its_disk_line(world):
     path.write_text(OPEN + "\nAn editor, in the gap.\n", encoding="utf-8")
     world.hub.pulled(path.parent, files, True, hashes)
     assert not world.hub.writes.is_pull(world.address, md_hash(path.read_text(encoding="utf-8")))
+
+
+def test_a_file_the_hub_cannot_name_does_not_keep_the_pull_of_the_files_after_it_open(world, monkeypatch):
+    world.put(OPEN)
+    path = world.two.private_repo / NAME
+    bad = world.two.private_repo / "unnameable.md"
+    world.hub.entry(world.address)
+    real = world.hub._page_of
+
+    def page_of(p):
+        if p == bad:
+            raise RuntimeError("cannot decide")
+        return real(p)
+    monkeypatch.setattr(world.hub, "_page_of", page_of)
+    files = [(bad, "Ada"), (path, "Ada")]
+    world.hub.pulling(path.parent, files)
+    assert world.hub.writes.is_pull(world.address, "any")
+    world.hub.pulled(path.parent, files, True)
+    assert not world.hub.writes.is_pull(world.address, "any")
+    assert [l.via for l in world.hub.writes.lines(world.address)] == ["pull"]

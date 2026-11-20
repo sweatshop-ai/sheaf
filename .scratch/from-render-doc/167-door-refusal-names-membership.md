@@ -2,6 +2,8 @@
 
 **Status:** open (the fix never reached this repo: only the ticket was written)
 
+**Blocked by:** none
+
 **From:** render-doc ticket 167 (private archive), triaged 2026-11-12
 
 **Where (main 81afdff):** `src/sheafmd/mcp.py:133` (`NOT_IN_A_ROOT`), `:763` (`_create`), `:781-782`; `src/sheafmd/hub/core.py:998` (`Hub.granted`); SPEC section 12

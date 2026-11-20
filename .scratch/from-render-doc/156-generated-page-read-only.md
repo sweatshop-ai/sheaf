@@ -2,6 +2,9 @@
 
 **Status:** open (feature not built; where the mark lives is still to decide)
 
+**Blocked by:** 
+- External: Thierry decides where the per-document "generated" mark lives (not yet asked)
+
 **From:** render-doc ticket 156 (private archive), triaged 2026-11-12
 
 **Where (main 81afdff):** `src/sheafmd/render.py:1137-1147` (page meta `edit` and `why`), the MCP door's `create`/`update` in `src/sheafmd/mcp.py`; SPEC 4.2, 7.1-7.3, 8.3, 8.5, 9.7, 10.1, 10.3, 12

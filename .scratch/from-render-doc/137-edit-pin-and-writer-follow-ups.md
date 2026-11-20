@@ -2,6 +2,8 @@
 
 **Status:** open
 
+**Blocked by:** none
+
 **From:** render-doc ticket 137 (private archive), triaged 2026-11-12
 
 **Where (main 81afdff):** `src/sheafmd/edit.py`, `src/sheafmd/render.py:801`, `src/sheafmd/hub/live.py`, `src/sheafmd/hub/state.py`, `src/sheafmd/source.py`, `src/sheafmd/atomic.py`, `src/sheafmd/agent_setup.py`, `SPEC.md:460`, `:788`, `:1636`

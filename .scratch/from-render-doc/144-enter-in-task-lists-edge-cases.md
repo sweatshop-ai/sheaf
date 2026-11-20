@@ -2,6 +2,8 @@
 
 **Status:** open
 
+**Blocked by:** none
+
 **From:** render-doc ticket 144 (private archive), triaged 2026-11-12
 
 **Where (main 81afdff):** `src/sheafmd/page/page.js:2946-2980`, `:3010-3013`, `src/sheafmd/edit.py:275`, `tests/page/test_page_writing.py:3682-4012`

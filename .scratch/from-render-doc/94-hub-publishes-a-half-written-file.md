@@ -2,6 +2,8 @@
 
 **Status:** open
 
+**Blocked by:** none
+
 **From:** render-doc ticket 94 (private archive), triaged 2026-11-12
 
 **Where (main 81afdff):** `src/sheafmd/hub/core.py:1159-1163`, `src/sheafmd/hub/live.py:168`, `:590-604`, `src/sheafmd/hub/waiting.py:157-168`, `tests/page/test_page_writing.py`

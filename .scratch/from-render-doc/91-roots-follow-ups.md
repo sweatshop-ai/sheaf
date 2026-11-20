@@ -2,6 +2,8 @@
 
 **Status:** open
 
+**Blocked by:** none
+
 **From:** render-doc ticket 91 (private archive), triaged 2026-11-12
 
 **Where (main 81afdff):** `SPEC.md:696`, `SPEC.md:1591`, `src/sheafmd/hub/index.py:81`, `src/sheafmd/hub/handler.py:1691-1701`, `src/sheafmd/hub/tell.py:415`, `SPEC.md:666`, `src/sheafmd/hub/core.py:815`, `:857-880`, `src/sheafmd/hub/live.py:468`

@@ -2,6 +2,8 @@
 
 **Status:** open
 
+**Blocked by:** none
+
 **From:** render-doc ticket 155 (private archive), triaged 2026-11-12
 
 **Where (main 81afdff):** mostly test fixtures; also `SPEC.md:887`, `:995-996`, `:1026`, `:1070-1071`, `:1229`, `docs/design/2026-11-07-agents-and-waiting-tells.md` (lines 3 and 12 among others), `src/sheafmd/agent_setup.py:270`

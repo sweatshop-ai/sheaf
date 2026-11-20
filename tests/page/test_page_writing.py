@@ -4189,7 +4189,7 @@ def test_enter_at_the_end_of_a_task_item_then_a_comment_on_the_new_words_deleted
     p.keyboard.type("word")
     p.wait_for_timeout(3500)                       # the autosave writes the item
     assert "- [ ] word" in f.read_text()
-    comment_on(tab, at("main li:has-text('word')", "word", 0), at("main li:has-text('word')", "word", None), "About this.")
+    comment_on(tab, at("main li:nth-of-type(2)", "word", 0), at("main li:nth-of-type(2)", "word", None), "About this.")
     p.keyboard.press(key("End"))                   # the selection the comment was made on is a caret again
     for _ in range(4):
         p.keyboard.press("Backspace")

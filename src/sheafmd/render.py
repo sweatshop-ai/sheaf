@@ -29,7 +29,7 @@ from importlib import resources
 from pathlib import Path
 
 
-from . import _pandoc, charts, config, copyblock, images, links
+from . import _pandoc, charts, config, copyblock, images, links, orderedtask
 from . import comments as rdc
 from . import sanitize as sanitizer
 from . import source as src_mod
@@ -805,10 +805,10 @@ def _shown_head_line(src: str) -> int:
 
 def pandoc_html(text: str) -> str:
     """The bundled pandoc, never whatever is on PATH (SPEC 3.2)."""
-    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], copyblock.hide(text))
+    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], orderedtask.hide(copyblock.hide(text)))
     if r.returncode != 0:
         raise RenderError(f"pandoc could not read this document: {r.stderr.strip()[:200]}")
-    return r.stdout
+    return orderedtask.show(r.stdout)
 
 
 PRE_RE = re.compile(r"(<pre\b[\s\S]*?</pre>)", re.I)

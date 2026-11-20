@@ -16,7 +16,7 @@ Nested tasks:
     - [x] Cable chart
 - [x] Open the doors
 
-An ordered list that starts with brackets (pandoc draws no box for it):
+An ordered list that starts with brackets (the page draws a box for it, as GitHub does):
 
 1. [x] Collect the bikes
 2. [ ] Tag each bike

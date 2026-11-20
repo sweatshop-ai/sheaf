@@ -23,7 +23,7 @@ from typing import NamedTuple
 
 from . import _pandoc
 from . import comments as rdc
-from . import copyblock, diagnostics
+from . import copyblock, diagnostics, orderedtask
 from .blocks import LOCKED_KINDS, split_md_blocks
 from .sanitize import sanitize
 
@@ -909,10 +909,10 @@ def _norm_html(fragment: str) -> str:
 
 @lru_cache(maxsize=8)
 def _rendered(content: str) -> str:
-    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], copyblock.hide(content))
+    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], orderedtask.hide(copyblock.hide(content)))
     if r.returncode != 0:
         raise _Unread                   # an exception is not cached: a timeout once must not refuse the next saves
-    return r.stdout
+    return orderedtask.show(r.stdout)
 
 
 def _render_source(content: str, keep: bool = True):
@@ -967,11 +967,11 @@ def _unchanged(block, fragment: str) -> bool:
 # the block is saved like any edit. When ticks are the only difference, the save
 # does not go through pandoc: it flips the `[ ]` / `[x]` of those items in the
 # source and leaves every other byte alone. Pandoc would rewrite the whole list
-# (bullets, wrapping, a capital X), so one tick would touch every line. Only a bullet item has a mark: pandoc 3.9
-# draws no box for `1. [ ] a` (a CR or none), so a mark there would be one the page never shows. The bullet may
-# stand behind other markers on its line (`- - [ ] a`, `1. - [ ] a`, `1. > - [ ] a`): pandoc draws its box.
+# (bullets, wrapping, a capital X), so one tick would touch every line. A bullet or an ordered item has a mark: pandoc 3.9
+# draws a box for a bullet only, and `orderedtask` draws the one GitHub draws for `1. [ ] a`. The item may stand
+# behind other markers on its line (`- - [ ] a`, `1. - [ ] a`, `1. > - [ ] a`): its box is drawn.
 TASK_MARK_RE = re.compile(
-    r"^([ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+|>[ \t]*)*[-*+][ \t]+)\[([ xX])\](?=[ \t]|$)", re.M)
+    r"^([ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+|>[ \t]*)*(?:[-*+]|\d{1,9}[.)])[ \t]+)\[([ xX])\](?=[ \t]|$)", re.M)
 
 
 class _Mark:

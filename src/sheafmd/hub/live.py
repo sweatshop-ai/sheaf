@@ -61,6 +61,8 @@ class LiveDocument:
         self._render, self._publish = render, publish
         self._by, self._clock = by, clock
         self._store, self._address = versions, address
+        self._written = set()        # the hashes this document put in the store: what a forget that came late takes out
+        self._forgotten = None       # `detach`: the store it had when its root was forgotten
         self._lock = threading.Lock()
         self._owner = None
         text = self._read()
@@ -141,6 +143,8 @@ class LiveDocument:
 
     def _stored(self):
         """The versions store now: found at each use when `versions` is a callable, so it follows the file."""
+        if self._forgotten is not None:
+            return None
         s = self._store
         return s() if callable(s) else s
 
@@ -151,6 +155,7 @@ class LiveDocument:
             v.pop(next(iter(v)))
         store = self._stored()
         if store is not None and self._address is not None:
+            self._written.add(rds.md_hash(text))
             try:
                 store.put(self._address, text)
             except OSError:
@@ -496,14 +501,27 @@ class LiveDocument:
         with self._hold(), self._held():
             return self._await(cid)
 
+    def detach(self):
+        """Its root was forgotten (SPEC 8.2), and the hub must not wait for this document's lock to say so: from now
+        on its texts stay in memory, and none reaches the store. Takes no lock. A write already under way may still
+        put its text there, so `forget` then takes out what this document wrote, and no more: the folder that takes
+        the name next has versions of its own under the address."""
+        store = self._store
+        self._forgotten = store() if callable(store) else store
+
     def forget(self):
         """Its root was forgotten (SPEC 8.2): drop its versions on disk, and keep the texts it hands out in
         memory only from now on. Under the lock, so the text of a write still under way is on disk by
-        then and goes with the others."""
+        then and goes with the others. After `detach`, only the texts this document wrote go: the name may
+        be another folder's by now."""
         with self._held():
-            store = self._stored()
+            detached = self._forgotten is not None
+            store = self._forgotten if detached else self._stored()
             if store is not None and self._address is not None:
-                store.forget(self._address)
+                if detached:
+                    store.forget_texts(self._address, self._written)
+                else:
+                    store.forget(self._address)
             self._store = None
 
     def pin(self, h):
@@ -522,6 +540,7 @@ class LiveDocument:
                 self._pins.pop(next(iter(self._pins)))
             store = self._stored()
             if store is not None and self._address is not None:
+                self._written.add(rds.md_hash(text))
                 try:
                     store.pin(self._address, text)
                 except OSError:

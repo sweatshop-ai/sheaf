@@ -1132,3 +1132,71 @@ def test_a_render_whose_root_is_forgotten_while_the_page_is_rebuilt_makes_no_ent
     e.live.rebuild = lambda: world.hub.forget_root("work")
     world.hub.render(f, {"title": "Two"}, None)
     assert "work/a.md" not in world.hub.entries
+
+
+# ── a forget does not wait for a render under the hub's lock (SPEC 8.2) ─────────
+
+def _holding(live):
+    """A thread that holds the document's lock, as a render does, until `release` is set."""
+    held, release = threading.Event(), threading.Event()
+
+    def run():
+        with live.exclusive():
+            held.set()
+            release.wait(15)
+    t = threading.Thread(target=run, daemon=True)
+    t.start()
+    assert held.wait(5)
+    return t, release
+
+
+def _forgetting(hub, name):
+    t = threading.Thread(target=lambda: hub.forget_root(name), daemon=True)
+    t.start()
+    return t
+
+
+def _until(check, seconds=5):
+    end = time.monotonic() + seconds
+    while time.monotonic() < end and not check():
+        time.sleep(0.01)
+    return check()
+
+
+def test_a_forget_does_not_hold_the_hubs_lock_while_a_render_of_its_document_runs(world, put):
+    put("a.md")
+    e = world.hub.entry("work/a.md")
+    renderer, release = _holding(e.live)
+    forgetting = _forgetting(world.hub, "work")
+    try:
+        assert _until(lambda: "work/a.md" not in world.hub.entries)
+        assert world.hub._lock.acquire(timeout=3), "the hub's lock is held while the forget waits for a render"
+        world.hub._lock.release()
+        assert forgetting.is_alive()        # the forget itself still waits: the page is told `gone` after the write
+    finally:
+        release.set()
+        renderer.join(5)
+        forgetting.join(5)
+    assert not forgetting.is_alive()
+
+
+def test_a_late_forget_leaves_the_versions_of_the_folder_that_took_the_name(world, put, tmp_path):
+    put("a.md")
+    e = world.hub.entry("work/a.md")
+    renderer, release = _holding(e.live)
+    forgetting = _forgetting(world.hub, "work")
+    try:
+        assert _until(lambda: "work/a.md" not in world.hub.entries)
+        other = tmp_path / "y" / "work"
+        other.mkdir(parents=True)
+        text = "# The other folder's document\n"
+        (other / "a.md").write_text(text)
+        world.hub.roots.for_document(other / "a.md")
+        world.hub.entry("work/a.md")
+        assert world.hub.versions.get("work/a.md", md_hash(text)) == text
+    finally:
+        release.set()
+        renderer.join(5)
+        forgetting.join(5)
+    assert not forgetting.is_alive()
+    assert world.hub.versions.get("work/a.md", md_hash(text)) == text

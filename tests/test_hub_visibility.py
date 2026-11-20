@@ -636,7 +636,7 @@ def test_the_owner_deleting_the_open_share_box_above_a_ticked_ballot_does_not_sh
                     member=ALICE)
     assert got.status == 200, got.body
     after = (work / DOC).read_text(encoding="utf-8")
-    assert "- [x] Share" in after and "shared" not in front_matter(after)
+    assert "- [ ] Share" in after and "- [x]" not in after and "shared" not in front_matter(after)    # the ballot's line is left unticked
     assert team.get(f"/work/{DOC}", member=BOB).status == 404
 
 
@@ -1270,6 +1270,76 @@ def test_the_hub_never_writes_the_new_label_into_a_file_that_holds_the_old_line(
     assert team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [edit]}, member=ALICE).status == 200
     text = (work / DOC).read_text(encoding="utf-8")
     assert "- [ ] Share\n" in text and "Shared with the team" not in text
+
+
+def rename_and_tick(team, work, rel, member, label="Shared with the team"):
+    """The page's save that renames the first unticked `Share` box to `label` and ticks it in one edit: a line that
+    becomes a ticked Share from anything else than the owner's tick of it, which the page never sends."""
+    text = (work / rel).read_text(encoding="utf-8")
+    edit = the_list.tick_edit(text, 0, "Share")
+    edit["html"] = edit["html"].replace("/>Share<", f"/>{label}<")
+    assert label in edit["html"]
+    return team.post("/_/save", {"doc": f"work/{rel}", "hash": md_hash(text), "edits": [edit]}, member=member)
+
+
+# ── a ticked Share box on a sheaf that is not shared (SPEC 9.11) ──────────────────────────────────────────
+
+def test_the_owners_save_that_renames_and_ticks_share_in_one_edit_leaves_the_box_unticked(team, work):
+    put(team, work, DOC, PRIVATE)
+    assert rename_and_tick(team, work, DOC, ALICE).status == 200
+    text = (work / DOC).read_text(encoding="utf-8")
+    assert "- [ ] Shared with the team" in text and "- [x]" not in text
+    assert "shared" not in front_matter(text)
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
+
+
+def test_a_member_who_is_not_the_owner_cannot_rename_and_tick_share_and_nothing_is_written(team, work):
+    put(team, work, DOC, PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]"))   # Bob can open it
+    before = (work / DOC).read_text(encoding="utf-8")
+    got = rename_and_tick(team, work, DOC, BOB)
+    assert got.status == 409 and "owner" in got.json()["error"]
+    assert (work / DOC).read_text(encoding="utf-8") == before
+
+
+def test_a_door_create_with_a_ticked_labelled_box_on_an_owner_only_sheaf_leaves_it_unticked(team, browser, work):
+    (work / "acme/tiroir").mkdir(parents=True)
+    text = PRIVATE.replace("- [ ] Share", "- [x] Shared with the team")
+    is_error, got = call(browser, "create", token=Tokens().add("mistral", write=True), doc=f"work/{DOC}", text=text)
+    assert not is_error, got
+    on_disk = (work / DOC).read_text(encoding="utf-8")
+    assert "- [ ] Shared with the team" in on_disk and "- [x]" not in on_disk
+    assert front_matter(on_disk)["visibility"] == "owner"
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
+
+
+MIXED = PRIVATE.replace("- [ ] Share\n", "- [ ] Share\n- [ ] Shared with the team\n")
+
+
+def test_a_page_with_a_box_of_each_spelling_is_shared_by_either_and_withdrawn_by_neither_alone(team, work):
+    put(team, work, DOC, MIXED)
+    assert tick(team, work, DOC, "Share", ALICE).status == 200
+    assert tick(team, work, DOC, "Share", ALICE).status == 200      # the other spelling, now the first unticked
+    text = (work / DOC).read_text(encoding="utf-8")
+    assert "- [x] Share\n- [x] Shared with the team" in text and front_matter(text)["visibility"] == "project"
+    edit = the_list.tick_edit(text, 0, "Share", release=True)
+    assert team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [edit]}, member=ALICE).status == 200
+    text = (work / DOC).read_text(encoding="utf-8")
+    assert front_matter(text)["visibility"] == "project" and team.get(f"/work/{DOC}", member=BOB).status == 200
+    edit = the_list.tick_edit(text, 0, "Share", release=True)
+    assert team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [edit]}, member=ALICE).status == 200
+    assert front_matter((work / DOC).read_text(encoding="utf-8"))["visibility"] == "owner"
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
+
+
+def test_a_plain_ticked_task_that_says_shared_with_the_team_is_shares_control_and_bob_cannot_untick_it(team, work):
+    """Case 4: the words are Share's, wherever a document has them, so a member who is not the owner is refused."""
+    shared = PRIVATE.replace("sources: [library:doc-123]", "visibility: project").replace("- [ ] Share", "- [x] Shared with the team")
+    put(team, work, DOC, shared)
+    text = (work / DOC).read_text(encoding="utf-8")
+    edit = the_list.tick_edit(text, 0, "Share", release=True)
+    got = team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [edit]}, member=BOB)
+    assert got.status == 409 and "withdraw its Share" in got.json()["error"]
+    assert (work / DOC).read_text(encoding="utf-8") == text
 
 
 def tick_names(team, work, rel, member):

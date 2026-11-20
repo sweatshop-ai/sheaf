@@ -35,7 +35,7 @@ def test_a_command_that_starts_a_hub_starts_it_on_that_port(work, sheaf, monkeyp
     doc.write_text("# T\n\nHello.\n", encoding="utf-8")
     ran = sheaf(doc)
     print('DIAG', ran.code, repr(ran.out), repr(ran.err))
-    assert ran.code == 0
+    assert ran.code == 0, ('DIAG', ran.out, ran.err)
     info = server.read_pid_file()
     STARTED.append(info["pid"])
     assert info["port"] == config.port() != 27419

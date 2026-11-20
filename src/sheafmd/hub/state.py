@@ -272,6 +272,18 @@ class Versions:
         if self._root is None or inside:
             shutil.rmtree(self._folder(address), ignore_errors=True)
 
+    def forget_texts(self, address: str, hashes, inside: bool = False):
+        """`forget`, for the texts named by `hashes` only, newest and pinned alike: what one document put there, when
+        the folder of `address` may hold another document's by now (a forget that came after the name was taken)."""
+        if self._root is None or inside:
+            folder = self._folder(address)
+            for h in hashes:
+                for f in (folder / f"{h}.md", folder / _PINS / f"{h}.md"):
+                    try:
+                        f.unlink()
+                    except OSError:
+                        pass
+
     def rename(self, old: str, new: str):
         """The versions of the document at `old` are those of `new`: a page that moved keeps its history, newest and
         pinned alike. Nothing at `old`, nothing to carry; whatever `new` held before is replaced (its page is the one that

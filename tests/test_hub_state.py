@@ -250,6 +250,15 @@ def test_forgetting_a_document_or_its_root_takes_its_pins():
     assert v.get(ADDR, h) is None and not pins_dir().parent.exists()
 
 
+def test_forgetting_texts_takes_the_ones_named_and_leaves_another_documents_at_the_address():
+    v = state.Versions()
+    old, pinned = v.put(ADDR, "old\n"), v.pin(ADDR, "old pinned\n")
+    new = v.put(ADDR, "the folder that took the name\n")
+    v.forget_texts(ADDR, {old, pinned})
+    assert v.get(ADDR, old) is None and v.get(ADDR, pinned) is None
+    assert v.get(ADDR, new) == "the folder that took the name\n"
+
+
 def test_a_pin_whose_content_is_not_its_name_is_not_believed():
     v = state.Versions()
     h = v.pin(ADDR, "real\n")

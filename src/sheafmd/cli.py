@@ -423,7 +423,7 @@ def cmd_stop(argv: list[str]) -> int:
                 return EXIT_OK
             info = hubserver.read_pid_file() or {}
             pid = info.get("pid") if info.get("boot") == got.get("boot") else None
-            status, res = c.call("POST", "/_/stop", {"reason": "stop"})
+            status, res = c.call("POST", "/_/stop", {"reason": "stop"}, boot=got.get("boot"))
             if status != 200 or not res.get("ok"):
                 _err(f"sheaf: the hub refused to stop: {res.get('error') or status}")
                 return EXIT_FAILED

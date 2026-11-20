@@ -111,6 +111,16 @@ class HubBeingStopped(HubDidNotStart):
     """A newer command met a stop already under way: it starts no hub behind it and fails (8.4)."""
 
 
+class HubChanged(Impostor):
+    """The hub that answered the request's own proof is not the one the command proved before: it
+    was replaced between the two connections. Nothing was sent. The command stops, and says to run
+    it again, so it never acts on a hub whose pid, boot and version it did not read."""
+
+    def __init__(self, port: int):
+        super().__init__(port, f"the sheaf hub on 127.0.0.1:{port} changed while this command was talking "
+                               "to it; nothing was sent. Please run the command again")
+
+
 class NotSent(Exception):
     """The connection that proved the hub ended before the request went on it: nothing was sent."""
 
@@ -160,14 +170,18 @@ class HubClient:
         self.key, self.port = key, port
         self._auth = Auth(key, port)
 
-    def _send_proved(self, method, path, data, headers, answer_within, answer_max) -> tuple[int, bytes]:
+    def _send_proved(self, method, path, data, headers, answer_within, answer_max,
+                     boot: str | None = None) -> tuple[int, bytes]:
         """One request that carries the key, on the connection that has just proved the hub (9.4).
-        Raises what `_prove_on` raises, `NotSent` when the connection ended after the proof, said or
+        `boot` is the boot id of the hub the caller proved before: another one is `HubChanged`, and
+        nothing is sent. Raises what `_prove_on` raises, `NotSent` when the connection ended after the proof, said or
         not (nothing was sent: `auto_open` is off, so nothing reopens it), and the sockets' own errors
         once the request may have gone. `answer_within` is how long the hub has to answer it."""
         c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=TIMEOUT)
         try:
-            self._prove_on(c)
+            proved = self._prove_on(c)
+            if boot is not None and proved.get("boot") != boot:
+                raise HubChanged(self.port)
             c.auto_open = 0                           # the request goes on this connection or on none
             if _ended_after_its_proof(c):
                 raise NotSent
@@ -217,9 +231,10 @@ class HubClient:
             raise Impostor(self.port)
         return got
 
-    def call(self, method: str, path: str, body=None) -> tuple[int, dict]:
+    def call(self, method: str, path: str, body=None, boot: str | None = None) -> tuple[int, dict]:
         """A request with the key header. The hub proves itself (9.4) on the connection that then
-        carries the request. Raises Impostor when what answers is not the hub; HubSilent when nothing
+        carries the request. A command that read a hub's answer with `challenge` passes its `boot`:
+        a hub of another boot id is not sent the request (`HubChanged`). Raises Impostor when what answers is not the hub; HubSilent when nothing
         answers the proof in time; HubHungUp when the hub ends the connection after its proof twice (the
         second time on a connection of its own: a hub that ended one is asked again); and HubLost when
         the hub is gone by the request, or does not answer it. Every one is an Impostor, which is what a
@@ -228,7 +243,7 @@ class HubClient:
         headers = {"X-Sheaf-Key": self.key, **({} if data is None else {"Content-Type": "application/json"})}
         for _ in range(2):
             try:
-                status, answer = self._send_proved(method, path, data, headers, TIMEOUT, ANSWER_MAX)
+                status, answer = self._send_proved(method, path, data, headers, TIMEOUT, ANSWER_MAX, boot)
             except NotSent:
                 continue
             except ConnectionRefusedError:               # nothing listens by now: nothing was sent
@@ -340,7 +355,8 @@ def stop_and_explain(c: HubClient, got: dict, reason: str, force: bool = False,
     from . import server
     info = server.read_pid_file() or {}
     pid = info.get("pid") if info.get("boot") == got.get("boot") and info.get("pid") != os.getpid() else None
-    status, res = c.call("POST", "/_/stop", {"reason": reason, **({"force": True} if force else {})})
+    status, res = c.call("POST", "/_/stop", {"reason": reason, **({"force": True} if force else {})},
+                         boot=got.get("boot"))
     if status == 409 and reason == "upgrade" and not force:
         raise JobsRunning(res.get("error") or "a Tell is running")
     if status != 200 or not res.get("ok"):
@@ -406,7 +422,7 @@ def _meet_version(c: HubClient, got: dict, warn) -> tuple[dict, bool]:
     if order != 1:                                      # older command, or a version nobody can read
         warn(mismatch)
         return got, False
-    status, jobs = c.call("GET", "/_/jobs")
+    status, jobs = c.call("GET", "/_/jobs", boot=got.get("boot"))
     if status != 200:                                   # cannot tell whether a job runs: leave it
         warn(mismatch)
         return got, False

@@ -3580,8 +3580,9 @@ var create = function (ROOT, CFG, opts) {
       // Ctrl+S on a page that cannot save is someone expecting to save. Saying
       // why beats a shortcut that does nothing at all.
       if (canEdit) save();
-      else say(canSave ? 'This document is not editable in the browser' +
-                         (CFG.why ? ': ' + CFG.why : '') + '. Edit the markdown instead.'
+      else say(canSave ? (CFG.generated ? CFG.why
+                          : 'This document is not editable in the browser' +
+                            (CFG.why ? ': ' + CFG.why : '') + '. Edit the markdown instead.')
                        : 'Opened without the sheaf hub, so there is nothing to save to.', true);
       return;
     }

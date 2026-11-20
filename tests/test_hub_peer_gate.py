@@ -113,6 +113,13 @@ def test_a_hub_that_does_not_check_lets_every_user_in_and_the_link_too(handler, 
     assert ask(handler, hub, "GET", f"/_/open?nonce={nonce}&next=/work/plan.md", seen(), how=None).status == 303
 
 
+def test_a_used_link_carries_the_limit_notice_when_the_check_is_off_at_start_up(handler, hub):
+    from sheafmd.hub.handler import LINK_LIMIT
+    handler.peer_off = "the owner of a loopback connection read as [], not the hub's own uid"
+    r = ask(handler, hub, "GET", "/_/open?nonce=" + "0" * 32, seen(), how=None, accept="text/html")
+    assert r.status == 401 and LINK_LIMIT in r.body.decode()
+
+
 # ── a caller that closed first ───────────────────────────────────────────────
 
 def test_a_caller_that_closed_before_the_hub_could_say_is_told_to_try_again_and_nothing_is_applied(handler, hub):

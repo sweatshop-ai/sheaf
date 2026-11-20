@@ -11,6 +11,7 @@ import time
 from pathlib import Path
 
 import pytest
+from sheafmd.atomic import write_text_atomic
 
 DOC = "work/plan.md"
 P1 = "main p:nth-of-type(2)"
@@ -26,6 +27,12 @@ HOST = {"light": {"--bg": "rgb(250, 250, 250)", "--fg": "rgb(10, 20, 30)", "--mu
 # The one-off's red and the toggle's blue of the list and of #rd-actions, light and dark (#169).
 RED = {"light": "rgb(198, 40, 40)", "dark": "rgb(255, 107, 107)"}
 BLUE = {"light": "rgb(31, 95, 214)", "dark": "rgb(110, 162, 255)"}
+
+
+def rewrite(path, text):
+    """Replace the file at `path` with `text` whole (a temporary sibling, then a rename): a page open on it, and the hub's watcher, never read it
+    truncated, as they can after `Path.write_text` (ticket 94)."""
+    write_text_atomic(Path(path), text)
 
 
 def contrast(a, b):
@@ -231,7 +238,7 @@ def open_with_comment(tab, md, quote, text, author="Ada", when="2026-10-14T10:00
     from sheafmd import comments as rdc
     from sheafmd.source import update_file
     if md is not None:
-        tab.site.file.write_text(md, encoding="utf-8")
+        rewrite(tab.site.file, md)
     update_file(tab.site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, quote), quote, text, author, when)[0])
     return tab.open().page
 

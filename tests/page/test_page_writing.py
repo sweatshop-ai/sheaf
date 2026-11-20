@@ -10,7 +10,7 @@ import pytest
 
 from helpers import comment, writes_from_outside
 from pagehelp import (settled, DOC, P1, RELOADING, draft_key, P2, T0, at, comment_draft_key, comment_on, kept_entries, kept_json, set_kept, gone, key, mark, open_box, open_form, typed, reload_on_clock, reloaded,
-                      select, select_by_touch, toast, toast_state, toasted, toasts_to_the_end, type_at_end, until)
+                      select, select_by_touch, toast, toast_state, toasted, toasts_to_the_end, type_at_end, until, rewrite)
 from pagehelp import TOAST_STEP, clock_at, run_clock, stalls_after
 from sheafmd import comments as rdc
 from sheafmd.hub import live as hub_live
@@ -50,7 +50,7 @@ def test_a_changed_event_while_a_reply_form_holds_text_leaves_the_form_alone(thr
     open_reply(thread, "my reply text")
     mark(thread.page)
     f = thread.site.file
-    f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\nA new paragraph from outside.\n")
     thread.page.wait_for_selector("#rd-popover .rd-hold")
     assert thread.page.input_value("#rd-popover textarea") == "my reply text"
     thread.page.wait_for_timeout(1500)
@@ -70,7 +70,7 @@ def test_putting_the_form_away_runs_the_reload_that_waited(thread):
     open_reply(thread, "never mind")
     mark(thread.page)
     f = thread.site.file
-    f.write_text(f.read_text() + "\nAnother paragraph.\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\nAnother paragraph.\n")
     thread.page.wait_for_selector("#rd-popover .rd-hold")
     thread.page.click("#rd-popover button[data-a=minimize]")
     reloaded(thread.page)
@@ -83,8 +83,7 @@ def test_a_reply_that_arrives_from_outside_updates_the_thread_and_leaves_the_for
     mark(thread.page)
     f = thread.site.file
     c = rdc.parse(f.read_text()).comments[0]
-    f.write_text(rdc.reply(f.read_text(), c.id, "From the agent.", "Claude", "2026-10-14T10:00:00Z"),
-                 encoding="utf-8")
+    rewrite(f, rdc.reply(f.read_text(), c.id, "From the agent.", "Claude", "2026-10-14T10:00:00Z"))
     until(lambda: "From the agent." in thread.page.inner_text("#rd-popover .rd-scroll"), what="the outside reply")
     assert thread.page.input_value("#rd-popover textarea") == "half a sentence"
     assert thread.page.evaluate("window.__same_load") is True
@@ -536,7 +535,7 @@ def test_a_kept_edit_of_a_comment_no_longer_the_persons_own_can_be_copied_and_le
     failed_send(thread, "edit", "Why apples, really?")
     p, f = thread.page, thread.site.file
     p.goto("about:blank")
-    f.write_text(re.sub(r'by="[^"]*"', 'by="Bea"', f.read_text(), count=1), encoding="utf-8")
+    rewrite(f, re.sub(r'by="[^"]*"', 'by="Bea"', f.read_text(), count=1))
     assert rdc.parse(f.read_text()).comments[0].by == "Bea"
     thread.open()
     unsent_line(p)
@@ -762,7 +761,7 @@ def refuse_a_comment_on_pears(tab, old="about pears", new="about ripe pears", mo
     open_box(tab.page)
     tab.page.fill("#rd-popover textarea", "about the pears")
     mark(tab.page)
-    f.write_text(f.read_text().replace(old, new) + more, encoding="utf-8")
+    rewrite(f, f.read_text().replace(old, new) + more)
     tab.page.wait_for_selector("#rd-popover .rd-hold")
     tab.page.click("#rd-popover button[data-f=ok]")
     reloaded(tab.page)
@@ -898,14 +897,13 @@ def test_a_kept_comment_comes_back_when_the_thread_opened_over_it_is_closed(tab)
 # entry is told by its paragraph (the opening words and which occurrence of them it is), never by its quote alone.
 def test_a_kept_comment_is_not_put_in_the_form_of_the_same_word_in_another_paragraph(tab):
     f = tab.site.file
-    f.write_text("# Plan\n\nA first paragraph, about pears.\n\nA second paragraph, about pears too.\n",
-                 encoding="utf-8")
+    rewrite(f, "# Plan\n\nA first paragraph, about pears.\n\nA second paragraph, about pears too.\n")
     tab.open()
     select(tab.page, at("main", "pears too"), at("main", "pears too", 5))
     open_box(tab.page)
     tab.page.fill("#rd-popover textarea", "about the second pears")
     mark(tab.page)
-    f.write_text(f.read_text().replace("pears too", "ripe pears too"), encoding="utf-8")
+    rewrite(f, f.read_text().replace("pears too", "ripe pears too"))
     tab.page.wait_for_selector("#rd-popover .rd-hold")
     tab.page.click("#rd-popover button[data-f=ok]")
     reloaded(tab.page)
@@ -920,14 +918,13 @@ def test_a_kept_comment_is_not_put_in_the_form_of_the_same_word_in_another_parag
 
 def test_a_comment_sent_on_the_same_word_of_another_paragraph_leaves_the_kept_comment_kept(tab):
     f = tab.site.file
-    f.write_text("# Plan\n\nA first paragraph, about pears.\n\nA second paragraph, about pears too.\n",
-                 encoding="utf-8")
+    rewrite(f, "# Plan\n\nA first paragraph, about pears.\n\nA second paragraph, about pears too.\n")
     tab.open()
     select(tab.page, at("main", "pears too"), at("main", "pears too", 5))
     open_box(tab.page)
     tab.page.fill("#rd-popover textarea", "about the second pears")
     mark(tab.page)
-    f.write_text(f.read_text().replace("pears too", "ripe pears too"), encoding="utf-8")
+    rewrite(f, f.read_text().replace("pears too", "ripe pears too"))
     tab.page.wait_for_selector("#rd-popover .rd-hold")
     tab.page.click("#rd-popover button[data-f=ok]")
     reloaded(tab.page)
@@ -970,14 +967,13 @@ def test_a_kept_comment_is_not_put_in_the_form_of_a_paragraph_that_opens_with_th
     # Two paragraphs open alike, the kept comment is on the second, and a paragraph added above both gives the
     # first the index the second had: the opening words and the index agree, the occurrence does not.
     f = tab.site.file
-    f.write_text("# Plan\n\nSame opening words, about apples.\n\nSame opening words, about pears.\n", encoding="utf-8")
+    rewrite(f, "# Plan\n\nSame opening words, about apples.\n\nSame opening words, about pears.\n")
     tab.open()
     select(tab.page, at("main", "about pears", 6), at("main", "about pears", None))
     open_box(tab.page)
     tab.page.fill("#rd-popover textarea", "about the pears")
     mark(tab.page)
-    f.write_text(f.read_text().replace("# Plan\n", "# Plan\n\nAdded above both.\n").replace("about pears", "about ripe pears"),
-                 encoding="utf-8")
+    rewrite(f, f.read_text().replace("# Plan\n", "# Plan\n\nAdded above both.\n").replace("about pears", "about ripe pears"))
     tab.page.wait_for_selector("#rd-popover .rd-hold")
     tab.page.click("#rd-popover button[data-f=ok]")
     reloaded(tab.page)
@@ -1038,7 +1034,7 @@ def kept_text(tab):
 
 def outside_change(tab):
     f = tab.site.file
-    f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\nA new paragraph from outside.\n")
 
 
 @pytest.mark.parametrize("what", ["the panel", "the menu", "edit mode"])
@@ -1117,7 +1113,7 @@ def test_a_save_that_merges_waits_for_the_reply_being_written_before_it_reloads(
     p.wait_for_selector("#rd-popover textarea")
     open_reply(frozen, "my reply text")
     mark(p)
-    f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\nA new paragraph from outside.\n")
     p.wait_for_selector("#rd-popover .rd-hold")
     p.keyboard.press("Control+s")           # the file moved on, so the hub merges the edit
     until(lambda: "and plums" in f.read_text(), what="the saved edit in the file")
@@ -1140,7 +1136,7 @@ def test_an_autosave_that_merges_waits_for_the_reply_being_written_before_it_rel
     p.wait_for_selector("#rd-popover textarea")
     open_reply(frozen, "my reply text")
     mark(p)
-    f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\nA new paragraph from outside.\n")
     p.wait_for_selector("#rd-popover .rd-hold")
     p.clock.run_for(3_000)                  # the page's own timer saves, nobody pressed a key
     until(lambda: "and plums" in f.read_text(), what="the autosaved edit in the file")
@@ -1158,14 +1154,14 @@ def test_an_autosave_that_merges_waits_for_the_reply_being_written_before_it_rel
 def test_a_ticked_task_box_that_merges_waits_for_the_reply_being_written_before_it_reloads(frozen):
     p, f = frozen.page, frozen.site.file
     mark(p)
-    f.write_text(f.read_text() + "\n- [ ] first task\n- [ ] second task\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\n- [ ] first task\n- [ ] second task\n")
     reloaded(p)
     p.wait_for_selector("main input[type=checkbox]")
     p.click(".rd-badge")
     p.wait_for_selector("#rd-popover textarea")
     open_reply(frozen, "my reply text")
     mark(p)
-    f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\nA new paragraph from outside.\n")
     p.wait_for_selector("#rd-popover .rd-hold")
     tick(p, p.locator("main input[type=checkbox]").first)
     until(lambda: "- [x] first task" in f.read_text(), what="the ticked box in the file")
@@ -1188,7 +1184,7 @@ def test_while_a_merge_waits_for_a_reply_a_later_save_does_not_overwrite_what_th
     p.click(".rd-badge")
     p.wait_for_selector("#rd-popover textarea")
     open_reply(frozen, "my reply text")
-    f.write_text(f.read_text().replace("Last paragraph.", "Last paragraph, rewritten outside."), encoding="utf-8")
+    rewrite(f, f.read_text().replace("Last paragraph.", "Last paragraph, rewritten outside."))
     p.wait_for_selector("#rd-popover .rd-hold")
     p.keyboard.press("Control+s")
     until(lambda: "and plums" in f.read_text(), what="the first save in the file")
@@ -1479,7 +1475,7 @@ def test_what_is_saved_while_the_reload_waits_for_a_reply_is_merged_onto_the_cha
     p.on("requestfinished", lambda r: out.update(n=out["n"] - 1) if r.method == "POST" and r.url.endswith("/_/save") else None)
     p.on("requestfailed", lambda r: out.update(n=out["n"] - 1) if r.method == "POST" and r.url.endswith("/_/save") else None)
     mark(p)
-    f.write_text(f.read_text() + "\n- [ ] first task\n- [ ] second task\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\n- [ ] first task\n- [ ] second task\n")
     reloaded(p)
     p.wait_for_selector("main input[type=checkbox]")
     type_at_end(p, P2, " and plums")
@@ -1487,8 +1483,7 @@ def test_what_is_saved_while_the_reload_waits_for_a_reply_is_merged_onto_the_cha
     p.route("**/_/save", lambda route: held.append(route))
 
     def from_outside():
-        f.write_text(f.read_text().replace("Second paragraph", "A paragraph from outside.\n\nSecond paragraph", 1),
-                     encoding="utf-8")
+        rewrite(f, f.read_text().replace("Second paragraph", "A paragraph from outside.\n\nSecond paragraph", 1))
     if start == "the page settles":
         from_outside()
     else:
@@ -1529,8 +1524,7 @@ def test_what_is_saved_while_the_reload_waits_for_a_reply_is_merged_onto_the_cha
 def tasks_above_the_last_paragraph(tab):
     p, f = tab.page, tab.site.file
     mark(p)
-    f.write_text(f.read_text().replace("Last paragraph.", "- [ ] first task\n- [ ] second task\n\nLast paragraph.", 1),
-                 encoding="utf-8")
+    rewrite(f, f.read_text().replace("Last paragraph.", "- [ ] first task\n- [ ] second task\n\nLast paragraph.", 1))
     reloaded(p)
     p.wait_for_selector("main input[type=checkbox]")
     return p.locator("main input[type=checkbox]")
@@ -1565,7 +1559,7 @@ def test_a_second_tick_while_the_first_ticks_save_is_out_writes_no_conflict_note
     boxes.nth(0).click()
     until(lambda: held or p.wait_for_timeout(20), what="the first tick's save to go out")
     if outside:
-        f.write_text(f.read_text().replace(*outside, 1), encoding="utf-8")
+        rewrite(f, f.read_text().replace(*outside, 1))
     p.wait_for_timeout(800)
     if second:
         boxes.nth(1).click()                # its save waits for the first
@@ -1741,7 +1735,7 @@ def test_a_paragraph_the_file_puts_between_the_halves_of_the_first_save_stays_an
     p.keyboard.press("Control+s")           # merged onto the change from outside, and split: the reload waits
     until(lambda: "Split off." in f.read_text(), what="the first save in the file")
     until(lambda: p.text_content("#rd-state") == "Editing", what="the page to take in the first save")
-    f.write_text(f.read_text().replace("\n\nSplit off.", "\n\nA line from outside.\n\nSplit off."), encoding="utf-8")
+    rewrite(f, f.read_text().replace("\n\nSplit off.", "\n\nA line from outside.\n\nSplit off."))
     before = f.read_text()
     p.focus(last)
     p.keyboard.press(key("Control+End"))
@@ -1774,7 +1768,7 @@ def type_into(p, k, keys, text):
 def test_two_paragraphs_the_first_save_wrote_alike_keep_the_next_save_of_each_while_the_reload_waits(frozen, outside):
     p, f = frozen.page, frozen.site.file
     mark(p)
-    f.write_text(f.read_text().replace("Last paragraph.", "TBD\n\nTBD\n\nLast paragraph."), encoding="utf-8")
+    rewrite(f, f.read_text().replace("Last paragraph.", "TBD\n\nTBD\n\nLast paragraph."))
     reloaded(p)
     until(lambda: len(paragraphs_saying(p, "TBD")) == 2, what="the two TBD paragraphs")
     p.keyboard.press("e")
@@ -1789,8 +1783,7 @@ def test_two_paragraphs_the_first_save_wrote_alike_keep_the_next_save_of_each_wh
     until(lambda: f.read_text().count("Done\n\nDone\n\n") == 1, what="the first save in the file")
     until(lambda: p.text_content("#rd-state") == "Editing", what="the page to take in the first save")
     if outside != "nothing":
-        f.write_text(f.read_text().replace("Done\n\nDone\n\n", "Done\n\nDone\n\nA note from the agent.\n\n"),
-                     encoding="utf-8")
+        rewrite(f, f.read_text().replace("Done\n\nDone\n\n", "Done\n\nDone\n\nA note from the agent.\n\n"))
         p.wait_for_timeout(500)
     before = f.read_text()
     first, second = paragraphs_saying(p, "Done")
@@ -1810,8 +1803,7 @@ def test_an_edit_of_a_paragraph_the_file_indents_into_code_is_kept_in_a_note(fro
     p, f = frozen.page, frozen.site.file
     type_at_end(p, P2, " and plums")
     mark(p)
-    f.write_text(f.read_text().replace("Second paragraph, about pears.", "    Second paragraph, about pears.", 1),
-                 encoding="utf-8")
+    rewrite(f, f.read_text().replace("Second paragraph, about pears.", "    Second paragraph, about pears.", 1))
     reloaded(p)
     until(lambda: "and plums" in f.read_text(), what="the page's text in the file")
     md = f.read_text()
@@ -1859,7 +1851,7 @@ def test_a_change_from_outside_to_the_list_between_two_ticks_still_gets_its_note
     boxes.nth(1).click()
     held.pop(0).continue_()
     until(lambda: held or p.wait_for_timeout(20), what="the second tick's save to go out")
-    f.write_text(f.read_text().replace("- [ ] second task", "- [ ] second task, renamed outside", 1), encoding="utf-8")
+    rewrite(f, f.read_text().replace("- [ ] second task", "- [ ] second task, renamed outside", 1))
     p.wait_for_timeout(800)
     mark(p)
     release_the_save(p, held)
@@ -2027,7 +2019,7 @@ HEADED = ("# Plan\n\nFirst paragraph, about apples.\n\n## A heading here\n\n"
 def test_enter_at_the_start_of_a_heading_or_in_a_table_cell_keeps_the_block_what_it_was(frozen, where, keys, typed, md):
     p, f = frozen.page, frozen.site.file
     mark(p)
-    f.write_text(HEADED, encoding="utf-8")
+    rewrite(f, HEADED)
     reloaded(p)
     p.wait_for_selector("main h2")
     p.keyboard.press("e")
@@ -2084,8 +2076,7 @@ def test_an_answer_that_reloads_saves_the_edits_typed_while_it_was_out_and_asks_
         p.keyboard.type(" and plums")
     md = f.read_text()
     blk, s, e = rdc.find_quote(md, "Last paragraph")
-    f.write_text(rdc.add_comment(md, blk, s, e, "Last paragraph", "From outside.", "Claude", "2026-10-18T10:00")[0],
-                 encoding="utf-8")
+    rewrite(f, rdc.add_comment(md, blk, s, e, "Last paragraph", "From outside.", "Claude", "2026-10-18T10:00")[0])
     p.wait_for_timeout(800)
     mark(p)
     held.pop(0).continue_()
@@ -2264,7 +2255,7 @@ def test_send_and_tell_while_a_reload_waits_still_starts_one_tell_and_the_page_s
     thread.page.on("request", lambda r: sent.append(r.url) if r.method == "POST" and r.url.endswith("/_/tell") else None)
     mark(thread.page)
     f = thread.site.file
-    f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\nA new paragraph from outside.\n")
     thread.page.wait_for_selector("#rd-popover .rd-hold")
     thread.page.click("#rd-popover button[data-f=tell]")
     reloaded(thread.page)
@@ -2282,7 +2273,7 @@ def test_a_new_comment_sent_with_tell_while_a_reload_waits_has_its_tell_waiting_
     tab.page.on("request", lambda r: sent.append(r.url) if r.method == "POST" and r.url.endswith("/_/tell") else None)
     mark(tab.page)
     f = tab.site.file
-    f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\nA new paragraph from outside.\n")
     tab.page.wait_for_selector("#rd-popover .rd-hold")
     tab.page.click("#rd-popover button[data-f=tell]")
     reloaded(tab.page)
@@ -2298,7 +2289,7 @@ def test_a_page_that_has_written_nothing_takes_in_a_change_from_outside(tab):
     tab.open()
     mark(tab.page)
     f = tab.site.file
-    f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\nA new paragraph from outside.\n")
     reloaded(tab.page)
     assert "A new paragraph from outside." in tab.page.inner_text("main")
 
@@ -2488,7 +2479,7 @@ def test_a_change_from_outside_does_not_reload_under_a_reply_that_is_out_while_a
     until(lambda: "Why pears?" in p.inner_text("#rd-popover"), what="the second thread")
     f = two_threads.site.file
     mark(p)
-    f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\nA new paragraph from outside.\n")
     p.wait_for_timeout(2500)     # a page with nothing out reloads within a second
     assert p.evaluate("window.__same_load") is True, "the page reloaded under a send that is out"
     held[0].continue_()
@@ -2551,7 +2542,7 @@ def test_a_change_heard_between_a_replys_answer_and_its_end_reloads_when_the_sen
     until(lambda: held or p.wait_for_timeout(20), what="the hub to take the reply")
     open_thread_by(two_threads, "a badge")
     until(lambda: "Why pears?" in p.inner_text("#rd-popover"), what="the second thread")
-    f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\nA new paragraph from outside.\n")
     heard_changes(p, heard, 2)     # the reply's own and this one, both waiting behind the write
     heard_before_the_send_ends(p)
     mark(p)
@@ -2973,7 +2964,7 @@ def test_a_replys_answer_does_not_reload_over_a_new_comment_form_opened_while_it
     p = two_threads.page
     held = send_held(two_threads, "reply", "first reply")
     f = two_threads.site.file
-    f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\nA new paragraph from outside.\n")
     p.wait_for_timeout(500)
     open_thread_by(two_threads, "the Comment button")
     p.fill("#rd-popover textarea", "second words")
@@ -3006,7 +2997,7 @@ def test_a_new_comments_answer_does_not_reload_the_page_while_a_reply_is_still_o
     open_reply(two_threads, "first reply")
     p.keyboard.press("Control+Enter")
     until(lambda: held or p.wait_for_timeout(20), what="the reply to go out")
-    f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\nA new paragraph from outside.\n")
     p.wait_for_timeout(500)
     open_thread_by(two_threads, "the Comment button")
     p.fill("#rd-popover textarea", "second words")
@@ -3031,7 +3022,7 @@ def test_a_new_comment_refused_while_a_reply_is_out_is_kept_and_the_reload_waits
     until(lambda: held or p.wait_for_timeout(20), what="the reply to go out")
     open_thread_by(two_threads, "the Comment button")      # 'Second' in the paragraph about pears
     p.fill("#rd-popover textarea", "about the second word")
-    f.write_text(f.read_text().replace("about pears", "about ripe pears"), encoding="utf-8")
+    rewrite(f, f.read_text().replace("about pears", "about ripe pears"))
     p.wait_for_timeout(500)
     mark(p)
     p.keyboard.press("Control+Enter")
@@ -3059,7 +3050,7 @@ def test_the_answer_of_a_delete_does_not_reload_the_page_while_a_new_comment_is_
     p.fill("#rd-popover textarea", "about the pears")
     p.keyboard.press("Control+Enter")
     until(lambda: len(held) == 2 or p.wait_for_timeout(20), what="the new comment to go out")
-    f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\nA new paragraph from outside.\n")
     p.wait_for_timeout(500)
     mark(p)
     held[0].continue_()
@@ -3500,7 +3491,7 @@ def test_a_kept_reply_or_edit_is_not_put_into_a_new_comment_that_got_the_id_of_a
 def test_a_kept_comment_is_not_put_into_the_form_of_the_paragraph_that_took_its_block_index(kept):
     f = kept.site.file
     mark(kept.page)
-    f.write_text(f.read_text().replace("First paragraph", "A paragraph added above.\n\nFirst paragraph", 1), encoding="utf-8")
+    rewrite(f, f.read_text().replace("First paragraph", "A paragraph added above.\n\nFirst paragraph", 1))
     reloaded(kept.page)
     kept.page.wait_for_selector(KEPT)
     open_comment_form(kept, P2, "apples")
@@ -3528,7 +3519,7 @@ def test_a_kept_comment_without_opening_words_still_comes_back_by_its_block(kept
 def test_a_kept_comment_is_not_put_into_the_form_of_another_paragraph_that_opens_with_the_same_words(kept):
     f = kept.site.file
     mark(kept.page)
-    f.write_text(f.read_text().replace("Second paragraph, about ripe pears.", "Second paragraph, about ripe pears.\n\nSecond paragraph, about plums."), encoding="utf-8")
+    rewrite(f, f.read_text().replace("Second paragraph, about ripe pears.", "Second paragraph, about ripe pears.\n\nSecond paragraph, about plums."))
     reloaded(kept.page)
     kept.page.wait_for_selector(KEPT)
     open_comment_form(kept, "main p:nth-of-type(4)", "plums")
@@ -3548,7 +3539,7 @@ def test_a_new_comment_answered_while_a_reply_is_out_has_its_thread_open_after_t
     open_reply(two_threads, "first reply")
     p.keyboard.press("Control+Enter")
     until(lambda: held or p.wait_for_timeout(20), what="the reply to go out")
-    f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\nA new paragraph from outside.\n")
     p.wait_for_timeout(500)
     open_thread_by(two_threads, "the Comment button")
     p.fill("#rd-popover textarea", "second words")
@@ -3569,7 +3560,7 @@ def test_the_badge_of_a_new_comment_answered_while_a_reply_is_out_opens_its_thre
     open_reply(two_threads, "first reply")
     p.keyboard.press("Control+Enter")
     until(lambda: held or p.wait_for_timeout(20), what="the reply to go out")
-    f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\nA new paragraph from outside.\n")
     p.wait_for_timeout(500)
     open_thread_by(two_threads, "the Comment button")
     p.fill("#rd-popover textarea", "second words")
@@ -3623,7 +3614,7 @@ def test_a_settle_that_failed_leaves_no_held_reload_to_a_later_upgrade(thread):
     p.keyboard.press("e")
     p.route("**/_/save", lambda route: route.fulfill(status=500, json={"ok": False, "error": "the hub broke off"}))
     open_reply(thread, "my reply text")
-    f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\nA new paragraph from outside.\n")
     p.wait_for_selector("#rd-popover .rd-hold")
     held = []
     p.route("**/_/comment", lambda route: held.append(route))
@@ -3748,7 +3739,7 @@ def _enter_in_task_list(tab, tasks, item, keys):
     """A `.md` with the given task lines, edit mode, the caret at the end of the item holding `item`, then `keys`
     typed ("Enter" is pressed, anything else typed); returns the file text after the save."""
     p, f = tab.page, tab.site.file
-    f.write_text(f.read_text() + "\n" + tasks, encoding="utf-8")
+    rewrite(f, f.read_text() + "\n" + tasks)
     tab.open()
     p.keyboard.press("e")
     p.click(f"main li:has-text('{item}')")
@@ -3785,7 +3776,7 @@ def test_enter_in_a_ticked_task_item_makes_an_unticked_one(tab):
 
 def test_enter_in_the_middle_of_a_task_item_splits_it_into_two_task_items(tab):
     p = tab.page
-    tab.site.file.write_text(tab.site.file.read_text() + "\n- [ ] first task\n", encoding="utf-8")
+    rewrite(tab.site.file, tab.site.file.read_text() + "\n- [ ] first task\n")
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
@@ -3815,7 +3806,7 @@ def test_enter_on_an_empty_task_item_in_the_middle_ends_the_list_there(tab):
 
 def test_enter_at_the_start_of_a_task_item_moves_the_words_and_leaves_one_box_in_each_item(tab):
     p = tab.page
-    tab.site.file.write_text(tab.site.file.read_text() + "\n- [ ] first task\n- [ ] second task\n", encoding="utf-8")
+    rewrite(tab.site.file, tab.site.file.read_text() + "\n- [ ] first task\n- [ ] second task\n")
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
@@ -3827,7 +3818,7 @@ def test_enter_at_the_start_of_a_task_item_moves_the_words_and_leaves_one_box_in
 
 def test_enter_on_the_only_item_of_a_task_list_when_it_is_empty_keeps_the_list(tab):
     p = tab.page
-    tab.site.file.write_text(tab.site.file.read_text() + "\n- [ ] only\n", encoding="utf-8")
+    rewrite(tab.site.file, tab.site.file.read_text() + "\n- [ ] only\n")
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('only')")
@@ -3840,7 +3831,7 @@ def test_enter_on_the_only_item_of_a_task_list_when_it_is_empty_keeps_the_list(t
 
 def test_enter_at_the_end_of_a_task_item_then_a_pause_saves_no_box_character(tab):
     p, f = tab.page, tab.site.file
-    f.write_text(f.read_text() + "\n- [ ] first task\n- [ ] second task\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\n- [ ] first task\n- [ ] second task\n")
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
@@ -3858,7 +3849,7 @@ def test_enter_at_the_end_of_a_task_item_then_a_pause_saves_no_box_character(tab
 
 def test_enter_on_an_empty_item_then_a_pause_saves_no_comment_marker_between_the_lists(tab):
     p, f = tab.page, tab.site.file
-    f.write_text(f.read_text() + "\n- [ ] first task\n- [ ] second task\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\n- [ ] first task\n- [ ] second task\n")
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
@@ -3878,7 +3869,7 @@ def test_enter_on_an_empty_item_then_a_pause_saves_no_comment_marker_between_the
 
 def test_enter_at_the_start_of_a_task_item_then_a_save_keeps_the_words_in_a_task_item(tab):
     p, f = tab.page, tab.site.file
-    f.write_text(f.read_text() + "\n- [ ] first task\n- [ ] second task\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\n- [ ] first task\n- [ ] second task\n")
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
@@ -3894,7 +3885,7 @@ def test_enter_at_the_start_of_a_task_item_then_a_save_keeps_the_words_in_a_task
 
 def test_enter_over_all_the_words_of_a_task_item_keeps_its_box(tab):
     p, f = tab.page, tab.site.file
-    f.write_text(f.read_text() + "\n- [x] first task\n- [ ] second task\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\n- [x] first task\n- [ ] second task\n")
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
@@ -3914,7 +3905,7 @@ def test_enter_over_all_the_words_of_a_task_item_keeps_its_box(tab):
 
 def test_enter_in_a_bold_word_in_a_task_item_adds_no_space_before_the_rest_of_it(tab):
     p, f = tab.page, tab.site.file
-    f.write_text(f.read_text() + "\n- [ ] a **bold**\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\n- [ ] a **bold**\n")
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('a bold')")
@@ -3935,7 +3926,7 @@ def test_enter_in_a_bold_word_in_a_task_item_adds_no_space_before_the_rest_of_it
 
 def test_enter_three_times_after_an_item_then_a_pause_saves_no_comment_marker_between_the_lists(tab):
     p, f = tab.page, tab.site.file
-    f.write_text(f.read_text() + "\n- [ ] first task\n- [ ] second task\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\n- [ ] first task\n- [ ] second task\n")
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
@@ -3957,7 +3948,7 @@ def _enter_before_the_words_of_the_first_item(tab, box, place):
     the file text. The caret between the box and the first letter is not at the start of the item for the browser
     (the label's offset 1), but it is for the writer: the words stay in the item and an empty one goes above."""
     p, f = tab.page, tab.site.file
-    f.write_text(f.read_text() + f"\n- [{box}] first task\n- [ ] second task\n", encoding="utf-8")
+    rewrite(f, f.read_text() + f"\n- [{box}] first task\n- [ ] second task\n")
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
@@ -4004,7 +3995,7 @@ def test_enter_over_the_box_alone_keeps_the_words_in_their_item(tab):
 
 def test_a_task_typed_in_the_paragraph_that_ending_a_list_left_joins_the_lists(tab):
     p, f = tab.page, tab.site.file
-    f.write_text(f.read_text() + "\n- [ ] first task\n- [ ] second task\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\n- [ ] first task\n- [ ] second task\n")
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
@@ -4022,7 +4013,7 @@ def test_a_task_typed_in_the_paragraph_that_ending_a_list_left_joins_the_lists(t
 
 def test_enter_in_the_middle_of_a_task_item_then_typing_saves_no_no_break_space(tab):
     p, f = tab.page, tab.site.file
-    f.write_text(f.read_text() + "\n- [ ] first task\n- [ ] two\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\n- [ ] first task\n- [ ] two\n")
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
@@ -4041,7 +4032,7 @@ def test_enter_in_the_middle_of_a_task_item_then_typing_saves_no_no_break_space(
 
 def test_enter_over_a_selection_across_two_task_items_changes_nothing(tab):
     p, f = tab.page, tab.site.file
-    f.write_text(f.read_text() + "\n- [ ] first task\n- [ ] second task\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\n- [ ] first task\n- [ ] second task\n")
     tab.open()
     p.keyboard.press("e")
     p.click("main li:has-text('first task')")
@@ -4078,7 +4069,7 @@ def _caret_in_last_item(p, words, at_end=True):
 def test_enter_at_the_end_of_a_commented_task_item_leaves_the_comment_with_its_words(tab):
     from helpers import comment
     p, f = tab.page, tab.site.file
-    f.write_text(f.read_text() + "\n- [ ] first task\n- [ ] other\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\n- [ ] first task\n- [ ] other\n")
     comment(f, quote="first task")
     tab.open()
     p.keyboard.press("e")
@@ -4099,7 +4090,7 @@ def test_enter_at_the_end_of_a_commented_task_item_leaves_the_comment_with_its_w
 
 def test_enter_on_a_loose_task_item_with_an_empty_first_line_keeps_its_other_paragraph(tab):
     p, f = tab.page, tab.site.file
-    f.write_text(f.read_text() + "\n- [ ] first\n\n  second para\n- [ ] other\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\n- [ ] first\n\n  second para\n- [ ] other\n")
     tab.open()
     p.keyboard.press("e")
     _caret_in_last_item(p, "first")
@@ -4687,8 +4678,8 @@ def test_a_kept_comment_whose_paragraph_changed_in_its_opening_words_is_found_th
 
 def test_a_kept_comment_goes_to_the_paragraph_that_ends_with_its_words_not_to_one_that_took_over_its_opening_words(tab):
     f = tab.site.file
-    f.write_text(f.read_text().replace("First paragraph, about apples.", "Second paragraph, about apples.")
-                 .replace("Second paragraph, about pears.", "Secund paragraph, about pears."), encoding="utf-8")
+    rewrite(f, f.read_text().replace("First paragraph, about apples.", "Second paragraph, about apples.")
+                 .replace("Second paragraph, about pears.", "Secund paragraph, about pears."))
     tab.open()
     keep_on_disk(tab, kept_entry("pears", "about the pears", 3, "Secondparagr", tail=",aboutpears."))
     p = tab.page
@@ -4731,7 +4722,7 @@ def test_a_new_comment_refused_while_a_failed_reply_form_is_open_in_its_popover_
     held = gone_and_sent(thread, "words for a gone thread")
     open_comment_form(thread, P2, "pears")
     p.fill("#rd-popover textarea", "about the pears")
-    f.write_text(f.read_text().replace("about pears", "about ripe pears"), encoding="utf-8")
+    rewrite(f, f.read_text().replace("about pears", "about ripe pears"))
     p.wait_for_timeout(500)
     mark(p)
     p.keyboard.press("Control+Enter")
@@ -4758,7 +4749,7 @@ def test_an_edit_of_a_line_with_raw_inline_html_keeps_each_tag_in_the_file(tab):
     """sheaf #155: the save of `(ref <x1>)` wrote `(ref )`. The browser nests an unknown element over the rest
     of the line, which is what reaches the hub here."""
     f = tab.site.file
-    f.write_text(RAW, encoding="utf-8")
+    rewrite(f, RAW)
     tab.page.clock.install()
     tab.open()
     type_at_end(tab.page, "main p:has-text('this line')", " typed")
@@ -4774,7 +4765,7 @@ def test_an_edit_of_a_line_with_a_closing_tag_with_no_opener_keeps_it_in_the_fil
     """sheaf #157: the browser drops a closing tag with no opener, and the save of `<x1>ref</x2>` wrote
     `<x1>ref`."""
     f = tab.site.file
-    f.write_text(LONE, encoding="utf-8")
+    rewrite(f, LONE)
     tab.page.clock.install()
     tab.open()
     type_at_end(tab.page, "main p:has-text('this line')", " typed")
@@ -4789,7 +4780,7 @@ PIPE = '# Plan\n\n| A | B |\n|---|---|\n| <abbr title="a\\|b">X</abbr> | the cel
 def test_an_edit_of_a_table_keeps_the_escaped_pipe_in_a_raw_tags_attribute(tab):
     """sheaf #157: the save wrote `title="a|b"`, and the bare pipe split the cell."""
     f = tab.site.file
-    f.write_text(PIPE, encoding="utf-8")
+    rewrite(f, PIPE)
     tab.page.clock.install()
     tab.open()
     type_at_end(tab.page, "main td:has-text('the cell')", " typed")
@@ -4869,7 +4860,7 @@ def test_typing_while_a_change_from_outside_settles_is_refused_and_said(tab):
     held = []
     p.route("**/_/save", lambda r: held.append(r))
     type_at_end(p, P1, " typed")
-    f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
+    rewrite(f, f.read_text(encoding="utf-8") + "\nFrom outside.\n")
     until(lambda: held or p.wait_for_timeout(20), what="the settle's save, held")
     p.keyboard.type("lost")
     toasted(p, "Saving", on_clock=True)

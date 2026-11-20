@@ -3,7 +3,7 @@ whole run and the comment lands after it; one that cannot hold a comment shows a
 that says why, before the click."""
 import pytest
 
-from pagehelp import at, box, open_box, select, select_by_touch, selected, until
+from pagehelp import at, box, open_box, select, select_by_touch, selected, until, rewrite
 from sheafmd import comments as rdc
 
 pytestmark = pytest.mark.page
@@ -34,7 +34,7 @@ FIELD = "#rd-popover textarea"
 
 @pytest.fixture
 def doc(tab, site):
-    site.file.write_text(PLAN_MD, encoding="utf-8")
+    rewrite(site.file, PLAN_MD)
     return tab.open()
 
 
@@ -191,7 +191,7 @@ LIST_TABLE_MD = """# Plan
 ])
 def test_a_selection_between_a_table_cell_and_text_outside_it_in_the_same_block_says_one_cell(
         tab, site, start, end):
-    site.file.write_text(LIST_TABLE_MD, encoding="utf-8")
+    rewrite(site.file, LIST_TABLE_MD)
     doc = tab.open()
     select(doc.page, start, end)
     btn = doc.page.wait_for_selector(BTN)
@@ -211,7 +211,7 @@ Read the [project plan](https://example.com/p) today.
 
 @pytest.fixture
 def editing(tab, site):
-    site.file.write_text(EDIT_DOC, encoding="utf-8")
+    rewrite(site.file, EDIT_DOC)
     tab.open()
     tab.page.keyboard.press("e")
     tab.page.wait_for_selector("main p[contenteditable]")
@@ -310,7 +310,7 @@ def _centre(b):
 
 @pytest.fixture
 def phone(touch_tab, site):
-    site.file.write_text(PLAN_MD, encoding="utf-8")
+    rewrite(site.file, PLAN_MD)
     return touch_tab.open()
 
 

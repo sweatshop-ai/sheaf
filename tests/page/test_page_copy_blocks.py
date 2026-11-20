@@ -2,7 +2,7 @@
 comments like any quote, and the button is never part of what a save writes."""
 import pytest
 
-from pagehelp import at, comment_on, until
+from pagehelp import at, comment_on, until, rewrite
 from sheafmd import comments as rdc
 
 pytestmark = pytest.mark.page
@@ -16,7 +16,7 @@ MD = ("# Plan\n\nBefore the mail.\n\n"
 
 @pytest.fixture
 def doc(tab, site):
-    site.file.write_text(MD, encoding="utf-8")
+    rewrite(site.file, MD)
     tab.page.context.grant_permissions(["clipboard-read", "clipboard-write"], origin=site.base)
     return tab.open()
 
@@ -103,7 +103,7 @@ def test_a_mounted_page_gets_the_button_too(chromium, site):
     # The front's copy of the page (mount.js) drops every `rd-` class the render wrote; this one it keeps.
     from test_mount_page import _front
     from pagehelp import close_context
-    site.file.write_text(MD, encoding="utf-8")
+    rewrite(site.file, MD)
     c, f = _front(chromium, site)
     try:
         f.open()

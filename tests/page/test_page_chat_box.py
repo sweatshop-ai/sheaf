@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from pagehelp import DOC, P1, P2, at, box, comment_draft_key, kept_json, mark, set_kept, open_box, open_with_comment, pasted, reloaded, select, toast, until
+from pagehelp import DOC, P1, P2, at, box, comment_draft_key, kept_json, mark, set_kept, open_box, open_with_comment, pasted, reloaded, select, toast, until, rewrite
 from sheafmd import comments as rdc
 from sheafmd.hub.state import Tokens
 from sheafmd.source import update_file
@@ -359,7 +359,7 @@ def test_a_resolved_thread_of_another_person_has_no_edit_or_delete(tab, site):
 def test_an_empty_box_does_not_hold_a_reload_but_typed_text_does(tab, site):
     p = open_thread(tab, site)
     mark(p)
-    site.file.write_text(site.file.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
+    rewrite(site.file, site.file.read_text(encoding="utf-8") + "\nFrom outside.\n")
     reloaded(p)
     p.wait_for_selector(".rd-badge")
     p.wait_for_timeout(500)                             # the reload keeps the thread open; open it only if it is not
@@ -368,7 +368,7 @@ def test_an_empty_box_does_not_hold_a_reload_but_typed_text_does(tab, site):
     p.wait_for_selector(FIELD)
     p.fill(FIELD, "half a thought")
     mark(p)
-    site.file.write_text(site.file.read_text(encoding="utf-8") + "\nAnd again.\n", encoding="utf-8")
+    rewrite(site.file, site.file.read_text(encoding="utf-8") + "\nAnd again.\n")
     p.wait_for_selector("#rd-popover .rd-hold")
     p.wait_for_timeout(1000)
     assert p.evaluate("window.__same_load") is True, "the page reloaded under the typed text"
@@ -381,7 +381,7 @@ def test_emptying_the_last_typed_field_lifts_the_held_reload(tab, site):
     p = open_thread(tab, site)
     p.fill(FIELD, "half a thought")
     mark(p)
-    site.file.write_text(site.file.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
+    rewrite(site.file, site.file.read_text(encoding="utf-8") + "\nFrom outside.\n")
     p.wait_for_selector("#rd-popover .rd-hold")
     p.wait_for_timeout(500)
     assert p.evaluate("window.__same_load") is True, "the page reloaded under the typed text"

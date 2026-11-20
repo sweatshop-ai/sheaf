@@ -3,7 +3,7 @@ unfocused takes the cursor on one touch in its empty area (band, thread backgrou
 A control keeps its meaning (×, −, ⋯, a link), a bubble and its selected text are content, and a scroll is not a tap."""
 import pytest
 
-from pagehelp import at, open_with_comment, select_by_touch, until
+from pagehelp import at, open_with_comment, select_by_touch, until, rewrite
 
 pytestmark = pytest.mark.page
 
@@ -62,7 +62,7 @@ def test_a_touch_in_the_empty_area_of_the_box_puts_the_cursor_in_the_field_in_th
 
 
 def test_a_touch_in_a_new_comment_box_does_the_same(touch_tab, site):
-    site.file.write_text(PLAN_MD, encoding="utf-8")
+    rewrite(site.file, PLAN_MD)
     p = touch_tab.open().page
     select_by_touch(p, at(MAIN, "Second"), at(MAIN, "paragraph", None))
     p.wait_for_selector(FIELD)

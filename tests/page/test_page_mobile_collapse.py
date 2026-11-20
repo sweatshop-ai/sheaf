@@ -4,7 +4,7 @@ cursor was not in the box. A box opened by a touch takes that selection away and
 cannot make the selection come back by itself, so the tests fire it."""
 import pytest
 
-from pagehelp import at, select_by_touch
+from pagehelp import at, select_by_touch, rewrite
 from test_page_selection import MAIN, PLAN_MD, TOUCH_END, TOUCH_START, FIELD
 
 pytestmark = pytest.mark.page
@@ -20,7 +20,7 @@ STATE = """() => { const t = document.querySelector('#rd-popover textarea'), s =
 
 @pytest.fixture
 def phone(touch_tab, site):
-    site.file.write_text(PLAN_MD, encoding="utf-8")
+    rewrite(site.file, PLAN_MD)
     return touch_tab.open()
 
 

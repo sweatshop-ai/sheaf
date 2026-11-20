@@ -72,6 +72,13 @@ LINK_UNKNOWN = ("The hub could not tell which user of this machine followed this
                 "<code>sheaf open &lt;the document&gt;</code> again. If it keeps happening, run "
                 "<code>sheaf diag</code> and look at the <code>open-401</code> rows, or run "
                 "<code>sheaf signin-url</code> and open what it prints in this browser.")
+REQUEST_OTHER_USER = ("This hub answers only to the user of this machine that runs it, and this connection comes from "
+                      "another user. If you are that user, run <code>sheaf open &lt;the document&gt;</code> in your "
+                      "own session.")
+REQUEST_UNKNOWN = ("The hub could not tell which user of this machine sent this request, so it did not answer it. "
+                   "Try again; if it keeps happening, run <code>sheaf diag</code> and look at the "
+                   "<code>peer-refused</code> rows.")
+PEER_ROW_SECONDS = 60                # `peer-refused` is written at most this often: the rest are counted
 PROXY_SIGN_IN = ("This browser is not signed in to this site, or its sign-in has ended. Sign in to this "
                  "site again, then reload this page.")
 WRONG_KEY = ("This link does not hold this hub's key. On the machine that runs the hub, run "
@@ -261,6 +268,8 @@ class Handler:
     def __init__(self, hub, peer_check=peer.check):
         self.hub = hub
         self.peer_check = peer_check
+        self.peer_off: str | None = None    # why the hub does not check who owns a connection (`peer.startup`), once it knows
+        self._peer_row_at = float("-inf")   # when `peer-refused` was last written
         self.door = Door(hub)
         self._titles = sheaf_view.Titles()
         self.door.called = self._james_called
@@ -394,6 +403,11 @@ class Handler:
                 res = _html(401, _sign_in_page("This sign-in link did not work", r.page), headers=r.headers)
                 res.error = r.detail or r.message
                 return res
+        elif req is not None and r.status == 403 and r.page and req.method == "GET" \
+                and "text/html" in req.headers.get("accept", ""):
+            res = _html(403, _sign_in_page("Not your hub", r.page), headers=r.headers)
+            res.error = r.detail or r.message
+            return res
         res = _json(r.status, {"ok": False, "error": r.message, **r.answer}, r.headers)
         res.error = r.detail
         return res
@@ -468,6 +482,8 @@ class Handler:
         else:
             # Only a route that takes a token has a 401 that names the scheme to try.
             raise Refuse(401, "not signed in", {"WWW-Authenticate": "Bearer"} if takes_token else None)
+        if req.kind in ("key", "cookie"):
+            self._gate(req)
         if req.path.startswith("/_/"):
             if methods is None:
                 raise Refuse(404, "no such route")
@@ -746,6 +762,44 @@ class Handler:
         except NotFound:
             raise Refuse(404, "no such document") from None
 
+    # ── who is at the other end (9.3) ────────────────────────────────────────
+    def _owner(self, req: Req):
+        """Why the connection of `req` is no one's to redeem a link: the answer the server got when it accepted
+        it, else a lookup now (a test hands the handler a connection it did not look at). None where the
+        hub's own user is at its other end, or where the hub does not check."""
+        if self.peer_off:
+            return None
+        conn = req.conn
+        if getattr(conn, "looked", False):
+            return conn.refusal
+        return self.peer_check(conn)
+
+    def _gate(self, req: Req):
+        """A key or a cookie is good only from the hub's own user (9.3): a caller whose connection the hub
+        looked at when it accepted it, and found owned by another user or by no one it could name, is
+        refused before anything is read or done. A caller that closed its connection before the hub
+        could say is told to try again, never that it was refused: its write is not applied."""
+        conn = req.conn
+        if self.peer_off or not getattr(conn, "looked", False) or conn.refusal is None:
+            return
+        if conn.closed is not None and conn.closed():
+            raise Refuse(503, "try again: the connection closed before the hub could tell who sent this",
+                         {"Retry-After": "1"}, row=False)
+        no, mine = conn.refusal, os.geteuid()
+        other = no.kind == peer.OTHER_USER
+        row = "peer-refused"
+        if time.monotonic() - self._peer_row_at < PEER_ROW_SECONDS:
+            row = False                  # counted, not written: a loop of refused requests is one row a minute
+        else:
+            self._peer_row_at = time.monotonic()
+        detail = no.detail
+        if other:
+            detail = f"a request from another user of this machine (uid {no.uid}); the hub runs as uid {mine}"
+        raise Refuse(403, "this hub answers only to the user that runs it" if other
+                     else "the hub could not tell which user of this machine sent this request",
+                     page=REQUEST_OTHER_USER if other else REQUEST_UNKNOWN, detail=detail, row=row,
+                     fields={"peer_uid": no.uid, "hub_uid": mine} if other else {})
+
     # ── open routes ──────────────────────────────────────────────────────────
     def _health(self, req: Req) -> Response:
         hub = self.hub
@@ -763,12 +817,14 @@ class Handler:
             if not req.auth.redeem_signin(req.query["nonce"]):
                 raise Refuse(401, "that sign-in link was used already, has expired or is not this hub's",
                              page=LINK_USED if peer.supported() else f"{LINK_USED} {LINK_LIMIT}")
-            no = self.peer_check(req.conn)
+            no = self._owner(req)
             if no is not None:
                 raise Refuse(401, no.message, page=LINK_OTHER_USER if no.kind == peer.OTHER_USER else LINK_UNKNOWN,
                              detail=no.detail)
         elif not req.auth.key_ok(req.query.get("key")):
             raise Refuse(401, "that is not this hub's key", page=WRONG_KEY)
+        else:
+            self._gate(req)
         nxt = req.query.get("next", "/")
         _shape(auth.safe_next(nxt), "next must be a path on this hub")
         return Response(303, {"Location": auth.location(nxt), "Set-Cookie": req.auth.set_cookie()})

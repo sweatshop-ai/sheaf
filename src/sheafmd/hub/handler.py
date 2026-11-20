@@ -1169,8 +1169,13 @@ class Handler:
         member's name on this hub, which signs a Team comment: the page's own `me` is the one the client tiroir gave."""
         team = self.hub.team.list(doc)
         if op == "page":
-            return _META_RE.sub(lambda m: m.group(1) + json.dumps({**json.loads(m.group(2)), "team": team, "team_me": me}).replace("<", "\\u003c")
-                                     + m.group(3), body)
+            def with_team(m):
+                try:
+                    meta = json.loads(m.group(2))
+                except ValueError:
+                    return m.group(0)       # as the doc and mount branches leave a body they cannot read
+                return m.group(1) + json.dumps({**meta, "team": team, "team_me": me}).replace("<", "\\u003c") + m.group(3)
+            return _META_RE.sub(with_team, body)
         try:
             got = json.loads(body)
         except ValueError:

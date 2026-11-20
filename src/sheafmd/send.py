@@ -211,6 +211,10 @@ def declared(environ=None, session=...) -> dict:
 
 # ── the door ─────────────────────────────────────────────────────────────────
 
+# What the caller reads from the result of a tool that did not fail: each must be text.
+_RESULT_TEXT = {"create": ("doc", "hash"), "update": ("doc", "hash"), "read": ("hash",)}
+
+
 class Door:
     """One tiroir's library door, with the token: `initialize` first (a door may keep a session), then each tool call."""
 
@@ -270,9 +274,13 @@ class Door:
                 raise moved
             return True, text
         try:
-            return False, json.loads(text)
+            parsed = json.loads(text)
         except ValueError:
             raise SendError(f"the door of {self.origin} answered {name} with something that is not JSON.") from None
+        for key in _RESULT_TEXT.get(name, ()):
+            if not isinstance(parsed, dict) or not isinstance(parsed.get(key), str):
+                raise SendError(f"the door of {self.origin} answered {name} with a result that has no `{key}`.")
+        return False, parsed
 
 
 @dataclasses.dataclass(frozen=True)

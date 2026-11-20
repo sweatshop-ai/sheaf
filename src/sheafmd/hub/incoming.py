@@ -265,7 +265,8 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
             # the root comes back from the tiroir it moved to, the peer the channel's token names (never the body's `from`):
             # it is unmoved only once nothing in this check would refuse it
             if (why := repos.refusal(first[0].short or first[0].id, b["repo"], privates)) is not None:
-                return 409, {"why": why.replace("-", "_"), **({"install": repos.install_url(b["repo"])} if why == repos_mod.NO_APP else {})}
+                return 409, {"why": why.replace("-", "_"),
+                             **({"install": url} if why == repos_mod.NO_APP and (url := repos.install_url(b["repo"])) else {})}
             repos.unmove(b["repo"])
         try:
             said = repos.report(first[0].short or first[0].id, b["repo"], first[1], b["tip"], privates, {})

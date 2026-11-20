@@ -1127,3 +1127,21 @@ def test_the_owners_own_hand_in_the_page_still_opens_it_as_9_11_says(team):
     assert tick(team, ALICE, doc, "Share").status == 200                     # and gives it again: the save writes the mark
     assert "shared: alice " in read(team, doc)
     assert _can_see(team, BOB, doc) == (200, True, True, True, True)
+
+
+def test_the_row_button_ticks_the_text_it_wrote_not_a_later_read_of_the_page(team, monkeypatch):
+    """The edit is built from the text whose hash is `after`, never from a later read of the live page: a write that lands
+    between the two would be ticked into, and the page's hash would no longer be the one sent."""
+    doc = made(team, "alice", PRIVATE)["doc"]
+    live = team.hub.entry(doc).live
+    real, seen = team.hub.committed, []
+
+    def committed(*a, **kw):
+        live.current = lambda: ("0" * 64, "# Someone else's page\n\n- [ ] Share\n")        # what a racing write leaves
+        return real(*a, **kw)
+
+    real_edit = the_list.share_edit
+    monkeypatch.setattr(team.hub, "committed", committed)
+    monkeypatch.setattr(the_list, "share_edit", lambda text: (seen.append(text), real_edit(text))[1])
+    team.post("/_/share", {"doc": doc, "hash": md_hash(read(team, doc))}, member=ALICE)
+    assert seen and "Alice's notes" in seen[0]

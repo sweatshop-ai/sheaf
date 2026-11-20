@@ -129,6 +129,7 @@
 #rd-popover .rd-head[hidden],#rd-popover:has(.rd-form[data-done]) .rd-head{display:none}
 #rd-popover .rd-head button,#rd-popover .rd-more summary{cursor:pointer;background:transparent;color:var(--fg,#000);border:0;border-radius:10px;padding:2px 7px;font:600 14px/1 system-ui,sans-serif;opacity:.65}
 #rd-popover .rd-head button:hover,#rd-popover .rd-more summary:hover{opacity:1;background:rgba(127,127,127,.18)}
+#rd-popover .rd-head .rd-check{display:block;width:14px;height:14px}
 #rd-popover .rd-more{position:relative}
 #rd-popover .rd-more summary{list-style:none}
 #rd-popover .rd-more summary::-webkit-details-marker{display:none}

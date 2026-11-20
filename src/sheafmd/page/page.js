@@ -2161,8 +2161,11 @@ var create = function (ROOT, CFG, opts) {
     if (m.role === 'action') return '<span class="rd-who rd-who-tell">' + name + '\u2019s action</span>';
     return '<span class="rd-who">' + name + '</span>';
   }
-  // The band of the box: the passage, then Resolve (−, an open thread only) and Close (×, which keeps everything,
-  // as Escape does). The little else the thread offers waits in the small menu.
+  // The band of the box: the passage, then Resolve (a check mark, an open thread only) and Close (×, which keeps everything,
+  // as Escape does). The little else the thread offers waits in the small menu. The check is a thin SVG, not U+2713: that glyph
+  // comes from whichever font the browser falls back to, and draws at another weight and size in each.
+  var CHECK = '<svg class="rd-check" viewBox="0 0 14 14" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" ' +
+              'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.8 7.4l2.9 2.9 5.5-6.2"/></svg>';
   function bandHtml(c) {
     var open = c.status === 'open', more = !open || mine(c);
     return '<div class="rd-head"><div class="rd-quote">“' + esc(c.quote) + '”' +
@@ -2170,7 +2173,7 @@ var create = function (ROOT, CFG, opts) {
       (!canSave ? '' : (more ? '<details class="rd-more"><summary aria-label="More" title="More">\u22EF</summary><div>' +
         (open ? '' : '<button data-a="status">Reopen</button>') +
         (mine(c) ? '<button data-a="edit">Edit</button><button data-a="delete">Delete</button>' : '') + '</div></details>' : '') +
-        (open ? '<button data-a="status" title="Resolve" aria-label="Resolve">\u2212</button>' : '')) +
+        (open ? '<button data-a="status" title="Resolve" aria-label="Resolve">' + CHECK + '</button>' : '')) +
       '<button data-a="minimize" title="Close" aria-label="Close">\u00D7</button></div>';   // closing needs no right to write
   }
   function thread(c) {
@@ -2431,7 +2434,7 @@ var create = function (ROOT, CFG, opts) {
         if (a === 'minimize') { closePopover(); return; }
         if (a === 'status') {
           var opened = c.status !== 'open';
-          if (!opened && !stashAll()) return;       // − resolves: not while its text has nowhere to go
+          if (!opened && !stashAll()) return;       // the check resolves: not while its text has nowhere to go
           op({ op: 'status', id: id, status: opened ? 'open' : 'resolved' }).then(function (j) { if (j && !opened && popId === id) closePopover(); });
         }
         else if (a === 'delete') op({ op: 'delete', id: id });
@@ -3333,7 +3336,7 @@ var create = function (ROOT, CFG, opts) {
   ['touchend', 'touchcancel', 'pointerup', 'pointercancel', 'click'].forEach(function (n) { listen(document, n, selectionEnded, true); });
   // iOS may leave the keyboard down after a selection. A box that stands open with its field unfocused takes the cursor on one
   // touch in its empty area (the box's padding, the band, the thread's background, the composer frame), made inside that touch's
-  // own event, which is what lets the keyboard rise. A control (×, −, ⋯, a link), a bubble and a selection in the box keep their
+  // own event, which is what lets the keyboard rise. A control (×, the check, ⋯, a link), a bubble and a selection in the box keep their
   // own meaning, and a touch that moved is a scroll.
   var emptyTouch = null;
   listen(document, 'touchstart', function (e) {

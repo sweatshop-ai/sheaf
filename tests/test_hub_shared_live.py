@@ -214,3 +214,22 @@ def test_a_tab_that_receives_a_burst_does_not_hold_back_the_tabs_that_joined_aft
     world.hub.entries[docs[2]].bus.publish("changed", {"n": 0})
     first_three = [d["k"] for _, d in stream.drain()[:3]]
     assert sorted(first_three) == ["a", "b", "c"]
+
+
+def test_a_closed_connection_still_waits_out_the_timeout_it_is_asked_for(world, docs):
+    """The server's writer loop paces itself with `get(timeout=0.25)`: a stream closed from another thread, before
+    the loop sees it, must not turn that into a busy loop."""
+    import time
+    stream = shared(world)
+    stream.close()
+    start = time.monotonic()
+    assert stream.get(timeout=0.3) is None
+    assert time.monotonic() - start >= 0.25
+
+
+def test_a_tab_that_left_no_longer_wakes_the_writer(world, docs):
+    stream = shared(world)
+    join(world, "a", docs[0])
+    sub = world.hub.entries[docs[0]].bus._subs.copy().pop()
+    world.post("/_/live/leave", {"stream": SID, "key": "a"})
+    assert sub.on_put is None

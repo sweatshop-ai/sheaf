@@ -163,12 +163,14 @@ class Shared:
                 sub.on_put = self._told
         self._told()                     # the events the stream holds already (its `hello`) are waiting too
         if old is not None:
+            old.on_put = None
             old.close()
 
     def leave(self, key: str):
         with self._lock:
             sub = self._subs.pop(key, None)
         if sub is not None:
+            sub.on_put = None
             sub.close()
 
     def keys(self) -> list:
@@ -205,7 +207,7 @@ class Shared:
             with self._wake:
                 seen = self._news
             got = self._poll()
-            if got is not None or self.closed or time.monotonic() >= deadline:
+            if got is not None or time.monotonic() >= deadline:
                 return got
             with self._wake:
                 # Nothing is looked at again until a stream queues something: an event queued since `seen` was
@@ -225,5 +227,6 @@ class Shared:
             self.closed = True
             subs, self._subs = list(self._subs.values()), {}
         for sub in subs:
+            sub.on_put = None
             sub.close()
-        self._told()                     # a writer waiting on it looks once more and sees it closed
+        self._told()                     # a writer waiting on it looks once more

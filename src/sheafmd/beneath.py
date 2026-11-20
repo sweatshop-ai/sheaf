@@ -16,6 +16,7 @@ import ctypes
 import errno
 import os
 import stat
+import sys
 from collections import deque
 
 FALLBACK = False                  # tests: take the walk of our own although the kernel has openat2
@@ -65,10 +66,10 @@ _HAS_OPENAT2 = None               # None until tried: True or False after the fi
 
 def _openat2(dirfd: int, rel: str, flags: int, resolve: int = _RESOLVE_BENEATH) -> int:
     """The descriptor of `rel` below `dirfd`, the kernel refusing anything that leaves it (EXDEV). NotImplementedError
-    where there is no such call."""
+    where there is no such call (any system but Linux)."""
     global _HAS_OPENAT2
-    if _HAS_OPENAT2 is False or _LIBC is None or not hasattr(_LIBC, "syscall"):
-        raise NotImplementedError
+    if _HAS_OPENAT2 is False or _LIBC is None or not hasattr(_LIBC, "syscall") or not sys.platform.startswith("linux"):
+        raise NotImplementedError          # 437 is Linux's number: elsewhere it is another call, or none (SIGSYS on macOS)
     how = _How(flags | os.O_CLOEXEC, 0, resolve)
     fd = _LIBC.syscall(_SYS_OPENAT2, dirfd, rel.encode(), ctypes.byref(how), ctypes.sizeof(how))
     if fd < 0:

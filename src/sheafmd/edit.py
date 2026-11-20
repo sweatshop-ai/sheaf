@@ -358,7 +358,8 @@ def _drop_empty_task_items(soup) -> None:
 _LINE_HOSTS = re.compile(r"^(?:p|h[1-6])$")
 # The shape of a shortcode that GFM's emoji extension reads as its emoji (`:b:`, `:+1:`); a lone colon is none.
 SHORTCODE_RE = re.compile(r":[a-z0-9_+-]+:")
-# How pandoc draws a shortcode it read as its emoji. The pattern strips `data-emoji` from any `<span>`, not only that one.
+# How pandoc draws a shortcode it read as its emoji.
+# The pattern strips `data-emoji` from any `<span>`, not only that one.
 EMOJI_ATTR_RE = re.compile(r'(<span\b[^>]*?)\s+data-emoji="[^"]*"')      # pandoc may wrap before the attribute
 
 

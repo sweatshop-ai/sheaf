@@ -124,14 +124,31 @@ jobs:
         shell: bash
         run: echo "os=${ImageOS:?ImageOS is not set on this runner}" >> "$GITHUB_OUTPUT"
 
+      # The page tests that run in Firefox or WebKit are all in the last slice (tests/conftest.py), and `--with-deps` puts
+      # apt on those engines' system packages (126 MB, 181 packages in run 44788361173, against about 20 MB for Chromium's).
+      # A slice installs the engines of the tests it collected, so none keeps a list of its own, and Chromium always.
+      - name: Name the browsers this slice runs
+        id: engines
+        if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'
+        shell: bash
+        run: |
+          collected=$(uv run --no-sync pytest -m page --collect-only -q) || { echo "$collected" | tail -30; echo "::error::the page tests did not collect"; exit 1; }
+          # The engine is the first part of the id: a Chromium id can hold "-webkit-user-modify" in a later one.
+          engines=chromium
+          for e in firefox webkit; do
+            if grep -Eq "::.*\[$e(-|])" <<<"$collected"; then engines="$engines $e"; fi
+          done
+          echo "engines=$engines" >> "$GITHUB_OUTPUT"
+          echo "set=${engines// /-}" >> "$GITHUB_OUTPUT"
+
       - name: Cache the Playwright browsers
         if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'
         uses: actions/cache@v4
         with:
           path: ${{ runner.os == 'macOS' && '~/Library/Caches/ms-playwright' || '~/.cache/ms-playwright' }}
-          key: playwright-${{ runner.os }}-${{ steps.image.outputs.os }}-${{ hashFiles('uv.lock') }}
+          key: playwright-${{ runner.os }}-${{ steps.image.outputs.os }}-${{ steps.engines.outputs.set }}-${{ hashFiles('uv.lock') }}
 
-      - name: Page tests (Playwright, Chromium, Firefox, WebKit)
+      - name: Page tests (Playwright)
         if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'
         # The page tests take 4 to 8 minutes; the install is bounded below. A step that runs past 40 is stuck.
         timeout-minutes: 40
@@ -139,8 +156,10 @@ jobs:
         run: |
           set -o pipefail
           # --with-deps installs the browsers' system packages through sudo, which GitHub's runners have.
-          # Firefox and WebKit are here, and only here, for the mount tests (#116: the rectoverso mounts in a shadow root
-          # and its selection code must hold in all three engines); the other steps install no browser.
+          # Firefox and WebKit are here, and only in the slice that holds their tests, for the mount tests (#116: the
+          # rectoverso mounts in a shadow root and its selection code must hold in all three engines); the other steps
+          # install no browser.
+          engines="${{ steps.engines.outputs.engines }}"
           deps=""
           if [ "$RUNNER_OS" = "Linux" ] && command -v sudo >/dev/null; then deps="--with-deps"; fi
           # apt's mirror is sometimes slow (45 minutes for 125 MB, run 44765451025): each try is cut at 10 minutes and the next
@@ -156,7 +175,7 @@ jobs:
             timeout 60 bash -c 'while pgrep -x apt-get >/dev/null || pgrep -x dpkg >/dev/null; do sleep 2; done' || true
             sudo dpkg --configure -a || true
           }
-          for try in 1 2 3; do $bounded uv run --no-sync playwright install $deps chromium firefox webkit && break; if [ "$try" = 3 ]; then echo "::error::the browsers did not install in three tries"; exit 1; fi; if [ -n "$deps" ]; then stop_apt; fi; done
+          for try in 1 2 3; do $bounded uv run --no-sync playwright install $deps $engines && break; if [ "$try" = 3 ]; then echo "::error::the browsers did not install in three tries"; exit 1; fi; if [ -n "$deps" ]; then stop_apt; fi; done
           uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v --durations=25 -m page -rs 2>&1 | tee page-tests.txt
           # A page test that cannot start its browser skips with a reason. Here that is a failure.
           if grep -Eq '[0-9]+ skipped' page-tests.txt; then

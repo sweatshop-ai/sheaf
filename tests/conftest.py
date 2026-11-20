@@ -141,8 +141,11 @@ def no_gc():
 
 
 @pytest.fixture
-def lock_order(monkeypatch):
-    """The hub's locks recorded and held to `sheafmd.hub.lockorder.ORDER` (tests/lockorder.py)."""
+def lock_order(monkeypatch, every_hub_settles_its_pusher):
+    """The hub's locks recorded and held to `sheafmd.hub.lockorder.ORDER` (tests/lockorder.py). It asks for
+    `every_hub_settles_its_pusher` so that the two patches of `Hub.__init__` are laid and lifted in order: a test that
+    calls `monkeypatch.undo()` mid-test lifts this one, and `own_patches` would else restore it at the end and leave
+    the checker on every later hub of the process."""
     import lockorder
     lockorder.install(monkeypatch)
     yield

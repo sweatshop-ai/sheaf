@@ -73,3 +73,17 @@ def test_non_ascii_text_typed_inside_an_emoji_span_is_kept(typed):
 
 def test_a_keycap_shortcode_is_written_back_as_the_shortcode():
     assert saved("Step :one: here") == "Step :one: there\n"
+
+
+def test_a_shortcode_beside_an_escaped_backslash_keeps_both():
+    src = r"Nice :+1: and a\\\*b here"
+    out = saved(src)
+    assert ":+1:" in out and page_fragment(out) == page_fragment(src.replace("here", "there"))
+
+
+def test_a_shortcode_and_an_escaped_backslash_in_a_table_cell_with_a_break():
+    src = "| :+1: | " + r"a\\\*b" + " here |\n|---|---|\n| x | y |"
+    html = page_fragment(src).replace("here", "th<br>ere")
+    out, rep = rde.apply_edits("# Title\n\n" + src + "\n", [{"i": 1, "html": html}])
+    assert rep["skipped"] == [] and "<table" not in out
+    assert ":+1:" in out and page_fragment(out).replace("<br />", "<br>").count("\\*b") == 1

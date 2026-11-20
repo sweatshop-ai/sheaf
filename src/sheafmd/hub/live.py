@@ -189,7 +189,7 @@ class LiveDocument:
             return None
         return st.st_mtime_ns, st.st_size
 
-    def _rerender(self):
+    def _rerender(self, remember: bool = True):
         # One read for both. Reading the file once for the page and again for the state lets a
         # write land in between (a session's reply right after its own edit, while pandoc
         # runs). The page would then carry a hash the hub does not know, the watcher would see
@@ -198,7 +198,8 @@ class LiveDocument:
         branch = self._render(text)
         self._text, self._hash = text, rds.md_hash(text)
         self._branch = branch if isinstance(branch, str) else None
-        self._remember(text)
+        if remember:
+            self._remember(text)
 
     def _telling_view(self):
         """`[{id, to, state}]` (SPEC 8.5): the threads told to the session, `working`, or `waiting` while it
@@ -654,7 +655,7 @@ class LiveDocument:
             if rds.md_hash(self._read()) == self._hash:
                 return None
             before, kept = self._text, (self._text, self._hash, self._branch)
-            self._rerender()
+            self._rerender(remember=False)      # a read that may be torn is no version: kept once the file has not moved under it
             if self._stamp() != seen:
                 # An editor's truncate-then-write landed while this read and render ran: what was read may be a torn
                 # file. Keep what the tabs hold and publish nothing; the watcher sees the file move and comes back.
@@ -662,4 +663,5 @@ class LiveDocument:
                 branch = self._render(self._text)         # the page the hub serves is the one the tabs hold, not the torn one
                 self._branch = branch if isinstance(branch, str) else None
                 return None
+            self._remember(self._text)
             return self._announce(self._snapshot(self._text), before)

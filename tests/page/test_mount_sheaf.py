@@ -648,3 +648,39 @@ def test_on_a_phone_a_pane_with_no_height_of_its_own_still_shows_the_table(mount
     mounted.page.evaluate("document.getElementById('pane').style.height = 'auto';")
     got = mounted.js(MEASURE + " return {main: box('.sheaf-main'), rows: lines('.sheaf-row')};")
     assert got["rows"] and got["main"]["height"] >= sum(got["rows"]), "the table collapses in a pane with no height"
+
+
+def said(m):
+    return m.js("const s = root.querySelector('.sheaf-said'); return s && !s.hidden ? s.textContent : '';")
+
+
+def test_a_connect_that_fails_after_the_panel_was_closed_says_nothing(mounted):
+    held = []
+
+    def hold(route):
+        if route.request.method == "POST":
+            held.append(route)
+        else:
+            route.fallback()
+    mounted.page.route("**/_/laptops", hold)
+    laptops_open(mounted)
+    connect_named(mounted, "Work MacBook")
+    until(lambda: held, what="the request of the connect")
+    mounted.click(".sheaf-laptops-open")                                   # the panel is closed while the request is out
+    held[0].abort("connectionrefused")
+    until(lambda: mounted.js("return !root.querySelector('.sheaf-laptop-connect').disabled;"), what="the button, enabled again")
+    assert said(mounted) == ""
+
+
+def test_the_copy_button_reads_copy_again_for_the_next_line(mounted):
+    mounted.js("Object.defineProperty(navigator, 'clipboard', { value: { writeText: () => Promise.resolve() }, configurable: true });")
+    laptops_open(mounted)
+    connect_named(mounted, "Work MacBook")
+    line_made(mounted)
+    mounted.click(".sheaf-laptop-copy")
+    until(lambda: mounted.js("return root.querySelector('.sheaf-laptop-copy').textContent;") == "Copied", what="the copy")
+    mounted.click(".sheaf-laptops-open")
+    laptops_open(mounted)
+    connect_named(mounted, "Second MacBook")
+    line_made(mounted)
+    assert mounted.js("return root.querySelector('.sheaf-laptop-copy').textContent;") == "Copy"

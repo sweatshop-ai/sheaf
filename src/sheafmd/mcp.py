@@ -1039,7 +1039,7 @@ class Door:
         """The arguments of a create with no root, as the create of `<root>/<path>` they come to: the page's name in
         the member's loose root, in the folder named, else the month. Anything else goes on as it was given.
         (the arguments, and (member, root) of a root this call made, to take back if the create is refused)"""
-        doc, folder = args["doc"], args.get("folder")
+        doc, folder = _named(args["doc"]), args.get("folder")
         bare = "/" not in doc and "\\" not in doc and "://" not in doc and not os.path.isabs(doc)
         if not bare and folder is None:
             if args.get("keep") is not None and not isinstance(args["keep"], bool):

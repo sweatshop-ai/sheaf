@@ -384,3 +384,13 @@ def test_a_keep_that_fails_after_the_sheaf_folder_was_made_on_a_fresh_root_takes
     bad, why = call(agents, "cal-claude", "create", doc="notes.md", text=TEXT, keep=True)
     assert bad and "keep" in why, why
     nothing_made_for_cal(agents, before)
+
+
+def test_a_page_name_with_spaces_around_it_is_the_name_without_them(agents):
+    out = made(agents, "bea-claude", doc="  notes.md ", text=TEXT)
+    assert out["doc"] == f"loose-bea/{loose.month()}/notes.md"
+
+
+def test_a_page_name_of_spaces_is_refused_as_empty(agents):
+    bad, why = call(agents, "bea-claude", "create", doc="   ", text=TEXT, folder="x")
+    assert bad and "empty" in why, why

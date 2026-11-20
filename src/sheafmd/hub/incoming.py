@@ -158,6 +158,7 @@ def _land_steps(hub, door, b, owner, deadline, peer: str | None, mine) -> tuple:
         if (loose_root := hub.loose.known(owner)) is not None:
             with contextlib.suppress(loose.Refused, OSError):
                 _unkeep(loose_root, address)
+            with contextlib.suppress(loose.Refused, OSError):
                 _unarchive(loose_root, address)
         hub.forwards.put_back(lifted)
         raise

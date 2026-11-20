@@ -718,8 +718,10 @@ def _bare_urls_as_words(fragment: str):
         return fragment, {}
     soup, put = BeautifulSoup(fragment, "html.parser"), {}
     for a in soup.find_all("a", href=True):
-        if "\\" in a["href"] and a.get_text() == a["href"] and not a.find_parent(["code", "pre"]) and not a.find(True):
-            word = next(w for w in ("RDURL" + os.urandom(5).hex().upper() for _ in iter(int, 1)) if w not in fragment)
+        if "\\" in a["href"] and "|" not in a["href"] and a.get_text() == a["href"] and not a.find_parent(["code", "pre"]) and not a.find(True):
+            word = "RDURL" + os.urandom(5).hex().upper()
+            while word in fragment or word in put:
+                word = "RDURL" + os.urandom(5).hex().upper()
             put[word] = a["href"]
             a.replace_with(word)
     return (str(soup), put) if put else (fragment, {})

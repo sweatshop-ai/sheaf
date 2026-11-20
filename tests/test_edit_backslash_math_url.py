@@ -41,3 +41,9 @@ def test_a_backslash_in_a_bare_url_keeps_its_address_and_text(src):
     want = page_fragment(src.replace("here", "there"))
     assert anchors(page_fragment(out)) == anchors(want)
     assert words(page_fragment(out)) == words(want)
+
+
+def test_a_bare_url_with_a_backslash_and_a_pipe_in_a_cell_keeps_its_row():
+    src = "| a | b |\n|---|---|\n| http://x.com/a\\\\\\|c | here |"
+    out = saved(src)
+    assert all(line.count("|") - line.count("\\|") == 3 for line in out.strip().splitlines())

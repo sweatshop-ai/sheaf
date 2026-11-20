@@ -200,16 +200,30 @@ def test_a_root_whose_folder_cannot_be_entered_is_a_row_that_says_why_and_names_
     assert docs(browser, token=token, root="shut") == [told]
 
 
-def test_a_root_past_the_listing_cap_says_how_many_more_it_holds(browser, tmp_path, monkeypatch):
-    """The door lists with the hub's own lister (8.6, D15): the cap is its, and what it leaves out is said."""
+def test_a_document_past_the_index_cap_with_open_comments_is_still_listed(browser, tmp_path, monkeypatch):
+    """The cap is the index page's (D15). The door is an agent's view and never hides what waits: a Tell or an
+    open comment on a file past that cap is listed, because the door lists up to the hub's count limit."""
     import sheafmd.hub.roots as roots
     monkeypatch.setattr(roots, "LIST_CAP", 3)
     root = tmp_path / "wiki"
     for i in range(6):
         doc(root, f"{i}.md")
     browser.hub.roots.for_document(root / "0.md")
+    comment(root / "5.md")
+    assert names(docs(browser)) == ["wiki/5.md"]
+    assert len(docs(browser, open_only=False)) == 6
+
+
+def test_a_root_past_the_count_limit_says_how_many_more_it_holds(browser, tmp_path, monkeypatch):
+    import sheafmd.hub.roots as roots
+    monkeypatch.setattr(roots, "COUNT_LIMIT", 4)
+    monkeypatch.setattr(roots, "LIST_CAP", 4)
+    root = tmp_path / "wiki"
+    for i in range(7):
+        doc(root, f"{i}.md")
+    browser.hub.roots.for_document(root / "0.md")
     rows = docs(browser, open_only=False)
-    assert len(rows) == 4 and rows[-1] == {"root": "wiki", "more": 3}
+    assert len(rows) == 5 and rows[-1] == {"root": "wiki", "more": 3}
 
 
 def test_a_git_root_does_not_list_what_lies_in_its_sheaf_folder(browser, tmp_path):

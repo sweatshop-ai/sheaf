@@ -1297,8 +1297,20 @@ def test_a_member_who_is_not_the_owner_cannot_rename_and_tick_share_and_nothing_
     put(team, work, DOC, PRIVATE.replace("sources: [library:doc-123]", "sources: [issue:x/y#1]"))   # Bob can open it
     before = (work / DOC).read_text(encoding="utf-8")
     got = rename_and_tick(team, work, DOC, BOB)
-    assert got.status == 409 and "owner" in got.json()["error"]
+    assert got.status == 409 and "Only the owner of this rectoverso can change who it is shared with" in got.json()["error"]
     assert (work / DOC).read_text(encoding="utf-8") == before
+
+
+def test_the_owners_save_that_ticks_share_and_adds_an_item_in_the_same_block_leaves_the_box_unticked(team, work):
+    put(team, work, DOC, PRIVATE)
+    text = (work / DOC).read_text(encoding="utf-8")
+    edit = the_list.tick_edit(text, 0, "Share")
+    edit["html"] = edit["html"].replace("</ul>", "<li>Another item</li>\n</ul>")
+    assert "Another item" in edit["html"]
+    assert team.post("/_/save", {"doc": f"work/{DOC}", "hash": md_hash(text), "edits": [edit]}, member=ALICE).status == 200
+    after = (work / DOC).read_text(encoding="utf-8")
+    assert "- [ ] Share" in after and "Another item" in after and "- [x]" not in after and "shared" not in front_matter(after)
+    assert team.get(f"/work/{DOC}", member=BOB).status == 404
 
 
 def test_a_door_create_with_a_ticked_labelled_box_on_an_owner_only_sheaf_leaves_it_unticked(team, browser, work):
@@ -1332,7 +1344,7 @@ def test_a_page_with_a_box_of_each_spelling_is_shared_by_either_and_withdrawn_by
 
 
 def test_a_plain_ticked_task_that_says_shared_with_the_team_is_shares_control_and_bob_cannot_untick_it(team, work):
-    """Case 4: the words are Share's, wherever a document has them, so a member who is not the owner is refused."""
+    """The words are Share's, wherever a document has them, so a member who is not the owner is refused."""
     shared = PRIVATE.replace("sources: [library:doc-123]", "visibility: project").replace("- [ ] Share", "- [x] Shared with the team")
     put(team, work, DOC, shared)
     text = (work / DOC).read_text(encoding="utf-8")

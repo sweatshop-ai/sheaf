@@ -2,7 +2,7 @@
 
 **Status:** open
 
-**Blocked by:** none
+**Blocked by:** 144 (same code, edit.py and page.js, task-line Enter)
 
 **From:** render-doc ticket 146 (private archive), triaged 2026-11-12
 

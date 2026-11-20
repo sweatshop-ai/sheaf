@@ -42,12 +42,16 @@ on:
         default: all
 
 # A new push to a pull request cancels its earlier run. A run on main is never cancelled once it has
-# started, so every merge to main gets a full verdict. Each run on main has a
-# group of its own, because a group holds one running and one waiting run, and a newer waiting run
-# would replace an older one even with cancel-in-progress false. Merges in a burst therefore run side
-# by side, one job each, and a 3.11 or 3.14 regression shows in the nightly run, not in a merge.
+# started. Every push to main shares one group, `ci-main`: a group holds one running and one waiting run,
+# and a newer waiting run replaces an older one even with cancel-in-progress false. A burst of merges
+# therefore leaves the run that started and the newest one, and the newest covers every merge it
+# replaced. This replaces a group per run (`ci-<run_id>`), which queued one full run of six jobs per
+# merge: the organisation's plan allows 20 concurrent hosted jobs, nine queued merges held 54, and every
+# pull request run waited behind them for 30 to 50 minutes. The cost: a regression is pinned to a range
+# of merges, not to one, and `git bisect` or a manual run on a merge finds it. The nightly and manual
+# runs keep a group of their own, so a merge never replaces the run on all Pythons.
 concurrency:
-  group: ci-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}
+  group: ci-${{ github.event_name == 'push' && 'main' || github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:

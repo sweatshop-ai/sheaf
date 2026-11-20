@@ -76,8 +76,9 @@ def agentview():
 
 
 class Mounted:
-    def __init__(self, page, errors):
+    def __init__(self, page, errors, answered=None):
         self.page, self.errors = page, errors
+        self.answered = [] if answered is None else answered        # (method, path, status) of every request the hub answered
 
     def js(self, body, arg=None):
         return self.page.evaluate("([arg]) => { const root = window.__root; " + body + " }", [arg])
@@ -93,7 +94,7 @@ class Mounted:
 
 @pytest.fixture
 def mounted(chromium, pages, agentview):
-    errors = []
+    errors, answered = [], []
 
     def answer(route):
         path = route.request.url[len(ORIGIN):]
@@ -101,6 +102,7 @@ def mounted(chromium, pages, agentview):
             return route.fulfill(status=200, content_type="text/html", body=FRONT_HTML)
         req = route.request
         res = pages.post(path, json.loads(req.post_data or "{}"), member=BEA) if req.method == "POST" else pages.get(path, member=BEA)
+        answered.append((req.method, path, res.status))
         route.fulfill(status=res.status, headers=dict(res.headers), body=res.body)
 
     context = new_context(chromium)
@@ -113,7 +115,7 @@ def mounted(chromium, pages, agentview):
     page.goto(ORIGIN + FRONT)
     until(lambda: page.evaluate("!!(window.__page || window.__failed)"), what="the mount")
     assert page.evaluate("window.__failed || null") is None
-    m = Mounted(page, errors)
+    m = Mounted(page, errors, answered)
     until(lambda: m.js("return !!root.querySelector('.sheaf-row');"), what="the rows in the root")
     yield m
     try:
@@ -462,6 +464,9 @@ TOKEN = re.compile(r"sheaf_mcp_[A-Za-z0-9_-]{43}")
 def laptops_open(m):
     m.click(".sheaf-laptops-open")
     until(lambda: m.js("return !root.querySelector('.sheaf-laptops').hidden;"), what="the Laptops panel")
+    # The list's answer draws a row ("No laptop is connected yet." or the laptops) above the form and moves it down. A click aimed
+    # at the Connect button before that redraw landed beside it: no POST went out (2 failures in 25 runs on a loaded box).
+    until(lambda: m.js("return !!root.querySelector('.sheaf-laptop-row, .sheaf-laptop-none');"), what="the list of laptops")
 
 
 def laptop_names(m):
@@ -473,12 +478,26 @@ def connect_named(m, name):
     m.click(".sheaf-laptop-connect")
 
 
+def line_made(m):
+    """Wait for the line "Connect a laptop" draws. A wait that runs out says what the page and the hub did instead: this wait
+    failed in CI (first laptop-connect test of a page process, three runs of one day) and passed alone and on t-compute, so a
+    red must name its cause, not only "timed out"."""
+    try:
+        until(lambda: m.js("return !root.querySelector('.sheaf-laptop-made').hidden;"), what="the line")
+    except AssertionError as e:
+        seen = m.js("const s = root.querySelector('.sheaf-said'); const b = root.querySelector('.sheaf-laptop-connect');"
+                    " return {said: s && !s.hidden ? s.textContent : null, button_disabled: b.disabled,"
+                    " input: root.querySelector('.sheaf-laptop-input').value, panel_hidden: root.querySelector('.sheaf-laptops').hidden};")
+        laptops = [a for a in m.answered if a[1].startswith("/_/laptops")]
+        raise AssertionError(f"{e}; the page: {seen}; the hub answered {laptops}; script errors {m.errors}") from None
+
+
 def test_connect_a_laptop_names_it_and_shows_one_line_once(mounted):
     seen = []
     mounted.page.on("console", lambda msg: seen.append(msg.text))
     laptops_open(mounted)
     connect_named(mounted, "Work MacBook")
-    until(lambda: mounted.js("return !root.querySelector('.sheaf-laptop-made').hidden;"), what="the line")
+    line_made(mounted)
     line = mounted.js("return root.querySelector('.sheaf-laptop-line').textContent;")
     assert re.fullmatch(r"sheaf connect \S+ sheaf_mcp_[A-Za-z0-9_-]{43}", line), line
     until(lambda: laptop_names(mounted) == ["Work MacBook"], what="the laptop in the list")
@@ -488,7 +507,7 @@ def test_connect_a_laptop_names_it_and_shows_one_line_once(mounted):
 def test_the_token_is_not_kept_once_the_member_leaves_the_panel(mounted):
     laptops_open(mounted)
     connect_named(mounted, "Work MacBook")
-    until(lambda: mounted.js("return !root.querySelector('.sheaf-laptop-made').hidden;"), what="the line")
+    line_made(mounted)
     token = TOKEN.search(mounted.js("return root.querySelector('.sheaf-laptop-line').textContent;")).group(0)
     kept = "return [root.innerHTML, root.textContent, document.documentElement.outerHTML, location.href, JSON.stringify(Object.entries(localStorage)), JSON.stringify(Object.entries(sessionStorage))].join('|');"
     mounted.click(".sheaf-laptops-open")                                   # the same switch closes the panel

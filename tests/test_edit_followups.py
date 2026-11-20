@@ -1124,3 +1124,78 @@ def test_a_comment_put_back_in_the_last_row_of_a_quoted_table_with_an_unclosed_o
     out = rde._insert_comment(md, 0, rdc.format(agent_note(), True), "w")
     assert out.startswith("> | h | i |\n> |---|---|\n> | y | <!-- x w\n\n<!-- sheaf-comment"), out
     assert len(rdc.parse(out).comments) == 1
+
+
+# What an online word processor's clipboard holds, as the paste leaves it in a block. RECONSTRUCTED, not captured:
+# the structure comes from the owner's description of a copy from the real program (a wrapper <b> that says it is
+# not bold, bold written as a styled <span>, an empty paragraph written as a <br> between two <p>); no clipboard
+# of it was ever recorded (ticket 142).
+DOCS_WRAP = '<meta charset="utf-8"><b style="font-weight:normal" id="docs-internal-guid-1">'
+
+
+@pytest.mark.parametrize("weight", ["700", "bold", "600", "800"])
+def test_a_styled_span_that_says_bold_is_bold_in_the_saved_markdown(weight):
+    html = f'<p>Two <span style="font-size:11pt;font-weight:{weight}">bold</span> words</p>'
+    out = rde.html_block_to_md(html, source="Two words")
+    assert out == "Two **bold** words", out
+
+
+@pytest.mark.parametrize("weight", ["400", "normal", "500", "300"])
+def test_a_styled_span_that_does_not_say_bold_stays_plain(weight):
+    html = f'<p>Two <span style="font-weight:{weight}">plain</span> words</p>'
+    assert rde.html_block_to_md(html, source="Two words") == "Two plain words"
+
+
+def test_a_styled_span_that_says_italic_is_italic_in_the_saved_markdown():
+    html = '<p>Two <span style="font-style:italic">slanted</span> words</p>'
+    assert rde.html_block_to_md(html, source="Two words") == "Two *slanted* words"
+
+
+@pytest.mark.parametrize("html", [
+    DOCS_WRAP + '<p dir="ltr"><span style="font-weight:700">Two</span> paragraphs</p><br>'
+                '<p dir="ltr">Here is <a href="https://example.com/">a link</a>.</p></b>',
+    '<p>Two paragraphs</p><br><p>Here is a link.</p>',
+    '<p>Two paragraphs</p><br><br><p>Here is a link.</p>',
+    '<br><p>Two paragraphs</p><br>'],
+    ids=["a word processor's empty paragraph", "a break between two paragraphs", "two breaks between them",
+         "a break before and after"])
+def test_the_break_a_paste_leaves_between_two_paragraphs_is_not_a_paragraph_of_its_own(html):
+    out = rde.html_block_to_md(html, source="Two paragraphs")
+    assert "\\" not in out, out
+    assert all(part.strip() for part in out.split("\n\n")), out
+
+
+def test_a_word_processor_paste_with_bold_a_link_and_an_empty_paragraph_is_plain_markdown():
+    html = (DOCS_WRAP + '<p dir="ltr" style="line-height:1.38"><span style="font-size:11pt;font-weight:700">Two</span>'
+            '<span style="font-size:11pt"> paragraphs, this is </span><span style="font-size:11pt;font-weight:700">bold</span></p><br>'
+            '<p dir="ltr"><span style="font-size:11pt">Here is a link to </span><a href="https://example.com/">'
+            '<span style="font-size:11pt;text-decoration:underline">the page</span></a><span>.</span></p></b>')
+    assert rde.html_block_to_md(html, source="x") == (
+        "**Two** paragraphs, this is **bold**\n\nHere is a link to [the page](https://example.com/).")
+
+
+@pytest.mark.parametrize("html, md", [
+    ('<p>a <strong><span style="font-weight:700">bold</span></strong> b</p>', "a **bold** b"),
+    ('<p>a <b><span style="font-weight:700">bold</span> x</b> b</p>', "a **bold x** b"),
+    ('<p>a <em><span style="font-style:italic">slant</span></em> b</p>', "a *slant* b"),
+    ('<p>a <a href="https://example.com/"><span style="font-weight:700">link</span></a></p>', "a [**link**](https://example.com/)")],
+    ids=["inside strong", "inside b", "italic inside em", "inside a link"])
+def test_a_styled_span_inside_a_mark_of_its_kind_is_marked_once(html, md):
+    assert rde.html_block_to_md(html, source="a b") == md
+
+
+@pytest.mark.parametrize("html", ['Words<br><p>Next.</p>', 'Words<br><br><p>Next.</p>', '<p>Words</p><br>'],
+                         ids=["a break before a block", "two breaks before a block", "a break at the end"])
+def test_a_break_before_a_block_or_at_the_end_is_not_a_backslash(html):
+    assert "\\" not in rde.html_block_to_md(html, source="Words")
+
+
+def test_a_word_processor_paste_as_the_browser_leaves_it_in_a_paragraph_is_plain_markdown():
+    # The DOM Chrome built from the clipboard (execCommand insertHTML, read back from outerHTML on 2026-11-20): the
+    # wrapper <b> became a <span id>, and the pasted <p> and the <br> between them sit inside the edited <p>.
+    html = ('<p>Last paragraph.<span id="docs-internal-guid-1"><p dir="ltr" style="line-height:1.38">'
+            '<span style="font-size:11pt;font-weight:700">Two</span><span style="font-size:11pt"> paragraphs, this is </span>'
+            '<span style="font-size:11pt;font-weight:700">bold</span></p><br><p dir="ltr"><span style="font-size:11pt">'
+            'Here is a link to </span><a href="https://example.com/"><span style="font-size: 11pt;">the page</span></a>.</p></span></p>')
+    out = rde.html_block_to_md(html, source="Last paragraph.")
+    assert "\\" not in out and out.endswith("**Two** paragraphs, this is **bold**\n\nHere is a link to [the page](https://example.com/)."), out

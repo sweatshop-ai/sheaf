@@ -95,7 +95,8 @@ def _unwrap_strays(soup, source: str, strays) -> None:
     brings (a mail client's styled <div> and <span>, a word processor's <b style="font-weight:normal">, a web
     page's classes). Pandoc would keep each as raw HTML, and a block with raw HTML is one the page cannot edit
     again. A <div>, a <span> and a <b> that says it is not bold are unwrapped; a style, and on a link a class,
-    a target and a rel, are dropped. What the block's source had stays as it is, in the same number and with
+    a target and a rel, are dropped; a <span> styled bold or italic becomes a <strong> or an <em>, and a <br> beside a block
+    is dropped. What the block's source had stays as it is, in the same number and with
     the same attributes. The page's own markup (`_page_own`) is left alone."""
     from bs4 import BeautifulSoup
 
@@ -112,6 +113,15 @@ def _unwrap_strays(soup, source: str, strays) -> None:
             continue
         plain_b = (el.name in ("b", "strong")
                    and re.search(r"font-weight:\s*(normal|400)", el.get("style", "")))
+        if el.name == "br" and _beside_a_block(el):
+            # An empty line a paste writes as a <br> beside a paragraph is no line of the markdown:
+            # pandoc would write it as a paragraph holding a lone backslash.
+            el.decompose()
+            if strays is not None:
+                strays.append("br")
+            continue
+        if el.name == "span":
+            _styled_marks(soup, el)
         if el.name in ("div", "span") or plain_b:
             if el.name == "div":
                 # A line: its words stay apart from the text around it.
@@ -132,6 +142,34 @@ def _unwrap_strays(soup, source: str, strays) -> None:
             del el[a]
         if drop and strays is not None:
             strays.append(el.name)
+
+
+_BLOCKS = ("p", "div", "ul", "ol", "li", "blockquote", "pre", "table", "hr", "h1", "h2", "h3", "h4", "h5", "h6")
+
+
+def _beside_a_block(br) -> bool:
+    """Whether a <br> has a block on a side, past any more <br> and white space: a break there ends no line."""
+    def block_on(step):
+        el = getattr(br, step)
+        while el is not None and (getattr(el, "name", None) in ("br", "meta") or not getattr(el, "name", None) and not str(el).strip()):
+            el = getattr(el, step)
+        return getattr(el, "name", None) in _BLOCKS
+
+    return block_on("next_sibling") or block_on("previous_sibling")
+
+
+def _styled_marks(soup, span) -> None:
+    """A word processor writes bold and italic as a <span> with a style, and no <b> or <i>: the span's words go
+    inside a <strong> or an <em>, or pandoc would drop the style and the words would lose it. Inside a mark of the
+    same kind the words are marked already."""
+    style = span.get("style", "")
+    for found, name, same in ((re.search(r"font-style:\s*italic\b", style), "em", ("em", "i")),
+                              (re.search(r"font-weight:\s*(bold|bolder|[6-9]00)\b", style), "strong", ("strong", "b"))):
+        if found and not any(p.name in same for p in span.parents):
+            inner = soup.new_tag(name)
+            for c in list(span.contents):
+                inner.append(c.extract())
+            span.append(inner)
 
 
 def _trim_lead(li, skip: int) -> None:

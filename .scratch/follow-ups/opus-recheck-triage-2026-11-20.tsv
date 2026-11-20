@@ -6,10 +6,10 @@
 15	385	b	src/sheafmd/hub/core.py:1680	First half is FIXED (create clears expectation at mcp.py:1174, update at mcp.py:1254); second half holds: `not is_pull and not is_own` short-circuits so a pending _own entry survives a pull; evaluate is_own first, then is_pull.	4
 19	386	FIXED	src/sheafmd/hub/loose.py:304	drop() now compares os.path.realpath(folder) with os.path.realpath(root.path).	
 20	386	b	src/sheafmd/hub/loose.py:306	drop() still runs forget_root then os.rmdir/write_json unguarded, and mcp.py:1038 calls it inside `except BaseException` so an OSError replaces the refusal; catch OSError around the drop call (or inside drop) and rmdir before forget_root.	2
-21	386	b	src/sheafmd/mcp.py:987	_loose reads raw args["doc"] and tests bare before _named strips it; use doc = _named(args["doc"]) at the top of _loose.	1
+21	386	FIXED	src/sheafmd/mcp.py:987	_loose reads raw args["doc"] and tests bare before _named strips it; use doc = _named(args["doc"]) at the top of _loose.	1
 22	386	FIXED	src/sheafmd/mcp.py:991	Non-bare doc refuses only a true keep (`if args.get("keep")`), keep=false passes.	
 23	386	FIXED	src/sheafmd/mcp.py:1174	The create path calls writes.told(address) in its except BaseException after expect_own (mcp.py:1165), so a refused create leaves no stale hash.	
-27	387	b	src/sheafmd/hub/sheaf_view.py:44	Titles.read still does `self._kept[key] = ...` then `return self._kept[key]` after a possible clear() by another thread; compute value into a local, store it, return the local.	1
+27	387	FIXED	src/sheafmd/hub/sheaf_view.py:44	Titles.read still does `self._kept[key] = ...` then `return self._kept[key]` after a possible clear() by another thread; compute value into a local, store it, return the local.	1
 28	387	b	src/sheafmd/hub/sheaf_view.py:223	hub.writes.last and last_way_back are still two separate lock takes; add one WriteLog method returning both under one lock (cosmetic).	5
 29	387	a	src/sheafmd/page/mount.js:438	The Sheaf wrapper still gets class `sheaf-list sheaf-sheaf`; reuse of list.css looks deliberate, so add a comment saying so (no behaviour change).	
 30	387	STALE	src/sheafmd/hub/sheaf_view.py:194	Not a defect: a cost remark, and Titles caches by (path, mtime, size) (sheaf_view.py:36-44) as the finding itself says.	
@@ -40,7 +40,7 @@
 79	396	c	src/sheafmd/connect.py:188	entry_name still maps https://[::1]:8443 to sheaf---1-8443; renaming changes the key of existing MCP entries in users' ~/.claude.json, so it needs a decision.	
 83	397	c	src/sheafmd/send.py:359	tiroir_of still reads .sheaf.toml of the file own folder only (load_root_config documents "never from a subfolder"); using the registered root needs a decision on how a laptop finds the root.	
 84	397	b	src/sheafmd/send.py:351	keep_row is still read_state, set, write_state with no lock; take a file lock around the read-modify-write.	4
-85	397	b	src/sheafmd/send.py:423	Door.tool now checks content[0] and text, but got["doc"], got["hash"] (send.py:423,434,594) are still read unchecked from the parsed JSON; validate the result shape in tool() and raise SendError.	1
+85	397	FIXED	src/sheafmd/send.py:423	Door.tool now checks content[0] and text, but got["doc"], got["hash"] (send.py:423,434,594) are still read unchecked from the parsed JSON; validate the result shape in tool() and raise SendError.	1
 86	397	c	src/sheafmd/send.py:386	_leave_theirs still write_text_atomic over FILE.tiroir.md with no check; whether to refuse, number it or overwrite is a decision.	
 87	397	b	src/sheafmd/send.py:631	cmd_pull hashes the local text before the door call and writes at line 631 without re-reading; re-read and compare md_hash just before write_text_atomic.	4
 91	398	a	docs/design/2026-11-07-agents-and-waiting-tells.md:16	"library-door#241" is still there (SPEC.md:969 says acme/library-door#241); replace with a resolvable reference or plain wording.	
@@ -87,7 +87,7 @@
 165	409	a	src/sheafmd/hub/repos.py:215	The "said once, at the hub's start" comment is true per Repos() construction only; reword the comment to "at each Repos construction (one per hub)".	
 166	409	b	tests/test_repo_pages.py:1180	The start-message tests monkeypatch _git_version; add a test with a failing then working real read at Repos() start asserting the recovery line is printed.	5
 170	410	FIXED	src/sheafmd/page/page.js:3133	Reply now renders the reply's text field (esc(r.text)); fixed by commit 9d49bd10 "Team tab: a reply shows its text".	
-171	410	b	src/sheafmd/hub/handler.py:1166	_with_team op "page" still calls json.loads(m.group(2)) with no try; wrap in try/except ValueError and return the body unchanged as the doc/mount branch does.	1
+171	410	FIXED	src/sheafmd/hub/handler.py:1166	_with_team op "page" still calls json.loads(m.group(2)) with no try; wrap in try/except ValueError and return the body unchanged as the doc/mount branch does.	1
 172	410	c	src/sheafmd/hub/team.py:42	Team comments are still keyed by the address and nothing renames them on a Move or Forward; following Forwards or re-keying on move is a design decision.	
 176	411	c	src/sheafmd/hub/incoming.py:150	Write log lines on disk are now retracted (writes.undo appends a retracted line, writelog.py:243), but hub.wrote/committed index entry, the git commit and made loose folders are still not undone in the rollback; undoing a commit in a git root is a decision.	
 177	411	b	src/sheafmd/hub/incoming.py:139	hub.versions.put/forget still used unconditionally; use (hub._versions_of(root) or hub.versions) as outgoing.py:100 does, for put and forget.	3
@@ -111,7 +111,7 @@
 207	417	c	tests/leakguard.py:136	is_ending still waits up to EXEC_WINDOW for a live process whose environ cannot be read; telling unreadable from empty is a change of the guard's rule.	
 211	422	FIXED	src/sheafmd/hub/outgoing.py:59	post now opens through connect._NO_REDIRECT, so the bearer is not sent to a redirect target (commit 9921afbf).	
 212	422	FIXED	src/sheafmd/hub/writelog.py:243	undo and restore append a `retracted` line and the kept lines to the file, so a restart does not bring the carried lines back (commits 9921afbf, 2b0db61e).	
-213	422	b	src/sheafmd/hub/incoming.py:158	_unkeep and _unarchive still share one contextlib.suppress; give each its own suppress so a failed _unkeep does not skip _unarchive.	1
+213	422	FIXED	src/sheafmd/hub/incoming.py:158	_unkeep and _unarchive still share one contextlib.suppress; give each its own suppress so a failed _unkeep does not skip _unarchive.	1
 214	422	c	src/sheafmd/hub/outgoing.py:59	The sender's timeout is still urllib's per-socket-operation timeout; a total-deadline call is a design change.	
 218	423	b	tests/test_helpers_wait.py:22	The unreaped test still asserts nothing after the wait; add assert proc_state(done.pid) == "zombie" before done.wait.	4
 222	425	c	src/sheafmd/hub/archive.py:143	_sweep_root still lists pages outside any lock and does not take moves._LOCK; adding it changes the hub's lock order for the sweep, a decision.	

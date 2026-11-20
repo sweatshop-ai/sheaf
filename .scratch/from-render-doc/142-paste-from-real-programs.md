@@ -3,7 +3,7 @@
 **Status:** open (one by-hand check)
 
 **Blocked by:** 
-- External: Thierry pastes from a real web mail client and a real online word processor, by hand (not yet asked)
+- External: The owner pastes from a real web mail client and a real online word processor, by hand (not yet asked)
 
 **From:** render-doc ticket 142 (private archive), triaged 2026-11-12
 

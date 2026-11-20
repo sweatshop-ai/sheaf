@@ -125,6 +125,19 @@ def test_share_opens_a_loose_page_to_every_member_of_the_tiroir(team):
     assert page(team, BOB, doc).status == 200 and page(team, CAROL, doc).status == 200
 
 
+def test_a_loose_pages_save_that_renames_and_ticks_share_keeps_the_box_ticked_for_it_is_the_share(team):
+    """On a loose page the ticked line is what Shares it (`Hub.shared_with` reads it each time), so no ticked box there
+    is out of step with the page's visibility."""
+    doc = made(team, "alice", "---\nvisibility: owner\n---\n# Alice's plan\n\n- [ ] Share\n\nA plan.\n")["doc"]
+    text = read(team, doc)
+    edit = line_edit(text, "Share")
+    edit["html"] = edit["html"].replace("/>Share<", "/>Shared with the team<")
+    assert "Shared with the team" in edit["html"]
+    assert team.post("/_/save", {"doc": doc, "hash": md_hash(text), "edits": [edit]}, member=ALICE).status == 200
+    assert "- [x] Shared with the team" in read(team, doc)
+    assert page(team, BOB, doc).status == 200
+
+
 def test_share_with_opens_it_to_the_named_members_only(team):
     doc = made(team, "alice", NAMED)["doc"]
     assert page(team, BOB, doc).status == 404

@@ -8,7 +8,7 @@ import time
 from http.server import ThreadingHTTPServer
 
 from sheafmd.hub import server
-from sheafmd.hub.handler import Refuse, Response
+from sheafmd.hub.handler import Response
 
 
 class Slow:

@@ -233,6 +233,28 @@ def test_a_second_refusal_before_the_merge_keeps_the_tiroirs_latest_text(tiroir,
     assert scratch.with_name("notes.tiroir.md").read_text(encoding="utf-8") == TEXT + "\nOne.\n\nTwo.\n"
 
 
+# ── the state file, held by more than one sheaf at once ──────────────────────
+
+def test_two_keeps_of_a_row_at_once_both_stay(tmp_path):
+    one, two = tmp_path / "one.md", tmp_path / "two.md"
+    row = lambda name: {"tiroir": FRONT, "doc": name, "hash": "h", "local": "l"}  # noqa: E731
+    write_state, other = send.write_state, []
+
+    def slow_write(data):
+        if not other:                                       # the first keep is between its read and its write
+            other.append(threading.Thread(target=send.keep_row, args=(two, row("two.md"))))
+            other[0].start()
+            other[0].join(0.5)                              # the second keep gets its turn, if the state file lets it
+        write_state(data)
+    send.write_state = slow_write
+    try:
+        send.keep_row(one, row("one.md"))
+    finally:
+        send.write_state = write_state
+    other[0].join(10)
+    assert sorted(v["doc"] for v in send.read_state().values()) == ["one.md", "two.md"]
+
+
 # ── sheaf pull ───────────────────────────────────────────────────────────────
 
 def test_pull_writes_the_tiroirs_latest_text_into_the_file(tiroir, scratch, capsys):
@@ -259,6 +281,26 @@ def test_pull_never_overwrites_an_edit_made_here_and_leaves_the_tiroirs_text_bes
     assert scratch.read_text(encoding="utf-8") == mine
     assert scratch.with_name("notes.tiroir.md").read_text(encoding="utf-8") == theirs
     assert "merge" in err and "nothing was sent" not in err
+
+
+def test_pull_never_overwrites_an_edit_made_while_it_asks_the_door(tiroir, scratch, capsys, monkeypatch):
+    run(capsys, scratch)
+    address = f"loose-bea/{loose.month()}/notes.md"
+    theirs = TEXT + "\nAdded on the tiroir.\n"
+    changed_there(tiroir, address, theirs)
+    mine = TEXT + "\nTyped while the pull waited.\n"
+    asked = send.post
+
+    def post(url, bearer, message, headers):
+        got = asked(url, bearer, message, headers)
+        if message.get("params", {}).get("name") == "read":
+            scratch.write_text(mine, encoding="utf-8")                  # the edit lands after the pull read the file, before it writes
+        return got
+    monkeypatch.setattr(send, "post", post)
+    code, out, err = run(capsys, "pull", scratch)
+    assert code == 1
+    assert scratch.read_text(encoding="utf-8") == mine
+    assert scratch.with_name("notes.tiroir.md").read_text(encoding="utf-8") == theirs
 
 
 def test_pull_of_a_page_never_sent_from_here_says_so(tiroir, scratch, capsys):

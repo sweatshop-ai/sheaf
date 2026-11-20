@@ -51,3 +51,26 @@ def test_a_break_in_code_in_a_cell_stays_a_pipe_table():
     src = "| a |\n|---|\n| x |"
     html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", "><code>x<br>\u00a0</code><")
     assert "<table" not in saved_table(html, src)
+
+
+def test_enter_inside_code_in_a_cell_splits_the_code_and_stays_a_pipe_table():
+    src = "| a |\n|---|\n| x |"
+    html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", "><code>red on<br>xes</code><")
+    out = saved_table(html, src)
+    assert "<table" not in out
+    assert out.splitlines()[-1].replace(" ", "") == "|`redon`<br>`xes`|"
+
+
+def test_enter_inside_code_among_words_in_a_cell_keeps_the_words():
+    src = "| a |\n|---|\n| x |"
+    html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", ">go <code>red<br>x</code> now<")
+    out = saved_table(html, src)
+    assert "<table" not in out
+    assert "go `red`<br>`x` now" in out.splitlines()[-1]
+
+
+def test_two_breaks_inside_code_in_a_cell_make_three_spans():
+    src = "| a |\n|---|\n| x |"
+    html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", "><code>a<br>b<br>c</code><")
+    out = saved_table(html, src)
+    assert "<table" not in out and "`a`<br>`b`<br>`c`" in out.replace(" ", "")

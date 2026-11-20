@@ -1172,3 +1172,19 @@ def test_a_word_processor_paste_with_bold_a_link_and_an_empty_paragraph_is_plain
             '<span style="font-size:11pt;text-decoration:underline">the page</span></a><span>.</span></p></b>')
     assert rde.html_block_to_md(html, source="x") == (
         "**Two** paragraphs, this is **bold**\n\nHere is a link to [the page](https://example.com/).")
+
+
+@pytest.mark.parametrize("html, md", [
+    ('<p>a <strong><span style="font-weight:700">bold</span></strong> b</p>', "a **bold** b"),
+    ('<p>a <b><span style="font-weight:700">bold</span> x</b> b</p>', "a **bold x** b"),
+    ('<p>a <em><span style="font-style:italic">slant</span></em> b</p>', "a *slant* b"),
+    ('<p>a <a href="https://example.com/"><span style="font-weight:700">link</span></a></p>', "a [**link**](https://example.com/)")],
+    ids=["inside strong", "inside b", "italic inside em", "inside a link"])
+def test_a_styled_span_inside_a_mark_of_its_kind_is_marked_once(html, md):
+    assert rde.html_block_to_md(html, source="a b") == md
+
+
+@pytest.mark.parametrize("html", ['Words<br><p>Next.</p>', 'Words<br><br><p>Next.</p>', '<p>Words</p><br>'],
+                         ids=["a break before a block", "two breaks before a block", "a break at the end"])
+def test_a_break_before_a_block_or_at_the_end_is_not_a_backslash(html):
+    assert "\\" not in rde.html_block_to_md(html, source="Words")

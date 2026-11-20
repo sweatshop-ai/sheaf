@@ -95,8 +95,8 @@ def _unwrap_strays(soup, source: str, strays) -> None:
     brings (a mail client's styled <div> and <span>, a word processor's <b style="font-weight:normal">, a web
     page's classes). Pandoc would keep each as raw HTML, and a block with raw HTML is one the page cannot edit
     again. A <div>, a <span> and a <b> that says it is not bold are unwrapped; a style, and on a link a class,
-    a target and a rel, are dropped; a <span> styled bold or italic becomes a <strong> or an <em>, and a <br> an
-    empty line left between blocks is dropped. What the block's source had stays as it is, in the same number and with
+    a target and a rel, are dropped; a <span> styled bold or italic becomes a <strong> or an <em>, and a <br> before a block
+    is dropped. What the block's source had stays as it is, in the same number and with
     the same attributes. The page's own markup (`_page_own`) is left alone."""
     from bs4 import BeautifulSoup
 
@@ -113,7 +113,7 @@ def _unwrap_strays(soup, source: str, strays) -> None:
             continue
         plain_b = (el.name in ("b", "strong")
                    and re.search(r"font-weight:\s*(normal|400)", el.get("style", "")))
-        if el.name == "br" and isinstance(el.parent, BeautifulSoup) and _between_blocks(el):
+        if el.name == "br" and isinstance(el.parent, BeautifulSoup) and _before_a_block(el):
             # An empty line a paste writes as a <br> between two paragraphs is no line of the markdown:
             # pandoc would write it as a paragraph holding a lone backslash.
             el.decompose()
@@ -147,26 +147,22 @@ def _unwrap_strays(soup, source: str, strays) -> None:
 _BLOCKS = ("p", "div", "ul", "ol", "li", "blockquote", "pre", "table", "hr", "h1", "h2", "h3", "h4", "h5", "h6")
 
 
-def _between_blocks(br) -> bool:
-    """Whether a <br> stands between block elements, or at the edge of the fragment, with no words beside it."""
-    def beside(el, step):
-        el = getattr(el, step)
-        while el is not None and (not getattr(el, "name", None) and not str(el).strip() or getattr(el, "name", None) in ("br", "meta")):
-            el = getattr(el, step)
-        return el
-
-    return all(n is None or getattr(n, "name", None) in _BLOCKS
-               for n in (beside(br, "previous_sibling"), beside(br, "next_sibling")))
+def _before_a_block(br) -> bool:
+    """Whether the words after a <br>, past any more <br>, are a block or nothing: a break there ends no line."""
+    nxt = br.next_sibling
+    while nxt is not None and (getattr(nxt, "name", None) in ("br", "meta") or not getattr(nxt, "name", None) and not str(nxt).strip()):
+        nxt = nxt.next_sibling
+    return nxt is None or getattr(nxt, "name", None) in _BLOCKS
 
 
 def _styled_marks(soup, span) -> None:
     """A word processor writes bold and italic as a <span> with a style, and no <b> or <i>: the span's words go
-    inside a <strong> or an <em>, or pandoc would drop the style and the words would lose it."""
+    inside a <strong> or an <em>, or pandoc would drop the style and the words would lose it. Inside a mark of the
+    same kind the words are marked already."""
     style = span.get("style", "")
-    weight = re.search(r"font-weight:\s*(bold|bolder|[6-9]00)\b", style)
-    slant = re.search(r"font-style:\s*italic\b", style)
-    for on, name in ((slant, "em"), (weight, "strong")):
-        if on:
+    for found, name, same in ((re.search(r"font-style:\s*italic\b", style), "em", ("em", "i")),
+                              (re.search(r"font-weight:\s*(bold|bolder|[6-9]00)\b", style), "strong", ("strong", "b"))):
+        if found and not any(p.name in same for p in span.parents):
             inner = soup.new_tag(name)
             for c in list(span.contents):
                 inner.append(c.extract())

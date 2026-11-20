@@ -1642,7 +1642,7 @@ class Handler:
 
     def _ticks(self, req: Req, e):
         """The guard of a save (live.save) for the actions the hub judges: a one-off is never unticked and a rectoverso
-        answers Move to once (9.10), and the two it acts on (9.11); and the set it fills with the words the save
+        answers Belongs to once (9.10), and the two it acts on (9.11); and the set it fills with the words the save
         ticked. Share is its owner's alone: ticked by anyone else, nothing is written; ticked by the owner, the same
         write opens the rectoverso to the project. Who ticked is the signed-in member, never a name the request carries."""
         ticked = set()
@@ -1664,8 +1664,8 @@ class Handler:
                 # routine has acted on its tick, and an untick would move nothing back.
                 raise EditError(f"{word} is pressed once: its tick cannot be taken back.")
             if (slug := the_list.ticks_another_move(text, new)) is not None:
-                # A thread moves to one client (9.10, #109): a rectoverso answers Move to once, by whatever edit.
-                raise EditError(f"This thread moves to one client: Move to {slug} is ticked.")
+                # A thread moves to one client (9.10, #109): a rectoverso answers Belongs to once, by whatever edit.
+                raise EditError(f"This thread moves to one client: Belongs to {slug} is ticked.")
             words = visibility.newly_ticked(toggled)
             if visibility.audience(new) is True and isinstance(visibility.audience(text), frozenset):
                 # A box that stays ticked while its words change (`Share with bob` into `Share`) opens the page to more

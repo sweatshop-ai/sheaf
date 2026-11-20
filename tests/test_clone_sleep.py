@@ -209,3 +209,23 @@ def test_a_clone_that_does_not_finish_going_to_sleep_is_left_for_the_next_round_
     assert repos.settle()
     assert repos.sleeping(REPO)                             # it finished behind the round, and the next one leaves it alone
     assert repos.sleep_idle() == []
+
+
+def test_a_clone_put_to_sleep_twice_keeps_the_folders_it_is_to_get_back(napping):
+    repos = napping.hub.repos
+    napping.now[0] += 31 * DAY
+    repos.sleep_idle()
+    assert repos.sleeping(REPO)
+    repos._sleep_one(REPO, the_clone(napping), [], None)        # a second round finds the set already shrunk
+    assert not report(napping, path="docs/plan.md")[0]
+    assert sh(the_clone(napping), "sparse-checkout", "list").split() == ["docs", "notes"]
+
+
+def test_a_write_whose_widen_fails_leaves_the_clone_asleep(napping, monkeypatch):
+    repos = napping.hub.repos
+    napping.now[0] += 31 * DAY
+    repos.sleep_idle()
+    assert repos.sleeping(REPO)
+    monkeypatch.setattr(repos, "_restore", lambda *a, **kw: False)
+    assert repos.wake(REPO) is False
+    assert repos.sleeping(REPO)

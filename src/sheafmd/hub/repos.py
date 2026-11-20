@@ -211,7 +211,7 @@ class Repos:
         # the clone's files, so it runs under the lock a save and a pull take.
         self.holding = lambda dest: contextlib.nullcontext()
         self._saves: dict[str, tuple] = {}      # repo -> (the branch saves go on or None, the line when none), as last decided
-        self._why: dict[str, str] = {}          # repo -> why its HEAD is not on the save branch, after a switch that did not happen
+        self._why: dict[str, tuple[str, str]] = {}          # repo -> why its HEAD is not on the save branch, after a switch that did not happen
         version = _git_version()
         if version is None or version < NO_LAZY_FETCH_FROM:     # said at each Repos construction (one per hub)
             print("sheaf hub: " + ("git version unreadable" if version is None else "git below 2.44") + ": commit look off",
@@ -362,8 +362,9 @@ class Repos:
                         # A report that came during the shrink dates the clone anew (it takes no lock): it stays awake and
                         # the thread's drain widens the set again.
                         idle = moved is not None or self.clock() - row.get("last_used", 0) > SLEEP_DAYS * 86400
+                        # A clone already shrunk lists the shrunk set: the folders it is to get back stay.
                         data[repo] = {**row, "sleeping": idle or row.get("sleeping") is True,
-                                      "restore": [f for f in listed.stdout.split("\n") if f]}
+                                      "restore": row.get("restore") or [f for f in listed.stdout.split("\n") if f]}
                         if moved is not None:
                             data[repo]["moved"] = moved
                         write_text_atomic(self._usage_file, json.dumps(data, indent=1, sort_keys=True) + "\n")
@@ -411,11 +412,14 @@ class Repos:
                 return False
             with self._records:
                 row = self._usage().get(repo)
-            self._use(repo)
             if not (isinstance(row, dict) and (row.get("sleeping") is True or row.get("restore"))):
+                self._use(repo)
                 return True                         # nothing is out: no token is asked for
             token = self.provider.token(repo)
-            return self._restore(repo, dest, token)
+            woken = self._restore(repo, dest, token)
+            if woken:
+                self._use(repo)                     # a failed widen leaves the row asleep, as it was
+            return woken
 
     def page_text(self, repo: str, path: str, commit: str) -> str | None:
         """The text of the page `path` at `commit`, read from git and not from the work tree, so a sleeping clone's pages open
@@ -611,8 +615,14 @@ class Repos:
         on = self.head_of(repo)
         if on == branch:
             return ""
-        return self._why.get(repo) or (f"The clone of {repo} is on {on or 'no branch'}, not on {branch}, where its pages "
+        return self._why_of(repo, branch) or (f"The clone of {repo} is on {on or 'no branch'}, not on {branch}, where its pages "
                                         f"are saved; it moves at the next render report.")
+
+    def _why_of(self, repo: str, branch: str) -> str:
+        """The reason the last switch to `branch` did not happen; none for a reason given for another branch."""
+        with self._guard:
+            got = self._why.get(repo)
+        return got[1] if got and got[0] == branch else ""
 
     def switch(self, repo: str, branch: str, token: str | None) -> str:
         """Put the clone's HEAD on `branch` (the remote's), when it is not: only when no commit of the clone is
@@ -640,7 +650,7 @@ class Repos:
         why = self.mover(root, root_name(repo), f"origin/{branch}", move) if root is not None else move()
         with self._guard:
             if why:
-                self._why[repo] = why
+                self._why[repo] = (branch, why)
             else:
                 self._why.pop(repo, None)
         return why

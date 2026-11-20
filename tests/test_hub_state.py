@@ -363,3 +363,16 @@ def test_each_store_takes_the_lock_the_spec_names():
     state.Seen().mark("a/one.md", "c1", 1)
     state.MemberSeen().mark("m1", "a/one.md", "c1", 1)
     assert {p.name for p in paths.locks_dir().glob("*.lock")} >= {"docs.lock", "seen.lock", "seen-members.lock"}
+
+
+def test_a_store_whose_write_fails_does_not_keep_the_change_in_memory(monkeypatch):
+    seen = state.Seen()
+    seen.mark("a/one.md", "c1", 1)
+    before = json.loads(json.dumps(seen._data))
+
+    def broken(*args, **kw):
+        raise OSError("disk full")
+    monkeypatch.setattr(state, "write_json", broken)
+    with pytest.raises(OSError):
+        seen.mark("a/two.md", "c2", 2)
+    assert seen._data == before

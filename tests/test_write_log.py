@@ -400,3 +400,13 @@ def test_a_restore_keeps_a_renamed_pages_lines_under_the_new_address_in_memory_t
     log.rename("old.md", "new.md")
     log.restore("new.md", log.lines("new.md"))
     assert [l.address for l in log.lines("new.md")] == ["new.md"]
+
+
+def test_a_pull_that_ends_does_not_close_the_window_of_another_pull_of_the_same_page():
+    log = WriteLog()
+    log.expect_pull("a.md")
+    log.expect_pull("a.md")
+    log.end_pull("a.md", None)
+    assert log.is_pull("a.md", "h-any")             # the second pull is still under way
+    log.end_pull("a.md", None)
+    assert not log.is_pull("a.md", "h-any")

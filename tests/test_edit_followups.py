@@ -1266,3 +1266,11 @@ def test_a_styled_italic_span_in_a_heading_stays_italic():
 def test_two_breaks_in_a_row_inside_a_pasted_paragraph_are_a_paragraph_break(html, md):
     source = "Alpha\n"
     assert rde.html_block_to_md(html, source) == md
+
+
+def test_a_typed_task_line_after_enter_in_a_task_item_that_starts_with_a_comment_anchor_becomes_a_task_item_and_keeps_the_comment():
+    block = rde.split_md_blocks(f"- [ ] Buy\n- [ ] milk{ADA_C1}\n")[0]
+    md, _ = rde._convert_with_comments(
+        block, f'<ul><li><input type="checkbox"> Buy<div>{anchor("c1")}- [ ] milk</div></li></ul>')
+    assert "\\[" not in md and "sheaf-comment id=c1" in md, md
+    assert md.count("- [ ]") == 2 and md.rindex("- [ ]") < md.index("milk"), md

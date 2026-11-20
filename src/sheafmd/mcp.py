@@ -732,7 +732,7 @@ class Door:
             for src in (root, *privates):          # the hub's own lister (8.6, D15): its rules, its cap
                 listing = list_documents(src)
                 files += [(src, f.rel) for f in listing.docs]
-                if listing.more:
+                if listing.more and not giving:     # another's loose root is told to no one (9.11)
                     left_out[root.name] = left_out.get(root.name, 0) + listing.more
             for src, found in files:
                 # A rectoverso of the list's root is listed by its name (9.11), wherever its file is; a private path is

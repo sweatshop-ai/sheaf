@@ -37,15 +37,22 @@ OTHER_USER, UNKNOWN = "other-user", "unknown"
 
 
 class Conn(NamedTuple):
-    """The two ends of one connection, (address, port) each: the caller's and the hub's."""
+    """The two ends of one connection, (address, port) each: the caller's and the hub's. The server
+    asks who owns it once, when it accepts the connection (`look`), and keeps the answer here:
+    `looked` is whether it did, `refusal` what it found (None: the hub's own user), `closed` a
+    function that says whether the caller has closed its end by now."""
     client: tuple
     hub: tuple
+    looked: bool = False
+    refusal: "Refusal | None" = None
+    closed: object = None
 
 
 class Refusal(NamedTuple):
     kind: str                        # OTHER_USER, or UNKNOWN: the hub could not tell
     message: str                     # what any caller is told: no uid, no path
     detail: str                      # what the row of the log says, for the person who runs `sheaf diag`
+    uid: int | None = None           # the uid found at the caller's end, for the row; never told to a caller
 
 
 def supported() -> bool:
@@ -101,6 +108,7 @@ _NLM_F_REQUEST = 1
 _NOCOOKIE = 0xFFFFFFFF
 _ENOENT = 2
 _NETLINK_TIMEOUT = 2.0
+_ESTABLISHED = 1                       # tcpi_state of a connection whose caller has not closed
 _HEADER = 16                           # struct nlmsghdr
 _UID_AT = _HEADER + 64                 # inet_diag_msg: 4 bytes, the 48-byte id, then expires, rqueue, wqueue
 _MSG_LEN = _HEADER + 72                # ... and uid, inode
@@ -217,5 +225,38 @@ def check(conn) -> Refusal | None:
     if found[0] != hub_uid:
         return Refusal(OTHER_USER, "that sign-in link was followed by another user of this machine",
                        f"that sign-in link was followed by another user of this machine "
-                       f"(uid {found[0]}); the hub runs as uid {hub_uid}")
+                       f"(uid {found[0]}); the hub runs as uid {hub_uid}", found[0])
     return None
+
+
+def closed(sock) -> bool:
+    """Whether the caller has closed its end of the connection `sock` is the hub's end of: the kernel
+    holds the hub's socket in CLOSE_WAIT, or past it, instead of ESTABLISHED. A caller that closed
+    first has its own socket owned by no one (uid 0) from then on, so a lookup made after the close
+    reads root, not the user who sent the request."""
+    try:
+        return sock.getsockopt(socket.IPPROTO_TCP, socket.TCP_INFO, 1)[0] != _ESTABLISHED
+    except (OSError, AttributeError, IndexError):
+        return False
+
+
+def look(client, hub, sock) -> Conn:
+    """The connection `sock` came in on, with the answer to who is at its other end: asked once, as
+    soon as it is accepted, before a byte of the request is read."""
+    conn = Conn(client, hub)
+    no = check(conn)
+    if no is None and os.geteuid() == 0 and closed(sock):
+        # Asked after the caller closed, the lookup reads root, which is the hub's own user where the hub
+        # runs as root: a closed caller is never let through on that answer. Where the hub is not root, a
+        # caller that only half-closed still reads as its owner and is judged by that.
+        no = _unknown("the connection closed before the hub could tell who sent this")
+    return Conn(client, hub, True, no, lambda: closed(sock))
+
+
+def startup() -> str | None:
+    """None when the hub can tell who owns a connection and turns the check on. Otherwise why it
+    cannot (this system gives it no way, or it read its own connection wrong): the check is off,
+    and the sign-in link goes by the nonce alone, as it did before 9.1."""
+    if not supported():
+        return f"this system ({PLATFORM}) gives the hub no way to see who owns a connection"
+    return selftest()

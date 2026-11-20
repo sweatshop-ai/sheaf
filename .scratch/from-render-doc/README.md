@@ -21,3 +21,5 @@ These are the open tickets carried over from the private development repo when i
 | [162-commit-follow-ups.md](162-commit-follow-ups.md) | Commit follow-ups | 3 | A commit in a root that took a forgotten name; `root.git` fixed at registration; versions store chosen once |
 | [164-list-action-inside-a-code-fence.md](164-list-action-inside-a-code-fence.md) | List action inside a code fence | 1 | A task line in a fenced block inside a list item becomes a false action |
 | [167-door-refusal-names-membership.md](167-door-refusal-names-membership.md) | Door refusal for a non-member | 2 | A non-member's `create` should name the project, not a missing root |
+| [174-comment-box-cannot-be-moved.md](174-comment-box-cannot-be-moved.md) | Comment box cannot be moved | 6 | Drag the open comment box by its band with pointer events; clicks on band buttons stay clicks; the box keeps its place across a re-render |
+| [175-resolve-button-shows-a-minus.md](175-resolve-button-shows-a-minus.md) | Resolve shown as a minus | 4 | The Resolve button in the box's band reads as "minimize"; draw a small check mark instead |

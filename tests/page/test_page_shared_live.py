@@ -111,3 +111,56 @@ def test_a_tab_that_leaves_without_a_leave_is_dropped_when_its_lock_frees(shared
     pages[2][0].evaluate("BroadcastChannel.prototype.postMessage = function () {}")
     pages[2][0].close()
     until(lambda: site.hub.tabs(DOC) == 2, timeout=1.0, what="two tabs counted after the tab went")
+
+
+def test_a_join_refused_for_another_owner_reopens_the_shared_stream(shared, site):
+    """Proxy mode, two members in one browser one after the other: the leader's connection belongs to the first, and
+    the hub answers 404 `no such stream` to the second's joins until the connection ends (up to 300 s). The leader
+    opens its connection again, which belongs to whoever asks now. Stood in for here: every join on the first
+    connection's id is answered 404, as the hub answers one for another owner."""
+    stale = []
+
+    def refuse(route):
+        sid = route.request.post_data_json["stream"]
+        if not stale:
+            stale.append(sid)
+        if sid == stale[0]:
+            route.fulfill(status=404, content_type="application/json",
+                          body='{"ok": false, "error": "no such stream"}')
+        else:
+            route.continue_()
+    shared.route("**/_/live/join", refuse)
+    p, errors = opened(shared, site)
+    until(lambda: site.hub.tabs(DOC) == 1, what="the tab counted on the reopened stream")
+    f = site.file
+    rewrite(f, f.read_text(encoding="utf-8") + "\nOn the new stream.\n")
+    until(lambda: shows(p, "On the new stream."), what="the change heard")
+    assert errors == []
+
+
+def test_a_join_refused_again_at_once_is_not_retried_in_a_loop(shared, site):
+    """A hub that refuses every join (404 whatever the stream) must not have its leader reopen without end."""
+    sids = set()
+
+    def refuse(route):
+        sids.add(route.request.post_data_json["stream"])
+        route.fulfill(status=404, content_type="application/json", body='{"ok": false, "error": "no such stream"}')
+    shared.route("**/_/live/join", refuse)
+    opened(shared, site)
+    time.sleep(3)
+    assert len(sids) <= 3
+
+
+def test_a_page_restored_from_the_back_forward_cache_joins_the_stream_again(shared, site):
+    """`pagehide` sends the leaves. A page the browser keeps and shows again (`pageshow` with `persisted`) must
+    join again: Chrome keeps no page that holds a Web Lock, Firefox and Safari were not checked."""
+    pages = [opened(shared, site) for _ in range(2)]
+    until(lambda: site.hub.tabs(DOC) == 2, what="two tabs counted")
+    second = pages[1][0]
+    second.evaluate("window.dispatchEvent(new PageTransitionEvent('pagehide', {persisted: true}))")
+    until(lambda: site.hub.tabs(DOC) == 1, what="one tab counted after its pagehide")
+    second.evaluate("window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}))")
+    until(lambda: site.hub.tabs(DOC) == 2, what="two tabs counted after its pageshow")
+    f = site.file
+    rewrite(f, f.read_text(encoding="utf-8") + "\nAfter the restore.\n")
+    until(lambda: shows(second, "After the restore."), what="the change in the restored tab")

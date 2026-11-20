@@ -1850,7 +1850,9 @@ class Hub:
                 return True                                  # a stop under way stays; a second signal adds nothing
             self.stop_requested = reason
         if self.on_stop:
-            self.on_stop(reason)
+            self.on_stop(reason)        # outside `_stop_lock` on purpose: the callback takes locks of its own, and two
+                                        # callbacks may arrive in the opposite order of their decisions (it is told
+                                        # the reason, and acts on the first stop that matters)
         return True
 
     def expect_restart(self) -> int:
@@ -1878,10 +1880,13 @@ class Hub:
         """Whether a Tell waits anywhere (what `GET /_/jobs` lists), or a Tell's
         delivery or a stop message is still on its way: a delivery whose wait has ended (the
         reply came first, or the clock gave up) and the stop message of a cancelled Tell have
-        no wait to show, and an upgrade stop would kill them half-way (8.4)."""
+        no wait to show, and an upgrade stop would kill them half-way (8.4). A delivery that was
+        cancelled but is still there (its child ignores SIGTERM, and no stop message was started for a
+        session that cannot be reached) counts until it ends."""
         j = self.jobs()
         return bool(j["telling"]
-                    or self.runner.active("tell") or self.runner.active("stop"))
+                    or self.runner.active("tell") or self.runner.active("stop")
+                    or self.runner.lingering("tell"))
 
     # ── the diagnostics log, as the hub ──────────────────────────────────────
     def record(self, kind: str, doc=None, **detail):

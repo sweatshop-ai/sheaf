@@ -107,6 +107,10 @@ class HubDidNotStart(Exception):
     pass
 
 
+class HubBeingStopped(HubDidNotStart):
+    """A newer command met a stop already under way: it starts no hub behind it and fails (8.4)."""
+
+
 class NotSent(Exception):
     """The connection that proved the hub ended before the request went on it: nothing was sent."""
 
@@ -324,13 +328,15 @@ def ended(pid: int) -> bool:
     return not signals.exists(pid)
 
 
-def stop_and_explain(c: HubClient, got: dict, reason: str, force: bool = False) -> str:
+def stop_and_explain(c: HubClient, got: dict, reason: str, force: bool = False,
+                     yield_to_stop: bool = False) -> str:
     """Ask the hub `got` to stop and wait for it to end, its exit row written. "" when it ended (its
     process is gone and nothing answers, or another hub answers, which the service may start at once);
     otherwise a few plain words on what was there when STOP_WAIT ran out: that it refused, that a
     hub still answers (this one or another), that the process it waited for still runs. Never the
     hub's own text. An upgrade stop that is not `force`d (`sheaf restart` forces its own) is
-    refused while a Tell runs, which raises JobsRunning."""
+    refused while a Tell runs, which raises JobsRunning. With `yield_to_stop`, an upgrade stop that meets a stop
+    or a signal already under way (the hub answers the reason in force) is not waited for: HubBeingStopped."""
     from . import server
     info = server.read_pid_file() or {}
     pid = info.get("pid") if info.get("boot") == got.get("boot") and info.get("pid") != os.getpid() else None
@@ -339,6 +345,9 @@ def stop_and_explain(c: HubClient, got: dict, reason: str, force: bool = False) 
         raise JobsRunning(res.get("error") or "a Tell is running")
     if status != 200 or not res.get("ok"):
         return "it refused the stop"
+    if yield_to_stop and reason == "upgrade" and res.get("reason") in ("stop", "signal"):
+        raise HubBeingStopped(f"the hub is being stopped; this is {__version__}. "
+                              "Run the command again when it has stopped")
     deadline = time.time() + STOP_WAIT
     while True:
         try:
@@ -406,7 +415,7 @@ def _meet_version(c: HubClient, got: dict, warn) -> tuple[dict, bool]:
              "Run sheaf restart when it is done.")
         return got, False
     try:
-        left = stop_and_explain(c, got, "upgrade")
+        left = stop_and_explain(c, got, "upgrade", yield_to_stop=True)
     except JobsRunning:                                 # a job started after the look at /_/jobs
         warn(f"  ! the hub runs {theirs} and a Tell is running; this is {__version__}. "
              "Run sheaf restart when it is done.")

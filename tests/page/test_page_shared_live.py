@@ -6,6 +6,8 @@ import time
 
 import pytest
 
+from sheafmd import comments as rdc
+from sheafmd.source import update_file
 from pagehelp import DOC, RELOADING, close_context, new_context, until, rewrite
 
 pytestmark = pytest.mark.page
@@ -38,6 +40,16 @@ def shows(p, text):
     except Exception as e:
         if any(said in str(e) for said in RELOADING):
             return False
+        raise
+
+
+def badges(p):
+    """How many comment badges the page shows; a read that falls on a reload counts none."""
+    try:
+        return p.evaluate("document.querySelectorAll('.rd-badge').length")
+    except Exception as e:
+        if any(said in str(e) for said in RELOADING):
+            return 0
         raise
 
 
@@ -111,3 +123,32 @@ def test_a_tab_that_leaves_without_a_leave_is_dropped_when_its_lock_frees(shared
     pages[2][0].evaluate("BroadcastChannel.prototype.postMessage = function () {}")
     pages[2][0].close()
     until(lambda: site.hub.tabs(DOC) == 2, timeout=1.0, what="two tabs counted after the tab went")
+
+
+def test_a_comment_written_while_the_leader_hands_over_reaches_the_tabs(shared, site):
+    """An event the hub emits after the old leader's stream closed and before a tab joins the new one reaches no
+    tab. The page makes up for it on the `hello` of its new join: `checkText` reads the document again, and a
+    comment or reply is in the file, so the hash it compares has moved. The joins are held here, in every tab, so
+    the gap is as long as the test wants: the leader closes, a comment is written, and only then do the tabs join.
+    (The index page reads its list again on every `hello`, `soon()` in page/index.js.)"""
+    pages = [opened(shared, site) for _ in range(3)]
+    until(lambda: site.hub.tabs(DOC) == 3, what="three tabs counted")
+    for p, _ in pages:
+        p.evaluate("""(() => {
+          const send = window.fetch; let open; const gate = new Promise(r => { open = r; });
+          window.__held = 0; window.__release = open;
+          window.fetch = function (u, i) {
+            if (String(u).includes('/_/live/join')) { window.__held++; return gate.then(() => send.call(window, u, i)); }
+            return send.apply(this, arguments);
+          };
+        })()""")
+    pages[0][0].close()          # its stream ends; the lock passes to another tab, whose join waits on the gate
+    until(lambda: sum(p.evaluate("window.__held") for p, _ in pages[1:]) >= 1, what="a join held")
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
+                                                     "Ada", "2026-10-14T10:00")[0])
+    until(lambda: "Why?" in site.hub.entries[DOC].live.current()[1], what="the hub reading the comment")   # nothing was listening for it
+    for p, _ in pages[1:]:
+        p.evaluate("window.__release()")
+    for n, (p, _) in enumerate(pages[1:], 2):
+        until(lambda: badges(p) >= 1,
+              what=f"the comment in tab {n}")

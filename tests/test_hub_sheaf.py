@@ -342,3 +342,27 @@ def test_a_listing_whose_caller_has_gone_stops_reading_pages(two, monkeypatch):
     read.clear()
     r = two.get("/_/mount?sheaf=1", member=BEA, gone=lambda: True)
     assert r.status == 499 and len(read) < full // 2, (r.status, len(read), full)
+
+
+def test_a_clear_by_another_thread_between_the_store_and_the_return_does_not_lose_the_answer(tmp_path):
+    from sheafmd.hub.sheaf_view import Titles
+
+    class Clearing(dict):
+        def __setitem__(self, k, v):
+            super().__setitem__(k, v)
+            self.clear()          # what another thread's full-cache start-over does at that moment
+
+    p = tmp_path / "a.md"
+    p.write_text("# Hello\n", encoding="utf-8")
+    t = Titles()
+    t._kept = Clearing()
+    assert t.of(p, "a.md") == "Hello"
+
+
+def test_the_team_overlay_leaves_a_page_whose_meta_is_not_json_as_it_is():
+    from types import SimpleNamespace
+
+    from sheafmd.hub.handler import Handler
+    body = '<p>x</p><script id="rd-edit-meta" type="application/json">{not json</script>'
+    me = SimpleNamespace(hub=SimpleNamespace(team=SimpleNamespace(list=lambda doc: [])))
+    assert Handler._with_team(me, "page", body, "r/a.md", "bea") == body

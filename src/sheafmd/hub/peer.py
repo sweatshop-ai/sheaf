@@ -245,9 +245,10 @@ def look(client, hub, sock) -> Conn:
     soon as it is accepted, before a byte of the request is read."""
     conn = Conn(client, hub)
     no = check(conn)
-    if no is None and closed(sock):
+    if no is None and os.geteuid() == 0 and closed(sock):
         # Asked after the caller closed, the lookup reads root, which is the hub's own user where the hub
-        # runs as root: a closed caller is never let through on that answer.
+        # runs as root: a closed caller is never let through on that answer. Where the hub is not root, a
+        # caller that only half-closed still reads as its owner and is judged by that.
         no = _unknown("the connection closed before the hub could tell who sent this")
     return Conn(client, hub, True, no, lambda: closed(sock))
 

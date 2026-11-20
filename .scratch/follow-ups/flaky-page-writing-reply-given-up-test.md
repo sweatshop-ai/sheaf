@@ -6,7 +6,9 @@
 
 **Blocked by:** None.
 
-**Status:** open
+**Status:** done
 
-- [ ] The cause of the failure is found and named (the logs of the two failed jobs: `gh api repos/sweatshop-ai/sheaf/actions/jobs/<job>/logs`)
-- [ ] The test no longer fails when the runner is slow (run it 20 times on t-compute under load)
+- [x] The cause of the failure is found and named: the test read #rd-popover once after the form went; fixed in cb4874cf by waiting on the reply being drawn
+- [x] The test no longer fails when the runner is slow (run it 20 times on t-compute under load)
+
+  Evidence 2026-11-20: already on main in cb4874cf (waits on the reply drawn in its thread); both tests run 20 times in a row on t-compute at origin/main 3f5271bd (load 64-83 on 32 cores): 20 of 20 runs passed (3 tests each, the writing one in two parametrized cases), none failed.

@@ -2453,6 +2453,11 @@ def _splice(text: str, blocks, j: int, n: int, region: str):
 BOTH_NOTE = "Edited on this page and in the file at the same time. The page's version was saved. The file had:"
 
 
+def _both_note(words: str) -> str:
+    """The note on a block edited on the page and in the file: `BOTH_NOTE`, a blank line, the file's words."""
+    return BOTH_NOTE + "\n\n" + words
+
+
 class _Step(NamedTuple):
     """One edit of a merge as it is written: at file block `at`, in `mode`, the edit of base block `i`
     with its `html`, over `span` file blocks; `merged`, the text `_own_merge` made of them with its notes,
@@ -2582,7 +2587,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
                     if k in by_i:
                         put_back.append((plan[k][0], k))
                     if k in in_todo:
-                        todo[in_todo[k]] = _Step(first, "gone", k, by_i[k]["html"])
+                        todo[in_todo[k]] = _Step(at=first, mode="gone", i=k, html=by_i[k]["html"])
                 paired[x] = i
             for g, gi in among:
                 plan[gi] = (first + n, "gone")
@@ -2590,7 +2595,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
             taken |= set(range(first, first + n))
             j, mode, span = first, "same", n
         in_todo[i] = len(todo)
-        todo.append(_Step(j, mode, i, e["html"], span, merged, back))
+        todo.append(_Step(at=j, mode=mode, i=i, html=e["html"], span=span, merged=merged, back=back))
     # From the end backwards, so every target index still points where it did.
     # At a shared index the block that is there goes first and the re-inserted
     # ones after it, later base blocks first, so each lands before it and they
@@ -2615,7 +2620,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
                     changed.append(i)
                 text = done
                 for k, words in reversed(notes):
-                    text = _note(text, j + k, BOTH_NOTE + "\n\n" + words, at, base_text, cur_text)
+                    text = _note(text, j + k, _both_note(words), at, base_text, cur_text)
                 if notes:
                     conflicts.append({"i": i, "kind": "both"})
                 continue
@@ -2676,7 +2681,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
                 conflicts.append({"i": i, "kind": "both"})
                 note = rdc.Comment(
                     id=_next_id(text, base_text, cur_text), by=MERGE_BY, at=at, status="open",
-                    quote=theirs_quote, body=BOTH_NOTE + "\n\n" + theirs.strip())
+                    quote=theirs_quote, body=_both_note(theirs.strip()))
                 text = _put_orphans(text, j, [note])
             continue
         if rep["changed"]:
@@ -2686,7 +2691,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
             text = _insert_comment(text, k, raw, quote, nth)
         if mode == "both" and rep["changed"]:
             conflicts.append({"i": i, "kind": "both"})
-            text = _note(text, j, BOTH_NOTE + "\n\n" + theirs.strip(), at, base_text, cur_text)
+            text = _note(text, j, _both_note(theirs.strip()), at, base_text, cur_text)
     if tomb in text:
         text = _drop_tombstones(text, tomb)
     return text, {"changed": changed, "skipped": skipped, "remap": True,

@@ -1,9 +1,10 @@
 # 142: Paste into a paragraph from a real mail client and a real online word processor
 
-**Status:** open (one by-hand check)
+**Claimed by:** Habib 2026-11-20 16:21
 
-**Blocked by:** 
-- External: The owner pastes from a real web mail client and a real online word processor, by hand (not yet asked)
+**Status:** in-progress
+
+**Blocked by:** none (the owner runs the paste live with a guiding worker, 2026-11-20)
 
 **From:** render-doc ticket 142 (private archive), triaged 2026-11-12
 

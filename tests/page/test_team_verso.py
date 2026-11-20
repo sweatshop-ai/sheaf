@@ -4,7 +4,7 @@ the text and sends no place in it. A page told no `team` is what it was. CI only
 import json
 
 import pytest
-from pagehelp import DOC, P2, at, open_box, select, until
+from pagehelp import DOC, P2, at, open_box, select, toasted, until
 
 pytestmark = pytest.mark.page
 
@@ -117,6 +117,15 @@ def test_a_member_replies_to_a_team_comment_from_the_page(tab, site):
     until(lambda: sent, what="the write")
     assert sent[0]["op"] == "reply" and sent[0]["id"] == "t1" and sent[0]["body"] == "noted"
     until(lambda: "noted" in tab.page.locator("#rd-panel").inner_text(), what="the reply in the tab")
+
+
+def test_a_reply_sent_with_no_text_says_so_and_sends_nothing(tab, site):
+    sent = told_team(tab.page, [TEAM_COMMENT])
+    item = team_tab(tab)
+    item.locator("button[data-act=reply]").click()
+    item.locator("button[data-act=send]").click()
+    toasted(tab.page, "Write something first.")
+    assert sent == []
 
 
 def test_a_member_resolves_and_reopens_a_team_comment(tab, site):

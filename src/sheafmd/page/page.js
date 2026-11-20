@@ -1767,7 +1767,7 @@ var create = function (ROOT, CFG, opts) {
     var ds = commentDraftsHeld();
     // A clear (no `add`) the store could not be read for is held, not forgotten.
     if (!ds) { if (!add) pendingClears.push(gone); return; }
-    draftsWrite(ds.filter(gone), add ? [{ quote: add.quote, body: add.body, block: add.block, head: add.head, tail: add.tail, occ: add.occ, rid: add.rid,
+    draftsWrite(ds.filter(gone), add ? [{ quote: add.quote, body: add.body, block: add.block, head: add.head, tail: add.tail, lead: add.lead, occ: add.occ, rid: add.rid,
                                           at: add.at || new Date().toISOString(), min: add.min }] : []);
   }
   // Is `d` the kept `kind` entry of the thread `c`: its id, its `at` (born) and its quote (about) all agree.
@@ -3274,7 +3274,7 @@ var create = function (ROOT, CFG, opts) {
         sel.addRange(r);
       }
     }
-    return { block: b1.i, head: blockHead(b1), tail: blockTail(b1), occ: headOccurrence(b1), start: start, end: end, quote: quote, rect: r.getBoundingClientRect(), range: r.cloneRange() };
+    return { block: b1.i, head: blockHead(b1), tail: blockTail(b1), lead: blockLead(b1), occ: headOccurrence(b1), start: start, end: end, quote: quote, rect: r.getBoundingClientRect(), range: r.cloneRange() };
   }
   function offerComment() {
     if (editing) { hideCommentBtn(); return; }     // in Edit a selection is for the text, and only for it
@@ -3410,6 +3410,9 @@ var create = function (ROOT, CFG, opts) {
   function blockHead(b) { return squashText(blockText(b)).slice(0, 12); }
   // The 12 characters it ends with: a second key for a kept comment, for the paragraph that changed in its opening words.
   function blockTail(b) { return squashText(blockText(b)).slice(-12); }
+  // The 40 characters it opens with: a third key, longer than the head. A paragraph whose ending changed keeps its
+  // lead, so an entry whose lead a paragraph still opens with is that paragraph's, whoever else ends like it did.
+  function blockLead(b) { return squashText(blockText(b)).slice(0, 40); }
   function headOccurrence(b) {
     var h = blockHead(b), n = 0;
     for (var k = 0; k < blocks.length && blocks[k] !== b; k++) if (blockHead(blocks[k]) === h) n++;
@@ -3440,16 +3443,18 @@ var create = function (ROOT, CFG, opts) {
     var alike = blocks.filter(function (b) { return blockHead(b) === t.head; }).length;
     var heads = blocks.map(blockHead);
     var tails = blocks.map(blockTail);
+    var leads = blocks.map(blockLead);
     var d = ds.filter(function (x) {
               // Not an entry whose last words are those of another paragraph, and only of that one: it is that paragraph's.
-              if (x.tail && x.tail !== t.tail && tails.filter(function (y) { return y === x.tail; }).length === 1) return false;
+              // Unless its lead is this paragraph's: the paragraph is the entry's, changed at its end, and another one ends like it did.
+              if (x.tail && x.tail !== t.tail && !(x.lead && x.lead === t.lead) && tails.filter(function (y) { return y === x.tail; }).length === 1) return false;
               return x.head && x.head === t.head && (x.occ !== undefined ? x.occ === t.occ : alike < 2 || x.block === t.block);
             })[0] ||
             ds.filter(function (x) { return !x.head && x.block === t.block; })[0] ||
             ds.filter(function (x) { return x.quote === t.quote && (!x.head || heads.indexOf(x.head) < 0); })[0] ||
             // The paragraph changed in its opening words and another one opens with the entry's: the words it ends
-            // with, when no other paragraph ends with them.
-            ds.filter(function (x) { return x.tail && x.tail === t.tail && x.head !== t.head && tails.filter(function (y) { return y === t.tail; }).length === 1; })[0];
+            // with, when no other paragraph ends with them, and no paragraph still opens with the entry's lead (that one is its own).
+            ds.filter(function (x) { return x.tail && x.tail === t.tail && x.head !== t.head && !(x.lead && leads.indexOf(x.lead) >= 0) && tails.filter(function (y) { return y === t.tail; }).length === 1; })[0];
     var was = d ? d.quote : t.quote, host = pop;
     var wrote = [];                       // the request ids of this form's sends (each text has its own): their entries are its own
     // This form's entries: the one it took into itself and those its own sends wrote, and no other: the same
@@ -3463,7 +3468,7 @@ var create = function (ROOT, CFG, opts) {
              async function (text, k, rid) {
       if (needClean()) return false;
       wrote.push(rid);
-      draftsReplace(own, { quote: t.quote, body: text, block: t.block, head: t.head, tail: t.tail, occ: t.occ, rid: rid });
+      draftsReplace(own, { quote: t.quote, body: text, block: t.block, head: t.head, tail: t.tail, lead: t.lead, occ: t.occ, rid: rid });
       try {
         var team = TEAM !== null && k === 'team';
         var sent = team ? { op: 'add', side: 'team', quote: t.quote, body: text, hash: hash, rid: rid }
@@ -3538,7 +3543,7 @@ var create = function (ROOT, CFG, opts) {
           return true;      // an empty field has no text to lose: a clear the store refused does not hold the box open
         }
         var at = (kept || d || {}).at || new Date().toISOString();       // one stamp for the form's draft, so the next stash finds it
-        draftsReplace(own, { quote: t.quote, body: box.value, block: t.block, head: t.head, tail: t.tail, occ: t.occ, min: true, at: at });
+        draftsReplace(own, { quote: t.quote, body: box.value, block: t.block, head: t.head, tail: t.tail, lead: t.lead, occ: t.occ, min: true, at: at });
         if (storeOk) kept = { quote: t.quote, at: at };
         return storeOk;
       };

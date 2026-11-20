@@ -1225,3 +1225,16 @@ def test_a_task_list_the_page_sends_back_unchanged_is_not_rewritten(md):
     block = split_md_blocks(md)[0]
     html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], block.content).strip()
     assert rde.html_block_to_md(html, block.content) == block.content.rstrip("\n")
+
+
+def test_a_typed_task_line_that_starts_with_a_comment_anchor_becomes_a_task_item_and_keeps_the_comment():
+    block = rde.split_md_blocks(f"Buy milk{ADA_C1}\n")[0]
+    md, _ = rde._convert_with_comments(block, f"<p>{anchor('c1')}- [ ] Buy milk</p>")
+    assert "\\[" not in md and "☐" not in md and "sheaf-comment id=c1" in md and "- [ ]" in md and "Buy milk" in md
+    assert md.index("- [ ]") < md.index("Buy milk"), md
+
+
+def test_a_typed_task_line_with_only_a_leading_comment_anchor_before_the_box_and_no_words_keeps_its_characters():
+    block = rde.split_md_blocks(f"Alpha{ADA_C1}\n")[0]
+    md, _ = rde._convert_with_comments(block, f"<p>{anchor('c1')}- [x] </p>")
+    assert "\\[x\\]" in md and "☒" not in md and "sheaf-comment id=c1" in md, md

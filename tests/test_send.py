@@ -456,9 +456,17 @@ def stand_in(tiroir, real_network, monkeypatch):
 
 
 def children() -> list[str]:
-    """The live child processes of this process, from /proc."""
+    """The live child processes of this process: from /proc where there is one, else from ps (macOS)."""
     me = os.getpid()
     found = []
+    if not Path("/proc").is_dir():
+        ps = subprocess.Popen(["ps", "-A", "-o", "pid=,ppid=,stat="], stdout=subprocess.PIPE, text=True)
+        out = ps.communicate()[0]
+        for line in out.splitlines():
+            pid, ppid, state = line.split()[:3]
+            if int(ppid) == me and int(pid) != ps.pid and not state.startswith("Z"):      # ps is our child too
+                found.append(pid)
+        return found
     for p in Path("/proc").iterdir():
         if p.name.isdigit():
             try:

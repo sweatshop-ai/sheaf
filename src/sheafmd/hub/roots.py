@@ -332,7 +332,7 @@ class Roots:
                 if found is not None:
                     return found
             if name is not None:
-                if name in self._roots:
+                if name in self._roots or name.casefold() == RESERVED:
                     raise NameTaken(f"the name {name} is held by another root")
             else:
                 base = clean_name(path.name)

@@ -7,7 +7,7 @@ import json
 
 import pytest
 from helpers import BEA
-from pagehelp import until
+from pagehelp import until, rewrite
 from test_mount_sheaf import agentview, mounted, pages  # noqa: F401  (fixtures)
 
 pytestmark = pytest.mark.page
@@ -20,7 +20,7 @@ def own(mounted, pages):  # noqa: F811  (the fixtures, by name)
     for name in ("alpha", "beta"):
         f = root.path / "2026-11" / f"{name}.md"
         f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(f"# {name.title()}\n\nText of {name}.\n", encoding="utf-8")
+        rewrite(f, f"# {name.title()}\n\nText of {name}.\n")
     mounted.page.reload()
     until(lambda: mounted.page.evaluate("!!window.__root"), what="the page after the reload")
     until(lambda: mounted.js("return !!root.querySelector('.sheaf-row');"), what="the rows in the root")

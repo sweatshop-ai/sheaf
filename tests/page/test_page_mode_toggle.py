@@ -3,7 +3,7 @@ same size for both. A click on Save saves and returns to Comment mode; a save th
 with what they typed."""
 import pytest
 
-from pagehelp import P1, toast, until
+from pagehelp import P1, toast, until, rewrite
 
 pytestmark = pytest.mark.page
 
@@ -32,7 +32,7 @@ def type_into_first_paragraph(page):
 
 @pytest.fixture
 def doc(tab, site):
-    site.file.write_text(MD, encoding="utf-8")
+    rewrite(site.file, MD)
     return tab.open()
 
 
@@ -49,7 +49,7 @@ def test_it_is_one_button_that_reads_edit_then_save_with_its_keys_and_keeps_its_
 
 
 def test_on_touch_the_labels_have_no_key_to_hint_at(touch_tab, site):
-    site.file.write_text(MD, encoding="utf-8")
+    rewrite(site.file, MD)
     p = touch_tab.open().page
     assert label(p) == "Edit"
     before = size(p)

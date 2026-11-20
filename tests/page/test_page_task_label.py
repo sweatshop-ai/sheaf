@@ -2,7 +2,7 @@
 else the first word, tick or untick it like a <label>; the rest of the line is ordinary text."""
 import pytest
 
-from pagehelp import at, comment_on, mark, open_box, until
+from pagehelp import at, comment_on, mark, open_box, until, rewrite
 
 pytestmark = pytest.mark.page
 
@@ -45,7 +45,7 @@ def spot(p, start, end, sel=ITEM):
 
 @pytest.fixture
 def sheaf(tab):
-    tab.site.file.write_text(SHEAF, encoding="utf-8")
+    rewrite(tab.site.file, SHEAF)
     tab.open()
     tab.page.wait_for_selector("main input[type=checkbox]")
     return tab
@@ -106,7 +106,7 @@ def test_a_drag_selection_from_the_label_opens_the_chat_box_and_ticks_nothing(sh
 
 def test_on_a_phone_the_label_is_44_px_high_to_touch(touch_tab):
     t = touch_tab
-    t.site.file.write_text(SHEAF, encoding="utf-8")
+    rewrite(t.site.file, SHEAF)
     t.open()
     p, f = t.page, t.site.file
     p.wait_for_selector("main input[type=checkbox]")

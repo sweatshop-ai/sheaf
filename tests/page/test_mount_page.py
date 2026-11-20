@@ -12,7 +12,7 @@ import re
 import pytest
 from helpers import PLAN
 from pagehelp import (BLUE, DOC, HOST, PAGE_TIMEOUT_MS, RED, assert_readable, close_context, drop_host, launch_engine, new_context,
-                      pasted, until, wear_host)
+                      pasted, until, wear_host, rewrite)
 
 from sheafmd import comments as rdc
 
@@ -308,12 +308,11 @@ def test_an_edit_makes_the_page_dirty_for_the_loader_and_is_stored_under_a_key_o
 
 
 def test_an_outside_change_remounts_in_place_and_keeps_the_scroll(front):
-    front.site.file.write_text(front.site.file.read_text() + "".join(f"\nFiller {i}.\n" for i in range(80)),
-                               encoding="utf-8")
+    rewrite(front.site.file, front.site.file.read_text() + "".join(f"\nFiller {i}.\n" for i in range(80)))
     front.open()
     front.page.evaluate("window.__same_front = 1")
     front.js("root.querySelector('main').__old = 1; root.querySelector('.rd-root').scrollTop = 600;")
-    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    rewrite(front.site.file, front.site.file.read_text().replace("about pears", "about plums"))
     until(lambda: "about plums" in front.js("return root.querySelector('main').textContent;"), what="the change")
     assert front.page.evaluate("window.__same_front === 1"), "the front reloaded"
     assert front.js("return root.querySelector('main').__old === undefined;"), "the page was not built again"
@@ -422,12 +421,12 @@ def test_a_hub_of_another_version_hands_the_remount_to_the_loader(front):
     front.open()
     front.js("root.querySelector('main').__old = 1;")
     front.page.route("**/_/mount?doc=*", _another_version)
-    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    rewrite(front.site.file, front.site.file.read_text().replace("about pears", "about plums"))
     assert until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told") == [NEXT_JS]
     front.page.wait_for_timeout(300)
     assert front.js("return root.querySelector('main').__old;") == 1, "the old script built the new page"
     # Told once: a later trigger of a remount does not call the loader again, and the old page says what is happening.
-    front.site.file.write_text(front.site.file.read_text().replace("about plums", "about figs"), encoding="utf-8")
+    rewrite(front.site.file, front.site.file.read_text().replace("about plums", "about figs"))
     front.page.wait_for_timeout(2500)
     assert front.page.evaluate("window.__upgrades") == [NEXT_JS]
     assert "updated" in front.js("return root.getElementById('rd-toast').textContent;")
@@ -447,7 +446,7 @@ def test_a_hub_with_other_scripts_under_the_same_version_hands_the_remount_to_th
     front.open()
     front.js("root.querySelector('main').__old = 1;")
     front.page.route("**/_/mount?doc=*", _another_script)
-    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    rewrite(front.site.file, front.site.file.read_text().replace("about pears", "about plums"))
     assert until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told") == [NEXT_JS]
     front.page.wait_for_timeout(300)
     assert front.js("return root.querySelector('main').__old;") == 1, "the old script built the new page"
@@ -474,7 +473,7 @@ def test_this_mount_js_served_by_a_hub_from_before_179_mounts_by_the_version_alo
     front.open()
     # Opus review 2, P2: not `?v=<version>`, which that hub keeps for a year whatever files are on its disk
     assert front.js("return root.querySelector('link[rel=stylesheet]').getAttribute('href');") == "/_/mount.css"
-    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    rewrite(front.site.file, front.site.file.read_text().replace("about pears", "about plums"))
     until(lambda: "plums" in front.js("return root.querySelector('main').textContent;"), what="the remount")
     assert front.page.evaluate("window.__upgrades || null") is None
 
@@ -488,11 +487,11 @@ def test_every_remount_after_an_upgrade_leaves_the_old_page_writable(front):
     written the keep, and the remount told nobody, so the page went read-only in silence (gate P2 of 5453534)."""
     front.open()
     front.page.route("**/_/mount?doc=*", _another_version)
-    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    rewrite(front.site.file, front.site.file.read_text().replace("about pears", "about plums"))
     until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told")
     until(lambda: front.js(_TYPED) is False, what="the page writable after the first change")
     front.js("root.getElementById('rd-toast').textContent = '';")
-    front.site.file.write_text(front.site.file.read_text().replace("about plums", "about figs"), encoding="utf-8")
+    rewrite(front.site.file, front.site.file.read_text().replace("about plums", "about figs"))
     until(lambda: "updated" in front.js("return root.getElementById('rd-toast').textContent;"),
           what="the second change said in the page")
     assert front.js(_TYPED) is False, "typing is refused after the second change"
@@ -522,13 +521,13 @@ def test_a_remount_that_fails_says_so_in_the_page_and_the_next_one_still_works(f
     refuse = [True]
     front.page.route("**/_/mount?doc=*", lambda route: route.fulfill(
         status=401, content_type="application/json", body='{"error": "sign in"}') if refuse else route.continue_())
-    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    rewrite(front.site.file, front.site.file.read_text().replace("about pears", "about plums"))
     until(lambda: "401" in (front.js("const t = root.getElementById('rd-toast'); return t.className.includes('err') "
                                      "? t.textContent : '';") or ""), what="the failure said in the page")
     # The keep the reload wrote is not left for a later mount of this rectoverso in the tab to restore.
     assert front.page.evaluate("Object.keys(sessionStorage).filter((k) => k.endsWith('rd-keep'))") == []
     refuse.clear()
-    front.site.file.write_text(front.site.file.read_text().replace("about plums", "about figs"), encoding="utf-8")
+    rewrite(front.site.file, front.site.file.read_text().replace("about plums", "about figs"))
     until(lambda: "about figs" in front.js("return root.querySelector('main').textContent;"), what="the next remount")
 
 
@@ -539,7 +538,7 @@ def test_a_remount_that_fails_leaves_no_toast_for_a_later_mount_of_the_tab(front
     front.page.route("**/_/mount?doc=*", lambda route: route.fulfill(
         status=401, content_type="application/json", body='{"error": "sign in"}'))
     front.page.evaluate("sessionStorage.setItem('sheaf-mount:rd-toast', '1 block \u2192 plan.md')")
-    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    rewrite(front.site.file, front.site.file.read_text().replace("about pears", "about plums"))
     until(lambda: "401" in (front.js("const t = root.getElementById('rd-toast'); return t.className.includes('err') "
                                      "? t.textContent : '';") or ""), what="the failure said in the page")
     assert front.page.evaluate("sessionStorage.getItem('sheaf-mount:rd-toast')") is None
@@ -554,7 +553,7 @@ def test_a_remount_that_fails_says_the_toast_a_merged_save_left_before_its_own_l
              "if (t && window.__said[window.__said.length - 1] !== t) window.__said.push(t); })"
              ".observe(root.getElementById('rd-toast'), {childList: true, characterData: true, subtree: true});")
     front.page.evaluate("sessionStorage.setItem('sheaf-mount:rd-toast', '1 block \u2192 plan.md')")
-    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    rewrite(front.site.file, front.site.file.read_text().replace("about pears", "about plums"))
     until(lambda: any("401" in t for t in front.js("return window.__said;")), what="the failure said in the page")
     said = front.js("return window.__said;")
     assert "1 block \u2192 plan.md" in said[0], said
@@ -567,7 +566,7 @@ def test_an_upgrade_handover_leaves_the_toast_of_a_merged_save_for_the_new_boot(
     front.open()
     front.page.route("**/_/mount?doc=*", _another_version)
     front.page.evaluate("sessionStorage.setItem('sheaf-mount:rd-toast', '1 block \u2192 plan.md')")
-    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    rewrite(front.site.file, front.site.file.read_text().replace("about pears", "about plums"))
     until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told")
     until(lambda: "updated" in front.js("return root.getElementById('rd-toast').textContent;"), what="the handover said")
     assert front.page.evaluate("sessionStorage.getItem('sheaf-mount:rd-toast')") == "1 block \u2192 plan.md"
@@ -580,7 +579,7 @@ def test_an_upgrade_handover_keeps_the_keep_the_reload_wrote_when_it_names_this_
     front.open()
     front.page.route("**/_/mount?doc=*", _another_version)
     front.page.evaluate("sessionStorage.setItem('sheaf-mount:rd-toast', '1 block \u2192 plan.md')")
-    front.site.file.write_text(front.site.file.read_text().replace("about pears", "about plums"), encoding="utf-8")
+    rewrite(front.site.file, front.site.file.read_text().replace("about pears", "about plums"))
     until(lambda: front.page.evaluate("window.__upgrades || null"), what="the loader told")
     until(lambda: "updated" in front.js("return root.getElementById('rd-toast').textContent;"), what="the handover said")
     keep = front.page.evaluate("JSON.parse(sessionStorage.getItem('sheaf-mount:rd-keep'))")
@@ -636,7 +635,7 @@ HEADS = "# Plan\n\n" + "".join(f"## Part {i}\n\n" + "".join(f"Line {i}.{j}.\n\n"
 def test_a_contents_link_scrolls_the_pane_to_its_heading_and_leaves_the_front_where_it_is(front):
     """A fragment in a shadow root is looked up in the front's document: the click scrolled nothing and changed the
     front's hash. mount.js scrolls the root's own element into view instead."""
-    front.site.file.write_text(HEADS, encoding="utf-8")
+    rewrite(front.site.file, HEADS)
     front.open()
     link = "nav a[href$='part-6']"
     until(lambda: front.has(link), what="the contents")
@@ -653,8 +652,8 @@ def test_a_contents_link_scrolls_the_pane_to_its_heading_and_leaves_the_front_wh
 def test_a_link_to_a_page_of_the_hub_goes_to_the_loader_and_a_modified_click_does_not(front):
     """The root is closed, so the front cannot see which link in it was clicked: a plain click on a link of the origin
     is handed to opts.navigate, which moves the front; a ctrl-click, a target or a download is the browser's."""
-    front.site.file.write_text(PLAN.replace("Last paragraph.", "See [the list](/list?show=mine), [out](https://example.org/x),"
-                                            " [new](/list), [file](/list/a.md), [hub](/_/export?doc=x)."), encoding="utf-8")
+    rewrite(front.site.file, PLAN.replace("Last paragraph.", "See [the list](/list?show=mine), [out](https://example.org/x),"
+                                            " [new](/list), [file](/list/a.md), [hub](/_/export?doc=x)."))
     front.open()
     front.click("main a[href='/list?show=mine']")
     assert until(lambda: front.page.evaluate("window.__moves || null"), what="the move") == ["/list?show=mine"]

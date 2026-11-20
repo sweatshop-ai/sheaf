@@ -4,7 +4,7 @@ Restated on 2026-11-09 (ticket 03, E): the bar a selection used to offer is gone
 (bar shaped like the field, selection left intact for the phone's Copy menu, touchstart cancelled, bar opens box) no longer apply."""
 import pytest
 
-from pagehelp import at, close_context, new_context, open_with_comment, select, select_by_touch
+from pagehelp import at, close_context, new_context, open_with_comment, select, select_by_touch, rewrite
 
 pytestmark = pytest.mark.page
 
@@ -17,7 +17,7 @@ UA = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile/15E148"
 
 @pytest.fixture
 def phone(touch_tab, site):
-    site.file.write_text(PLAN_MD, encoding="utf-8")
+    rewrite(site.file, PLAN_MD)
     return touch_tab.open()
 
 
@@ -52,7 +52,7 @@ def laptop(chromium, site):
     c.add_cookies([site.cookie()])
     c.add_init_script("""(() => { const m = window.matchMedia.bind(window);
       window.matchMedia = q => /pointer:\\s*coarse/.test(q) && !/any-/.test(q) ? m("not all") : m(q); })()""")
-    site.file.write_text(PLAN_MD, encoding="utf-8")
+    rewrite(site.file, PLAN_MD)
     from conftest import Tab
     t = Tab(c.new_page(), site)
     t.open()

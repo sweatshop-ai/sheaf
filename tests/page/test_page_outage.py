@@ -15,7 +15,7 @@ import pytest
 
 from helpers import PLAN, comment
 from pagehelp import (DOC, clock_at, P1, P2, T0, at, comment_on, draft_key, gone, set_kept, mark, open_with_comment,
-                      reload_on_clock, reloaded, toast, toasted, type_at_end, until)
+                      reload_on_clock, reloaded, toast, toasted, type_at_end, until, rewrite)
 from sheafmd import comments as rdc
 
 pytestmark = pytest.mark.page
@@ -307,8 +307,7 @@ def test_the_interrupted_row_is_still_there_after_the_reload_a_new_version_bring
 
 def test_the_interrupted_row_is_still_there_after_the_reload_moved_text_brings(running_tell, site):
     site.stop()
-    site.file.write_text(site.file.read_text().replace("Last paragraph.", "Last paragraph, edited outside."),
-                         encoding="utf-8")
+    rewrite(site.file, site.file.read_text().replace("Last paragraph.", "Last paragraph, edited outside."))
     mark(running_tell.page)
     site.start()                         # a new boot, and the text moved while the hub was away
     assert interrupted_after_the_reload(running_tell)
@@ -327,8 +326,7 @@ def test_a_new_version_reloads_the_page_onto_the_new_script(tab, site):
 def test_text_that_moved_while_the_hub_was_away_reloads_the_page_when_it_is_back(tab, site):
     tab.open()
     site.kill()
-    site.file.write_text(site.file.read_text().replace("Last paragraph.", "Last paragraph, edited outside."),
-                         encoding="utf-8")
+    rewrite(site.file, site.file.read_text().replace("Last paragraph.", "Last paragraph, edited outside."))
     mark(tab.page)
     site.start()
     reloaded(tab.page, timeout=15)
@@ -339,8 +337,7 @@ def test_text_that_moved_while_the_hub_was_away_is_settled_with_the_edits_and_re
     tab.open()
     site.kill()
     type_at_end(tab.page, P2, " and plums")
-    site.file.write_text(site.file.read_text().replace("Last paragraph.", "Last paragraph, edited outside."),
-                         encoding="utf-8")
+    rewrite(site.file, site.file.read_text().replace("Last paragraph.", "Last paragraph, edited outside."))
     mark(tab.page)
     site.start()
     reloaded(tab.page, timeout=15)
@@ -412,7 +409,7 @@ def test_a_new_boot_meets_the_popover_of_a_deleted_thread_that_holds_a_reply_wit
     p.wait_for_selector("#rd-popover textarea")
     p.fill("#rd-popover textarea", "my reply text")
     (c,) = rdc.parse(f.read_text()).comments
-    f.write_text(rdc.delete(f.read_text(), c.id), encoding="utf-8")
+    rewrite(f, rdc.delete(f.read_text(), c.id))
     p.wait_for_selector("#rd-popover .rd-hold:has-text('deleted')")
     running_tell.site.stop()
     running_tell.site.start()            # a new boot: the page forgets its running jobs
@@ -549,7 +546,7 @@ def test_a_settle_that_gives_up_leaves_its_toast_with_a_keep_naming_the_document
     p.route("**/_/save", lambda route: route.fulfill(status=500, json={"ok": False, "error": "the hub broke off"}))
     p.evaluate("sessionStorage.setItem('rd-toast', '1 block \u2192 plan.md')")
     p.evaluate(f"document.querySelector({P2!r}).append(' and plums')")      # on screen only, no autosave
-    site.file.write_text(site.file.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    rewrite(site.file, site.file.read_text() + "\nA new paragraph from outside.\n")
     until(lambda: "could not be merged" in p.inner_text("#rd-toast"), timeout=20.0, what="the give-up said")
     assert p.evaluate("sessionStorage.getItem('rd-toast')") == "1 block \u2192 plan.md"
     assert p.evaluate("JSON.parse(sessionStorage.getItem('rd-keep'))") == {"doc": DOC}
@@ -603,7 +600,7 @@ def test_a_page_whose_root_was_forgotten_and_its_name_taken_while_its_stream_was
     assert site.hub.forget_root("work").name == "work"
     other = tmp_path / "y" / "work" / "plan.md"
     other.parent.mkdir(parents=True)
-    other.write_text(PLAN.replace("apples", "cherries"), encoding="utf-8")
+    rewrite(other, PLAN.replace("apples", "cherries"))
     assert site.hub.render(other, {}, None)["doc"] == DOC
     kept = other.read_text(encoding="utf-8")
     mark(p)
@@ -643,8 +640,7 @@ def test_a_page_whose_file_moved_on_while_its_stream_was_down_holds_its_reload_f
     waits for the reply being written."""
     p = replying.page
     cut(replying)
-    site.file.write_text(site.file.read_text().replace("Last paragraph.", "Last paragraph, edited outside."),
-                         encoding="utf-8")
+    rewrite(site.file, site.file.read_text().replace("Last paragraph.", "Last paragraph, edited outside."))
     mark(p)
     site.reopen()
     p.wait_for_selector("#rd-popover .rd-hold", timeout=15_000)
@@ -665,8 +661,7 @@ def test_a_page_whose_version_aged_out_and_whose_file_moved_on_while_its_stream_
     until(lambda: stream(p)["opens"] >= 1, what="the stream to open")
     held = md_hash(site.file.read_text(encoding="utf-8"))
     cut(tab)
-    site.file.write_text(site.file.read_text().replace("Last paragraph.", "Last paragraph, edited outside."),
-                         encoding="utf-8")
+    rewrite(site.file, site.file.read_text().replace("Last paragraph.", "Last paragraph, edited outside."))
     e = site.hub.entry(DOC)
     site.hub.catch_up(e)                         # the hub took the new text in, as its watcher does
     e.live._versions.pop(held)                   # and the page's version aged out, in memory and on disk
@@ -701,11 +696,11 @@ def test_a_page_whose_file_was_deleted_while_its_stream_was_down_tries_again_and
     assert GONE not in notice(p)
     until(lambda: answers.count(404) >= 2 or p.wait_for_timeout(20), timeout=15,
           what="the page to try again and be told 404 again")
-    site.file.write_text(text, encoding="utf-8")
+    rewrite(site.file, text)
     until(lambda: stream(p)["opens"] >= 2, timeout=15, what="the stream to come back")
     p.wait_for_timeout(500)
     assert GONE not in notice(p) and p.evaluate("window.__same_load") is True
-    site.file.write_text(text.replace("Last paragraph.", "Last paragraph, edited outside."), encoding="utf-8")
+    rewrite(site.file, text.replace("Last paragraph.", "Last paragraph, edited outside."))
     reloaded(p, timeout=15)                      # it hears the file again
 
 
@@ -1022,14 +1017,14 @@ def test_a_change_heard_while_the_check_after_a_reconnect_is_out_does_not_reload
     assert site.hub.forget_root("work").name == "work"
     other = tmp_path / "y" / "work" / "plan.md"
     other.parent.mkdir(parents=True)
-    other.write_text(PLAN.replace("apples", "cherries"), encoding="utf-8")
+    rewrite(other, PLAN.replace("apples", "cherries"))
     assert site.hub.render(other, {}, None)["doc"] == DOC
     asked = []
     p.route("**/_/doc?*", lambda route: asked.append(route))      # the answer to the check is held
     mark(p)
     site.reopen()
     until(lambda: asked or p.wait_for_timeout(50), timeout=15, what="the page to ask what the document is")
-    other.write_text(other.read_text(encoding="utf-8").replace("Last paragraph.", "Last, edited."), encoding="utf-8")
+    rewrite(other, other.read_text(encoding="utf-8").replace("Last paragraph.", "Last, edited."))
     site.hub.catch_up(site.hub.entry(DOC))             # the hub takes the new text in: a `changed`
     p.wait_for_timeout(1000)                                      # has gone out and been heard
     for r in asked:
@@ -1139,7 +1134,7 @@ def test_a_file_missing_from_a_root_that_is_there_says_so_and_not_that_the_hub_i
     text = missing_past_the_grace(tab)
     assert "Hub unreachable" not in notice(p) and "Hub unreachable" not in p.inner_text("#rd-menu-btn")
     assert GONE not in notice(p)
-    site.file.write_text(text, encoding="utf-8")                  # the file is back: the notice goes
+    rewrite(site.file, text)                  # the file is back: the notice goes
     p.clock.run_for(6_000)
     run_until(p, lambda: notice(p) == "", "the notice to go when the file is back")
 
@@ -1180,7 +1175,7 @@ def test_the_menu_does_not_say_file_missing_once_the_file_is_back(tab, site):
     text = missing_past_the_grace(tab, HOLD_DOC_AFTER_OPEN)
     assert p.evaluate("document.querySelector('#rd-state').textContent") == "File missing"
     p.evaluate("window.__holdFrom = window.__stream.opens")      # asks from the next open stream on are held
-    site.file.write_text(text, encoding="utf-8")
+    rewrite(site.file, text)
     run_until(p, lambda: notice(p) == "", "the notice to go when the file is back")
     until(lambda: p.evaluate("window.__held") >= 1, what="the check after the hello to be asked (and held)")
     assert p.evaluate("document.querySelector('#rd-state').textContent") == "Ready"
@@ -1200,7 +1195,7 @@ def test_an_older_answer_to_what_the_address_is_does_not_undo_a_newer_one(tab, s
     def ask(route):
         asked.append(route)
         if len(asked) == 2:
-            site.file.write_text(text, encoding="utf-8")        # the file is back by the time of the newer ask
+            rewrite(site.file, text)        # the file is back by the time of the newer ask
             route.continue_()
 
     p.route("**/_/doc?*", ask)
@@ -1270,7 +1265,7 @@ def test_a_change_held_behind_the_pages_own_write_waits_for_the_check_that_write
     assert site.hub.forget_root("work").name == "work"
     other = tmp_path / "y" / "work" / "plan.md"
     other.parent.mkdir(parents=True)
-    other.write_text(PLAN.replace("apples", "cherries"), encoding="utf-8")
+    rewrite(other, PLAN.replace("apples", "cherries"))
     assert site.hub.render(other, {}, None)["doc"] == DOC
     held = []
     p.route("**/_/save", lambda route: held.append(route))
@@ -1281,7 +1276,7 @@ def test_a_change_held_behind_the_pages_own_write_waits_for_the_check_that_write
     mark(p)
     site.reopen()
     until(lambda: stream(p)["opens"] >= 2 or p.wait_for_timeout(50), timeout=15, what="the stream to be back")
-    other.write_text(other.read_text(encoding="utf-8").replace("Last paragraph.", "Last, edited."), encoding="utf-8")
+    rewrite(other, other.read_text(encoding="utf-8").replace("Last paragraph.", "Last, edited."))
     site.hub.catch_up(site.hub.entry(DOC))
     p.wait_for_timeout(1000)
     held[0].fulfill(status=200, content_type="application/json",

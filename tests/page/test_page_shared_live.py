@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from pagehelp import DOC, RELOADING, close_context, new_context, until
+from pagehelp import DOC, RELOADING, close_context, new_context, until, rewrite
 
 pytestmark = pytest.mark.page
 
@@ -49,7 +49,7 @@ def test_seven_tabs_load_count_and_all_hear_a_change(shared, site):
     assert time.monotonic() - t0 < 1.0, "the seventh tab took more than a second to load"
     until(lambda: site.hub.tabs(DOC) == TABS, what="seven tabs counted by the hub")
     f = site.file
-    f.write_text(f.read_text(encoding="utf-8") + "\nFrom outside.\n", encoding="utf-8")
+    rewrite(f, f.read_text(encoding="utf-8") + "\nFrom outside.\n")
     for n, (p, _) in enumerate(pages):
         until(lambda: shows(p, "From outside."),
               what=f"the change in tab {n + 1}")
@@ -62,7 +62,7 @@ def test_a_tab_that_closes_leaves_the_count_and_the_leaders_tab_hands_over(share
     pages[0][0].close()          # the first tab took the lock: the stream moves to another
     until(lambda: site.hub.tabs(DOC) == 2, what="two tabs counted")
     f = site.file
-    f.write_text(f.read_text(encoding="utf-8") + "\nAfter the hand-over.\n", encoding="utf-8")
+    rewrite(f, f.read_text(encoding="utf-8") + "\nAfter the hand-over.\n")
     for p, _ in pages[1:]:
         until(lambda: shows(p, "After the hand-over."), what="the change heard")
     # A change from outside reloads both pages; the hub drops a closed page's stream within its next read check.

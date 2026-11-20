@@ -838,7 +838,7 @@ class Hub:
             out["fork"] = (f"uvx --from {work_mod.FORK_CLIENT} tiroir work "
                            f"{self.proxy.origin}{roots_mod.url_path(e.address)}")
         # James names a project's window <client>_<project>, and only when both parts are his SLUG
-        # (agency-tiroir james.py `project_window`): a part with `_` would let a_b/c and a/b_c share one window,
+        # (his `project_window` in agency-tiroir): a part with `_` would let a_b/c and a/b_c share one window,
         # and the `_` between the parts keeps a-b/c and a/b-c apart.
         parts = roots_mod.Address.parse(e.address).rel.split("/")[:2]
         window = "_".join(parts)

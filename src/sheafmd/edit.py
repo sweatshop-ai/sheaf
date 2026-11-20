@@ -158,13 +158,16 @@ def _beside_a_block(br) -> bool:
     return block_on("next_sibling") or block_on("previous_sibling")
 
 
+_HEADINGS = ("h1", "h2", "h3", "h4", "h5", "h6")     # a heading is bold already: a bold span in one takes no <strong>
+
+
 def _styled_marks(soup, span) -> None:
     """A word processor writes bold and italic as a <span> with a style, and no <b> or <i>: the span's words go
     inside a <strong> or an <em>, or pandoc would drop the style and the words would lose it. Inside a mark of the
-    same kind the words are marked already."""
+    same kind the words are marked already, and a heading's are bold already."""
     style = span.get("style", "")
     for found, name, same in ((re.search(r"font-style:\s*italic\b", style), "em", ("em", "i")),
-                              (re.search(r"font-weight:\s*(bold|bolder|[6-9]00)\b", style), "strong", ("strong", "b"))):
+                              (re.search(r"font-weight:\s*(bold|bolder|[6-9]00)\b", style), "strong", ("strong", "b", *_HEADINGS))):
         if found and not any(p.name in same for p in span.parents):
             inner = soup.new_tag(name)
             for c in list(span.contents):

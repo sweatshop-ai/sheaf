@@ -4,7 +4,7 @@ hub's own, through the proxy handler of tests/test_hub_list.py; the page's clock
 import json
 
 import pytest
-from pagehelp import close_context, new_context, until
+from pagehelp import close_context, new_context, until, rewrite
 from test_hub_list import JOEY, NELL, ago, box, github, rectoversos  # noqa: F401  (the hub with its list, as there)
 
 pytestmark = pytest.mark.page
@@ -51,10 +51,9 @@ LONG_CLIENT, LONG_PROJECT = "globex_international_relaunch", "black_friday_2026_
 def phone(chromium, box, rectoversos):  # noqa: F811
     """The list on a 360 px phone, Joey's row holding four buttons, one a Belongs to whose long slug has no hyphen."""
     path = rectoversos / JOEY[5:]
-    path.write_text(path.read_text(encoding="utf-8").replace(
+    rewrite(path, path.read_text(encoding="utf-8").replace(
         "- [ ] Approve\n", "- [ ] Approve\n- [ ] Done\n- [ ] Share\n"
-        f"- [ ] Belongs to {SLUG} (ref 18f3a9c2)\n"),
-        encoding="utf-8")
+        f"- [ ] Belongs to {SLUG} (ref 18f3a9c2)\n"))
     box.hub.the_list.poll()
     yield from on_the_list(chromium, box, **PHONE)
 
@@ -101,7 +100,7 @@ def test_undo_in_the_five_seconds_sends_nothing_and_gives_the_button_back(listed
 def test_a_refused_press_is_said_above_the_rows_and_the_button_comes_back(listed, rectoversos):  # noqa: F811
     page, ticks = listed
     path = rectoversos / JOEY[5:]
-    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve", "- [x] Approve"), encoding="utf-8")
+    rewrite(path, path.read_text(encoding="utf-8").replace("- [ ] Approve", "- [x] Approve"))
     joey(page).click()
     page.clock.run_for(5100)
     until(lambda: ticks, what="the tick")
@@ -131,8 +130,7 @@ def test_a_press_on_another_row_in_the_five_seconds_is_sent_too_and_the_list_rel
 def test_while_a_press_of_a_row_waits_its_other_buttons_cannot_be_pressed(listed, box, rectoversos):  # noqa: F811
     page, ticks = listed
     path = rectoversos / JOEY[5:]
-    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve\n- [ ] Done\n"),
-                    encoding="utf-8")
+    rewrite(path, path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve\n- [ ] Done\n"))
     box.hub.the_list.poll()
     page.reload()
     approve, done = joey(page).nth(0), joey(page).nth(1)
@@ -155,7 +153,7 @@ def test_a_refusal_beside_a_press_that_went_through_is_still_said_after_the_relo
     path = rectoversos / GA4[5:]
     joey(page).click()
     ga4(page).click()
-    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Done", "- [x] Done"), encoding="utf-8")
+    rewrite(path, path.read_text(encoding="utf-8").replace("- [ ] Done", "- [x] Done"))
     page.clock.run_for(5100)
     until(lambda: len(ticks) == 2, what="both ticks")
     assert sorted(s for _, s in ticks) == [200, 409]
@@ -163,7 +161,7 @@ def test_a_refusal_beside_a_press_that_went_through_is_still_said_after_the_relo
     until(lambda: page.locator(".list-error").is_visible(), what="the refusal, said after the reload")
     assert "Done" in page.locator(".list-error").inner_text()
     # The GA4 sheaf, whose tick was refused, gets an action again, for a press that goes through.
-    path.write_text(path.read_text(encoding="utf-8").replace("- [x] Done", "- [x] Done\n- [ ] Approve"), encoding="utf-8")
+    rewrite(path, path.read_text(encoding="utf-8").replace("- [x] Done", "- [x] Done\n- [ ] Approve"))
     page.reload()                                           # a reload by hand
     assert page.locator(".list-error").is_hidden()
     page.evaluate("sessionStorage.setItem('sheaf-list-said', 'an old refusal')")
@@ -181,8 +179,7 @@ def test_a_refusal_beside_a_press_that_went_through_is_still_said_after_the_relo
 def test_a_pressed_one_off_stays_locked_when_a_press_beside_it_is_undone(listed, box, rectoversos):  # noqa: F811
     page, ticks = listed
     path = rectoversos / JOEY[5:]
-    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [x] Approve\n- [ ] Done\n"),
-                    encoding="utf-8")
+    rewrite(path, path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [x] Approve\n- [ ] Done\n"))
     box.hub.the_list.poll()
     page.reload()
     approve, done = joey(page).nth(0), joey(page).nth(1)
@@ -199,8 +196,7 @@ def test_a_pressed_one_off_stays_locked_when_a_press_beside_it_is_undone(listed,
 def test_the_owner_releases_a_pressed_share_after_its_five_seconds(listed, box, rectoversos):  # noqa: F811
     page, ticks = listed
     path = rectoversos / JOEY[5:]
-    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve\n- [x] Share\n"),
-                    encoding="utf-8")
+    rewrite(path, path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve\n- [x] Share\n"))
     box.hub.the_list.poll()
     page.reload()
     share = page.locator(f'button.list-act[data-doc="{JOEY}"][data-word="Share"]')
@@ -243,8 +239,8 @@ def test_on_a_phone_a_refusal_naming_a_slug_with_no_hyphen_breaks_and_the_list_n
 def long_words(chromium, box, rectoversos, github):  # noqa: F811
     """The list on a 360 px phone, Joey's title one long word and a group whose client/project has no hyphen."""
     path = rectoversos / JOEY[5:]
-    path.write_text(path.read_text(encoding="utf-8").replace(
-        "# Reply to Joey about column L", "# Reply_to_Joey_about_column_L_of_the_black_friday_sheet"), encoding="utf-8")
+    rewrite(path, path.read_text(encoding="utf-8").replace(
+        "# Reply to Joey about column L", "# Reply_to_Joey_about_column_L_of_the_black_friday_sheet"))
     rel = rectoversos / LONG_CLIENT / LONG_PROJECT / "2026-10-29-tagging.md"
     rel.parent.mkdir(parents=True)
     rel.write_text(f"---\nclient: {LONG_CLIENT}\nproject: {LONG_PROJECT}\nissue: acme/record#8\nkind: question\n---\n"

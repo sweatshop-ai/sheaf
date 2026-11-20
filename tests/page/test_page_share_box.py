@@ -5,7 +5,7 @@ sheaf's owner."""
 import pytest
 
 from helpers import BEA
-from pagehelp import settled, mark, reloaded, toast, until
+from pagehelp import settled, mark, reloaded, toast, until, rewrite
 from sheafmd.hub import proxy
 
 pytestmark = pytest.mark.page
@@ -35,7 +35,7 @@ SPOT = """(needle) => {
 @pytest.fixture
 def opened(tab):
     def open_with(text):
-        tab.site.file.write_text(text, encoding="utf-8")
+        rewrite(tab.site.file, text)
         tab.open()
         tab.page.wait_for_selector("button.rd-act")         # Approve's button; its own box is hidden behind it
         share_box(tab.page).wait_for()
@@ -101,7 +101,7 @@ def test_a_member_who_is_not_the_owner_is_told_so_and_nothing_is_written(tab, si
     bea = proxy.Member(BEA, "Bea", (str(work),))
     real = site.hub.page
     site.hub.page = lambda e, nonce, member=None, **kw: real(e, nonce, member=bea, **kw)
-    site.file.write_text(SHEAF, encoding="utf-8")
+    rewrite(site.file, SHEAF)
     tab.open()
     tab.page.wait_for_selector("button.rd-act")
     share_box(tab.page).wait_for()

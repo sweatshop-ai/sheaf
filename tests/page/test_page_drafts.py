@@ -5,7 +5,7 @@ import re
 import pytest
 
 from helpers import comment
-from pagehelp import settled, clock_at, open_box, P1, P2, T0, at, draft_key, mark, set_kept, reloaded, select, toasted, toasts_to_the_end, type_at_end, until
+from pagehelp import settled, clock_at, open_box, P1, P2, T0, at, draft_key, mark, set_kept, reloaded, select, toasted, toasts_to_the_end, type_at_end, until, rewrite
 from sheafmd import comments as rdc
 
 pytestmark = pytest.mark.page
@@ -181,7 +181,7 @@ def test_a_task_box_ticked_while_the_hub_is_away_is_kept_as_a_draft_and_restored
     # A tick is an edit that no key press made, so nothing mirrored it. The
     # save that follows the click failed, and the tick stayed on screen and in no store.
     f = tab.site.file
-    f.write_text(f.read_text() + "\n- [ ] first task\n- [ ] second task\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\n- [ ] first task\n- [ ] second task\n")
     tab.open()
     tab.site.kill()
     tab.page.locator("main input[type=checkbox]").first.click()
@@ -352,7 +352,7 @@ def test_a_page_that_is_stale_with_edits_on_screen_still_asks_before_it_is_left(
     p.route("**/_/save", lambda route: route.fulfill(status=409, json={"ok": False, "error": "no merge"}))
     type_at_end(tab.page, P2, " and plums")
     f = tab.site.file
-    f.write_text(f.read_text() + "\nA new paragraph from outside.\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\nA new paragraph from outside.\n")
     toasted(p, "could not be merged", timeout=20.0)     # behind the red toast of the refused save (7 s)
     p.close(run_before_unload=True)
     p.wait_for_timeout(500)          # the dialog event is delivered while the API is called
@@ -367,7 +367,7 @@ def offered_with_a_failed_tick(tab, context, tick=True):
     """A document with two task boxes and an edit lost while the hub was away; a page that offers that edit,
     on which the first box is ticked and its save fails (with `tick`). Returns the page."""
     f = tab.site.file
-    f.write_text(f.read_text() + "\n- [ ] first task\n- [ ] second task\n", encoding="utf-8")
+    rewrite(f, f.read_text() + "\n- [ ] first task\n- [ ] second task\n")
     lose_an_edit(tab)
     page = context.new_page()
     page.goto(tab.site.url)

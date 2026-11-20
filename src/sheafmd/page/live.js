@@ -195,10 +195,11 @@
           // The hub has no such stream for this browser (404): the connection is the closed one of another member, which
           // proxy mode keeps until it ends, or a rollover ended it. Open it again, which belongs to whoever asks now, and
           // join every stream to it; once in RETRY, so a hub that refuses every join is not asked in a loop.
-          if (what === 'join' && status === 404 && sid === self.sid && self.joined[key] === j && self.es &&
-              Date.now() - self.reopened > RETRY) {
-            self.reopen();
-            return;
+          if (what === 'join' && status === 404 && self.joined[key] === j && self.es) {
+            // The others of the same refused batch come back after the first reopened: their keys joined the new
+            // connection already, so a refusal of the old one is no news.
+            if (sid !== self.sid) return;
+            if (Date.now() - self.reopened > RETRY) { self.reopen(); return; }
           }
           // A join the hub would not take (signed out, the connection gone, no answer) is that tab's stream refused.
           if (what === 'join' && (status < 200 || status > 299) && self.joined[key] === j) {
@@ -217,6 +218,7 @@
     this.es.close();
     this.sid = rnd();
     this.sent = {};
+    tell({ t: 'down', s: 0 }); // the open streams were on the connection just closed: they error, as a browser's would
     this.connect();            // `onopen` joins every stream in `joined` to the new connection
   };
   Leader.prototype.take = function (m) {

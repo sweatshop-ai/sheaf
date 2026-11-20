@@ -116,30 +116,36 @@ def test_a_tab_that_leaves_without_a_leave_is_dropped_when_its_lock_frees(shared
 def test_a_join_refused_for_another_owner_reopens_the_shared_stream(shared, site):
     """Proxy mode, two members in one browser one after the other: the leader's connection belongs to the first, and
     the hub answers 404 `no such stream` to the second's joins until the connection ends (up to 300 s). The leader
-    opens its connection again, which belongs to whoever asks now. Stood in for here: every join on the first
-    connection's id is answered 404, as the hub answers one for another owner."""
-    stale = []
+    opens its connection again, which belongs to whoever asks now. Stood in for here: three tabs are open on the
+    first connection, which then answers every join 404 as the hub does for another owner, and all three join at once."""
+    seen, stale = [], []
 
     def refuse(route):
         sid = route.request.post_data_json["stream"]
-        if not stale:
-            stale.append(sid)
-        if sid == stale[0]:
+        seen.append(sid)
+        if sid in stale:
             route.fulfill(status=404, content_type="application/json",
                           body='{"ok": false, "error": "no such stream"}')
         else:
             route.continue_()
     shared.route("**/_/live/join", refuse)
-    p, errors = opened(shared, site)
-    until(lambda: site.hub.tabs(DOC) == 1, what="the tab counted on the reopened stream")
+    pages = [opened(shared, site) for _ in range(3)]
+    until(lambda: site.hub.tabs(DOC) == 3, what="three tabs counted")
+    stale.append(seen[-1])
+    for p, _ in pages:
+        p.evaluate("window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}))")
+    until(lambda: seen[-1] not in stale and site.hub.tabs(DOC) == 3, what="the three tabs counted on the reopened stream")
+    time.sleep(3.5)              # a tab told its join was refused asks again after 2 s: each joins once, not twice
+    assert len([sid for sid in seen if sid not in stale]) == 3
     f = site.file
     rewrite(f, f.read_text(encoding="utf-8") + "\nOn the new stream.\n")
-    until(lambda: shows(p, "On the new stream."), what="the change heard")
-    assert errors == []
+    for n, (p, errors) in enumerate(pages, 1):
+        until(lambda: shows(p, "On the new stream."), what=f"the change in tab {n}")
+        assert errors == []
 
 
 def test_a_join_refused_again_at_once_is_not_retried_in_a_loop(shared, site):
-    """A hub that refuses every join (404 whatever the stream) must not have its leader reopen without end."""
+    """A hub that refuses every join (404 whatever the stream) is not asked faster than the page's own retry (2 s)."""
     sids = set()
 
     def refuse(route):

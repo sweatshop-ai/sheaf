@@ -40,7 +40,7 @@ from urllib.parse import quote
 from .. import beneath, config, paths
 from ..source import md_hash
 from ..blocks import _split_lines, split_md_blocks
-from ..edit import box_number, task_marks, ticked_html
+from ..edit import _render_source, box_number, task_marks, ticked_html
 from .. import comments as rdc
 from . import commits, place, projects, state
 from . import proxy as proxy_mod
@@ -353,16 +353,18 @@ def read_rectoverso(rel: str, text: str) -> Rectoverso:
                  fm_text(fm, "owner"), fm_text(fm, "shared"), md_hash(text), "moved_to" in fm, tuple(pressed))
 
 
-_MAY_HOLD_CODE_RE = re.compile(r"```|~~~|<|^(?:\t| {4,})", re.M)     # a fence, an HTML block or comment, or an indented line
+# a fence, a comment, an HTML block (a line that starts with `<`), or indented code (an indented line after a blank one)
+_MAY_HOLD_CODE_RE = re.compile(r"```|~~~|<!--|^[ \t>*+-]*<|\n[ \t]*\n(?: {4,}|\t)", re.M)
 
 
 def _drawn_actions(b):
     """(line in the block, match) of each action line of the list block `b` whose mark draws a box. A fence, an HTML
     block or indented code inside a list item stays part of the list block, and a task line in it is text, no action
     (SPEC 9.10): the render says which marks are boxes, as `tick_edit` asks it. Asked only where the block has
-    something that could hold code, so a plain list costs no render."""
+    something that could hold code, so a plain list costs no render. A block that does not render at all is read
+    line by line, as before: `box_number` answers None for it as for an empty item, and no real action may go."""
     own = b.content.removesuffix("\n").split("\n")
-    check = _MAY_HOLD_CODE_RE.search(b.content) is not None
+    check = _MAY_HOLD_CODE_RE.search(b.content) is not None and _render_source(b.content) is not None
     state = {m.start(): m.start(2) for m in task_marks(b.content)} if check else {}
     offset = 0
     for k, line in enumerate(own):

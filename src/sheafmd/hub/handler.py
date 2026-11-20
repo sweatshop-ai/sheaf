@@ -2580,4 +2580,4 @@ class Handler:
         _shape(isinstance(force, bool), "force must be true or false")
         if not self.hub.request_stop(reason, force):
             raise Refuse(409, "a Tell is running, so the hub was not stopped for the upgrade")
-        return _ok()
+        return _ok(reason=self.hub.stop_requested)         # the one in force: a stop under way is not turned into an upgrade (8.4)

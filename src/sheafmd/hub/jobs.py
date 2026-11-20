@@ -207,6 +207,12 @@ class Jobs:
                             and (address is None or j.address == address)})
         return [c for _, c in found] if address is not None else [[a, c] for a, c in found]
 
+    def lingering(self, kind: str) -> bool:
+        """Whether a job of `kind` is still there, one that was cancelled included until its worker has
+        ended: `active` leaves it out, but its child may still run (a delivery that ignores SIGTERM)."""
+        with self._lock:
+            return any(j.kind == kind for j, _ in self._jobs)
+
     def kill_all(self):
         """Stop every job and kill every child's group: a hub stop (SPEC 8.4). SIGTERM first; what
         is still running when the grace has passed gets SIGKILL from here, since the timer that

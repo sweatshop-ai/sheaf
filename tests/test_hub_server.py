@@ -531,7 +531,7 @@ def test_a_stop_by_key_tells_the_streams_and_ends_the_server(live):
     read_events(r, 1)
     c = connect()
     c.request("POST", "/_/stop", json.dumps({"reason": "stop"}), {"X-Sheaf-Key": hub.auth.key})
-    assert json.loads(c.getresponse().read()) == {"ok": True}
+    assert json.loads(c.getresponse().read()) == {"ok": True, "reason": "stop"}
     assert read_events(r, 1) == [("hub-stopping", {"reason": "stop"})]
     assert wait_until_refused(port, 2), "the hub still listens after a stop"
 

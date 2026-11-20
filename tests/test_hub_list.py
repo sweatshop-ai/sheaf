@@ -784,6 +784,27 @@ def test_an_action_inside_a_fence_that_holds_a_shorter_or_other_fence_is_no_acti
     assert [(w, short) for w, short, _, _ in s.actions] == [("Done", "")]
 
 
+@pytest.mark.parametrize("inner, line", [("  ```\n  - [ ] Approve\n  ```\n", 6), ("  <!--\n  - [ ] Approve\n  -->\n", 6),
+                                         ("\n      - [ ] Approve\n", 5)])
+def test_an_action_inside_code_in_a_list_item_is_no_action_and_the_real_one_ticks(inner, line):
+    text = f"# T\n\n- item\n{inner}- [ ] Done\n"
+    s = the_list.read_rectoverso("a.md", text)
+    assert [(w, ln) for w, _, ln, _ in s.actions] == [("Done", line)]
+    edit = the_list.tick_edit(text, 0, "Done")
+    assert edit is not None and "checked" in edit["html"]
+
+
+def test_a_list_block_that_does_not_render_keeps_its_actions(monkeypatch):
+    monkeypatch.setattr(the_list, "_render_source", lambda content, keep=True: None)
+    s = the_list.read_rectoverso("a.md", "# T\n\n- item\n  ```\n  - [ ] Approve\n  ```\n- [ ] Done\n")
+    assert [w for w, *_ in s.actions] == ["Approve", "Done"]
+
+
+def test_a_nested_action_in_a_list_that_holds_no_code_is_kept():
+    s = the_list.read_rectoverso("a.md", "# T\n\n- item\n\n    - [ ] Done\n")
+    assert [(w, ln) for w, _, ln, _ in s.actions] == [("Done", 4)]
+
+
 def test_an_action_inside_an_html_comment_is_no_action():
     s = the_list.read_rectoverso("a/b/c.md", "# A rectoverso\n\n<!--\n- [ ] Approve\n-->\n\n- [ ] Done\n")
     assert [(w, line) for w, _, line, _ in s.actions] == [("Done", 6)]

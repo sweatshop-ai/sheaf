@@ -147,3 +147,89 @@ def test_a_key_that_joins_a_new_connection_leaves_the_old_one(world, docs):
 @pytest.mark.parametrize("key", [None, 7, ["a"], ""])
 def test_a_leave_with_no_stream_of_ours_is_refused_whatever_its_key(world, key):
     assert world.post("/_/live/leave", {"stream": "nope", "key": key}).status == 404
+
+
+# ── what wakes the connection's writer (ticket 171) ──────────────────────────
+
+def test_an_idle_connection_wakes_its_writer_no_more_than_it_is_asked_to(world, docs, monkeypatch):
+    """The writer used to look at every tab's queue 20 times a second. It now waits to be told."""
+    from sheafmd.hub import events
+    stream = shared(world)
+    join(world, "a", docs[0])
+    stream.drain()
+    looked = []
+    real = events.Shared._poll
+    monkeypatch.setattr(events.Shared, "_poll", lambda self: looked.append(1) or real(self))
+    assert stream.get(timeout=0.5) is None
+    assert len(looked) <= 2
+
+
+def test_an_event_goes_out_when_it_is_published_not_at_the_next_look(world, docs, monkeypatch):
+    import threading
+    import time
+    from sheafmd.hub import events
+    monkeypatch.setattr(events.Shared, "POLL_S", 10, raising=False)
+    stream = shared(world)
+    join(world, "a", docs[0])
+    stream.drain()
+    got = []
+
+    def wait():
+        event = stream.get(timeout=5)
+        got.append((time.monotonic(), event))
+    t = threading.Thread(target=wait)
+    t.start()
+    time.sleep(0.2)
+    sent = time.monotonic()
+    world.hub.entries[docs[0]].bus.publish("changed", {"x": 1})
+    t.join(timeout=6)
+    at, event = got[0]
+    assert event == ("m", {"k": "a", "e": "changed", "d": {"x": 1}})
+    assert at - sent < 1
+
+
+def test_a_join_and_a_refusal_wake_the_writer_too(world, docs):
+    import threading
+    import time
+    stream = shared(world)
+    got = []
+    t = threading.Thread(target=lambda: got.append(stream.get(timeout=5)))
+    t.start()
+    time.sleep(0.2)
+    start = time.monotonic()
+    join(world, "a", docs[0])
+    t.join(timeout=6)
+    assert got[0] == ("m", {"k": "a", "e": "open", "d": {}})
+    assert time.monotonic() - start < 1
+
+
+def test_a_tab_that_receives_a_burst_does_not_hold_back_the_tabs_that_joined_after_it(world, docs):
+    stream = shared(world)
+    for key, doc in (("a", docs[0]), ("b", docs[1]), ("c", docs[2])):
+        join(world, key, doc)
+    stream.drain()
+    for n in range(5):
+        world.hub.entries[docs[0]].bus.publish("changed", {"n": n})
+    world.hub.entries[docs[1]].bus.publish("changed", {"n": 0})
+    world.hub.entries[docs[2]].bus.publish("changed", {"n": 0})
+    first_three = [d["k"] for _, d in stream.drain()[:3]]
+    assert sorted(first_three) == ["a", "b", "c"]
+
+
+def test_a_closed_connection_still_waits_out_the_timeout_it_is_asked_for(world, docs):
+    """The server's writer loop paces itself with `get(timeout=0.25)`: a stream closed from another thread, before
+    the loop sees it, must not turn that into a busy loop."""
+    import time
+    stream = shared(world)
+    stream.close()
+    start = time.monotonic()
+    assert stream.get(timeout=0.3) is None
+    assert time.monotonic() - start >= 0.25
+
+
+def test_a_tab_that_left_no_longer_wakes_the_writer(world, docs):
+    stream = shared(world)
+    join(world, "a", docs[0])
+    sub = world.hub.entries[docs[0]].bus._subs.copy().pop()
+    world.post("/_/live/leave", {"stream": SID, "key": "a"})
+    assert sub.on_put is None

@@ -43,10 +43,13 @@ class Subscription:
         self._q: queue.Queue = queue.Queue()
         self._accept = accept
         self.closed = False
+        self.on_put = None       # called after every event queued: a `Shared` wakes its writer with it
 
     def put(self, name: str, data):
         if not self.closed:
             self._q.put((name, data))
+            if self.on_put is not None:
+                self.on_put()
 
     def get(self, timeout: float | None = 0):
         """The next (name, data) this stream is sent, or None when none arrived within `timeout`
@@ -127,14 +130,21 @@ class Shared:
     is joined (or `refused` with the status a stream of its own was answered with), then its own
     events. Its last event (`ENDS`) drops it from here; the connection stays open, for the others."""
     ENDS = ("hub-stopping", "signed-out", "gone")
-    POLL_S = 0.05
 
     def __init__(self, owner=None):
         self.owner = owner               # the member id the stream was opened by: no other may join it
         self._lock = threading.Lock()
         self._subs: dict = {}            # key -> Subscription
         self._out: queue.Queue = queue.Queue()
+        self._last = None                # the key served last: the next look starts after it
+        self._wake = threading.Condition()
+        self._news = 0                   # counts what was queued, so a look that missed one is not waited out
         self.closed = False
+
+    def _told(self):
+        with self._wake:
+            self._news += 1
+            self._wake.notify_all()
 
     def join(self, key: str, sub):
         """Adds the stream `sub` under `key`, or the refusal status a stream of its own was answered
@@ -150,13 +160,17 @@ class Shared:
             else:
                 self._out.put(("m", {"k": key, "e": "open", "d": {}}))
                 self._subs[key] = sub
+                sub.on_put = self._told
+        self._told()                     # the events the stream holds already (its `hello`) are waiting too
         if old is not None:
+            old.on_put = None
             old.close()
 
     def leave(self, key: str):
         with self._lock:
             sub = self._subs.pop(key, None)
         if sub is not None:
+            sub.on_put = None
             sub.close()
 
     def keys(self) -> list:
@@ -170,7 +184,10 @@ class Shared:
             pass
         with self._lock:
             subs = list(self._subs.items())
-        for key, sub in subs:
+        # Start after the tab served last, so one that receives events faster than they go out does not keep the
+        # tabs behind it waiting.
+        at = next((i + 1 for i, (key, _) in enumerate(subs) if key == self._last), 0)
+        for key, sub in subs[at:] + subs[:at]:
             got = sub.get(0)
             if got is None:
                 continue
@@ -180,16 +197,22 @@ class Shared:
                     if self._subs.get(key) is sub:
                         del self._subs[key]
                 sub.close()
+            self._last = key
             return "m", {"k": key, "e": name, "d": data}
         return None
 
     def get(self, timeout: float | None = 0):
         deadline = time.monotonic() + (timeout or 0)
         while True:
+            with self._wake:
+                seen = self._news
             got = self._poll()
             if got is not None or time.monotonic() >= deadline:
                 return got
-            time.sleep(min(self.POLL_S, max(0.0, deadline - time.monotonic())))
+            with self._wake:
+                # Nothing is looked at again until a stream queues something: an event queued since `seen` was
+                # counted skips the wait.
+                self._wake.wait_for(lambda: self._news != seen, max(0.0, deadline - time.monotonic()))
 
     def drain(self) -> list:
         out = []
@@ -204,4 +227,6 @@ class Shared:
             self.closed = True
             subs, self._subs = list(self._subs.values()), {}
         for sub in subs:
+            sub.on_put = None
             sub.close()
+        self._told()                     # a writer waiting on it looks once more

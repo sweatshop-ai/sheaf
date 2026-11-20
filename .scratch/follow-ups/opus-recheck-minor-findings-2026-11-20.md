@@ -282,7 +282,7 @@
 ## PR #440
 
 - [x] src/sheafmd/connect.py:122 use_peer_file lets OSError from mkdir/os.open escape (cmd_peer catches only ConnectError/TokenError, main has no OSError handler), so an unwritable --dir gives a traceback at f5901098; already fixed on current main (same command now prints "cannot keep the token in /proc/nope ... nothing was written") **[fixed on main 4a34dd8c, src/sheafmd/connect.py:134-153: use_peer_file now wraps mkdir/os.open/replace in `except OSError` and raises ConnectError("cannot keep the token in ... nothing was written").]**
-- [ ] src/sheafmd/cli.py:1134 `peer add` still tells the user to run `sheaf peer use <address> <token>`, the form this PR documents as discouraged (token in ps/history)
+- [x] src/sheafmd/cli.py:1134 `peer add` still tells the user to run `sheaf peer use <address> <token>`, the form this PR documents as discouraged (token in ps/history) **[fixed on main: #522, bf5f0587]**
 - [ ] src/sheafmd/connect.py:82 peer_credential_name maps ':' to '-', so https://a.example:8443 and a host literally named a.example-8443 share one credential file name (contrived)
 - [ ] src/sheafmd/connect.py:121 an existing --dir keeps its mode; only a newly created folder is 0700 (the file itself is 0600, so the token is not exposed)
 

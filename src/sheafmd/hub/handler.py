@@ -95,6 +95,27 @@ PENDING_S = 300  # how long a session James named waits for the copy before it i
 _clock = time.monotonic
 
 
+def _asks_for_html(accept: str) -> bool:
+    """Whether an `Accept` header names `text/html` with a weight above zero (RFC 9110 12.5.1): the
+    media types are compared whatever their case, and `text/html;q=0` is a refusal. A wildcard
+    does not count: a command that sends `*/*` still reads JSON."""
+    for item in accept.split(","):
+        media, *params = (part.strip() for part in item.split(";"))
+        if media.lower() != "text/html":
+            continue
+        weight = 1.0
+        for param in params:
+            name, _, value = param.partition("=")
+            if name.strip().lower() == "q":
+                try:
+                    weight = float(value.strip())
+                except ValueError:
+                    weight = 0.0
+        if weight > 0:
+            return True
+    return False
+
+
 @dataclass
 class Response:
     status: int
@@ -400,7 +421,7 @@ class Handler:
                 return _html(401, _signed_out_page(), headers=r.headers)
             # The link of `sheaf open` is the one `/_/` route a person's browser follows: it asks
             # for a page, so it gets one, not the JSON that a command reads.
-            if req.path == "/_/open" and r.page and "text/html" in req.headers.get("accept", ""):
+            if req.path == "/_/open" and r.page and _asks_for_html(req.headers.get("accept", "")):
                 res = _html(401, _sign_in_page("This sign-in link did not work", r.page), headers=r.headers)
                 res.error = r.detail or r.message
                 return res

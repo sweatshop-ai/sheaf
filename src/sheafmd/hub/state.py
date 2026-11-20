@@ -339,7 +339,11 @@ class _Store:
             self._data = read_json(file, {})
             result, save = change(self._data)
             if save:
-                write_json(file, self._data)
+                try:
+                    write_json(file, self._data)
+                except BaseException:
+                    self._data = read_json(file, {})      # the change is not the file's: memory goes back to what is there
+                    raise
             return result
 
     def rename(self, old: str, new: str) -> None:

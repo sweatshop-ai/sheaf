@@ -51,3 +51,15 @@ def test_a_break_in_code_in_a_cell_stays_a_pipe_table():
     src = "| a |\n|---|\n| x |"
     html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", "><code>x<br>\u00a0</code><")
     assert "<table" not in saved_table(html, src)
+
+
+def test_a_cut_after_a_backslash_the_page_text_keeps_goes_with_the_break():
+    # A backslash before `*` is an escape the text has to keep, so `_text_backslashes` takes it before the table goes
+    # to `_cell_breaks`; `_without_placeholder_breaks` has to judge the table the same way.
+    row = saved_cell("x\\*<br>\u00a0")
+    assert "<br>" not in row and "\u00a0" not in row and row.startswith("| x\\\\\\* ")
+
+
+def test_two_no_break_spaces_after_a_backslash_keep_the_break_and_leave_one():
+    row = saved_cell("x\\*<br>\u00a0\u00a0")
+    assert "<br>" in row and row.count("\u00a0") == 1

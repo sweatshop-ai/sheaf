@@ -74,3 +74,10 @@ def test_comment_reply_and_resolve_still_work(browser, plan):
     assert r.status == 200
     r = browser.post("/_/comment", {"doc": DOC, "op": "status", "hash": h(), "id": "c1", "status": "resolved"})
     assert r.status == 200 and rdc.parse(plan.read_text(encoding="utf-8")).by_id("c1").status == "resolved"
+
+
+def test_a_generated_page_draws_no_action_button_and_says_it_is_generated(browser, plan):
+    browser.get(URL)
+    mark(browser.hub)
+    meta = page_meta(browser.get(URL).text)
+    assert meta["actions"] == [] and meta["generated"] is True

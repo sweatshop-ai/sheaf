@@ -754,7 +754,7 @@ class Hub:
         if line := self.read_only_line(e.address, waking=bool(self.may_wake(e.address, key))):
             meta["readonly"], meta["why_readonly"] = True, line
         if line := self.generated_line(e.address):
-            meta["edit"], meta["why"] = False, line
+            meta["edit"], meta["why"], meta["generated"], meta["actions"] = False, line, True, []     # no button is drawn that a 403 answers
         if "branch" in meta and meta.get("readonly"):
             del meta["branch"]                  # a read-only page saves nowhere: it carries no branch to save on
         if member is None:

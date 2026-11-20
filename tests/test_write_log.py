@@ -392,3 +392,13 @@ def test_an_undo_keeps_a_renamed_lines_address_and_brings_back_the_lines_the_lan
     assert [l.writer for l in log.lines("new.md")] == ["Bea", "Cal", "Dan"]
     assert {l.address for l in log.lines("new.md")} == {"new.md"}
     assert [l.writer for l in WriteLog(keep=3).lines("new.md")] == ["Bea", "Cal", "Dan"]
+
+
+def test_a_pull_that_ends_does_not_close_the_window_of_another_pull_of_the_same_page():
+    log = WriteLog()
+    log.expect_pull("a.md")
+    log.expect_pull("a.md")
+    log.end_pull("a.md", None)
+    assert log.is_pull("a.md", "h-any")             # the second pull is still under way
+    log.end_pull("a.md", None)
+    assert not log.is_pull("a.md", "h-any")

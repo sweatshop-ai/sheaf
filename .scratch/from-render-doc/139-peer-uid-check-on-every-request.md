@@ -1,6 +1,8 @@
 # 139: Check the connection's OS user on every cookie and key request
 
-**Status:** open (design ruled, probe 2 run, option (b) chosen, nothing built)
+**Claimed by:** Sigrid 2026-11-20 17:44
+
+**Status:** in-progress
 
 **Blocked by:** none
 

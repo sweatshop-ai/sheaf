@@ -1,6 +1,8 @@
 # 93: MCP door follow-ups: a second file lister, a second status dot, a CLI proof on two connections
 
-**Status:** open
+**Claimed by:** Piotr 2026-11-20 17:44
+
+**Status:** in-progress
 
 **Blocked by:** none
 

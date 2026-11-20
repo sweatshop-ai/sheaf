@@ -1,6 +1,8 @@
 # 169: A leader tab that Chrome freezes stops the live updates of every sheaf tab of that browser
 
-**Status:** open, to check
+**Claimed by:** Alonso 2026-11-20 17:44
+
+**Status:** in-progress
 
 **Blocked by:** none
 

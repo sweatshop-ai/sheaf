@@ -1,6 +1,8 @@
 # 99: Lifecycle review follow-ups: peer check, restart announcements, stop races, refactors, lint
 
-**Status:** open
+**Claimed by:** Rhea 2026-11-20 17:44
+
+**Status:** in-progress
 
 **Blocked by:** none
 

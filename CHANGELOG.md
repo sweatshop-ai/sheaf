@@ -6,11 +6,11 @@ changes whenever an asset does. The entries name pull requests of sweatshop-ai/s
 
 ## 1.3.0 (2026-11-20)
 
-Everything merged since 1.2.1 (#472), up to #517. Version 1.2.1 was never tagged; this release carries it.
+Everything merged since 1.2.1 (#472), up to #534. Version 1.2.1 was never tagged; this release carries it.
 
 ### Added
 
-- A page a job generates can be marked as generated, read-only for text edits: the mark is set, shown and guarded by the door (#486, #503, ticket 156).
+- A page a job generates can be marked as generated, read-only for text edits: the mark is set, shown and guarded by the door (#486, #503, #534, ticket 156). The hub refuses a save, a tick or a share on such a page with a sentence that names who generated it; comments, replies and resolve stay open.
 - The comment box moves by its band, with a mouse or a finger (#501, ticket 174).
 - Resolve in the comment box is a check mark, not a minus (#500, ticket 175).
 - The list action `Move to` is now `Belongs to`; a box still carrying the old word is read (#480, ticket 168).
@@ -29,11 +29,15 @@ Everything merged since 1.2.1 (#472), up to #517. Version 1.2.1 was never tagged
 - A kept new-comment draft is matched by a longer lead (#510, ticket 146).
 - SPEC section 13 is narrowed to the command line's output; the footer credit stays (#485, ticket 91).
 - Attach is offered only for a window whose client and project parts are valid slugs (#502).
-- A connection's owner is read from the kernel's socket diagnostics, with `/proc/net/tcp*` as the fallback; no visible change yet (#488, ticket 139).
+- A connection's owner is read from the kernel's socket diagnostics, with `/proc/net/tcp*` as the fallback (#488, ticket 139). The hub then refuses a key or a cookie from another OS user with a 403 that names no uid or path; where owners cannot be read, the check turns itself off and says so (#509, ticket 139).
+- The door's `documents` says when a git root gave no answer and when the 10 second budget ran out (#512).
+- `sheaf peer add` tells the person to pipe the token into `sheaf peer use` instead of putting it on a command line (#522).
 
 ### Fixed
 
-- A page edit keeps the backslashes of the text, writes a shortcode back as the shortcode, and no longer turns a no-break space after a break in a table cell into a lost break; a backslash before a placeholder, a comment or a footnote citation is kept (#475, #479, #482, #517, ticket 137).
+- A page edit keeps the backslashes of the text, writes a shortcode back as the shortcode, and no longer turns a no-break space after a break in a table cell into a lost break; a backslash before a placeholder, a comment or a footnote citation is kept (#475, #479, #482, #517, #524, ticket 137). A backslash in inline math or in a bare URL is kept too (#524), and Enter inside inline code in a table cell keeps the pipe table (#520).
+- A save of a document whose owner bits lack read no longer reports a swap that did not happen (#519, ticket 137).
+- Five rechecked findings: a name with spaces around it in the door's `create`, a title read that returned a re-read of a cleared cache, a non-text `doc` or `hash` sent to the send door, a page whose meta block is not JSON, and an `incoming` step skipped after a failed unkeep (#525).
 - A paste from an online word processor keeps its bold and leaves no backslash paragraphs (#481, ticket 142).
 - Enter with the caret in a loose task item moves to the item's text (#476, ticket 144).
 - A task line inside code held by a list item is no action (#477, ticket 164).

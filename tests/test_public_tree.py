@@ -5,6 +5,7 @@ environment (CI sets it from a secret). These tests hold the guard with terms of
 this checkout with the real ones.
 """
 import io
+import os
 import subprocess
 
 import pytest
@@ -83,6 +84,13 @@ def test_a_name_in_a_path_is_found(repo):
 def test_an_untracked_file_is_not_read(repo):
     (repo / "scratch.txt").write_text("leakguardcanary", encoding="utf-8")
     assert scan(repo) == []
+
+
+def test_a_file_whose_name_is_not_utf8_is_read_under_its_real_name(repo):
+    name = b"caf\xe9.txt"
+    (repo / os.fsdecode(name)).write_text("one\nleakguardcanary\n", encoding="utf-8")
+    git(repo, "add", "-A")
+    assert scan(repo) == [Hit(os.fsdecode(name), 2, "term 1")]
 
 
 def test_a_binary_file_does_not_stop_the_scan(repo):

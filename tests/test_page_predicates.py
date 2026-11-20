@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 PAGE_TESTS = Path(__file__).resolve().parent / "page"
-A_FUNCTION = re.compile(r"^\s*(async\s*)?(\(|[\w$]+\s*=>|function\b)")
+A_FUNCTION = re.compile(r"^\s*(async\s*)?(\(.*?\)\s*=>|[\w$]+\s*=>|function\b)")
 
 
 def string_predicates():
@@ -31,3 +31,10 @@ def string_predicates():
 
 def test_no_page_test_waits_with_a_string_predicate():
     assert string_predicates() == [], "a wait_for_function over a string needs `unsafe-eval`: write `() => <expression>`"
+
+
+def test_a_parenthesised_expression_is_not_a_function_and_an_arrow_function_is():
+    for text in ("(document.title)", "(1 + 2) === 3", "(a, b)"):
+        assert not A_FUNCTION.match(text), text
+    for text in ("() => 1", "(a, b) => a", "async (a) => a", "x => x", "function () {}", "  async function f() {}"):
+        assert A_FUNCTION.match(text), text

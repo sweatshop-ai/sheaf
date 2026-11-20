@@ -315,7 +315,7 @@ def parse_report(origin: str, got: object) -> Report:
     if install is not None and not isinstance(install, str):
         raise bad("an install link that is no text")
     moved_to = got.get("moved_to")
-    if clone == repos_mod.MOVED and not (isinstance(moved_to, str) and moved_to):
+    if clone == repos_mod.MOVED and not (isinstance(moved_to, str) and moved_to and moved_to.isprintable()):
         raise bad("a moved without the origin it moved to")
     return Report(clone, known if clone == repos_mod.OK else None, install, moved_to if clone == repos_mod.MOVED else None)
 

@@ -3794,14 +3794,15 @@ var create = function (ROOT, CFG, opts) {
   // way. A reload brings them, and is asked for when none is coming. Any other box ticks as a plain one.
   var boxWaits = new WeakSet();       // a box whose block's save is out: a second click would toggle it back
   // The eleven words as the hub reads them (the_list.WORDS and _ACTION_RE), so a box no button names yet can be told.
-  var ACTION_WORDS = ['Approve', 'Run it', 'Don\'t run', 'Undo skip', 'Done', 'Share', 'Stop James', 'Move to', 'Merge', 'Deploy', 'Install'];
-  // Move to takes `<slug> (ref <thread>)`, Merge, Deploy and Install the rest of the line, the others nothing.
-  var ACTION_ARG = { 'Move to': '\\s+[A-Za-z0-9._\\\\-]+\\s+\\(ref\\s+[^()\\s]+\\)(?:\\s+@[A-Za-z0-9._-]+)?',
+  var ACTION_WORDS = ['Approve', 'Run it', 'Don\'t run', 'Undo skip', 'Done', 'Share', 'Stop James', 'Belongs to', 'Merge', 'Deploy', 'Install'];
+  // Belongs to (and Move to, its old name) takes `<slug> (ref <thread>)`, Merge, Deploy and Install the rest of the line, the others nothing.
+  var MOVE_ARG = '\\s+[A-Za-z0-9._\\\\-]+\\s+\\(ref\\s+[^()\\s]+\\)(?:\\s+@[A-Za-z0-9._-]+)?';
+  var ACTION_ARG = { 'Belongs to': MOVE_ARG,
                      'Merge': '\\s+\\S.*', 'Deploy': '\\s+\\S.*', 'Install': '\\s+\\S.*' };
   // Share's tick box may say it in its own words (the_list.LABELS).
   var ACTION_LINE = new RegExp('^(?:' + ACTION_WORDS.map(function (w) {
     return w.replace(/'/g, '[\'’]').replace(/^Share$/, 'Share(?:d with the team)?') + (ACTION_ARG[w] || '(?:\\s+@[A-Za-z0-9._-]+)?');
-  }).join('|') + ')$');
+  }).concat('Move to' + MOVE_ARG).join('|') + ')$');     // Move to: the old name, read while an open page carries it
   // The text of a box's own item, its nested lists left out; null for a box in no item.
   function itemLine(t) {
     var li = t.closest && t.closest('li');
@@ -3891,7 +3892,7 @@ var create = function (ROOT, CFG, opts) {
   // A one-off's button is drawn where its box is, in the document, the page's own (data-rd-ui, never editable) and
   // left out of what a save sends by clean(), as the Copy button is; the box is hidden behind it. A toggle (Share), and
   // a one-off whose box the page does not find, stay in the row above the document, which is drawn only for them.
-  // The line's own words are what the button says (a Move to's slug too), so they are hidden under it, in a span
+  // The line's own words are what the button says (a Belongs to's slug too), so they are hidden under it, in a span
   // clean() unwraps: the rest of the line is the button's text. The text around the span is kept as it was, and a
   // span already in place is kept on a redraw: an autosave's answer redraws, and must not move the caret or the
   // comments' ranges.

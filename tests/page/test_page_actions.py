@@ -122,13 +122,13 @@ def test_two_lines_of_the_same_word_are_two_buttons_and_each_presses_its_own_box
 
 def test_a_selection_on_a_buttons_line_does_not_press_it_and_the_button_is_not_part_of_the_text(tab):
     f = tab.site.file
-    f.write_text("# Plan\n\n- [ ] Move to klium-website (ref 18f3a9c2)\n", encoding="utf-8")
+    f.write_text("# Plan\n\n- [ ] Belongs to klium-website (ref 18f3a9c2)\n", encoding="utf-8")
     tab.open()
     p = tab.page
     p.wait_for_selector("button.rd-act")
     select(p, at("main", "(ref"), at("main", "18f3a9c2", None))
     open_box(p)
-    assert "- [ ] Move to" in f.read_text(encoding="utf-8")
+    assert "- [ ] Belongs to" in f.read_text(encoding="utf-8")
     # The line's own words are under the button, not said twice.
     assert p.locator("main li").first.evaluate("li => li.innerText.replace(/\\s+/g, ' ').trim()").count("klium-website") == 1
 
@@ -477,7 +477,7 @@ def test_a_press_while_the_page_settles_onto_a_change_is_refused_and_the_page_re
 def test_on_a_phone_the_buttons_wrap_44_px_high_and_the_page_never_scrolls_sideways(touch_tab):
     p = touch_tab.page
     touch_tab.site.file.write_text(SHEAF.replace("- [ ] Share\n", "- [ ] Share\n- [ ] Stop James\n"
-                                                 "- [ ] Move to klium-website-relaunch (ref 18f3a9c2)\n"),
+                                                 "- [ ] Belongs to klium-website-relaunch (ref 18f3a9c2)\n"),
                                    encoding="utf-8")
     p.set_viewport_size({"width": 360, "height": 780})
     touch_tab.open()
@@ -494,7 +494,7 @@ def test_on_a_phone_a_move_to_whose_slug_has_no_hyphen_breaks_inside_its_button_
     # The button breaks it (#112), and so does the document's own line of that box, the theme's (#128).
     p = touch_tab.page
     touch_tab.site.file.write_text(SHEAF.replace(
-        "- [ ] Share\n", f"- [ ] Share\n- [ ] Move to {LONG} (ref 18f3a9c2)\n"),
+        "- [ ] Share\n", f"- [ ] Share\n- [ ] Belongs to {LONG} (ref 18f3a9c2)\n"),
         encoding="utf-8")
     p.set_viewport_size({"width": 360, "height": 780})
     touch_tab.open()

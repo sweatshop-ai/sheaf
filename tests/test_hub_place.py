@@ -510,20 +510,20 @@ def test_the_untick_is_refused_outside_the_list_too(team, work, tmp_path):
 
 # ── a thread moves to one client (#109) ──────────────────────────────────────
 
-MOVES = OPEN.replace("- [ ] Share", "- [ ] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n- [ ] Share")
-MOVED = MOVES.replace("- [ ] Move to klium", "- [x] Move to klium")
-MOVED_ONCE = "This thread moves to one client: Move to klium is ticked."
+MOVES = OPEN.replace("- [ ] Share", "- [ ] Belongs to klium (ref t1)\n- [ ] Belongs to acme (ref t1)\n- [ ] Share")
+MOVED = MOVES.replace("- [ ] Belongs to klium", "- [x] Belongs to klium")
+MOVED_ONCE = "This thread belongs to one place: Belongs to klium is ticked."
 
 
 def set_moves(team, text, ticked, member=BOB):
-    """The page's save of the Move to block of `text` with exactly the boxes of the slugs `ticked` checked."""
+    """The page's save of the Belongs to block of `text` with exactly the boxes of the slugs `ticked` checked."""
     blocks = split_md_blocks(text)
-    i = next(i for i, b in enumerate(blocks) if "Move to klium" in b.content)
+    i = next(i for i, b in enumerate(blocks) if "Belongs to klium" in b.content)
     soup = BeautifulSoup(_pandoc.run(["-f", "gfm", "-t", "html5"], blocks[i].content).stdout, "html.parser")
     for b in soup.select('input[type="checkbox"]'):
         words = b.parent.get_text()
-        if "Move to" in words:
-            if any(f"Move to {s} " in words for s in ticked):
+        if "Belongs to" in words:
+            if any(f"Belongs to {s} " in words for s in ticked):
                 b["checked"] = ""
             elif b.has_attr("checked"):
                 del b["checked"]
@@ -535,7 +535,7 @@ def test_the_first_move_to_tick_in_the_page_writes(team, work):
     put(team, work, SHARED, MOVES)
     got = set_moves(team, MOVES, ["klium"])
     assert got.status == 200, got.text
-    assert "- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)" in (work / SHARED).read_text(encoding="utf-8")
+    assert "- [x] Belongs to klium (ref t1)\n- [ ] Belongs to acme (ref t1)" in (work / SHARED).read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("ticked", [["klium", "acme"], ["acme"]], ids=["second", "swap"])

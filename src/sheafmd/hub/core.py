@@ -946,7 +946,7 @@ class Hub:
                 e.live.rebuild()
             with self._lock:
                 warnings = []
-                if self.entries.get(address) is e:      # a forget in between has taken the entry: nothing to mark
+                if self.entries.get(address) is e:      # a forget, move or delete in between has taken the entry: nothing to mark
                     e.opened, e.rendered = False, True
                     warnings, e.warnings = e.warnings, []
                     self.index.touch(address)
@@ -954,8 +954,8 @@ class Hub:
                         "log": list(e.log), "warnings": warnings}
 
     def _render_entry(self, address: str, md: Path, settings: dict, target: dict | None):
-        """The part of `render` that holds the hub's lock: the settings are recorded and the entry is found or made.
-        Returns it and whether the page is to be rebuilt."""
+        """The part of `render` that is done with the hub's lock held by the caller: the settings are recorded and the entry is
+        found or made. Returns it and whether the page is to be rebuilt."""
         live = self.tell_live(address)         # beside the docs lock, not inside it
         def settle(new: dict) -> dict:
             old = dict(new)

@@ -141,7 +141,7 @@
 279	439	b	src/sheafmd/hub/writelog.py:270	restore writes `replace(line, address=address)` to the file but keeps `deque(kept, ...)` with the old addresses in memory; build the deque from the replaced lines, as undo does at :256.	2
 280	439	c	src/sheafmd/hub/writelog.py:263	restore re-appends up to KEEP lines plus a marker per failed landing; bounded by rotation and lossless, so any change (diffing the lines) is a design decision.	
 284	440	FIXED	src/sheafmd/connect.py:134-153	use_peer_file now wraps mkdir/os.open/replace in `except OSError` and raises ConnectError("cannot keep the token in ... nothing was written").	
-285	440	b	src/sheafmd/cli.py:1134	`peer add` still prints `sheaf peer use <address> <token>` although the `use` help (cli.py:1093-1096) calls a token argument discouraged; print the stdin form (token piped on the standard input).	1
+285	440	b	src/sheafmd/cli.py:1134	`peer add` still prints `sheaf peer use <address> <token>` although the `use` help (cli.py:1093-1096) calls a token argument discouraged; print the stdin form (token piped on the standard input).	0
 286	440	c	src/sheafmd/connect.py:82	peer_credential_name still maps every non [A-Za-z0-9._-] to '-', so a:8443 and a-8443 share a file; a different encoding renames credential files already deployed, a decision.	
 287	440	c	src/sheafmd/connect.py:133	mkdir(mode=0o700, exist_ok=True) leaves an existing folder's mode; chmod-ing a folder the user named is a decision (the file is 0600 either way).	
 291	441	FIXED	src/sheafmd/connect.py:134-153	Both except branches (OSError :146, BaseException :149) unlink the temp when `made`, so no .new token is left after a failed os.replace.	
@@ -191,7 +191,7 @@
 386	476	a	tests/test_edit_followups.py:1206-1215	TASK_LISTS ids "ordered"/"ordered from three" still name task lists though gfm renders `1. [ ]` as plain text; rename the ids or comment.	
 390	477	c	src/sheafmd/hub/the_list.py:368-373	check still requires _render_source of the block but box_number None (flipped render fails) drops the action; falling back to line reading changes what counts as an action and the save guard, so it needs a decision.	
 391	477	STALE	src/sheafmd/hub/the_list.py:368	Describes a one-time render cost per new text (cached by (content, at)); an observation, no defect to fix.	
-395	479	b	src/sheafmd/edit.py:781	_EMOJI_TOKEN is still replaced by `:name:` regardless of table depth, so a raw-HTML table saves <th>:+1:</th>; inside <table depth substitute the emoji glyph (as the pipe/slash loop at 768-776 does).	1
+395	479	b	src/sheafmd/edit.py:781	→ 137 item 4 (Emil's). _EMOJI_TOKEN is still replaced by `:name:` regardless of table depth, so a raw-HTML table saves <th>:+1:</th>; inside <table depth substitute the emoji glyph (as the pipe/slash loop at 768-776 does).	-
 399	480	b	src/sheafmd/page/page.js:4038	inlineButton words are still [label, a.word] where _word (the_list.py:397) maps legacy "Move to" to "Belongs to"; pass "Move to" as a third word.	4
 400	480	STALE	src/sheafmd/hub/the_list.py:443-449	Transient across the ticket 168 restart only (a page loaded before the deploy); the window has passed, no code to change.	
 401	480	a	GLOSSARY.md:180,194	Code now says Belongs to (the_list.py:65, MOVE_OLD only a legacy read at :66), so drop 'until ticket 168' and reword 'a Move to is a one-off too' to Belongs to.	

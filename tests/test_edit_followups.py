@@ -1237,4 +1237,4 @@ def test_a_typed_task_line_that_starts_with_a_comment_anchor_becomes_a_task_item
 def test_a_typed_task_line_with_only_a_leading_comment_anchor_before_the_box_and_no_words_keeps_its_characters():
     block = rde.split_md_blocks(f"Alpha{ADA_C1}\n")[0]
     md, _ = rde._convert_with_comments(block, f"<p>{anchor('c1')}- [x] </p>")
-    assert md.startswith("\\- \\[x\\]") or "\\[x\\]" in md, md
+    assert "\\[x\\]" in md and "☒" not in md and "sheaf-comment id=c1" in md, md

@@ -518,7 +518,8 @@ def _list_beside(el, side: str):
 def _typed_tasks(fragment: str) -> str:
     """A paragraph that starts `- [ ] `, `- [x] ` or `* [ ] ` was typed as a task line: it becomes a
     list item with a box, which `_boxes_as_text` and pandoc then write as `- [ ] words`. Only a top-level
-    paragraph is looked at, and only the start of its text (a comment anchored at its very start is not words): a code block, a quote and a `[ ]` mid-sentence are words.
+    paragraph is looked at, and only the start of its text (a comment anchored at its very start is not words):
+    a code block, a quote and a `[ ]` mid-sentence are words.
     It runs before `_boxes_as_text`, which turns the boxes made here into the characters pandoc reads back."""
     from bs4 import BeautifulSoup, NavigableString
 
@@ -527,12 +528,12 @@ def _typed_tasks(fragment: str) -> str:
     for p in [el for el in soup.contents if getattr(el, "name", None) == "p"]:
         first = next(iter(p.contents), None)
         # a comment anchored at the very start of the line comes first in the text, as its token: it is not the line's words
-        lead = _LEADING_TOKENS.match(first).end() if isinstance(first, NavigableString) else 0
-        m = _TYPED_TASK.match(first, lead) if isinstance(first, NavigableString) else None
+        token_end = _LEADING_TOKENS.match(first).end() if isinstance(first, NavigableString) else 0
+        m = _TYPED_TASK.match(first, token_end) if isinstance(first, NavigableString) else None
         # words after the box, anywhere in the paragraph: a break, a comment or an empty mark is none
         if not m or not (_shows(_COMMENT_TOKEN.sub("", p.get_text()[m.end():])) or p.find("img")):
             continue
-        first.replace_with(NavigableString(first[:lead] + first[m.end():]))
+        first.replace_with(NavigableString(first[:token_end] + first[m.end():]))
         box = soup.new_tag("input", type="checkbox")
         if m.group(1) in "xX":
             box["checked"] = ""

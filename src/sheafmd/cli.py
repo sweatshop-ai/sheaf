@@ -1131,7 +1131,7 @@ def cmd_peer(argv: list[str]) -> int:
     _out(f"  + peer token {name}, for {origin}, scopes: {', '.join(scopes)}")
     _out(f"    {token}")
     _out(f"  Written to {Tokens.path()}")
-    _out(f"  Shown once. Give it to the other shared Sheaf: `sheaf peer use <this Sheaf's address> <token>` there.")
+    _out(f"  Shown once. Give it to the other shared Sheaf: run `sheaf peer use <this Sheaf's address>` there, with the token piped in on the standard input.")
     return EXIT_OK
 
 

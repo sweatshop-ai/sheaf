@@ -70,6 +70,12 @@ prints it once. A token can read and answer comments. A token made with
 `sheaf token add NAME --write` can also read a page's text, make a page and change its text; it
 keeps every comment in the text, and a change made against an older text is refused.
 
+A module that rebuilds a page on a schedule can mark it generated: `create` and `update` take
+`generated: true`. A person's edit of the text, which the next rebuild would overwrite, is then
+refused at the page with a notice, while comments, replies, resolve, Ask and Tell go on working
+and `update` still keeps every comment. Only the token that set the mark, or the hub key, can
+update the page or clear the mark; leaving `generated` out of a later `update` keeps it as it is.
+
 ## Platforms
 
 - **Linux** is tested: CI runs the whole test suite on every pull request and every merge to main, on x86-64, with Python

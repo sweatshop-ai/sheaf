@@ -606,6 +606,23 @@ def stored(tmp_path):
     return go
 
 
+def test_a_detached_document_whose_store_was_none_leaves_the_store_that_resolves_later_alone(tmp_path):
+    """A document whose store follows its file (`versions` a callable) finds none at the forget; the store that
+    resolves after it is another folder's, and neither a write nor its forget reaches it."""
+    md = tmp_path / "d.md"
+    md.write_text(DOC, encoding="utf-8")
+    box = {"store": None}
+    doc = rdl.LiveDocument(md, render=lambda text: None, publish=lambda n, d: None, by="Ada",
+                           versions=lambda: box["store"], address=ADDR)
+    doc.detach()
+    box["store"] = state.Versions()
+    other = box["store"].put(ADDR, "the folder that took the name\n")
+    doc.save(rds.md_hash(DOC), edit_other(DOC))
+    doc.forget()
+    assert state.Versions().get(ADDR, other) == "the folder that took the name\n"
+    assert state.Versions().texts(ADDR) == ["the folder that took the name\n"]
+
+
 def test_every_text_handed_to_a_page_is_written_to_disk(stored):
     doc, md, *_ = stored()
     assert state.Versions().get(ADDR, rds.md_hash(DOC)) == DOC

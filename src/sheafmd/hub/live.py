@@ -62,7 +62,8 @@ class LiveDocument:
         self._by, self._clock = by, clock
         self._store, self._address = versions, address
         self._written = set()        # the hashes this document put in the store: what a forget that came late takes out
-        self._forgotten = None       # `detach`: the store it had when its root was forgotten
+        self._detached = False       # `detach`: its root was forgotten, and nothing of it reaches a store now
+        self._detached_store = None  # the store it had then, for `forget` to take its texts out of
         self._lock = threading.Lock()
         self._owner = None
         text = self._read()
@@ -143,19 +144,20 @@ class LiveDocument:
 
     def _stored(self):
         """The versions store now: found at each use when `versions` is a callable, so it follows the file."""
-        if self._forgotten is not None:
+        if self._detached:
             return None
         s = self._store
         return s() if callable(s) else s
 
     def _remember(self, text):
         v = self._versions
-        v[rds.md_hash(text)] = text
+        h = rds.md_hash(text)
+        v[h] = text
         while len(v) > VERSIONS:
             v.pop(next(iter(v)))
         store = self._stored()
         if store is not None and self._address is not None:
-            self._written.add(rds.md_hash(text))
+            self._written.add(h)
             try:
                 store.put(self._address, text)
             except OSError:
@@ -507,7 +509,8 @@ class LiveDocument:
         put its text there, so `forget` then takes out what this document wrote, and no more: the folder that takes
         the name next has versions of its own under the address."""
         store = self._store
-        self._forgotten = store() if callable(store) else store
+        self._detached_store = store() if callable(store) else store
+        self._detached = True
 
     def forget(self):
         """Its root was forgotten (SPEC 8.2): drop its versions on disk, and keep the texts it hands out in
@@ -515,8 +518,8 @@ class LiveDocument:
         then and goes with the others. After `detach`, only the texts this document wrote go: the name may
         be another folder's by now."""
         with self._held():
-            detached = self._forgotten is not None
-            store = self._forgotten if detached else self._stored()
+            detached = self._detached
+            store = self._detached_store if detached else self._stored()
             if store is not None and self._address is not None:
                 if detached:
                     store.forget_texts(self._address, self._written)

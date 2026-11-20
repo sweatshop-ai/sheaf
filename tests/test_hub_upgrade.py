@@ -550,10 +550,10 @@ def test_a_newer_command_that_meets_a_stop_under_way_starts_no_hub_and_fails(
     monkeypatch.setattr(hubclient, "spawn_hub", lambda *a, **k: spawned.append(a))
     real_call = hubclient.HubClient.call
 
-    def call(self, method, path, body=None):
+    def call(self, method, path, body=None, **kw):
         if path == "/_/stop":
             return 200, {"ok": True, "reason": under_way}
-        return real_call(self, method, path, body)
+        return real_call(self, method, path, body, **kw)
     monkeypatch.setattr(hubclient.HubClient, "call", call)
     with pytest.raises(hubclient.HubDidNotStart) as e:
         hubclient.ensure_hub("cli", lambda s: None, lambda s: None)

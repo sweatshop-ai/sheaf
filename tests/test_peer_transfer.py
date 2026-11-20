@@ -389,3 +389,16 @@ def test_a_landing_that_fails_keeps_the_line_someone_else_wrote_at_its_address_m
     res = transfer(members, peer_token())
     assert res.status == 409 and res.json()["why"] == "too_slow"
     assert [(l.writer, l.via) for l in members.hub.writes.lines(address)] == [("Cal", "save")]    # the landing's own lines go, Cal's stays
+
+
+def test_a_failed_unkeep_does_not_skip_the_unarchive_of_a_failed_landing(members, monkeypatch):
+    from sheafmd.hub import incoming
+
+    def boom(*a, **k):
+        raise OSError("disk")
+    seen = []
+    monkeypatch.setattr(incoming, "_unkeep", boom)
+    monkeypatch.setattr(incoming, "_unarchive", lambda *a: seen.append(a))
+    monkeypatch.setattr(members.hub.versions, "put", boom)
+    assert transfer(members, peer_token()).status == 500
+    assert seen

@@ -39,8 +39,10 @@ class Titles:
                 text = path.read_bytes().decode("utf-8", errors="replace")      # bytes: the hash is of the text a save reads, line ends as they are
                 if len(self._kept) >= TITLES_KEPT:
                     self._kept.clear()
-                self._kept[key] = (the_list.read_rectoverso(rel, text).title, shared_by(text),
-                                    md_hash(text) if visibility.audience(text) is None else "")
+                kept = (the_list.read_rectoverso(rel, text).title, shared_by(text),
+                        md_hash(text) if visibility.audience(text) is None else "")
+                self._kept[key] = kept      # another thread's clear() may come before a read of it: the local is the answer
+                return kept
             return self._kept[key]
         except OSError:
             return rel.rsplit("/", 1)[-1][:-3], "", ""

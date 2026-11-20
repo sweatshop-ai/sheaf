@@ -1084,10 +1084,6 @@ class Door:
             # A root of another member's. Root ownership alone, not rule A: `_new_address` already refused a real path
             # inside a private root, and a list name a private root holds falls to `place.taken` below, as a shared one.
             raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path")
-        if member is not None and (project := self.hub.project_refused(member, address)) is not None:
-            # Before any look at a private root or a name's homes, so a member the project does not name learns
-            # nothing from the order of the checks; the project is named, its members never (8.12).
-            raise ToolError(f"{_named(args['doc'])} cannot be made: {NOT_IN_PROJECT.format(project)}", "path")
         self._writable(address)         # a clone with no save branch is not written to, whoever's token
         if self.hub.forwards.follow(address) is not None:
             raise ToolError(f"{_named(args['doc'])} cannot be made: a page moved away from that address, and its "
@@ -1096,6 +1092,10 @@ class Door:
         if placed and place.names_private(rel):
             raise ToolError(f"{_named(args['doc'])} cannot be made: the hub places owner-only rectoversos itself: name "
                             "`<client>/<project>/<name>.md`.", "path")
+        if member is not None and (project := self.hub.project_refused(member, address)) is not None:
+            # Before any look at a private root or a name's homes, so a member the project does not name learns
+            # nothing from the order of the checks; the project is named, its members never (8.12).
+            raise ToolError(f"{_named(args['doc'])} cannot be made: {NOT_IN_PROJECT.format(project)}", "path")
         try:
             if placed and place.undecided(self.hub, rel):      # a private root that cannot be looked at may hold the name
                 raise NotFound(rel)

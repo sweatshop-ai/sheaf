@@ -51,6 +51,11 @@ Which parametrised cases fail differs from run to run of the slice, as expected 
 
 Causes are read from the assertion text only: none of A to F is diagnosed yet. One PR per cause.
 
+**Progress (2026-11-20).**
+- **A: done, PR 547 (merged 636dd296).** `children()` in `test_send.py` asks `ps` where there is no `/proc` (and leaves out its own `ps`); `test_hub_transcribe.py` lists `/dev/fd` where there is no `/proc/self/fd`. Tests only. macOS py3.13, the four tests, no xdist: red run 44805030223 (4 of 4 `FileNotFoundError: '/proc'`), green run 44811109769 (`4 passed in 38.72s`).
+- **B: done, PR 562 (merged 14a2fcc3).** Cause read from the stacks of run 44813927978: `beneath._walk` resolves its root with `os.path.realpath(top)` for every file it opens (`src/sheafmd/beneath.py:222`), because macOS has no `openat2` and always takes that walk; the two listing tests counted those calls. It is the containment guard re-resolving its root on purpose, so the source is unchanged: `helpers.in_beneath_walk()` leaves those calls out of both counts where `openat2` is not in use. macOS py3.13, the two files, no xdist: red 44813927978, green run 44818580480 (`3 passed in 5.35s`).
+- **C to F: open**, not yet diagnosed.
+
 - [x] **Get a clean failure list.** Start a manual run on a branch for one Python (py3.13) with xdist off (`-p no:xdist`) or at `-n 2`, on the failing slices only, and read the first real traceback of each test. Cost: macOS minutes count ten times, so one Python, only the slices above.
 
 - [ ] **Group the failures by cause, fix only what a macOS runner proves.** One cause per PR. Cause of the worker deaths: not yet read.

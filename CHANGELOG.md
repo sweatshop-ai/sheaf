@@ -6,7 +6,7 @@ changes whenever an asset does. The entries name pull requests of sweatshop-ai/s
 
 ## 1.3.0 (2026-11-20)
 
-Everything merged since 1.2.1 (#472), up to #515. Version 1.2.1 was never tagged; this release carries it.
+Everything merged since 1.2.1 (#472), up to #517. Version 1.2.1 was never tagged; this release carries it.
 
 ### Added
 
@@ -33,7 +33,7 @@ Everything merged since 1.2.1 (#472), up to #515. Version 1.2.1 was never tagged
 
 ### Fixed
 
-- A page edit keeps the backslashes of the text, writes a shortcode back as the shortcode, and no longer turns a no-break space after a break in a table cell into a lost break (#475, #479, #482, ticket 137).
+- A page edit keeps the backslashes of the text, writes a shortcode back as the shortcode, and no longer turns a no-break space after a break in a table cell into a lost break; a backslash before a placeholder, a comment or a footnote citation is kept (#475, #479, #482, #517, ticket 137).
 - A paste from an online word processor keeps its bold and leaves no backslash paragraphs (#481, ticket 142).
 - Enter with the caret in a loose task item moves to the item's text (#476, ticket 144).
 - A task line inside code held by a list item is no action (#477, ticket 164).

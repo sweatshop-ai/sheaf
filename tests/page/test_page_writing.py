@@ -4109,6 +4109,137 @@ def test_enter_on_a_loose_task_item_with_an_empty_first_line_keeps_its_other_par
     assert "second para" in p.inner_text("main")
 
 
+def _enter_at_caret(tab, tasks, words, keys, at_end=True):
+    """A `.md` with the given task lines, edit mode, the caret at the end (or the start) of the last item holding
+    `words`, then `keys` ("Enter" is pressed, anything else typed); returns the file text after the save."""
+    p, f = tab.page, tab.site.file
+    f.write_text(f.read_text() + "\n" + tasks, encoding="utf-8")
+    tab.open()
+    p.keyboard.press("e")
+    _caret_in_last_item(p, words, at_end)
+    for k in keys:
+        p.keyboard.press("Enter") if k == "Enter" else p.keyboard.type(k)
+    before = f.read_text()
+    mark(p)
+    p.keyboard.press("Control+s")
+    until(lambda: f.read_text() != before, what="the save in the file")
+    settled(p)
+    return f.read_text()
+
+
+def _task_lines(md):
+    return [ln.strip() for ln in md.splitlines() if "[ ]" in ln or "[x]" in ln]
+
+
+def test_enter_at_the_end_of_a_nested_task_item_makes_a_nested_task_item(tab):
+    saved = _enter_at_caret(tab, "- [ ] outer\n  - [ ] inner\n- [ ] last\n", "inner", ["Enter", "new one"])
+    assert "  - [ ] inner\n  - [ ] new one\n- [ ] last" in saved
+    assert "<" not in saved.replace("<!--", "").replace("-->", "") and "☐" not in saved
+
+
+def test_enter_at_the_end_of_an_outer_task_item_with_a_sublist_adds_an_item_after_the_sublist(tab):
+    saved = _enter_at_caret(tab, "- [ ] outer\n  - [ ] inner\n- [ ] last\n", "outer", ["Enter", "new one"])
+    assert _task_lines(saved)[-4:] == ["- [ ] outer", "- [ ] inner", "- [ ] new one", "- [ ] last"]
+    assert "☐" not in saved
+
+
+def test_enter_at_the_start_of_a_nested_task_item_keeps_its_words_in_a_nested_task_item(tab):
+    saved = _enter_at_caret(tab, "- [ ] outer\n  - [ ] inner\n", "inner", ["Enter", "X"], at_end=False)
+    assert "- [ ] outer\n  - [ ] Xinner" in saved and "☐" not in saved
+
+
+def test_enter_on_an_empty_nested_task_item_writes_no_html_and_keeps_every_word(tab):
+    saved = _enter_at_caret(tab, "- [ ] outer\n  - [ ] inner\n- [ ] last\n", "inner", ["Enter", "Enter", "after"])
+    assert "<" not in saved.replace("<!--", "").replace("-->", "") and "☐" not in saved
+    for w in ("outer", "inner", "after", "last"):
+        assert w in saved
+    tab.page.reload()
+    tab.page.wait_for_selector("main input[type=checkbox]")
+    assert "after" in tab.page.inner_text("main")
+
+
+def test_enter_in_an_ordered_list_whose_items_start_with_a_box_is_an_ordinary_numbered_item(tab):
+    # pandoc reads `1. [ ] one` as a numbered item whose words start with "[ ]": there is no box, so Enter is the browser's.
+    tab.site.file.write_text(tab.site.file.read_text() + "\n1. [ ] one\n2. [ ] two\n", encoding="utf-8")
+    tab.open()
+    p = tab.page
+    assert p.locator("main ol input[type=checkbox]").count() == 0
+    p.keyboard.press("e")
+    _caret_in_last_item(p, "one")
+    p.keyboard.press("Enter")
+    p.keyboard.type("new one")
+    assert p.locator("main ol li").count() == 3 and p.locator("main ol input").count() == 0
+    before = tab.site.file.read_text()
+    mark(p)
+    p.keyboard.press("Control+s")
+    until(lambda: tab.site.file.read_text() != before, what="the save in the file")
+    saved = tab.site.file.read_text()
+    assert "new one" in saved and "<" not in saved.replace("<!--", "").replace("-->", "") and "☐" not in saved
+
+
+def test_enter_at_the_end_of_a_task_item_then_a_comment_on_the_new_words_deleted_leaves_an_orphan_and_no_error(tab):
+    p, f = tab.page, tab.site.file
+    errors = []
+    p.on("pageerror", lambda e: errors.append(str(e)))
+    f.write_text(f.read_text() + "\n- [ ] first task\n- [ ] other\n", encoding="utf-8")
+    tab.open()
+    p.keyboard.press("e")
+    _caret_in_last_item(p, "first task")
+    p.keyboard.press("Enter")
+    p.keyboard.type("word")
+    p.wait_for_timeout(3500)                       # the autosave writes the item
+    assert "- [ ] word" in f.read_text()
+    comment_on(tab, at("main li:has-text('word')", "word", 0), at("main li:has-text('word')", "word", None), "About this.")
+    for _ in range(4):
+        p.keyboard.press("Backspace")
+    p.wait_for_timeout(3500)                       # the autosave drops the emptied item that holds the anchor
+    saved = f.read_text()
+    assert "☐" not in saved and "- [ ] word" not in saved and "- [ ] first task\n- [ ] other" in saved
+    (c,) = rdc.parse(saved).comments
+    assert c.body == "About this." and c.orphan
+    p.reload()
+    p.wait_for_selector("main input[type=checkbox]")
+    assert errors == []
+
+
+def _caret_on_item_paragraph(p, words, offset):
+    """The caret on the <p> that wraps the label of the last item holding `words`: at its start (`offset` 0) or at the
+    end of its children (`offset` -1); nothing is in the caret's container but the paragraph itself."""
+    p.evaluate("""([t, o]) => {
+      const li = [...document.querySelectorAll('main li')].reverse()
+        .find(l => l.textContent.replace(/\\s+/g, ' ').includes(t));
+      const para = li.querySelector(':scope > p');
+      const r = document.createRange();
+      r.setStart(para, o < 0 ? para.childNodes.length : o);
+      r.collapse(true);
+      li.closest('[contenteditable]').focus();
+      const s = getSelection();
+      s.removeAllRanges();
+      s.addRange(r);
+    }""", [words, offset])
+
+
+@pytest.mark.parametrize("offset, typed_words, expected", [
+    (0, "X", ["- [ ] aaa", "- [ ] Xbbb"]),
+    (-1, "X", ["- [ ] aaa", "- [ ] bbb", "- [ ] X"]),
+])
+def test_enter_with_the_caret_on_the_paragraph_of_a_loose_task_item_keeps_the_words_and_a_box_in_each_item(tab, offset, typed_words, expected):
+    p, f = tab.page, tab.site.file
+    f.write_text(f.read_text() + "\n- [ ] aaa\n\n- [ ] bbb\n", encoding="utf-8")
+    tab.open()
+    p.keyboard.press("e")
+    _caret_on_item_paragraph(p, "bbb", offset)
+    p.keyboard.press("Enter")
+    p.keyboard.type(typed_words)
+    before = f.read_text()
+    mark(p)
+    p.keyboard.press("Control+s")
+    until(lambda: f.read_text() != before, what="the save in the file")
+    settled(p)
+    saved = f.read_text()
+    assert _task_lines(saved)[-len(expected):] == expected and "☐" not in saved
+
+
 # ── an unreachable hub, said for what failed ───────────────────────────────────
 
 @pytest.mark.parametrize("what", ["tell", "cancel-tell"])

@@ -697,7 +697,7 @@ class Repos:
             raise Refused(failed)
         dest = self.clone_dir(repo)
         held = (dest / ".git").exists()
-        if not held and repo not in self._queues:
+        if not held and not self._queued(repo):
             token = self.provider.token(repo)
             if token is None:
                 return {"repo": repo, "path": path, "clone": NO_APP, "commit_known": None,
@@ -725,9 +725,14 @@ class Repos:
         repo = _clean_repo(repo)
         if (private := self._private(member, repo, private_roots)) is not None:
             return private
-        if not (self.clone_dir(repo) / ".git").exists() and repo not in self._queues and self.provider.token(repo) is None:
+        if not (self.clone_dir(repo) / ".git").exists() and not self._queued(repo) and self.provider.token(repo) is None:
             return NO_APP
         return None
+
+    def _queued(self, repo: str) -> bool:
+        """Whether `repo` has a thread working (a queue): the membership test only, under the guard, never across a call to the provider."""
+        with self._guard:
+            return repo in self._queues
 
     def _enqueue(self, repo: str, item: tuple):
         with self._guard:

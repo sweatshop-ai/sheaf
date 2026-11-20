@@ -19,6 +19,7 @@ import time
 from .. import comments as rdc
 from .. import edit as rde
 from .. import source as rds
+from .state import PINS_MAX_AGE
 
 VERSIONS = 60
 # The versions pages keep past a change of the file, beside the newest VERSIONS: the PINS pinned last (`pin`).
@@ -71,7 +72,8 @@ class LiveDocument:
         # (state.Versions) answers for a hash from before a restart.
         self._versions = {}
         # The versions pages said they keep (`pin`), the last pinned last: apart from `_versions`, so
-        # that writes from outside, however many, never push them out.
+        # that writes from outside, however many, never push them out. Each is `(text, when pinned)`: it goes
+        # after PINS_MAX_AGE, as it does on disk.
         self._pins = {}
         self._remember(text)
         # Threads told to a live session: the count of its action replies each had when it was
@@ -168,11 +170,19 @@ class LiveDocument:
             return None
         text = self._versions.get(h)
         if text is None:
-            text = self._pins.get(h)
+            self._expire_pins()
+            text = (self._pins.get(h) or (None,))[0]
         store = self._stored() if text is None else None
         if store is not None and self._address is not None:
             text = store.get(self._address, h)
         return text
+
+    def _expire_pins(self):
+        """Drop the pins no page has pinned for PINS_MAX_AGE (`state.Versions.prune` does it on disk)."""
+        cutoff = self._clock() - PINS_MAX_AGE
+        for h, (_, at) in list(self._pins.items()):     # a copy: `_known` is read without the lock
+            if at < cutoff:
+                self._pins.pop(h, None)
 
     def _stamp(self):
         """`(mtime_ns, size)` of the file now, or None where it cannot be stat-ed: what a write in flight moves."""
@@ -517,7 +527,8 @@ class LiveDocument:
             if text is None:
                 return False
             self._pins.pop(h, None)
-            self._pins[h] = text
+            self._pins[h] = (text, self._clock())
+            self._expire_pins()
             while len(self._pins) > PINS:
                 self._pins.pop(next(iter(self._pins)))
             store = self._stored()

@@ -879,7 +879,8 @@ class Handler:
     # A browser opens six connections to a host at most, and each tab held one. One tab of the
     # browser now opens `/_/live?shared=ID` and joins the streams of all of them to it, each the
     # Subscription its own `/_/live` would have been: the same Bus counts it as an open tab.
-    SHARED_MAX = 200         # streams on one connection: far more tabs than a browser holds; the cap is soft by a few (the count and the add are not atomic)
+    # The cap is soft by a few: the count and the add are not atomic.
+    SHARED_MAX = 200         # streams on one connection: far more tabs than a browser holds
 
     def _shared_stream(self, req: Req) -> Response:
         sid = req.query.get("shared", "")

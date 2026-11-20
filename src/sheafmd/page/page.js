@@ -599,7 +599,6 @@ var create = function (ROOT, CFG, opts) {
   }
   var btn = el('button', { id: 'rd-menu-btn', title: 'Menu', 'aria-label': 'Menu' },
                '☰<span class="rd-dot"></span>');
-  // takeAgent() has run by here (above): the menu's Tell row reads what it set.
   var menu = el('div', { id: 'rd-menu', role: 'menu' });
   var toast = el('div', { id: 'rd-toast' });
   var panel = el('aside', { id: 'rd-panel' });

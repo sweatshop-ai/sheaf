@@ -88,7 +88,7 @@ def test_in_edit_mode_the_selection_is_not_redrawn_and_nothing_is_painted_or_ope
 def test_the_drafts_stores_are_described_with_their_entries_and_their_readers():
     s = flat(section("10.8"))
     assert "`sheaf-comment-draft:<port>:<doc>`, which holds one key per entry" in s
-    assert "`{quote, body, block, head, tail, occ, rid, at, root}`" in s
+    assert "`{quote, body, block, head, tail, lead, occ, rid, at, root}`" in s
     assert "`{thread, born, about, kind, body, rid, of, out, at, root}`" in s
     assert "neither holds a key or a token" in s
     assert "every document page of the hub shares that store" in s

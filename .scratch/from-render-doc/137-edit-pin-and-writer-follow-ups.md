@@ -56,7 +56,7 @@
 
 - [ ] **A backslash in the text of a bare-URL link.** `http://x.com/a\b` as an autolink saves as `[http://x.com/a\\\b](http://x.com/a\b)`; fix idea: treat text of an `<a>` whose text equals its href as raw.
 - [ ] **Inline math with a backslash.** `$a\\b$` saves as `<span class="math inline">\$a\\b\$</span>`, and the page text changes.
-- [ ] **A backslash right before a comment or footnote citation.** `apply_edits` swaps them for `RDCMT…` placeholders, which start with a letter, so the backslash is left bare and escapes what comes back: `a\\<!-- c -->here` saves as `a\<!-- c -->there` (comment shows as text), `x\\[^1] here` loses the citation. Fix: always tokenize a backslash directly before a placeholder (`edit.py:1485`, `:1503-1505`).
+- [x] **A backslash right before a comment or footnote citation.** *(merged: #517, 811f20b6; tests/test_edit_backslash_placeholder.py, 3 of 7 red before the fix)* `apply_edits` swaps them for `RDCMT…` placeholders, which start with a letter, so the backslash is left bare and escapes what comes back: `a\\<!-- c -->here` saves as `a\<!-- c -->there` (comment shows as text), `x\\[^1] here` loses the citation. Fix: always tokenize a backslash directly before a placeholder (`edit.py:1485`, `:1503-1505`).
 - [ ] **`\:smile:` typed on the page saves as `\\:smile:` and renders as an emoji** (same family as the emoji item).
 - [ ] **Emoji in a table pandoc writes as raw HTML shows as text** (`:+1:`, from #479): restore the emoji character there, as the backslash and pipe tokens do by depth (`edit.py` end of `html_block_to_md`).
 - [ ] **`_emoji_drawn` caches a failed pandoc run as None** (`lru_cache`, from #479): a name then stays an emoji for the process; do not cache a failure.
@@ -74,3 +74,5 @@
 - [ ] **A literal `\:name:` is kept by name, not by place**: the block's source holding `\:smile:` once keeps the backslash on every `:smile:` of the page text, so a `:smile:` the reader types elsewhere in that block, meaning the emoji, is saved escaped.
 - [ ] **A failed emoji lookup writes the shortcode bare** (literal case) or as `:name:` (raw-HTML table): `_emoji_drawn` gives None on a pandoc failure, so the literal text can draw its emoji, or a raw table can show the name, until the next save.
 - [ ] **The table depth counts `<table` anywhere in the output**, also a literal `\<table` in a paragraph or code block, so a `\:name:` after it loses its backslash (same for the pipe and backslash tokens before it).
+
+- [ ] **A wrong comment at `edit.py:689`** (from #517): it says a raw tag's `⟦…⟧` placeholder is "matched above", but `⟦` is not in the ASCII class of `_BACKSLASH_ESCAPES`; tags keep their backslash because pandoc handles it (pinned by the controls in tests/test_edit_backslash_placeholder.py). Fix the comment whoever next touches edit.py there.

@@ -132,6 +132,7 @@
     this.joined = {};          // key -> {doc, tab, at}: every stream this browser wants
     this.sid = rnd();
     this.sent = {};            // key -> the last post for it, which the next one waits for
+    this.watch = {};           // tab -> the abort of its queued request for its lock, which is granted when the tab dies
     this.es = null;
     this.open = false;
     this.connect();
@@ -145,6 +146,9 @@
     this.open = false;
     this.joined = {};          // a join still on the way must not refuse a stream on the next leader
     this.sent = {};
+    var w = this.watch;
+    this.watch = {};
+    Object.keys(w).forEach(function (t) { w[t].abort(); });
     if (this.release) this.release();
   };
   Leader.prototype.connect = function () {
@@ -193,14 +197,36 @@
   Leader.prototype.take = function (m) {
     if (m.t === 'join') {
       this.joined[m.key] = { doc: m.doc, tab: m.tab, at: Date.now() };
+      if (m.tab !== TAB) this.watching(m.tab);
       if (!this.es) this.connect();
       else if (this.open) this.post('join', m.key);
     } else if (m.t === 'leave' && this.joined[m.key]) {
+      var tab = this.joined[m.key].tab;
       if (this.open) this.post('leave', m.key);
       delete this.joined[m.key];
+      var self = this;
+      // The tab has no stream left: its lock needs no watching until it joins again.
+      if (this.watch[tab] && !Object.keys(this.joined).some(function (k) { return self.joined[k].tab === tab; })) {
+        this.watch[tab].abort();
+        delete this.watch[tab];
+      }
     }
   };
-  // A tab that closed without its pagehide (it crashed, it was killed) leaves its lock behind.
+  // A tab that closed without its pagehide (it crashed, it was killed) frees its lock. A request for that lock is
+  // granted the moment it is freed, in a hidden leader too, whose timers Chrome slows to once a minute.
+  Leader.prototype.watching = function (tab) {
+    var self = this;
+    if (this.watch[tab]) return;
+    var ctl = this.watch[tab] = new AbortController();
+    navigator.locks.request('sheaf-tab-' + tab, { signal: ctl.signal }, function () {
+      if (self.watch[tab] === ctl) delete self.watch[tab];
+      // The tab asked for its lock before it first joined, so a grant to this request means the tab is gone.
+      Object.keys(self.joined).forEach(function (k) {
+        if (self.joined[k].tab === tab) self.take({ t: 'leave', key: k });
+      });
+    }).catch(function () {});      // aborted
+  };
+  // The poll stays as the backstop: a tab that never held its lock, and a watch lost to an abort.
   Leader.prototype.sweep = function () {
     var self = this;
     navigator.locks.query().then(function (st) {

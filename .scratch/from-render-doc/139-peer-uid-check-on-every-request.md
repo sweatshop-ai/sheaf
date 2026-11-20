@@ -3,7 +3,7 @@
 **Status:** open (design ruled, probe 2 run, nothing built; one decision open)
 
 **Blocked by:** 
-- External: Thierry chooses (a) or (b) under "Decide first" (not yet asked)
+- External: the owner chooses (a) or (b) under "Decide first" (not yet asked)
 
 **From:** render-doc ticket 139 (private archive), triaged 2026-11-12
 

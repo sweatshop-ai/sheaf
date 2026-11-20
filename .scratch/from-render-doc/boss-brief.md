@@ -45,9 +45,9 @@ Ready now: 91, 93, 94, 99, 101, 137, 144, 146, 155, 162, 164, 167, 168, 169, 170
 Waiting on other tickets:
   96  after 101
 External blockers:
-  139: Thierry chooses (a) or (b) under "Decide first" (not yet asked)
-  142: Thierry pastes from a real web mail client and a real online word processor, by hand (not yet asked)
-  156: Thierry decides where the per-document "generated" mark lives (not yet asked)
+  139: the owner chooses (a) or (b) under "Decide first" (not yet asked)
+  142: the owner pastes from a real web mail client and a real online word processor, by hand (not yet asked)
+  156: the owner decides where the per-document "generated" mark lives (not yet asked)
 Done: 160
 ```
 
@@ -58,9 +58,9 @@ External blockers — who holds each one, and what unblocks it:
 
 | Ticket | Waiting on | Who | Asked |
 |---|---|---|---|
-| 139 | the choice (a) or (b) under "Decide first" | Thierry | not yet |
-| 142 | a by-hand paste from a real web mail client and a real online word processor | Thierry | not yet |
-| 156 | where the per-document "generated" mark lives | Thierry | not yet |
+| 139 | the choice (a) or (b) under "Decide first" | Owner | not yet |
+| 142 | a by-hand paste from a real web mail client and a real online word processor | Owner | not yet |
+| 156 | where the per-document "generated" mark lives | Owner | not yet |
 
 An external blocker is a person, not a task: nobody on the team works around it.
 A blocker the owner holds goes into your tracker's Open blockers and up the
@@ -155,7 +155,7 @@ source wins where this summary is short.
 - Tests: "Locally, run only the test files your change touches. Never the full suite, never `pytest -n auto`/xdist, unless `uptime` shows load under 8." "Browser tests (Playwright, headless Chrome e2e) never run on the laptop, not even one file: run them on t-compute over ssh or in CI." (`/home/tiroir/.claude/CLAUDE.md`)
 - Reviews: "One review round per PR … A PR gets Matt's `code-review` plus `/codex-review` once." "NO-GO only for a serious defect … minor findings are fixed in the same push, with no new round." (`/home/tiroir/.claude/CLAUDE.md`)
 - Git: nothing deploys from `main`: `branch_deploys.py /home/tiroir/Projects/sheaf main` lists only `ci.yml` (tests), so merge to `main` yourself, no question (`/home/tiroir/.claude/CLAUDE.md`, "A branch whose workflows only run tests … is not a deploy"). "After every push, check CI for that commit … A push is not finished until its checks are green." (same file)
-- Devices: the live hub on port 27419 is Thierry's, installed with `uv tool` and restarted only by the merge desk's Install or by Thierry. No worker installs, stops or restarts it (`sheaf stop`, `sheaf restart`, `uv tool install sheafmd`); a fix reaches him through the desk.
+- Devices: the live hub on port 27419 is the owner's, installed with `uv tool` and restarted only by the merge desk's Install or by the owner. No worker installs, stops or restarts it (`sheaf stop`, `sheaf restart`, `uv tool install sheafmd`); a fix reaches him through the desk.
 
 ## Shared runtime
 
@@ -164,7 +164,7 @@ how it gets its own copy.
 
 | Repo | Shared when it runs | Own copy per worker |
 |---|---|---|
-| sheaf | Thierry's installed hub (`~/.local/share/uv/tools/sheafmd`, port 27419, state in `~/.local/state/sheaf`) | `uv run` in the worker's own worktree builds a `.venv` there that imports that worktree's `src/sheafmd` (proved 2026-11-20 in a detached worktree). Tests set their own `SHEAF_HOME` and `SHEAF_PORT` (`tests/conftest.py:191`, `:228`) and refuse port 27419. A hand-run hub sets `SHEAF_HOME` to a scratch folder and `SHEAF_PORT` to a free port, and is stopped by the worker that started it. |
+| sheaf | The owner's installed hub (`~/.local/share/uv/tools/sheafmd`, port 27419, state in `~/.local/state/sheaf`) | `uv run` in the worker's own worktree builds a `.venv` there that imports that worktree's `src/sheafmd` (proved 2026-11-20 in a detached worktree). Tests set their own `SHEAF_HOME` and `SHEAF_PORT` (`tests/conftest.py:191`, `:228`) and refuse port 27419. A hand-run hub sets `SHEAF_HOME` to a scratch folder and `SHEAF_PORT` to a free port, and is stopped by the worker that started it. |
 | tiroir-mail-replies | nothing shared | its own clone |
 
 ## Time windows

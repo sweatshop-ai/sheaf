@@ -3,7 +3,7 @@
 **Status:** open (feature not built; where the mark lives is still to decide)
 
 **Blocked by:** 
-- External: Thierry decides where the per-document "generated" mark lives (not yet asked)
+- External: the owner decides where the per-document "generated" mark lives (not yet asked)
 
 **From:** render-doc ticket 156 (private archive), triaged 2026-11-12
 

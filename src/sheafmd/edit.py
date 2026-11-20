@@ -652,10 +652,41 @@ def _text_backslashes(fragment: str):
     return str(soup), token
 
 
+# A shortcode drawn as its emoji: the name is in `data-emoji`, the emoji itself is the span's text.
+_EMOJI_SPAN = re.compile(r'<span\b(?=[^>]*\sclass="emoji")[^>]*?\sdata-emoji="([a-z0-9_+-]+)"[^>]*>([^<]*)</span>')
+_EMOJI_TOKEN = re.compile("\uF8FE([0-9]+)\uF8FF")
+
+
+@lru_cache(maxsize=256)
+def _emoji_drawn(name: str):
+    """The emoji pandoc draws for `:name:`, or None."""
+    r = _pandoc.run(["-f", "gfm", "-t", "html5"], f":{name}:")
+    m = _EMOJI_SPAN.search(r.stdout) if r.returncode == 0 else None
+    return m.group(2) if m else None
+
+
+def _emoji_as_tokens(fragment: str, source):
+    """(the fragment with each emoji span the source wrote as `:name:` as a token, the names). A token, not the
+    shortcode: `_cell_breaks` sends a table holding a shortcode to raw HTML, which shows it as text. A span the
+    reader typed in the source has no `:name:` there, and a span whose text is no longer its emoji, have their words kept."""
+    names = []
+
+    def token(m):
+        if (source is not None and f":{m.group(1)}:" not in source) or m.group(2) != _emoji_drawn(m.group(1)):
+            return m.group(0)
+        names.append(m.group(1))
+        return f"\uF8FE{len(names) - 1}\uF8FF"
+
+    if "\uF8FE" in fragment or "\uF8FF" in fragment:
+        return fragment, names           # the text holds a token's own characters: the spans go as they did before
+    return _EMOJI_SPAN.sub(token, fragment), names
+
+
 def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     """Convert one edited HTML block back to GitHub-flavoured markdown. With `source`, the block's markdown,
     markup the source did not have is unwrapped (`_unwrap_strays`) and named in `strays`."""
     _reject_irreversible(fragment)
+    fragment, emoji = _emoji_as_tokens(fragment, source)
     fragment = copyblock.tokenize(fragment)
     # The page sends each block's outerHTML as the tab holds it, so what reaches pandoc
     # goes through the 9.5 sanitiser first: no handler, no script address, no element
@@ -691,6 +722,8 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     # noise on every line of a table the moment one cell is edited. Unwrap them. The
     # scheme makes the match unambiguous against real tags.
     out = re.sub(r"<(https?://[^>\s]+)>", r"\1", out)
+    if emoji:
+        out = _EMOJI_TOKEN.sub(lambda m: f":{emoji[int(m.group(1))]}:", out)
     return copyblock.restore(out).strip("\n")
 
 

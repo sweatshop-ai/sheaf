@@ -29,6 +29,9 @@ def test_a_backslash_before_a_footnote_citation_keeps_the_citation():
 @pytest.mark.parametrize("src", [
     "a\\\\\\\\<!-- c -->here",
     "a\\\\<span class=\"k\">x</span>here",
+    "a\\\\<u>x</u>here",
+    "a\\\\\\\\<u>x</u>here",
+    "a<u>x\\\\</u>here",
 ])
-def test_other_backslash_counts_before_a_comment(src):
+def test_other_backslash_counts_and_raw_tags_keep_their_backslashes(src):
     assert saved(src) == src.replace("here", "there") + "\n"

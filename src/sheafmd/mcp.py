@@ -1338,7 +1338,7 @@ class Door:
 
     def _owned(self, text: str, address: str, caller: Caller) -> str:
         """`text`, a door write's text after `_visible`, when the rectoverso it makes at `address` has an owner. A
-        sheaf that is its owner's alone and that no member owns is open to nobody, the token that wrote it
+        rectoverso that is its owner's alone and that no member owns is open to nobody, the token that wrote it
         included, and no door write can mend it (9.11). So when no member owns it and it names no `owner`, a
         token bound to a member gives it that member's `short`; else the write is refused. One its issue's
         assignees alone own gets the `short` of one of them, so it stays theirs once the list no longer knows the

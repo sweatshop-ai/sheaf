@@ -31,7 +31,8 @@ BLUE = {"light": "rgb(31, 95, 214)", "dark": "rgb(110, 162, 255)"}
 
 def rewrite(path, text):
     """Replace the file at `path` with `text` whole (a temporary sibling, then a rename): a page open on it, and the hub's watcher, never read it
-    truncated, as they can after `Path.write_text` (ticket 94)."""
+    truncated, as they can after `Path.write_text` (ticket 94). The file takes the umask's default mode, and a missing
+    folder above it is created."""
     write_text_atomic(Path(path), text)
 
 

@@ -1,7 +1,7 @@
 """No synthetic test value takes the shape of a secret (#53).
 
 The Codex review runner (~/.claude/skills/codex-review/codex-review.sh) refuses a diff with a line its secret pattern
-matches, and only Alice may override it. A fixture that set TOKEN to a quoted value of 12 characters or more matched it, so every diff that
+matches, and only the operator may override it. A fixture that set TOKEN to a quoted value of 12 characters or more matched it, so every diff that
 touched one stopped the review. The pattern below is the runner's SECRET_TEXT, read with grep -aEi, one line at a time.
 A test value that must look like a secret is written as two literals, the first under 12 characters.
 """

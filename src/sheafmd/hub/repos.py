@@ -84,7 +84,8 @@ RETRY_READ_EVERY = 60.0     # seconds between reads of the git version while it 
 def _cache_good(read):
     """Keep what `read()` gave once it is not None. A None (a failed read) is asked again, but not sooner than
     RETRY_READ_EVERY seconds after the last try, so a git that hangs costs one read in that time and not one per request;
-    the read that finally works is said on stderr when an earlier one had failed."""
+    the read that finally works is said on stderr when an earlier one had failed. The lock is held across the `git --version`
+    read on purpose: it is bounded, and a second caller waiting for it is no defect."""
     kept, state = [], {"failed_at": None}
     lock = threading.Lock()
 
@@ -212,7 +213,7 @@ class Repos:
         self._saves: dict[str, tuple] = {}      # repo -> (the branch saves go on or None, the line when none), as last decided
         self._why: dict[str, str] = {}          # repo -> why its HEAD is not on the save branch, after a switch that did not happen
         version = _git_version()
-        if version is None or version < NO_LAZY_FETCH_FROM:     # said once, at the hub's start
+        if version is None or version < NO_LAZY_FETCH_FROM:     # said at each Repos construction (one per hub)
             print("sheaf hub: " + ("git version unreadable" if version is None else "git below 2.44") + ": commit look off",
                   file=sys.stderr, flush=True)
 

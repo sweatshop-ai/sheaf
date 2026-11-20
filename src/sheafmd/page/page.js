@@ -165,7 +165,7 @@ var create = function (ROOT, CFG, opts) {
     CAN = CFG.can || [];
     toBox = CAN.indexOf('box-tell') >= 0;
     // The session's own name when it has one ("Linnea"), else the agent's display name (SPEC 10.5); on a
-    // box rectoverso the member the live session runs as (James), and James on his sheaf with no session yet.
+    // box rectoverso the member the live session runs as (James), and James on his rectoverso with no session yet.
     AGENT = toBox ? upper(liveSession().member) || 'James'
           : (CFG.agent && (CFG.agent.name || CFG.agent.display)) || 'the agent';
     AGENT_UC = AGENT.charAt(0).toUpperCase() + AGENT.slice(1);
@@ -178,7 +178,7 @@ var create = function (ROOT, CFG, opts) {
   // Where a member's Tell goes: James's window on the box.
   function whereTo() { return AGENT + '’s window on the box'; }
   function upper(s) { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); }
-  takeAgent();
+  takeAgent();        // before the #rd-menu below is built: its Tell row reads `canTell` and `toBox`, which this sets
   // What the hub's answer to /_/doc says of the agent: a rename, or a session that ended, reaches
   // an open page by any of the three places that ask (SPEC 10.5).
   // A client page, read through this hub (an address under `Clients/`, SPEC 9.9), offers no agent, Tell target or Work, whatever a /_/doc answer says.
@@ -599,6 +599,7 @@ var create = function (ROOT, CFG, opts) {
   }
   var btn = el('button', { id: 'rd-menu-btn', title: 'Menu', 'aria-label': 'Menu' },
                '☰<span class="rd-dot"></span>');
+  // takeAgent() has run by here (above): the menu's Tell row reads what it set.
   var menu = el('div', { id: 'rd-menu', role: 'menu' });
   var toast = el('div', { id: 'rd-toast' });
   var panel = el('aside', { id: 'rd-panel' });

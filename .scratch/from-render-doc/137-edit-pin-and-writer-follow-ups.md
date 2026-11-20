@@ -51,3 +51,10 @@
 - [ ] **Test duplication:** `tests/test_hub_handler.py:231` builds its own sibling-swap hook (monkeypatching `os.fsync`) beside the shared helper `swap_the_sibling_at` in `tests/test_source.py:258`.
 - [ ] **Test hygiene:** a SIGTERM to a full `tests/page/` run once left "Task was destroyed but it is pending! ... Page._on_route()" and a main thread at 100% CPU for 15 minutes. Every full run showed 2 to 4 `PytestUnraisableExceptionWarning`s from a `Page._on_route` coroutine collected after its loop. Not re-run on sheaf.
 - [ ] **Code smells in `src/sheafmd/edit.py`** (standards only): `_Step` is built by position (`:2217`, `:2225`); `BOTH_NOTE + "\n\n"` is repeated three times (`:2250`, `:2311`, `:2321`); `_PINS` is a folder name (`hub/state.py:40`); the closures use `nonlocal` and bare tuples; the names `own`, `mine`, `span`, `at` and `keeping` each mean several things.
+
+## Found while fixing the backslash item (PR #475), both also fail on main
+
+- [ ] **A backslash in the text of a bare-URL link.** `http://x.com/a\b` as an autolink saves as `[http://x.com/a\\\b](http://x.com/a\b)`; fix idea: treat text of an `<a>` whose text equals its href as raw.
+- [ ] **Inline math with a backslash.** `$a\\b$` saves as `<span class="math inline">\$a\\b\$</span>`, and the page text changes.
+- [ ] **A backslash right before a comment or footnote citation.** `apply_edits` swaps them for `RDCMT…` placeholders, which start with a letter, so the backslash is left bare and escapes what comes back: `a\\<!-- c -->here` saves as `a\<!-- c -->there` (comment shows as text), `x\\[^1] here` loses the citation. Fix: always tokenize a backslash directly before a placeholder (`edit.py:1485`, `:1503-1505`).
+- [ ] **`\:smile:` typed on the page saves as `\\:smile:` and renders as an emoji** (same family as the emoji item).

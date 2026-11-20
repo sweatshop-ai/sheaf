@@ -1,6 +1,8 @@
 # 101: macOS: a run on main on every Python, and the readings only a real Mac can check
 
-**Status:** open
+**Claimed by:** Wanda 2026-11-20 17:44
+
+**Status:** in-progress
 
 **Blocked by:** none
 

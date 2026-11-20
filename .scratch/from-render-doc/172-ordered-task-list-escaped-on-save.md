@@ -1,6 +1,8 @@
 # 172: An ordered list whose items start with `[ ]` is saved with the brackets escaped
 
-**Status:** ready-for-agent
+**Claimed by:** Hugo 2026-11-20 17:44
+
+**Status:** in-progress
 
 **Blocked by:** none
 

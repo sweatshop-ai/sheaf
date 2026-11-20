@@ -1,6 +1,8 @@
 # 156: A page a job generates is read-only for text edits in the hub
 
-**Status:** open (feature not built; mark lives in docs.json, decided 2026-11-20)
+**Claimed by:** Basil 2026-11-20 17:44
+
+**Status:** in-progress
 
 **Blocked by:** none
 

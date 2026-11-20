@@ -1,6 +1,8 @@
 # 167: The door's refusal for a non-member should name the project, not a missing root
 
-**Status:** open (the fix never reached this repo: only the ticket was written)
+**Claimed by:** Kwame 2026-11-20 17:44
+
+**Status:** in-progress
 
 **Blocked by:** none
 

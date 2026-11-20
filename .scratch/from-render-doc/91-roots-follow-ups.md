@@ -1,6 +1,8 @@
 # 91: Roots follow-ups: the brand rule, a cancel that is never refused, a forget that waits on a render
 
-**Status:** open
+**Claimed by:** Amir 2026-11-20 17:44
+
+**Status:** in-progress
 
 **Blocked by:** none
 

@@ -879,7 +879,7 @@ class Handler:
     # A browser opens six connections to a host at most, and each tab held one. One tab of the
     # browser now opens `/_/live?shared=ID` and joins the streams of all of them to it, each the
     # Subscription its own `/_/live` would have been: the same Bus counts it as an open tab.
-    SHARED_MAX = 200         # streams on one connection: far more tabs than a browser holds
+    SHARED_MAX = 200         # streams on one connection: far more tabs than a browser holds; the cap is soft by a few (the count and the add are not atomic)
 
     def _shared_stream(self, req: Req) -> Response:
         sid = req.query.get("shared", "")
@@ -1535,6 +1535,7 @@ class Handler:
         # trash's move. Then the name, the page's lock, and the file's lock in `trash`.
         with moves._LOCK, place.held(self.hub, doc):
             try:
+                # _own_loose runs under the moves' lock here: a throughput cost that is accepted.
                 root, rel, _ = self._own_loose(req, doc)
                 with self.hub.page_lock(doc):       # a save in the middle of its write finishes first, one after it finds the page gone
                     self.hub.archive.trash(root, rel)

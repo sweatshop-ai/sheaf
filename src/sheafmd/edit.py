@@ -358,7 +358,7 @@ def _drop_empty_task_items(soup) -> None:
 _LINE_HOSTS = re.compile(r"^(?:p|h[1-6])$")
 # The shape of a shortcode that GFM's emoji extension reads as its emoji (`:b:`, `:+1:`); a lone colon is none.
 SHORTCODE_RE = re.compile(r":[a-z0-9_+-]+:")
-# How pandoc draws a shortcode it read as its emoji.
+# How pandoc draws a shortcode it read as its emoji. The pattern strips `data-emoji` from any `<span>`, not only that one.
 EMOJI_ATTR_RE = re.compile(r'(<span\b[^>]*?)\s+data-emoji="[^"]*"')      # pandoc may wrap before the attribute
 
 
@@ -824,6 +824,7 @@ def _comparable(block, fragment: str):
     src = COMMENT_HTML_RE.sub(lambda m: f"<!--RDA:{m.group(1)}-->", copyblock.mark(html, page=True))
     # A shortcode (`:100:`) renders as `<span class="emoji" data-emoji="100">`; _sanitize strips every data- attribute from the
     # fragment, so the source loses it too, or a block with a shortcode never compares equal and no box in it ticks.
+    # (EMOJI_ATTR_RE drops `data-emoji` from any `<span>` here.)
     src = EMOJI_ATTR_RE.sub(r"\1", src)
     frag = ANCHOR_RE.sub(lambda m: f"<!--RDA:{m.group(1)}-->", fragment)
     try:

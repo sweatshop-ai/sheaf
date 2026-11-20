@@ -1203,7 +1203,7 @@ def test_a_word_processor_paste_as_the_browser_leaves_it_in_a_paragraph_is_plain
 
 # ── a task list a save did not change is written back as it was (ticket 144) ──
 
-TASK_LISTS = [
+TASK_LISTS = [      # the ids say which shape: gfm renders a numbered `1. [ ]` as plain text, not a task list
     "- [ ] outer\n  - [ ] inner\n  - [x] done inner\n- [ ] last\n",
     "1. [ ] one\n2. [x] two\n3. [ ] three\n",
     "3. [ ] starts at three\n4. [ ] four\n",
@@ -1212,7 +1212,7 @@ TASK_LISTS = [
 ]
 
 
-@pytest.mark.parametrize("md", TASK_LISTS, ids=["nested", "ordered", "ordered from three", "loose", "loose with a second paragraph"])
+@pytest.mark.parametrize("md", TASK_LISTS, ids=["nested", "numbered", "numbered from three", "loose", "loose with a second paragraph"])
 def test_a_save_of_another_block_writes_a_task_list_back_byte_for_byte(md):
     base = f"{md}\nA paragraph.\n"
     i = next(n for n, b in enumerate(split_md_blocks(base)) if b.content.startswith("A paragraph"))

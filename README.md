@@ -72,7 +72,7 @@ keeps every comment in the text, and a change made against an older text is refu
 
 A module that rebuilds a page on a schedule can mark it generated: `create` and `update` take
 `generated: true`. A person's edit of the text, which the next rebuild would overwrite, is then
-refused at the page with a notice, while comments, replies, resolve, Ask and Tell go on working
+refused at the page with a notice, while comments, replies, resolve and Tell go on working
 and `update` still keeps every comment. Only the token that set the mark, or the hub key, can
 update the page or clear the mark; leaving `generated` out of a later `update` keeps it as it is.
 

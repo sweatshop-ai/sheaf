@@ -129,6 +129,8 @@ jobs:
 
       - name: Page tests (Playwright, Chromium, Firefox, WebKit)
         if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'
+        # The page tests take 4 to 8 minutes; the install is bounded below. A step that runs past 40 is stuck.
+        timeout-minutes: 40
         shell: bash
         run: |
           set -o pipefail
@@ -137,7 +139,11 @@ jobs:
           # and its selection code must hold in all three engines); the other steps install no browser.
           deps=""
           if [ "$RUNNER_OS" = "Linux" ] && command -v sudo >/dev/null; then deps="--with-deps"; fi
-          uv run --no-sync playwright install $deps chromium firefox webkit
+          # apt's mirror is sometimes slow (45 minutes for 125 MB, run 44765451025): each try is cut at 10 minutes and the next
+          # one goes on from the packages apt already holds. macOS has no `timeout` and no apt, so it installs unbounded.
+          bounded=""
+          if command -v timeout >/dev/null; then bounded="timeout -k 30 600"; fi
+          for try in 1 2 3; do $bounded uv run --no-sync playwright install $deps chromium firefox webkit && break; if [ "$try" = 3 ]; then echo "::error::the browsers did not install in three tries"; exit 1; fi; done
           uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v --durations=25 -m page -rs 2>&1 | tee page-tests.txt
           # A page test that cannot start its browser skips with a reason. Here that is a failure.
           if grep -Eq '[0-9]+ skipped' page-tests.txt; then

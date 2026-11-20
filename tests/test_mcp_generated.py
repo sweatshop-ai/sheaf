@@ -16,7 +16,9 @@ def generate(browser, token, word="plums", **kw):
 
 
 def test_a_page_never_generated_reads_with_no_mark_and_an_old_docs_file_loads(browser, plan):
-    assert "generated" not in browser.hub.docs.get(DOC)         # an entry written before the mark has no such key
+    browser.hub.docs.put(DOC, {"path": str(plan), "rendered": "2026-11-01T10:00:00+0100", "title": None, "toc": "auto",
+                               "target": None})     # an entry as an older hub wrote it
+    assert "generated" not in browser.hub.docs.get(DOC)
     assert ok(browser, "read", doc=DOC)["generated"] is None
 
 
@@ -124,3 +126,10 @@ def test_a_page_the_key_marks_has_no_token_as_its_setter(browser, plan):
     same_name = Tokens().add("Claude", write=True)          # the key signs as `Claude`: a token of that name is not it
     refused(browser, "update", doc=DOC, text=edited(got["text"]), expected_hash=got["hash"], token=same_name)
     ok(browser, "update", doc=DOC, text=edited(got["text"]), expected_hash=got["hash"])
+
+
+def test_a_mark_set_by_a_token_with_no_id_is_not_inherited_by_a_token_made_since(browser, plan):
+    browser.hub.docs.put(DOC, {"path": str(plan), "generated": {"by": "old", "id": None, "at": "2026-11-01T10:00:00+0100"}})
+    made_since = Tokens().add("old", write=True)             # the same name; it has an id, the old row had none
+    got = ok(browser, "read", doc=DOC)
+    refused(browser, "update", doc=DOC, text=edited(got["text"]), expected_hash=got["hash"], token=made_since)

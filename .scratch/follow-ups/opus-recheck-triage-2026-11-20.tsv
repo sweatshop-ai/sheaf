@@ -28,7 +28,7 @@
 55	391	FIXED	tests/test_proxy_start.py:224	Members are now "Alice Example", "Carol Example", "Bob Example", "Dave Example"; no real surnames remain in the config text.	
 56	391	a	tests/test_proxy_start.py:210	Docstring still names "agency-tiroir's stage sheaf-agents-hub-2026-11-07" and "read off the box's tokens.json"; rewrite without them.	
 57	391	a	tests/test_secret_shapes.py:4	Docstring still says "only Alice may override it"; reword to "only the operator may override it".	
-61	393	b	src/sheafmd/page/page.js:155	wayBackWhere.say is still `say(t, true)` (red 7 s error toast + incident) for the informational Remote Control message; give where.say an info flag (second argument from sheaf.js:84) and pass false for that message.	2
+61	393	FIXED	src/sheafmd/page/page.js:155	wayBackWhere.say is still `say(t, true)` (red 7 s error toast + incident) for the informational Remote Control message; give where.say an info flag (second argument from sheaf.js:84) and pass false for that message.	2
 62	393	a	SPEC.md:415	SPEC item 11 still does not state that a member page loaded without sheaf.js shows the session name as plain text (page.js comment at 137 says it); add one sentence.	
 66	394	b	src/sheafmd/hub/handler.py:1474	_share still builds the edit from e.live.current()[1] after the place.held block ends and sends `after` as the hash; capture the text whose hash is `after` inside change (the with_share_line result, or text) and compute share_edit from it.	2
 67	394	c	src/sheafmd/hub/core.py:1347	may_open still does not ask shared_with/member_owns (only visible-style fm checks plus opened_by_line); the save guard's under-lock recheck on a loose page needs a decision on what it must judge, and it is trust-boundary code.	
@@ -146,7 +146,7 @@
 287	440	c	src/sheafmd/connect.py:133	mkdir(mode=0o700, exist_ok=True) leaves an existing folder's mode; chmod-ing a folder the user named is a decision (the file is 0600 either way).	
 291	441	FIXED	src/sheafmd/connect.py:134-153	Both except branches (OSError :146, BaseException :149) unlink the temp when `made`, so no .new token is left after a failed os.replace.	
 292	441	FIXED	src/sheafmd/connect.py:98-104	_WARNED (:78) records the file name; the warning prints only when the name is not yet in it, once per process.	
-296	442	b	src/sheafmd/page/sheaf.js:523	Submit sends to /_/move-folder even when input.value.trim() === at, and moves.py:189 answers 409 "A folder cannot be moved into itself."; in the submit handler, form.remove() and return when the value is unchanged.	2
+296	442	FIXED	src/sheafmd/page/sheaf.js:523	Submit sends to /_/move-folder even when input.value.trim() === at, and moves.py:189 answers 409 "A folder cannot be moved into itself."; in the submit handler, form.remove() and return when the value is unchanged.	2
 297	442	c	src/sheafmd/page/sheaf.js:583	A refusal goes to the shared say() line (:355), not beside the form; where to show it (per-form line) is a UI decision.	
 301	443	c	src/sheafmd/connect.py:135	`made = True` follows os.open at :134-135; a one-statement window only a KeyboardInterrupt reaches and no code change closes it fully; accept or restructure with a decision.	
 302	443	b	src/sheafmd/connect.py:143	os.close(fd) in the finally can replace the write/fsync error with close's; catch OSError around the close when an exception is already propagating.	5
@@ -158,7 +158,7 @@
 317	446	a	tests/page/test_mount_sheaf.py:418	Comment cites a specific test by name (test_rename_folder_onto_a_taken_name...) and `9 of 240 runs`; reword without the test name so a rename cannot stale it.	
 321	448	b	src/sheafmd/hub/repos.py:288-289 (also 329-330, 741-742)	Still unguarded on main: wrap t.start() so a failure discards the thread from _threads and the repo from _queues, then re-raises.	4
 322	448	c	tests/test_clone_sleep.py:137	Still rests on helper[0].join(0.5); making the red/green signal deterministic needs a different test design (e.g. an event the patched start waits on).	
-326	449	b	src/sheafmd/page/page.js:3108	catch path in teamAct never sets teamAsk = null (only the success path at 3105 does); reset it in the catch.	2
+326	449	FIXED	src/sheafmd/page/page.js:3108	catch path in teamAct never sets teamAsk = null (only the success path at 3105 does); reset it in the catch.	2
 327	449	c	src/sheafmd/page/page.js:3082	`if (teamBusy) return;` still drops every Team-tab click silently; whether to say something or queue is a UX decision.	
 328	449	b	src/sheafmd/page/page.js:3096	`if (!text) return;` still silent; add a say(...) line (wording is the only choice).	4
 332	450	c	tests/page/pagehelp.py:557-562	LEAVING_JS still clears __leaving when defaultPrevented/returnValue is set, and page.js:4190 does set both on unload with unsaved edits; fix needs a browser run to settle.	

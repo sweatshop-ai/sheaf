@@ -4,7 +4,7 @@
 
 **Blocked by:** None. Same shape as #459, which memoizes `git_place` per listing (`config.git_places_remembered()`); reuse that per-listing scope.
 
-**Status:** ready
+**Status:** done (already shipped in ee5c421c on main, 2026-11-19; checked 2026-11-20)
 
 ## Problem
 
@@ -20,7 +20,15 @@ Profile of one cold listing of a copy of a production hub's data (same paths, si
 
 ## Acceptance criteria
 
-- [ ] A test counts the opens/parses of `projects.toml` for one listing of a root with 48 pages in 4 folders (as `tests/test_listing_git_calls.py` does for git in #459) and fails on current main with a count near the number of `visible` calls.
-- [ ] After the change the count is bounded by the number of roots, not pages.
-- [ ] An edit of `projects.toml` between two listings still takes effect at the next listing (the existing "read again only when the file changed" behaviour).
+- [x] A test counts the opens/parses of `projects.toml` for one listing of a root with 48 pages in 4 folders (as `tests/test_listing_git_calls.py` does for git in #459) and fails on current main with a count near the number of `visible` calls.
+- [x] After the change the count is bounded by the number of roots, not pages.
+- [x] An edit of `projects.toml` between two listings still takes effect at the next listing (the existing "read again only when the file changed" behaviour).
 - [ ] The measured count before and after is stated in the PR body (before: 801 per listing on that copy).
+
+## Evidence (2026-11-20)
+
+The fix was already on main: ee5c421c `Index.data` wraps the listing in `hub.projects_remembered()`, so `projects_of` answers from a per-listing memo. `tests/test_listing_projects_reads.py` counts `projects.load` and `projects.parse` per listing and pins that an edit is seen by the next listing.
+
+- On current main: `uv run pytest tests/test_listing_projects_reads.py` gives 2 passed (sheafmd imported from the worktree).
+- With the `projects_remembered()` call removed from `index.py`: the count test fails with `assert (49 <= 2)`, so 49 loads before and at most 2 (roots) after, for 48 pages.
+- The 801 figure (production-sized copy, 1067 pages) is in the commit message of ee5c421c; no new measurement on that copy. That box stays unticked: it asks for the count in a PR body, and no PR was needed.

@@ -1199,3 +1199,29 @@ def test_a_word_processor_paste_as_the_browser_leaves_it_in_a_paragraph_is_plain
             'Here is a link to </span><a href="https://example.com/"><span style="font-size: 11pt;">the page</span></a>.</p></span></p>')
     out = rde.html_block_to_md(html, source="Last paragraph.")
     assert "\\" not in out and out.endswith("**Two** paragraphs, this is **bold**\n\nHere is a link to [the page](https://example.com/)."), out
+
+
+# ── a task list a save did not change is written back as it was (ticket 144) ──
+
+TASK_LISTS = [
+    "- [ ] outer\n  - [ ] inner\n  - [x] done inner\n- [ ] last\n",
+    "1. [ ] one\n2. [x] two\n3. [ ] three\n",
+    "3. [ ] starts at three\n4. [ ] four\n",
+    "- [ ] loose a\n\n- [ ] loose b\n",
+    "- [ ] first\n\n  second paragraph\n- [ ] other\n",
+]
+
+
+@pytest.mark.parametrize("md", TASK_LISTS, ids=["nested", "ordered", "ordered from three", "loose", "loose with a second paragraph"])
+def test_a_save_of_another_block_writes_a_task_list_back_byte_for_byte(md):
+    base = f"{md}\nA paragraph.\n"
+    i = next(n for n, b in enumerate(split_md_blocks(base)) if b.content.startswith("A paragraph"))
+    new, _ = rde.apply_edits(base, [{"i": i, "html": "<p>A paragraph, edited.</p>"}])
+    assert new == f"{md}\nA paragraph, edited.\n"
+
+
+@pytest.mark.parametrize("md", TASK_LISTS[:1] + TASK_LISTS[3:4], ids=["nested", "loose"])
+def test_a_task_list_the_page_sends_back_unchanged_is_not_rewritten(md):
+    block = split_md_blocks(md)[0]
+    html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], block.content).strip()
+    assert rde.html_block_to_md(html, block.content) == block.content.rstrip("\n")

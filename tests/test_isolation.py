@@ -31,6 +31,9 @@ def test_no_variable_of_the_agent_that_runs_the_suite_reaches_a_test():
 
 def test_a_command_that_starts_a_hub_starts_it_on_that_port(work, sheaf, monkeypatch):
     monkeypatch.setattr("sheafmd.cli.webbrowser.open", lambda *a, **k: True)
+    # This test asks where the hub starts, not how fast it answers: on a loaded runner (macOS, four workers
+    # on three cores, CI run 44831400077) a new hub took over 3 s to reply and the command said so.
+    monkeypatch.setattr(client, "TIMEOUT", 30.0)
     doc = work / "d.md"
     doc.write_text("# T\n\nHello.\n", encoding="utf-8")
     ran = sheaf(doc)

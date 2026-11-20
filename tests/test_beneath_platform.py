@@ -28,8 +28,9 @@ def test_openat2_is_never_asked_of_a_system_that_is_not_linux(monkeypatch, platf
 
 
 def test_a_file_that_cannot_be_read_still_has_an_identity_by_the_walk(tmp_path, monkeypatch):
-    """`meta`: the walk opens it with a descriptor that reads nothing. `os.O_PATH` is Linux's: macOS has none, and the
-    first mode 000 file ended in AttributeError there (CI run 44828043440), told to a token as a failure of the hub."""
+    """`meta`: the walk gives its identity and status without a descriptor. `os.O_PATH` is Linux's: macOS has none, and
+    the first mode 000 file ended in AttributeError there (CI run 44828043440), told to a token as a failure of the hub;
+    `O_EVTONLY` is refused there as well (run 44829164316)."""
     import os
     if os.geteuid() == 0:
         pytest.skip("root reads a file of mode 000")
@@ -41,5 +42,6 @@ def test_a_file_that_cannot_be_read_still_has_an_identity_by_the_walk(tmp_path, 
         with beneath.open_beneath(tmp_path, "a.md", meta=True) as op:
             st = f.stat()
             assert op.file == (st.st_dev, st.st_ino)
+            assert op.stat().st_ino == st.st_ino
     finally:
         f.chmod(0o644)

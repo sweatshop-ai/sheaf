@@ -14,7 +14,7 @@ GitHub Project. `waiting` is the Project's option named by `waiting`, `open` the
 The owner is the issue's assignee, told by the member whose `github` it is. The rest is the rectoverso's front
 matter: `issue` (`owner/repo#n`; empty for a documentation rectoverso, which is never listed), `assistant`,
 `kind`, `visibility`; its title is its first `# ` heading and its actions are its unticked boxes that
-carry one of the eleven words (`- [ ] Approve`, `- [ ] Done @nell`, `- [ ] Move to klium (ref <thread>)`). A rectoverso
+carry one of the eleven words (`- [ ] Approve`, `- [ ] Done @nell`, `- [ ] Belongs to klium (ref <thread>)`). A rectoverso
 whose front matter has `moved_to:` is the pointer a move left, never a row.
 
 The record is read as the GitHub App the deployment installs: the hub reads an installation token from
@@ -60,9 +60,10 @@ FOLDER_KEYS = ("stop_dir", "tell_dir", "sessions_dir")
 DIR_KEYS = ("tell_dir", "stop_dir", "sessions_dir", "work_dir")
 DEFAULTS = {"api": "https://api.github.com", "poll": 60, "waiting": "Waiting on member",
             "in_progress": "In progress"}
-WORDS = ("Approve", "Run it", "Don't run", "Undo skip", "Done", "Share", "Stop James", "Move to",
+WORDS = ("Approve", "Run it", "Don't run", "Undo skip", "Done", "Share", "Stop James", "Belongs to",
          "Merge", "Deploy", "Install")
-MOVE = "Move to"                # a word that takes an argument: `<slug> (ref <thread>)`
+MOVE = "Belongs to"             # a word that takes an argument: `<slug> (ref <thread>)`
+MOVE_OLD = "Move to"            # its name until ticket 168: read as MOVE while an open rectoverso still carries it, never written
 FREE = ("Merge", "Deploy", "Install")   # the words whose argument is the rest of the line, which the hub does not read
 TOGGLES = frozenset({"Share"})  # the words a member may press and release; every other word is pressed once
 # A box line may say its word in its own words: `- [ ] Shared with the team` is Share's tick box (9.11, 10.11). The hub
@@ -81,7 +82,7 @@ _BOX_RE = re.compile(r"[A-Za-z0-9.-]{1,63}")
 _REPO_RE = re.compile(r"[A-Za-z0-9-]+/[A-Za-z0-9._-]+")
 _ISSUE_RE = re.compile(r"([A-Za-z0-9-]+)/([A-Za-z0-9._-]+)#([0-9]+)")
 _ACTION_RE = re.compile(r"\s*[-*+] \[(?P<mark>[ xX])\] (?:(?P<word>" + "|".join(re.escape(w).replace("'", "['’]") for w in (*LABELS, *WORDS) if w != MOVE and w not in FREE)
-                        + r")|(?P<free>" + "|".join(FREE) + r")\s+\S.*|(?P<move>" + re.escape(MOVE) + r")\s+(?P<slug>[A-Za-z0-9._\\-]+)\s+\(ref\s+[^()\s]+\))"
+                        + r")|(?P<free>" + "|".join(FREE) + r")\s+\S.*|(?P<move>" + re.escape(MOVE) + "|" + re.escape(MOVE_OLD) + r")\s+(?P<slug>[A-Za-z0-9._\\-]+)\s+\(ref\s+[^()\s]+\))"
                         + r"(?:\s+@(?P<short>[A-Za-z0-9._-]+))?\s*")
 
 
@@ -303,7 +304,7 @@ class Rectoverso:
     assistant: str
     kind: str
     visibility: str             # what the hub enforces (9.11): `owner` or `project`, never as written alone
-    actions: tuple              # ((word, short name or "", 0-based line in the file, Move to's slug or ""), ...)
+    actions: tuple              # ((word, short name or "", 0-based line in the file, Belongs to's slug or ""), ...)
     sources: tuple = ()
     owner: str = ""
     shared: str = ""
@@ -346,7 +347,7 @@ def read_rectoverso(rel: str, text: str) -> Rectoverso:
                     pressed.append(box)
                     moved = moved or bool(m["move"])
     if moved:
-        # A thread moves to one client (#109): once a Move to is ticked, its other candidates are no actions.
+        # A thread moves to one client (#109): once a Belongs to is ticked, its other candidates are no actions.
         actions = [a for a in actions if a[0] != MOVE]
     return Rectoverso(rel, title or rel.rsplit("/", 1)[-1][:-3], issue, fm_text(fm, "assistant"),
                  fm_text(fm, "kind"), visibility.effective(fm), tuple(actions), visibility.sources(fm),
@@ -393,11 +394,11 @@ def _title(heading: str) -> str:
 def _word(m: re.Match) -> str:
     """The word of the action `_ACTION_RE` matched, its apostrophe straight."""
     word = (m["word"] or m["free"] or m["move"]).replace("’", "'")
-    return LABELS.get(word, word)
+    return MOVE if word == MOVE_OLD else LABELS.get(word, word)
 
 
 def _slug(m: re.Match) -> str:
-    """The slug of the Move to `_ACTION_RE` matched, "" for another word. A slug the hub gave back escaped
+    """The slug of the Belongs to (or Move to) `_ACTION_RE` matched, "" for another word. A slug the hub gave back escaped
     (`newtrition\\-coach`) is read as written."""
     return re.sub(r"\\(.)", r"\1", m["slug"] or "")
 
@@ -415,9 +416,9 @@ def unticks_one_off(old: str, new: str) -> str | None:
 
 
 def ticks_another_move(old: str, new: str) -> str | None:
-    """The slug of the Move to ticked in `old` (else the first one ticked in `new`) when writing `new` over `old`
-    ticks a Move to box beside it, by whatever edit (9.10, #109): a thread moves to one client, so a rectoverso answers
-    Move to once. A second tick, a swap and two ticks in one save are each one; None when there is none."""
+    """The slug of the Belongs to ticked in `old` (else the first one ticked in `new`) when writing `new` over `old`
+    ticks a Belongs to box beside it, by whatever edit (9.10, #109): a thread moves to one client, so a rectoverso answers
+    Belongs to once. A second tick, a swap and two ticks in one save are each one; None when there is none."""
     was = collections.Counter(_slug(m) for m in _boxes(old) if m["move"] and m["mark"] != " ")
     now = [_slug(m) for m in _boxes(new) if m["move"] and m["mark"] != " "]
     if collections.Counter(now) - was and (was or len(now) > 1):

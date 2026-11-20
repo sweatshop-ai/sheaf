@@ -1418,37 +1418,37 @@ def test_a_take_off_of_a_file_that_went_is_not_narrowed_by_a_later_tick_of_the_s
         assert the_list_._off[("name", "a/b/c.md")][1] == ("acme", "record", 5)
 
 
-# ── Move to: the eighth word, and the pointer a move leaves (agency-tiroir#211) ──
+# ── Belongs to: the eighth word, and the pointer a move leaves (agency-tiroir#211) ──
 
 CLIENT = """
 ## Client
 
 The sender writes from dexis.be, which Dexis and Klium share. Which client is this thread for?
 
-- [ ] Move to dexis (ref 18f3a9c2)
-- [ ] Move to klium (ref 18f3a9c2)
-- [ ] Move to acme (ref 18f3a9c2)
+- [ ] Belongs to dexis (ref 18f3a9c2)
+- [ ] Belongs to klium (ref 18f3a9c2)
+- [ ] Belongs to acme (ref 18f3a9c2)
 """
 
 
 def test_a_move_to_box_with_its_slug_and_ref_is_an_action_with_the_word_move_to():
-    s = the_list.read_rectoverso("a/b/c.md", "# A rectoverso\n\n- [ ] Move to klium (ref 18f3a9c2)\n")
-    assert s.actions == (("Move to", "", 2, "klium"),)
+    s = the_list.read_rectoverso("a/b/c.md", "# A rectoverso\n\n- [ ] Belongs to klium (ref 18f3a9c2)\n")
+    assert s.actions == (("Belongs to", "", 2, "klium"),)
 
 
 def test_a_client_section_of_three_boxes_gives_three_actions_in_its_order():
     s = the_list.read_rectoverso("a/b/c.md", "# A rectoverso\n" + CLIENT)
     assert [(w, line, arg) for w, _, line, arg in s.actions] == [
-        ("Move to", 6, "dexis"), ("Move to", 7, "klium"), ("Move to", 8, "acme")]
+        ("Belongs to", 6, "dexis"), ("Belongs to", 7, "klium"), ("Belongs to", 8, "acme")]
 
 
 def test_a_move_to_the_hub_gave_back_escaped_reads_its_slug_unescaped():
-    s = the_list.read_rectoverso("a/b/c.md", "# A rectoverso\n\n- [ ] Move to newtrition\\-coach (ref 18f\\_3a)\n")
-    assert [(w, arg) for w, _, _, arg in s.actions] == [("Move to", "newtrition-coach")]
+    s = the_list.read_rectoverso("a/b/c.md", "# A rectoverso\n\n- [ ] Belongs to newtrition\\-coach (ref 18f\\_3a)\n")
+    assert [(w, arg) for w, _, _, arg in s.actions] == [("Belongs to", "newtrition-coach")]
 
 
-@pytest.mark.parametrize("line", ["- [ ] Move to", "- [ ] Move to klium", "- [ ] Move to (ref 18f3a9c2)",
-                                  "- [ ] Move to klium (ref 18f3a9c2) now", "- [ ] Move klium (ref 18f3a9c2)",
+@pytest.mark.parametrize("line", ["- [ ] Belongs to", "- [ ] Belongs to klium", "- [ ] Belongs to (ref 18f3a9c2)",
+                                  "- [ ] Belongs to klium (ref 18f3a9c2) now", "- [ ] Move klium (ref 18f3a9c2)",
                                   "- [ ] Archive", "- [ ] Undo skip (ref 18f3a9c2)", "- [ ] Approve klium"])
 def test_a_line_with_an_unknown_word_or_a_move_to_without_its_argument_is_still_no_action(line):
     assert the_list.read_rectoverso("a/b/c.md", f"# A rectoverso\n\n{line}\n").actions == ()
@@ -1457,13 +1457,13 @@ def test_a_line_with_an_unknown_word_or_a_move_to_without_its_argument_is_still_
 def test_tick_edit_ticks_the_move_to_box_of_its_index():
     from sheafmd.blocks import split_md_blocks
     text = "# A rectoverso\n" + CLIENT
-    edit = the_list.tick_edit(text, 1, "Move to")
+    edit = the_list.tick_edit(text, 1, "Belongs to")
     block = split_md_blocks(text)[edit["i"]]
     assert block.kind == "list"
     assert edit["html"].count("checked") == 1
     soup = BeautifulSoup(edit["html"], "html.parser")
     ticked = [" ".join(li.get_text(" ").split()) for li in soup.select("li") if li.find("input", checked=True)]
-    assert ticked == ["Move to klium (ref 18f3a9c2)"]
+    assert ticked == ["Belongs to klium (ref 18f3a9c2)"]
     assert the_list.tick_edit(text, 1, "Approve") is None
 
 
@@ -1492,9 +1492,9 @@ def test_a_tick_of_the_second_move_to_ticks_that_box_and_no_other(box, rectovers
     path = unsure(rectoversos)
     box.hub.the_list.poll()
     before = path.read_text(encoding="utf-8")
-    r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 1, "word": "Move to"}), member=NELL)
+    r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 1, "word": "Belongs to"}), member=NELL)
     assert r.status == 200, r.text
-    assert path.read_text(encoding="utf-8") == before.replace("- [ ] Move to klium", "- [x] Move to klium")
+    assert path.read_text(encoding="utf-8") == before.replace("- [ ] Belongs to klium", "- [x] Belongs to klium")
 
 
 def test_a_row_of_move_to_boxes_draws_one_one_off_button_per_candidate_named_by_its_slug(box, rectoversos):
@@ -1502,65 +1502,65 @@ def test_a_row_of_move_to_boxes_draws_one_one_off_button_per_candidate_named_by_
     box.hub.the_list.poll()
     res = box.get("/list", member=NELL)
     assert read(res)["Waiting on you 2"]["globex/black-friday"] == [
-        ("Reply to Joey about column L Move to dexis Move to klium Move to acme James", "mail · you · #5 · 2 h")]
+        ("Reply to Joey about column L Belongs to dexis Belongs to klium Belongs to acme James", "mail · you · #5 · 2 h")]
     href = "/list/globex/black-friday/2026-10-28-reply-to-joey.md"
     assert [b for b in buttons(res) if b.doc == JOEY] == [
-        (href, JOEY, str(n), "Move to", "one-off", f"Move to {slug}") for n, slug in enumerate(("dexis", "klium",
+        (href, JOEY, str(n), "Belongs to", "one-off", f"Belongs to {slug}") for n, slug in enumerate(("dexis", "klium",
                                                                                                  "acme"))]
 
 
 @pytest.mark.parametrize("mark", ["x", "X"])
 def test_once_a_move_to_is_ticked_the_other_candidates_are_no_actions_and_other_words_stay(mark):
-    s = the_list.read_rectoverso("a/b/c.md", "# A rectoverso\n" + CLIENT.replace("- [ ] Move to klium", f"- [{mark}] Move to klium")
+    s = the_list.read_rectoverso("a/b/c.md", "# A rectoverso\n" + CLIENT.replace("- [ ] Belongs to klium", f"- [{mark}] Belongs to klium")
                             + "\n- [ ] Done\n")
     assert [(w, arg) for w, _, _, arg in s.actions] == [("Done", "")]
 
 
 def test_a_row_whose_move_to_is_ticked_draws_no_move_to_button_to_press(box, rectoversos):
     path = unsure(rectoversos)
-    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Move to klium", "- [x] Move to klium"),
+    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Belongs to klium", "- [x] Belongs to klium"),
                     encoding="utf-8")
     box.hub.the_list.poll()
     soup = BeautifulSoup(box.get("/list?show=all", member=NELL).text, "html.parser")
     # The ticked candidate stays, locked (#110); the others are gone.
     assert [(b.get_text(" ", strip=True), b.has_attr("disabled"))
-            for b in soup.select('button.list-act[data-word="Move to"]')] == [("Move to klium ✓", True)]
+            for b in soup.select('button.list-act[data-word="Belongs to"]')] == [("Belongs to klium ✓", True)]
 
 
 def test_a_tick_of_another_candidate_once_one_is_ticked_is_refused_and_one_tick_stays(box, rectoversos):
     """Even on the text as it is now: the other candidates are no actions, so no tick can reach them."""
     path = unsure(rectoversos)
     box.hub.the_list.poll()
-    assert box.post("/_/tick", now(box, {"doc": JOEY, "action": 1, "word": "Move to"}), member=NELL).status == 200
+    assert box.post("/_/tick", now(box, {"doc": JOEY, "action": 1, "word": "Belongs to"}), member=NELL).status == 200
     after = path.read_text(encoding="utf-8")
-    r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Move to"}), member=NELL)
+    r = box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Belongs to"}), member=NELL)
     assert r.status == 409, r.text
-    assert path.read_text(encoding="utf-8") == after and after.count("- [x] Move to") == 1
+    assert path.read_text(encoding="utf-8") == after and after.count("- [x] Belongs to") == 1
 
 
 @pytest.mark.parametrize("old, new, slug", [
-    ("- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n",
-     "- [x] Move to klium (ref t1)\n- [x] Move to acme (ref t1)\n", "klium"),           # a second tick
-    ("- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n",
-     "- [ ] Move to klium (ref t1)\n- [x] Move to acme (ref t1)\n", "klium"),           # the two swapped
-    ("- [x] Move to klium (ref t1)\n", "- [x] Move to acme (ref t1)\n", "klium"),       # its slug rewritten
-    ("- [ ] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n",
-     "- [x] Move to klium (ref t1)\n- [x] Move to acme (ref t1)\n", "klium"),           # two in one save
+    ("- [x] Belongs to klium (ref t1)\n- [ ] Belongs to acme (ref t1)\n",
+     "- [x] Belongs to klium (ref t1)\n- [x] Belongs to acme (ref t1)\n", "klium"),           # a second tick
+    ("- [x] Belongs to klium (ref t1)\n- [ ] Belongs to acme (ref t1)\n",
+     "- [ ] Belongs to klium (ref t1)\n- [x] Belongs to acme (ref t1)\n", "klium"),           # the two swapped
+    ("- [x] Belongs to klium (ref t1)\n", "- [x] Belongs to acme (ref t1)\n", "klium"),       # its slug rewritten
+    ("- [ ] Belongs to klium (ref t1)\n- [ ] Belongs to acme (ref t1)\n",
+     "- [x] Belongs to klium (ref t1)\n- [x] Belongs to acme (ref t1)\n", "klium"),           # two in one save
 ])
 def test_a_write_that_ticks_another_move_to_names_the_one_ticked(old, new, slug):
     assert the_list.ticks_another_move(f"# A rectoverso\n\n{old}", f"# A rectoverso\n\n{new}") == slug
 
 
 @pytest.mark.parametrize("old, new", [
-    ("- [ ] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n",
-     "- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n"),                    # the first tick
-    ("- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n",
-     "- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n\nText.\n"),          # another edit
-    ("- [x] Move to klium (ref t1)\n", "- [x] Move to klium (ref t1)\n- [ ] Approve\n"),    # another word added
-    ("- [ ] Move to newtrition-coach (ref t1)\n", "- [x] Move to newtrition\\-coach (ref t1)\n"),  # ticked escaped
-    ("- [x] Move to newtrition-coach (ref t1)\n", "- [x] Move to newtrition\\-coach (ref t1)\n"),  # escaped back
-    ("```\n- [x] Move to klium (ref t1)\n```\n- [ ] Move to acme (ref t1)\n",
-     "```\n- [x] Move to klium (ref t1)\n```\n- [x] Move to acme (ref t1)\n"),         # in a fence: no box
+    ("- [ ] Belongs to klium (ref t1)\n- [ ] Belongs to acme (ref t1)\n",
+     "- [x] Belongs to klium (ref t1)\n- [ ] Belongs to acme (ref t1)\n"),                    # the first tick
+    ("- [x] Belongs to klium (ref t1)\n- [ ] Belongs to acme (ref t1)\n",
+     "- [x] Belongs to klium (ref t1)\n- [ ] Belongs to acme (ref t1)\n\nText.\n"),          # another edit
+    ("- [x] Belongs to klium (ref t1)\n", "- [x] Belongs to klium (ref t1)\n- [ ] Approve\n"),    # another word added
+    ("- [ ] Belongs to newtrition-coach (ref t1)\n", "- [x] Belongs to newtrition\\-coach (ref t1)\n"),  # ticked escaped
+    ("- [x] Belongs to newtrition-coach (ref t1)\n", "- [x] Belongs to newtrition\\-coach (ref t1)\n"),  # escaped back
+    ("```\n- [x] Belongs to klium (ref t1)\n```\n- [ ] Belongs to acme (ref t1)\n",
+     "```\n- [x] Belongs to klium (ref t1)\n```\n- [x] Belongs to acme (ref t1)\n"),         # in a fence: no box
 ])
 def test_a_write_that_ticks_no_other_move_to_names_none(old, new):
     assert the_list.ticks_another_move(f"# A rectoverso\n\n{old}", f"# A rectoverso\n\n{new}") is None
@@ -1596,8 +1596,8 @@ def test_a_row_whose_move_to_boxes_come_before_another_action_carries_the_button
                     encoding="utf-8")
     box.hub.the_list.poll()
     assert [(b.action, b.word, b.label) for b in buttons(box.get("/list", member=NELL)) if b.doc == JOEY] == [
-        ("0", "Move to", "Move to dexis"), ("1", "Move to", "Move to klium"),
-        ("2", "Move to", "Move to acme"), ("3", "Approve", "Approve")]
+        ("0", "Belongs to", "Belongs to dexis"), ("1", "Belongs to", "Belongs to klium"),
+        ("2", "Belongs to", "Belongs to acme"), ("3", "Approve", "Approve")]
 
 
 # ── a one-off stays pressed (#108) ────────────────────────────────────────────
@@ -1607,8 +1607,8 @@ def test_a_row_whose_move_to_boxes_come_before_another_action_carries_the_button
     ("- [X] Done @nell\n", "- [ ] Done @nell\n", "Done"),
     ("- [x] Don’t run\n", "- [ ] Don't run\n", "Don't run"),
     ("- [x] Stop James\n", "* [ ] Stop James\n", "Stop James"),
-    ("- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n",
-     "- [ ] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n", "Move to"),
+    ("- [x] Belongs to klium (ref t1)\n- [ ] Belongs to acme (ref t1)\n",
+     "- [ ] Belongs to klium (ref t1)\n- [ ] Belongs to acme (ref t1)\n", "Belongs to"),
     ("- [x] Approve\n- [x] Approve\n", "- [x] Approve\n- [ ] Approve\n", "Approve"),
     ("- [x] Approve @nell\n", "- [ ] Approve\n", "Approve"),                # the member it names dropped
     ("- [x] Done @nell\n", "- [ ] Done @dora\n", "Done"),                   # or changed
@@ -1762,11 +1762,11 @@ def test_a_press_from_the_page_that_went_stale_says_to_reload_the_page(box, rect
 def test_a_box_no_commit_holds_shows_pressed_without_who_or_when_and_a_ticked_move_to_is_one(box, rectoversos):
     path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace(
-        "- [ ] Approve\n", "- [x] Approve\n- [ ] Done\n- [x] Move to klium (ref t1)\n- [ ] Move to acme (ref t1)\n"),
+        "- [ ] Approve\n", "- [x] Approve\n- [ ] Done\n- [x] Belongs to klium (ref t1)\n- [ ] Belongs to acme (ref t1)\n"),
         encoding="utf-8")
     box.hub.the_list.poll()
     assert row_buttons(box.get("/list", member=NELL), JOEY) == [
-        ("Approve ✓", None, True, None), ("Done", "0", False, None), ("Move to klium ✓", None, True, None)]
+        ("Approve ✓", None, True, None), ("Done", "0", False, None), ("Belongs to klium ✓", None, True, None)]
 
 
 def test_a_box_ticked_by_someone_who_is_no_member_shows_their_name(committing, box, rectoversos):
@@ -2420,3 +2420,14 @@ def test_a_tick_in_a_list_the_text_reading_guesses_wrong_still_lands_on_the_righ
         assert [b.has_attr("checked") for b in boxes] == [j == k for j in range(len(real))], k
     if shape not in ("nbsp after the mark", "quoted continuation"):
         assert reached                               # the slow fallback served, not a lucky first reading
+
+
+def test_move_to_is_read_as_belongs_to():
+    """Ticket 168: a rectoverso that still carries the old word `Move to` gives the action `Belongs to`."""
+    s = the_list.read_rectoverso("a/b/c.md", "# A rectoverso\n\n- [ ] Move to klium (ref 18f3a9c2)\n")
+    assert s.actions == (("Belongs to", "", 2, "klium"),)
+    assert the_list.tick_edit("# A rectoverso\n\n- [ ] Move to klium (ref 18f3a9c2)\n", 0, "Belongs to") is not None
+    moved = the_list.read_rectoverso("a/b/c.md", "# A\n\n- [x] Move to klium (ref t1)\n- [ ] Belongs to acme (ref t1)\n")
+    assert moved.actions == () and [p[0] for p in moved.pressed] == ["Belongs to"]
+    assert the_list.ticks_another_move("- [x] Move to klium (ref t1)\n- [ ] Belongs to acme (ref t1)\n",
+                                       "- [x] Move to klium (ref t1)\n- [x] Belongs to acme (ref t1)\n") == "klium"

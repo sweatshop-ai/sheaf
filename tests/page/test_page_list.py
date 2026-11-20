@@ -43,17 +43,17 @@ def listed(chromium, box):  # noqa: F811
 
 PHONE = {"viewport": {"width": 360, "height": 780}, "has_touch": True, "is_mobile": True}
 TABLET = {"viewport": {"width": 1024, "height": 768}, "has_touch": True, "is_mobile": True}
-SLUG = "klium_website_relaunch_international_2026_phase_two"         # a Move to's slug with no hyphen
+SLUG = "klium_website_relaunch_international_2026_phase_two"         # a Belongs to's slug with no hyphen
 LONG_CLIENT, LONG_PROJECT = "globex_international_relaunch", "black_friday_2026_phase_two_and_three"
 
 
 @pytest.fixture
 def phone(chromium, box, rectoversos):  # noqa: F811
-    """The list on a 360 px phone, Joey's row holding four buttons, one a Move to whose long slug has no hyphen."""
+    """The list on a 360 px phone, Joey's row holding four buttons, one a Belongs to whose long slug has no hyphen."""
     path = rectoversos / JOEY[5:]
     path.write_text(path.read_text(encoding="utf-8").replace(
         "- [ ] Approve\n", "- [ ] Approve\n- [ ] Done\n- [ ] Share\n"
-        f"- [ ] Move to {SLUG} (ref 18f3a9c2)\n"),
+        f"- [ ] Belongs to {SLUG} (ref 18f3a9c2)\n"),
         encoding="utf-8")
     box.hub.the_list.poll()
     yield from on_the_list(chromium, box, **PHONE)
@@ -226,10 +226,10 @@ def test_on_a_phone_a_rows_buttons_wrap_under_its_title_44_px_high_and_the_list_
 
 
 def test_on_a_phone_a_refusal_naming_a_slug_with_no_hyphen_breaks_and_the_list_never_scrolls_sideways(phone):
-    # The refusal is the list's own line (#130). The hub says this one only when a Move to is ticked between the
+    # The refusal is the list's own line (#130). The hub says this one only when a Belongs to is ticked between the
     # tick's hash check and its lock, so the test answers the tick with it.
     page, _ = phone
-    refusal = f"This thread moves to one client: Move to {SLUG} is ticked."
+    refusal = f"This thread belongs to one place: Belongs to {SLUG} is ticked."
     page.route(f"{ORIGIN}/_/tick", lambda route: route.fulfill(status=409, content_type="application/json",
                                                                body=json.dumps({"error": refusal})))
     joey(page).first.click()

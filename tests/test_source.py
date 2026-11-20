@@ -547,3 +547,17 @@ def test_one_stamp_format_serves_every_timestamp_the_hub_writes():
     import time
     from sheafmd.source import STAMP_FORMAT
     assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d[+-]\d{4}", time.strftime(STAMP_FORMAT))
+
+
+def test_a_document_whose_owner_bits_lack_read_is_not_called_a_swap(tmp_path):
+    """The saver cannot read back the sibling it made with that mode: the failure says so, and does not
+    claim the sibling was replaced."""
+    p = make(tmp_path)
+    os.chmod(p, 0o200)
+    try:
+        with pytest.raises(OSError) as e:
+            rds._write_atomic(p, "new\n")
+    finally:
+        os.chmod(p, 0o644)
+    assert "replaced" not in str(e.value) and "read" in str(e.value)
+    assert p.read_text(encoding="utf-8") == DOC and not (tmp_path / ".d.md.sheaf-tmp").exists()

@@ -33,7 +33,9 @@ def test_a_command_that_starts_a_hub_starts_it_on_that_port(work, sheaf, monkeyp
     monkeypatch.setattr("sheafmd.cli.webbrowser.open", lambda *a, **k: True)
     doc = work / "d.md"
     doc.write_text("# T\n\nHello.\n", encoding="utf-8")
-    assert sheaf(doc).code == 0
+    ran = sheaf(doc)
+    print('DIAG', ran.code, repr(ran.out), repr(ran.err))
+    assert ran.code == 0
     info = server.read_pid_file()
     STARTED.append(info["pid"])
     assert info["port"] == config.port() != 27419

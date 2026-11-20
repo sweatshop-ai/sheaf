@@ -436,7 +436,7 @@ def test_the_refusal_for_a_tree_the_check_cannot_read_blames_the_nesting_not_a_c
     assert "nests too deep" in message and "is not a comment" not in message
 
 
-def test_the_comments_a_document_of_46_kb_spells_in_raw_tags_are_found_in_a_second(tmp_path, monkeypatch):
+def test_the_comments_a_document_of_46_kb_spells_in_raw_tags_are_found_in_a_second(tmp_path, monkeypatch, no_gc):
     # The text of a block was read character by character against every
     # cut against every comment it spells, which is slow on a large input. The whole refusal still costs
     # a dozen pandoc runs (and more on a loaded machine), so the bound is on that one step.
@@ -445,11 +445,11 @@ def test_the_comments_a_document_of_46_kb_spells_in_raw_tags_are_found_in_a_seco
     real = R._spelled_out
 
     def timed(text, marks):
-        start = time.perf_counter()
+        start = time.process_time()
         try:
             return real(text, marks)
         finally:
-            spent.append(time.perf_counter() - start)
+            spent.append(time.process_time() - start)
 
     monkeypatch.setattr(R, "_spelled_out", timed)
     text = ("<<b></b>!-- y --> " + "<b>x</b> " * 5000 + "\n\n" + "a <!-- c --> b\n\n" * 63

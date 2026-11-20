@@ -3638,6 +3638,15 @@ var create = function (ROOT, CFG, opts) {
     host.appendChild(nb);
     // a caret ahead of the box (the item's start) has the box behind it, not in what moves
     var sc = range.startContainer, ahead = false;
+    // a caret on the item or on the <p> that wraps its label (a loose item), not in the words: the offset says whether it
+    // is ahead of the label or behind it, and it goes to the start or to the end of what holds the words
+    if (sc !== cont && sc !== box && sc.nodeType === 1 && sc.contains(cont)) {
+      var kid = cont;
+      while (kid.parentNode !== sc) kid = kid.parentNode;
+      var front = range.startOffset <= Array.prototype.indexOf.call(sc.childNodes, kid);
+      range.setStart(cont, front ? 0 : cont.childNodes.length);
+      sc = cont;
+    }
     if (sc === box) ahead = true;
     else if (sc === cont || sc === li) ahead = range.startOffset <= Array.prototype.indexOf.call(sc.childNodes, sc === cont ? box : cont);
     else if (cont.contains(sc)) ahead = !!(box.compareDocumentPosition(sc) & Node.DOCUMENT_POSITION_PRECEDING);

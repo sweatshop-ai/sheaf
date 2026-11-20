@@ -99,3 +99,16 @@ def test_a_frozen_tab_that_waits_for_the_lock_is_not_handed_it(shared, site):
     f = site.file
     f.write_text(f.read_text(encoding="utf-8") + "\nWith two tabs frozen.\n", encoding="utf-8")
     until(lambda: shows(pages[2][0], "With two tabs frozen."), what="the change in the third tab")
+
+
+def test_a_tab_that_leaves_without_a_leave_is_dropped_when_its_lock_frees(shared, site):
+    """A tab that crashes sends no `pagehide` and says nothing: only its Web Lock is freed. The leader must hear
+    that from the lock itself, not from a poll every SWEEP (2 s), which Chrome slows to once a minute in a tab
+    hidden for five minutes. The tab here says nothing (its `leave` is dropped) and closes."""
+    pages = [opened(shared, site) for _ in range(3)]
+    until(lambda: site.hub.tabs(DOC) == 3, what="three tabs counted")
+    pages[2][0].evaluate("BroadcastChannel.prototype.postMessage = function () {}")
+    t0 = time.monotonic()
+    pages[2][0].close()
+    until(lambda: site.hub.tabs(DOC) == 2, timeout=1.0, what="two tabs counted after the tab went")
+    assert time.monotonic() - t0 < 1.0

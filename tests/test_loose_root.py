@@ -394,3 +394,28 @@ def test_a_page_name_with_spaces_around_it_is_the_name_without_them(agents):
 def test_a_page_name_of_spaces_is_refused_as_empty(agents):
     bad, why = call(agents, "bea-claude", "create", doc="   ", text=TEXT, folder="x")
     assert bad and "empty" in why, why
+
+
+def test_a_loose_root_whose_folder_is_a_link_is_left_as_it_is_and_the_drop_raises_nothing(agents, tmp_path):
+    member = agents.hub.proxy.members[CAL]
+    root, fresh = agents.hub.loose.root_for(member)
+    assert fresh
+    folder = root.path
+    moved = tmp_path / "real-folder"
+    folder.rename(moved)
+    folder.symlink_to(moved)                        # the folder loose.json holds is a link to the root's own path
+    agents.hub.loose.drop(member, root)
+    assert agents.hub.roots.get(root.name) is not None
+    assert str(folder) in json.loads((state(agents) / "loose.json").read_text(encoding="utf-8")).values()
+
+
+def test_a_refused_create_whose_drop_fails_still_raises_its_own_refusal(agents, monkeypatch):
+    def refuse(*a, **k):
+        raise loose.Refused("no marks today")
+
+    def fail(*a, **k):
+        raise OSError("disk says no")
+    monkeypatch.setattr(loose, "keep", refuse)
+    monkeypatch.setattr(agents.hub.loose, "drop", fail)
+    bad, why = call(agents, "cal-claude", "create", doc="notes.md", text=TEXT, keep=True)
+    assert bad and "no marks today" in why and "disk says no" not in why, why

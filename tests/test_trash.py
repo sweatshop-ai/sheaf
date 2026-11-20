@@ -395,3 +395,42 @@ def test_a_page_in_a_folder_that_leads_out_of_the_root_is_not_trashed(agents, cl
     with pytest.raises(loose.Refused):
         agents.hub.archive.trash(root, "way-out/x.md")
     assert (outside / "x.md").read_text(encoding="utf-8") == "# Not the root's\n"
+
+
+def test_a_trashed_page_purged_between_the_look_and_the_link_is_not_found_not_an_error(agents, clock, monkeypatch):
+    doc = made(agents, "bea-claude")
+    assert delete(agents, doc).status == 200
+    [row] = trash_rows(agents)
+    root = root_of(agents, doc)
+    real_lstat, real_makedirs = os.lstat, os.makedirs
+    made_dirs = []
+
+    def makedirs(*a, **k):
+        made_dirs.append(a)                         # the folders of the old address are made after the checks, before the link
+        return real_makedirs(*a, **k)
+
+    def lstat(p, *a, **k):
+        if made_dirs and str(p).startswith(str(root.path / ".sheaf" / "trash")):
+            raise FileNotFoundError(p)              # purged between the checks and the look at the entry
+        return real_lstat(p, *a, **k)
+    monkeypatch.setattr(archive.os, "makedirs", makedirs)
+    monkeypatch.setattr(archive.os, "lstat", lstat)
+    with pytest.raises(KeyError):
+        agents.hub.archive.restore_trash(root, row["id"])
+
+
+def test_purge_does_not_follow_a_linked_sheaf_folder(agents, clock, tmp_path):
+    doc = made(agents, "bea-claude")
+    root = root_of(agents, doc)
+    old = tmp_path / "elsewhere" / "trash" / "1000"
+    old.mkdir(parents=True)
+    (old / "page.md").write_text("kept\n", encoding="utf-8")
+    sheaf = root.path / ".sheaf"
+    if sheaf.is_symlink() or not sheaf.exists():
+        sheaf.unlink(missing_ok=True)
+    else:
+        sheaf.rename(tmp_path / "moved-sheaf")
+    sheaf.symlink_to(tmp_path / "elsewhere")
+    clock.now += 60 * DAY
+    agents.hub.archive.purge()
+    assert (old / "page.md").is_file()

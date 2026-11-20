@@ -1105,7 +1105,8 @@ class Door:
                 return self._created(given, args, caller)
         except BaseException:
             if fresh is not None:       # a refused create leaves no loose root it made behind
-                self.hub.loose.drop(*fresh)
+                with contextlib.suppress(OSError):      # a drop that fails does not replace the refusal
+                    self.hub.loose.drop(*fresh)
             raise
 
     def _in_loose_root(self, args: dict, caller: Caller) -> bool:

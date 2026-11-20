@@ -263,7 +263,10 @@ class Archive:
             for part in reversed(Path(rel).parents):
                 if str(part) != ".":
                     os.makedirs(Path(root.path) / part, mode=0o700, exist_ok=True)
-            before = os.lstat(src)
+            try:
+                before = os.lstat(src)
+            except FileNotFoundError:
+                raise KeyError(ident) from None     # purged since the look above
             try:
                 os.link(src, dest, follow_symlinks=False)       # the entry itself, never what a link put there since the look leads to
             except FileExistsError:
@@ -294,8 +297,10 @@ class Archive:
         for _, root in self._loose_roots():
             base = Path(root.path) / TRASH
             try:
+                self._plain_dir(Path(root.path) / ".sheaf")     # a linked .sheaf or trash is not followed (`trash` refuses it too)
+                self._plain_dir(base)
                 stamps = [e for e in os.scandir(base) if e.name.isdigit() and e.is_dir(follow_symlinks=False)]
-            except OSError:
+            except (OSError, loose.Refused):
                 continue
             for e in stamps:
                 if now - int(e.name) > TRASH_DAYS * DAY:

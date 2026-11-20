@@ -392,3 +392,11 @@ def test_an_undo_keeps_a_renamed_lines_address_and_brings_back_the_lines_the_lan
     assert [l.writer for l in log.lines("new.md")] == ["Bea", "Cal", "Dan"]
     assert {l.address for l in log.lines("new.md")} == {"new.md"}
     assert [l.writer for l in WriteLog(keep=3).lines("new.md")] == ["Bea", "Cal", "Dan"]
+
+
+def test_a_restore_keeps_a_renamed_pages_lines_under_the_new_address_in_memory_too():
+    log = WriteLog()
+    log.add(address="old.md", writer="Bea", place="page", via="save")
+    log.rename("old.md", "new.md")
+    log.restore("new.md", log.lines("new.md"))
+    assert [l.address for l in log.lines("new.md")] == ["new.md"]

@@ -99,8 +99,11 @@ def test_a_new_push_to_a_pull_request_cancels_the_run_before_it_and_a_run_on_mai
     assert "cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}" in block
     assert "cancel-in-progress: true" not in block
     assert "github.ref" in block
-    # Each run on main has a group of its own: a group keeps one waiting run, and a newer one would replace it.
-    assert "group: ci-${{ github.ref == 'refs/heads/main' && github.run_id || github.ref }}" in block
+    # Every push to main shares one group: a group keeps one running and one waiting run, so a burst of
+    # merges leaves the run that started and the newest, and the newest covers the ones it replaced.
+    assert "group: ci-${{ github.event_name == 'push' && 'main' || github.event_name == 'pull_request' && github.ref || github.run_id }}" in block
+    assert "github.run_id" in block  # the nightly and manual runs keep a group of their own: never replaced by a merge
+    assert "ci-${{ github.ref == 'refs/heads/main' && github.run_id" not in block
 
 
 def test_the_matrix_is_ubuntu_on_every_trigger_and_macos_only_when_a_manual_run_asks_for_it(text):

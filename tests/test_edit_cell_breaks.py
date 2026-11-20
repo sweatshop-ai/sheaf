@@ -9,9 +9,9 @@ from sheafmd import edit as rde
 SRC = "| a | b |\n|---|---|\n| x | y |"
 
 
-def saved_cell(new):
-    html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], SRC).strip().replace(">x<", ">" + new + "<")
-    out, rep = rde.apply_edits("# Title\n\n" + SRC + "\n", [{"i": 1, "html": html}])
+def saved_cell(new, src=SRC):
+    html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", ">" + new + "<")
+    out, rep = rde.apply_edits("# Title\n\n" + src + "\n", [{"i": 1, "html": html}])
     assert rep["skipped"] == []
     return out.splitlines()[-1]
 
@@ -32,3 +32,8 @@ def test_a_no_break_space_typed_after_a_break_keeps_the_break():
 
 def test_a_break_between_words_is_kept():
     assert "x<br>z" in saved_cell("x<br>z")
+
+
+def test_a_table_with_a_backslash_drops_the_break_and_the_space_at_the_end_of_a_cell():
+    row = saved_cell("x<br>\u00a0", "| a | b |\n|---|---|\n| x | a\\\\b |")
+    assert "<br>" not in row and "\u00a0" not in row

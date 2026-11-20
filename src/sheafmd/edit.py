@@ -612,6 +612,7 @@ def _cell_breaks(fragment: str):
         return fragment, None
     for br in breaks:
         if ends_its_cell(br, br.find_parent(["td", "th"])):
+            # The no-break space Enter leaves at the cut ends with the break.
             if type(br.next_sibling) is NavigableString:
                 _cut(br.next_sibling, False)
             br.decompose()

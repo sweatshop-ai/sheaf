@@ -1123,3 +1123,12 @@ def test_a_render_with_new_settings_does_not_hold_the_hubs_lock_while_the_page_i
         release.set()
         rendering.join(5)
     assert not rendering.is_alive()
+
+
+def test_a_render_whose_root_is_forgotten_while_the_page_is_rebuilt_makes_no_entry_again(world, put):
+    f = put("a.md")
+    world.hub.render(f, {"title": "One"}, None)
+    e = world.hub.entry("work/a.md")
+    e.live.rebuild = lambda: world.hub.forget_root("work")
+    world.hub.render(f, {"title": "Two"}, None)
+    assert "work/a.md" not in world.hub.entries

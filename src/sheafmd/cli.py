@@ -423,7 +423,7 @@ def cmd_stop(argv: list[str]) -> int:
                 return EXIT_OK
             info = hubserver.read_pid_file() or {}
             pid = info.get("pid") if info.get("boot") == got.get("boot") else None
-            status, res = c.call("POST", "/_/stop", {"reason": "stop"}, boot=got.get("boot"))
+            status, res = c.call("POST", "/_/stop", {"reason": "stop"}, boot=got.get("boot") or "")
             if status != 200 or not res.get("ok"):
                 _err(f"sheaf: the hub refused to stop: {res.get('error') or status}")
                 return EXIT_FAILED
@@ -477,10 +477,11 @@ def cmd_list(argv: list[str]) -> int:
             "a tab has it open, had it open, or never did.").parse_args(argv)
     try:
         c = hubclient.client()
-        if c.challenge() is None:
+        got = c.challenge()
+        if got is None:
             _out("  no hub is running")
             return EXIT_OK
-        status, res = c.call("GET", "/_/index.json?rendered=1")
+        status, res = c.call("GET", "/_/index.json?rendered=1", boot=got.get("boot") or "")
     except hubclient.Impostor as e:
         return _hub_failure(e)
     if status != 200 or not res.get("ok"):
@@ -498,10 +499,10 @@ def cmd_list(argv: list[str]) -> int:
     return EXIT_OK
 
 
-def _forget_on_hub(c, name: str) -> tuple[bool, str | None]:
+def _forget_on_hub(c, name: str, boot: str) -> tuple[bool, str | None]:
     """Ask the hub to forget the root `name`: (whether it took the request, the folder of the root
     it forgot, or None when it holds none by that name). Says why when it refused."""
-    status, res = c.call("POST", "/_/forget", {"name": name})
+    status, res = c.call("POST", "/_/forget", {"name": name}, boot=boot)
     if status == 404:
         return True, None
     if status != 200 or not res.get("ok"):
@@ -515,9 +516,10 @@ def _forget_root(name: str) -> int:
     back over ours. With none, the files it reads when it starts (`_forget_with_no_hub`)."""
     try:
         c = hubclient.client()
-        if c.challenge() is None:
+        got = c.challenge()
+        if got is None:
             return _forget_with_no_hub(c, name)
-        took, path = _forget_on_hub(c, name)
+        took, path = _forget_on_hub(c, name, got.get("boot") or "")
     except hubclient.Impostor as e:
         return _hub_failure(e)
     return _hub_forgot(name, took, path)
@@ -556,7 +558,7 @@ def _forget_with_no_hub(c, name: str) -> int:
         late = None                                # the files held no such root, so neither can that hub
     if late is None:
         return EXIT_OK if root is not None else _hub_forgot(name, True, None)
-    took, held = _forget_on_hub(c, name)
+    took, held = _forget_on_hub(c, name, late.get("boot") or "")
     if root is not None:
         return EXIT_OK if took else EXIT_FAILED
     return _hub_forgot(name, took, held)

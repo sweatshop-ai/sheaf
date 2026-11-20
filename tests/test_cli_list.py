@@ -381,7 +381,7 @@ def test_forget_with_no_hub_says_the_files_were_forgotten_when_the_late_look_fai
     sheaf("stop")
     looks = first_look_clean_then(monkeypatch, second_look(late))
 
-    def call(self, method, path, body=None):
+    def call(self, method, path, body=None, **kw):
         if late == "hung up":
             raise hubclient.HubHungUp(self.port)
         return 500, {"ok": False, "error": "it broke"}

@@ -512,7 +512,7 @@ def test_the_untick_is_refused_outside_the_list_too(team, work, tmp_path):
 
 MOVES = OPEN.replace("- [ ] Share", "- [ ] Belongs to klium (ref t1)\n- [ ] Belongs to acme (ref t1)\n- [ ] Share")
 MOVED = MOVES.replace("- [ ] Belongs to klium", "- [x] Belongs to klium")
-MOVED_ONCE = "This thread moves to one client: Belongs to klium is ticked."
+MOVED_ONCE = "This thread belongs to one place: Belongs to klium is ticked."
 
 
 def set_moves(team, text, ticked, member=BOB):

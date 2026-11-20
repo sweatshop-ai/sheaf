@@ -1163,7 +1163,7 @@ sessions:
 
 **With a sign-in code** (9.13), the laptop client calls the same two routes without the front's sign-in: the code is its member's, and narrows the routes to the code's rectoverso and session, once each, in order.
 
-**What the page offers.** The meta block's `work` and `can` (10.1), refreshed by every `/_/doc` answer: the command that forks the live session on the member's machine, the command that attaches to James's window for the project, by its exact name, for a member with `shell = true` on the box, the sessions, and whether a Tell goes to James (10.2, 10.6).
+**What the page offers.** The meta block's `work` and `can` (10.1), refreshed by every `/_/doc` answer: the command that forks the live session on the member's machine, the command that attaches to James's window for the project, by its exact name, for a member with `shell = true` on the box (only when both the client and the project part of the address match the SLUG of James's `project_window`, `[a-z0-9][a-z0-9-]*`, since he makes no window for any other part: there is no `attach` for `a_b/c`, `a/b_c`, `Acme/tiroir` or `-a/b`), the sessions, and whether a Tell goes to James (10.2, 10.6).
 
 ### 9.13 The sign-in code
 

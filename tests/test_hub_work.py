@@ -1181,6 +1181,22 @@ def test_a_window_name_tmux_or_a_shell_would_read_otherwise_gets_no_attach(team,
     assert "attach" not in meta(team, ALICE, doc="acme/site.v2/2026-10-28-a.md")["work"]
 
 
+@pytest.mark.parametrize("rel", ["a_b/c", "a/b_c", "Acme/tiroir", "-a/b", "a/-b", "a/B"])
+def test_a_part_james_would_not_name_a_window_for_gets_no_attach(team, box, work, rel):
+    # James's SLUG is [a-z0-9][a-z0-9-]* (`project_window` in agency-tiroir): he makes no window for
+    # another part, and a_b/c and a/b_c would name one window for two projects.
+    doc = f"{rel}/2026-10-28-a.md"
+    put(team, work, doc, SHEAF)
+    assert "attach" not in meta(team, ALICE, doc=doc)["work"]
+
+
+@pytest.mark.parametrize("rel, window", [("a-b/c", "a-b_c"), ("a--b/c", "a--b_c"), ("a/b--c", "a_b--c")])
+def test_a_part_of_dashes_and_letters_gets_its_own_window(team, box, work, rel, window):
+    doc = f"{rel}/2026-10-28-a.md"
+    put(team, work, doc, SHEAF)
+    assert meta(team, ALICE, doc=doc)["work"]["attach"].endswith(f"select-window -t ={window}")
+
+
 # ── `sessions` is the hub's (9.12): no door write and no save sets it ─────────
 @pytest.fixture
 def james_token():

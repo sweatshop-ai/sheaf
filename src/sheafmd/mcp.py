@@ -30,6 +30,7 @@ from . import comments as rdc
 from .agents import detect
 from .hub.auth import clean_display
 from .hub.client import HubUnavailable
+from .hub import roots as roots_mod
 from .hub.roots import Address, NotFound, address_of_url, in_git_dir, list_documents
 from .agents import prompts
 from .hub import loose, moves, place, targets, visibility
@@ -66,7 +67,7 @@ TOOLS = {
                        "message the person has not seen) and dot (red, orange, blue or green). A root "
                        "whose folder the hub cannot enter comes last, as a row of its own: root and "
                        "closed (why, such as Permission denied); a root with more files than the hub lists "
-                       "gets one too: root and more (how many were left out).",
+                       "gets one too: root and more (how many were left out, past 100,000 files).",
         "annotations": {"readOnlyHint": True},
         "properties": {
             "root": {"type": "string", "description": "Only the documents of this root."},
@@ -729,8 +730,8 @@ class Door:
             # The files of a member's private root are listed to that member alone, under the list root's names (rule D).
             privates = [p for p in place.private_listed(hub, member) if p.closed() is None and not p.missing()] if placed else []
             files = []
-            for src in (root, *privates):          # the hub's own lister (8.6, D15): its rules, its cap
-                listing = list_documents(src)
+            for src in (root, *privates):          # the hub's own lister (8.6), past the index's cap: nothing that waits is hidden
+                listing = list_documents(src, cap=roots_mod.COUNT_LIMIT)
                 files += [(src, f.rel) for f in listing.docs]
                 if listing.more and not giving:     # another's loose root is told to no one (9.11)
                     left_out[root.name] = left_out.get(root.name, 0) + listing.more

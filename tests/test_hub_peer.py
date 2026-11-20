@@ -7,6 +7,7 @@ section runs the real thing, over a real socket, with the suite's own uid."""
 import http.client
 import ipaddress
 import os
+import socket
 import sys
 
 import pytest
@@ -356,8 +357,8 @@ def live(work):
     hub.roots.for_document(f)
     conns = []
 
-    def connect():
-        c = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    def connect(source_port=0):
+        c = http.client.HTTPConnection("127.0.0.1", port, timeout=10, source_address=("127.0.0.1", source_port))
         c.connect()
         conns.append(c)
         return c
@@ -365,6 +366,13 @@ def live(work):
     for c in conns:
         c.close()
     srv.close()
+
+
+def free_port():
+    """A port the next connection can come from, so /proc/net can name it before the hub accepts."""
+    with socket.socket() as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
 
 
 def sign_in_over(c, hub):
@@ -384,18 +392,16 @@ def test_the_user_that_runs_the_hub_signs_in_over_a_real_socket_by_the_real_proc
 
 def test_the_server_hands_the_handler_the_address_of_the_connection_it_came_in_on(live, proc):
     hub, port, connect = live
-    c = connect()
-    mine, theirs = c.sock.getsockname(), c.sock.getpeername()
-    proc.write(v4=[row(mine[:2], theirs[:2], ME)])
-    r, _ = sign_in_over(c, hub)
+    src = free_port()    # the hub looks at a connection when it accepts it: the rows are there before it does
+    proc.write(v4=[row(("127.0.0.1", src), ("127.0.0.1", port), ME)])
+    r, _ = sign_in_over(connect(src), hub)
     assert r.status == 303
 
 
 def test_over_a_real_socket_a_row_with_another_uid_refuses_and_a_row_of_the_hubs_end_does_not_help(live, proc):
     hub, port, connect = live
-    c = connect()
-    mine, theirs = c.sock.getsockname()[:2], c.sock.getpeername()[:2]
+    mine, theirs = ("127.0.0.1", free_port()), ("127.0.0.1", port)
     proc.write(v4=[row(mine, theirs, THEM), row(theirs, mine, ME)])
-    r, body = sign_in_over(c, hub)
+    r, body = sign_in_over(connect(mine[1]), hub)
     assert r.status == 401 and r.getheader("Content-Type").startswith("text/html")
     assert r.getheader("Set-Cookie") is None and b"another user" in body

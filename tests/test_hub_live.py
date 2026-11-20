@@ -944,3 +944,20 @@ def test_a_save_that_changed_nothing_sent_again_is_answered_as_taken(made):
     first = doc.save(rds.md_hash(DOC), same, rid=SAVE_RID)
     again = doc.save(rds.md_hash(DOC), same, rid=SAVE_RID)
     assert first["changed"] == [] and again == {**first, "again": True} and events == []
+
+
+def test_a_refresh_that_a_write_moved_under_publishes_nothing_and_the_next_one_tells_from_what_the_tabs_hold(made):
+    # An editor's truncate-then-write caught part way: the file is rewritten while the render runs, so the text the
+    # refresh read is a torn one. It publishes nothing and keeps what the tabs hold; the next refresh tells the whole text.
+    doc, md, rendered, events, _ = made()
+    torn, whole = "# Title\n\nFirst par", DOC.replace("First paragraph.", "First, reworded.")
+    md.write_text(torn, encoding="utf-8")
+    writes = iter([lambda: md.write_text(whole, encoding="utf-8")])
+    served = []
+    doc._render = lambda text: (served.append(text), next(writes, lambda: None)())[1]
+    assert doc.refresh() is None and events == []
+    assert served == [torn, DOC]                  # the page served is rendered again from the text the tabs hold
+    assert doc.current() == (rds.md_hash(DOC), DOC)
+    snap = doc.refresh()
+    assert snap["hash"] == rds.md_hash(whole) and snap["base"] == rds.md_hash(DOC)
+    assert [n for n, _ in events] == ["changed"] and events[0][1]["base"] == rds.md_hash(DOC)

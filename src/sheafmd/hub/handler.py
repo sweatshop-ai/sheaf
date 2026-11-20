@@ -1712,6 +1712,12 @@ class Handler:
                     # Share rewrites the front matter: a line it takes out must not join a skipped one to `sessions`.
                     if visibility.front_matter(new).get("sessions", "") != visibility.front_matter(text).get("sessions", ""):
                         raise EditError("A save cannot change the front matter: change it in the file.")
+            elif (visibility.audience(text) is None and visibility.audience(new) is True
+                  and visibility.effective(visibility.front_matter(new)) == "owner" and self.hub.loose_owner(e.address) is None):
+                # A line that became a ticked Share by an edit that is not the owner's tick of it (a box renamed and ticked in
+                # one save) shares nothing on a page of a shared root: it is left unticked, as a door create leaves it, so the
+                # box does not say the page is shared when it is not (9.11). A loose page is Shared by the line itself.
+                new = visibility.without_ticked_share(new)
             ticked.clear()
             ticked.update(words)
             return new

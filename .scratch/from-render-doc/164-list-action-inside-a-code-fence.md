@@ -2,7 +2,7 @@
 
 **Claimed by:** Gustav 2026-11-20 15:56
 
-**Status:** done, PR #477 awaiting merge (head c7c27513, CI green, review round 2 GO)
+**Status:** done, merged in PR #477 as 05bf1ff6
 
 **Blocked by:** none
 

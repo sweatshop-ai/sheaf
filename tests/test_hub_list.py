@@ -1481,6 +1481,23 @@ def test_tick_edit_ticks_a_box_in_a_list_that_holds_an_emoji_shortcode(quoted):
             for box in soup.find_all("input", checked=True)] == ["Merge a/b#2: two"]
 
 
+@pytest.mark.parametrize("attr", ['data-x="1"', "data-x='1'", "data-x", 'data-x="1" data-y="a>b"'])
+def test_tick_edit_ticks_a_box_in_a_list_that_holds_raw_html_with_a_data_attribute(attr):
+    # `_sanitize` strips every data- attribute of the page fragment, so the source render loses them too, or no box of
+    # the list ticks and its block counts as edited on every save.
+    text = f"# Merge desk\n\n- [ ] Deploy a/b#1: <span {attr}>one</span>\n- [ ] Merge a/b#2: two\n"
+    edit = the_list.tick_edit(text, 1, "Merge")
+    assert edit is not None
+    soup = BeautifulSoup(edit["html"], "html.parser")
+    assert [" ".join(box.find_parent("li").get_text(" ").split())
+            for box in soup.find_all("input", checked=True)] == ["Merge a/b#2: two"]
+
+
+def test_a_data_attribute_written_in_a_code_span_is_still_text_of_the_source_render():
+    text = '# Merge desk\n\n- [ ] Deploy a/b#1: `<span data-x="1">`\n- [ ] Merge a/b#2: two\n'
+    assert the_list.tick_edit(text, 1, "Merge") is not None
+
+
 def unsure(rectoversos):
     """Joey's sheaf with the Client section of an unsure thread in place of its Approve."""
     path = rectoversos / JOEY[5:]

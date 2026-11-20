@@ -166,3 +166,17 @@ def test_this_checkout_holds_no_name(monkeypatch):
                         "and a run that cannot read them must not pass")
         pytest.skip("SHEAF_PUBLIC_TREE_TERMS is not set; CI sets it from a secret")
     assert scan_tree(public_tree.ROOT, terms=terms) == []
+
+
+@pytest.mark.parametrize("path, ignored", [
+    ("handoff-example-2026-01-01.md", True),
+    ("handoff-.md", True),
+    ("docs/handoff-example-2026-01-01.md", False),
+    ("handoff.md", False),
+    ("handoff-example.txt", False),
+])
+def test_a_session_handoff_note_at_the_root_is_ignored_and_nothing_else_is(repo, path, ignored):
+    """Handoff notes name people and work, so a broad `git add` must not pick one up."""
+    (repo / ".gitignore").write_text((public_tree.ROOT / ".gitignore").read_text(encoding="utf-8"), encoding="utf-8")
+    result = subprocess.run(["git", "check-ignore", "-q", path], cwd=repo)
+    assert (result.returncode == 0) is ignored

@@ -12,3 +12,5 @@
 - [x] The test no longer fails when the runner is slow (run it 20 times on t-compute under load)
 
   Evidence 2026-11-20: already on main in cb4874cf (waits on the reply drawn in its thread); both tests run 20 times in a row on t-compute at origin/main 3f5271bd (load 64-83 on 32 cores): 20 of 20 runs passed (3 tests each, the writing one in two parametrized cases), none failed.
+
+  Second check 2026-11-20, at main e5f10c6f: 30 runs of the 8 given-up tests (10 parallel loops sharing 4 cores on t-compute): 30 of 30 passed, 0 failed.

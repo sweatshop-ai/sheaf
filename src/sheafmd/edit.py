@@ -770,7 +770,8 @@ def _cell_code_pipes(fragment: str):
 
 
 # A backslash before the placeholder of a comment or a citation (`_convert_with_comments`) escapes what takes its place.
-# A raw tag's placeholder (`_tags_as_text`) opens with a bracket that is punctuation, so it is matched above.
+# A raw tag's placeholder (`_tags_as_text`) opens with `⟦`, which is not in the ASCII class here: a backslash before a tag
+# keeps pandoc's own handling (pinned by the controls in tests/test_edit_backslash_placeholder.py).
 _BACKSLASH_ESCAPES = re.compile(r"\\(?=[!-/:-@\[-`{-~\n]|\Z|RDCMT[0-9A-F]{10})")
 
 

@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 import sheafmd.comments as rdc
-from helpers import GIT_FAILS, PLAN, git_dirs_in, git_fails, page_meta, writes_from_outside
+from helpers import GIT_FAILS, PLAN, git_dirs_in, git_fails, page_meta, swap_the_sibling_at, writes_from_outside
 from sheafmd import diagnostics, paths
 from sheafmd.blocks import split_md_blocks
 from sheafmd.hub import live, state
@@ -238,15 +238,7 @@ def test_a_save_whose_sibling_is_swapped_for_a_link_is_not_acknowledged(browser,
     victim = tmp_path / "note.txt"
     victim.write_text("personal\n", encoding="utf-8")
     sibling = work / ".plan.md.sheaf-tmp"
-    real_fsync = os.fsync
-
-    def plant(fd):
-        if swap and os.path.lexists(sibling) and not sibling.is_symlink():
-            os.unlink(sibling)
-            sibling.symlink_to(victim)
-        return real_fsync(fd)
-
-    monkeypatch.setattr(os, "fsync", plant)
+    swap_the_sibling_at(monkeypatch, "fsync", sibling, lambda s: s.symlink_to(victim), swap)
     r = browser.post("/_/save", {"doc": DOC, "hash": md_hash(PLAN),
                                  "edits": edit(PLAN, "Second paragraph", "<p>Second, saved.</p>")})
     assert not plan.is_symlink() and victim.read_text(encoding="utf-8") == "personal\n"

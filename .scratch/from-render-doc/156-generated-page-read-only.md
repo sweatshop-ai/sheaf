@@ -24,4 +24,10 @@
   - `update` or create-over by another write token refused, accepted from the setting token or the key; a revoked setter leaves the mark, which only the key can clear;
   - `read` and `tools/list` expose `generated`.
 
+- [x] **Step 1, spec and README (Basil 2026-11-20):** SPEC 4.2, 7.1, 7.2, 7.3, 8.3, 8.5, 9.7, 10.1, 10.3 and 12 and one README paragraph, merged as e268a04f (#486, CI green on b207e9ef).
+- Step 2, the door (PR #503, in review): `create`/`update` take `generated`, `read` returns it, token rule; tests in `tests/test_mcp_generated.py`.
+- [x] **Step 3, the hub (Rumi, #534, merged 50645412):** meta `edit:false` + `why` + `generated`, `/_/save`, `/_/tick` and `/_/share` answer 403 with a `generated-refused` diagnostics row; comment, reply and resolve still work; tests in `tests/test_hub_generated.py`. Still open for the boxes above: the door half (#503). Original scope: `POST /_/share` is refused too: `_share` in `src/sheafmd/hub/handler.py` appends the Share line to the page's own .md and ticks it through `_save` (`e.live.rewrite`), so it is a text write (SPEC 7.2 and the 8.5 share row say so).
+
 - [ ] **Tests red first** for each of: meta `edit:false` + `why`; save refused; tick refused; `update` by a second token refused vs the setting token or the key accepted; clearing by a second token refused; comment, reply and resolve still work and `update` still keeps every comment. SPEC 4.2, 7.1-7.3, 8.5, 9.7, 10.1, 10.3 and 12 updated before the code; one README paragraph for modules that generate pages.
+
+- [ ] **Open after #534, from its review round 2.** `/_/sessions` writes a rectoverso's front matter on a generated page: decide whether the mark refuses it too. Two siblings of the same kind: the session rewrite in `src/sheafmd/hub/handler.py` (about lines 2041-2050) checks only `_writable`; The List (`src/sheafmd/hub/the_list.py`, about lines 1016-1021) still builds action buttons for a generated rectoverso whose tick now gets a 403.

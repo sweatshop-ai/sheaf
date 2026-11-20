@@ -2,7 +2,7 @@
 
 **Status:** open, to check
 
-**Blocked by:** none
+**Blocked by:** 169, 170 (same file, page/live.js; its items build on both)
 
 **From:** open points of PR #474 (ticket 160), raised by Thierry 2026-11-20. The two larger ones are tickets 169 and 170.
 

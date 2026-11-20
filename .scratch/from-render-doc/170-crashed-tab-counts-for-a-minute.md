@@ -2,7 +2,7 @@
 
 **Status:** open, to check
 
-**Blocked by:** none
+**Blocked by:** 169 (same file, page/live.js)
 
 **From:** open point of PR #474 (ticket 160), raised by Thierry 2026-11-20
 

@@ -32,6 +32,20 @@ BRAND_WORDS = ("tiroir", "acme")
 CREDIT = f"Made by {BRAND_WORDS[0]}. A hosted version is coming."
 
 
+def in_beneath_walk() -> bool:
+    """Whether the caller runs inside `beneath._walk` on a system without openat2 (macOS). There the guard resolves its root
+    afresh for every file it opens, on purpose: a link swapped for a folder is seen. A test of how often a listing resolves
+    its paths counts what the listing asks, not that. On Linux, where openat2 does the work, nothing is left out."""
+    if sys.platform.startswith("linux"):
+        return False
+    f = sys._getframe(1)
+    while f is not None:
+        if f.f_code.co_name == "_walk" and f.f_code.co_filename.endswith("beneath.py"):
+            return True
+        f = f.f_back
+    return False
+
+
 def hub_rows(*kinds):
     """The rows the hub wrote to the diagnostics log, of these kinds (all of them when none is named)."""
     return [r for r in diagnostics.read() if r["source"] == "hub" and (not kinds or r["kind"] in kinds)]

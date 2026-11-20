@@ -104,6 +104,7 @@ def _unwrap_strays(soup, source: str, strays) -> None:
         return (el.name, tuple(sorted((k, str(v)) for k, v in el.attrs.items())))
 
     had = Counter(key(el) for el in BeautifulSoup(source, "html.parser").find_all(True))
+    new_br = set()      # the <br> the source did not have: two in a row make a paragraph break (`_split_at_double_breaks`)
     for el in soup.find_all(True):
         if _page_own(el):
             continue
@@ -111,6 +112,8 @@ def _unwrap_strays(soup, source: str, strays) -> None:
         if had[k] > 0:
             had[k] -= 1
             continue
+        if el.name == "br":
+            new_br.add(id(el))
         plain_b = (el.name in ("b", "strong")
                    and re.search(r"font-weight:\s*(normal|400)", el.get("style", "")))
         if el.name == "br" and _beside_a_block(el):
@@ -142,6 +145,46 @@ def _unwrap_strays(soup, source: str, strays) -> None:
             del el[a]
         if drop and strays is not None:
             strays.append(el.name)
+    _split_at_double_breaks(soup, new_br)
+
+
+def _split_at_double_breaks(soup, new_br) -> None:
+    """Two <br> in a row, none of them in the source, inside a paragraph with words on both sides (an online word
+    processor's Shift+Enter twice, each <br> in a span of its own): a blank line, so the paragraph is two. Pandoc
+    would write them as two lines of a lone backslash. One <br> stays a line break."""
+    def blank(c):
+        return getattr(c, "name", None) is None and not str(c).strip()
+
+    for p in soup.find_all("p"):
+        if _page_own(p):
+            continue
+        while True:
+            kids = list(p.children)
+            run, at = [], None
+            for k, c in enumerate(kids):
+                if getattr(c, "name", None) == "br" and id(c) in new_br:
+                    if at is None:
+                        at = k
+                    run.append(k)
+                elif blank(c) and at is not None:
+                    continue
+                elif at is not None and len(run) >= 2:
+                    break
+                else:
+                    run, at = [], None
+            else:
+                if len(run) < 2:
+                    break
+            if len(run) < 2 or not any(_shows(str(c)) or getattr(c, "name", None) in ("img", "a", "b", "i", "strong", "em", "code")
+                                        for c in kids[:at]) or run[-1] + 1 >= len(kids) or all(blank(c) for c in kids[run[-1] + 1:]):
+                break
+            tail = soup.new_tag("p")
+            for c in kids[run[-1] + 1:]:
+                tail.append(c.extract())
+            for c in kids[at:run[-1] + 1]:
+                c.extract()
+            p.insert_after(tail)
+            p = tail
 
 
 _BLOCKS = ("p", "div", "ul", "ol", "li", "blockquote", "pre", "table", "hr", "h1", "h2", "h3", "h4", "h5", "h6")

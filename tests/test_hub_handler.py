@@ -1257,6 +1257,15 @@ def test_a_restart_announced_returns_a_token_the_take_back_must_carry(browser):
     assert seen == ["upgrade"]
 
 
+def test_a_take_back_whose_token_is_not_a_number_is_refused(browser):
+    seen = stops_of(browser.hub)
+    browser.post("/_/restarting", cookie=False, key=True)
+    r = browser.request("DELETE", "/_/restarting?token=x", cookie=False, key=True)
+    assert r.status == 400
+    browser.hub.request_stop("signal")
+    assert seen == ["upgrade"]                          # a refused take-back forgot nothing
+
+
 def test_a_take_back_with_the_current_token_forgets_the_announcement(browser):
     seen = stops_of(browser.hub)
     token = browser.post("/_/restarting", cookie=False, key=True).json()["token"]

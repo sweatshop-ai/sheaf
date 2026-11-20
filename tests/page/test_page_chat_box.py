@@ -103,11 +103,11 @@ def test_the_check_resolves_an_open_thread_and_stays_while_writing(tab, site):
     """The check mark is Resolve and the cross is Close (swapped on 2026-11-09 after a trial: the cross resolved a thread by accident;
     the minus that stood for Resolve read as "minimize", so it became a check mark on 2026-11-20)."""
     p = open_thread(tab, site)
-    button, box = p.locator("#rd-popover button[title=Resolve]").bounding_box(), p.locator("#rd-popover").bounding_box()
-    assert button["y"] - box["y"] < 24 and box["x"] + box["width"] - (button["x"] + button["width"]) < 90, button
     resolve = p.locator("#rd-popover button[title=Resolve]")
+    button, box = resolve.bounding_box(), p.locator("#rd-popover").bounding_box()
+    assert button["y"] - box["y"] < 24 and box["x"] + box["width"] - (button["x"] + button["width"]) < 90, button
     assert resolve.get_attribute("aria-label") == "Resolve" and resolve.locator("svg.rd-check").count() == 1
-    assert "\u2212" not in resolve.inner_text() and p.inner_text("#rd-popover button[title=Close]") == "\u00D7"
+    assert resolve.inner_text() == "" and p.inner_text("#rd-popover button[title=Close]") == "\u00D7"
     assert p.locator("#rd-popover button[title=Minimize]").count() == 0
     p.fill(FIELD, "half a thought")
     assert p.is_visible("#rd-popover button[title=Resolve]")
@@ -129,7 +129,7 @@ def test_the_cross_closes_an_open_thread_and_keeps_everything(tab, site):
     until(lambda: p.input_value(FIELD) == "half a thought", what="the text back in the box")
 
 
-def test_there_is_no_minus_where_there_is_nothing_to_resolve(tab, site):
+def test_there_is_no_check_where_there_is_nothing_to_resolve(tab, site):
     p = open_thread(tab, site)
     p.keyboard.press("Escape")
     select(p, at(P1, "apples"), at(P1, "apples", None))

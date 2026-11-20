@@ -16,34 +16,34 @@
 
 ## PR #386
 
-- [ ] src/sheafmd/hub/loose.py:186 drop() compares the unresolved Path(folder) (built from paths.state_dir()) with root.path, which root_for checks equals realpath(folder); when the state dir path holds a symlink the two never match and a refused first create leaves its empty loose root registered (harmless: the member's next create reuses it).
+- [x] src/sheafmd/hub/loose.py:186 drop() compares the unresolved Path(folder) (built from paths.state_dir()) with root.path, which root_for checks equals realpath(folder); when the state dir path holds a symlink the two never match and a refused first create leaves its empty loose root registered (harmless: the member's next create reuses it). **[fixed on main 4a34dd8c, src/sheafmd/hub/loose.py:304: drop() now compares os.path.realpath(folder) with os.path.realpath(root.path).]**
 - [ ] src/sheafmd/hub/loose.py:188 drop() runs inside _create's except BaseException; an OSError from os.rmdir (a concurrent create by the same member filling the folder between listdir and rmdir) or from forget_root replaces the original refusal and leaves loose.json pointing at a forgotten root until the next attach.
 - [ ] src/sheafmd/mcp.py:796 the bare-name test runs on the raw doc before _named() strips it: " x.md" becomes a page named " x.md" with a leading space, and "x.md " is refused as not .md.
-- [ ] src/sheafmd/mcp.py:798 keep=false on a rooted or absolute doc is refused ("keep is for a loose page"); only a true keep needs refusing.
-- [ ] src/sheafmd/mcp.py:945 expect_own is now recorded for every create (not only loose) before the write; a create refused after it leaves the hash in writes._own until a later change pops it, so a later external write of the identical text to that address would be taken as the door's own.
+- [x] src/sheafmd/mcp.py:798 keep=false on a rooted or absolute doc is refused ("keep is for a loose page"); only a true keep needs refusing. **[fixed on main 4a34dd8c, src/sheafmd/mcp.py:991: Non-bare doc refuses only a true keep (`if args.get("keep")`), keep=false passes.]**
+- [x] src/sheafmd/mcp.py:945 expect_own is now recorded for every create (not only loose) before the write; a create refused after it leaves the hash in writes._own until a later change pops it, so a later external write of the identical text to that address would be taken as the door's own. **[fixed on main 4a34dd8c, src/sheafmd/mcp.py:1174: The create path calls writes.told(address) in its except BaseException after expect_own (mcp.py:1165), so a refused create leaves no stale hash.]**
 
 ## PR #387
 
 - [ ] src/sheafmd/hub/sheaf_view.py:126-130 Titles is one dict shared by the ThreadingHTTPServer threads with no lock; when the cache reaches TITLES_KEPT (5000), another thread's clear() between `self._kept[key] = ...` and `return self._kept[key]` raises KeyError (not OSError), so that /_/mount?sheaf=1 request answers 500. Rare, recovers on retry; return the computed title from a local instead of re-reading the dict.
 - [ ] src/sheafmd/hub/sheaf_view.py:201 last() and last_session() take the Write log lock separately; a write landing between them can pair a newer session line with an older last line, so the row reads "X, before Y" for a moment. Cosmetic, next mount is right.
 - [ ] src/sheafmd/page/mount.js:437 the Sheaf wrapper carries the class `sheaf-list` as well as `sheaf-sheaf`, so every list.css rule scoped to .sheaf-list also applies to the Sheaf's tree and table; styling coupling only.
-- [ ] src/sheafmd/hub/sheaf_view.py:194-200 each request reads the title of every listed .md (up to 2,000 per root) under its name's lock on first view; cost grows with roots, cached afterwards by (path, mtime, size).
+- [x] src/sheafmd/hub/sheaf_view.py:194-200 each request reads the title of every listed .md (up to 2,000 per root) under its name's lock on first view; cost grows with roots, cached afterwards by (path, mtime, size). **[does not hold on main 4a34dd8c, src/sheafmd/hub/sheaf_view.py:194: Not a defect: a cost remark, and Titles caches by (path, mtime, size) (sheaf_view.py:36-44) as the finding itself says.]**
 
 ## PR #388
 
-- [ ] src/sheafmd/connect.py:307 make_default tests `.get("tiroir")` for truthiness: a config.toml holding `tiroir = ""` gets a second `tiroir = "https://..."` line, and tomllib then refuses the whole file ("Cannot overwrite a value", reproduced), so every sheaf command stops on a ConfigError until the line is removed by hand. Test `"tiroir" in data` instead.
-- [ ] src/sheafmd/connect.py:307 a ConfigError from read_toml (broken config.toml) surfaces after the keyring and ~/.claude.json were already written; cmd_connect catches only ConnectError, so the "what was left unwritten" message is not given (main's ConfigError handler at cli.py:1221 prints the error cleanly, no traceback).
+- [x] src/sheafmd/connect.py:307 make_default tests `.get("tiroir")` for truthiness: a config.toml holding `tiroir = ""` gets a second `tiroir = "https://..."` line, and tomllib then refuses the whole file ("Cannot overwrite a value", reproduced), so every sheaf command stops on a ConfigError until the line is removed by hand. Test `"tiroir" in data` instead. **[fixed on main 4a34dd8c, src/sheafmd/connect.py:280: _with_default has an `empty` regex that fills an empty `tiroir = ""` line in place and then verifies with tomllib, so no second key is written.]**
+- [x] src/sheafmd/connect.py:307 a ConfigError from read_toml (broken config.toml) surfaces after the keyring and ~/.claude.json were already written; cmd_connect catches only ConnectError, so the "what was left unwritten" message is not given (main's ConfigError handler at cli.py:1221 prints the error cleanly, no traceback). **[fixed on main 4a34dd8c, src/sheafmd/connect.py:320: connect() runs check_config(origin) before store.set and add_mcp_entry, converting ConfigError to ConnectError "Nothing was written."]**
 - [ ] src/sheafmd/connect.py:291-299 ~/.claude.json is read, modified and replaced without any lock while running Claude Code sessions also rewrite it: a write of theirs between the read and os.replace is lost.
 - [ ] src/sheafmd/connect.py:247 r.read(1 << 20) on a 200 event-stream answer that is held open blocks until the server closes it; TIMEOUT is per socket operation, so a door that sends keep-alives keeps `sheaf connect` waiting.
 - [ ] src/sheafmd/hub/laptops.py:34 laptops.of drops rows marked invalid, so a laptop row that becomes invalid cannot be listed or revoked through /_/laptops/revoke (only `sheaf token revoke laptop-<hex>` on the hub ends it).
-- [ ] src/sheafmd/cli.py:914 in loopback mode (no [proxy]) a laptop row still signs `Claude Code (<person>)` in _signed_by_others, so `sheaf token add --client "Claude Code"` is refused because of a laptop token the hub itself refuses in that mode.
+- [x] src/sheafmd/cli.py:914 in loopback mode (no [proxy]) a laptop row still signs `Claude Code (<person>)` in _signed_by_others, so `sheaf token add --client "Claude Code"` is refused because of a laptop token the hub itself refuses in that mode. **[fixed on main 4a34dd8c, src/sheafmd/hub/proxy.py:607: signed_names skips a laptop row when cfg is None, so loopback mode no longer counts a laptop token as signed by Claude Code.]**
 
 ## PR #389
 
 - [ ] src/sheafmd/mcp.py:1020 reads WriteLog._own (private, outside WriteLog._lock) as a guard; told() is already an idempotent pop under the lock, so the guard is redundant and a call to told() alone would do. Harmless under place.held.
 - [ ] src/sheafmd/hub/loose.py:192 drop() now compares realpaths; if the folder recorded in loose.json were itself a symlink to the root, os.rmdir(folder) raises NotADirectoryError after hub.forget_root() has already run, leaving loose.json and the member's roots unchanged. Sheaf makes that folder itself, so this needs a hand-placed link.
-- [ ] src/sheafmd/mcp.py:798 a non-bool keep is refused only for a non-bare doc; a bare doc with keep="false" (string) is still truthy and marks the page, unless the tool schema (mcp.py:122, boolean) is enforced upstream.
-- [ ] PR #389 description does not mention commit 5cde9cff (loose.keep removes the .sheaf folder it made, drop compares real paths, keep=false accepted on a non-bare doc, failed loose create clears its expectation).
+- [x] src/sheafmd/mcp.py:798 a non-bool keep is refused only for a non-bare doc; a bare doc with keep="false" (string) is still truthy and marks the page, unless the tool schema (mcp.py:122, boolean) is enforced upstream. **[fixed on main 4a34dd8c, src/sheafmd/mcp.py:253: _check enforces schema type boolean for every call (`keep must be true or false`), so keep="false" is refused for a bare doc too.]**
+- [x] PR #389 description does not mention commit 5cde9cff (loose.keep removes the .sheaf folder it made, drop compares real paths, keep=false accepted on a non-bare doc, failed loose create clears its expectation). **[does not hold on main 4a34dd8c, n/a: About the PR #389 description text, not code on main; nothing to change in the repo.]**
 
 ## PR #390
 
@@ -52,7 +52,7 @@
 
 ## PR #391
 
-- [ ] tests/test_proxy_start.py:224-225,238 the scrub renamed first names only: three test member names still carry real surnames (pre-existing in the parent, not newly added by this PR; the public-tree check passed on the merge, so these surnames are not in the check's term list). Replace them with invented names and add the surnames to the term list.
+- [x] tests/test_proxy_start.py:224-225,238 the scrub renamed first names only: three test member names still carry real surnames (pre-existing in the parent, not newly added by this PR; the public-tree check passed on the merge, so these surnames are not in the check's term list). Replace them with invented names and add the surnames to the term list. **[fixed on main 4a34dd8c, tests/test_proxy_start.py:224: Members are now "Alice Example", "Carol Example", "Bob Example", "Dave Example"; no real surnames remain in the config text.]**
 - [ ] tests/test_proxy_start.py:211-215 the docstring still names a private stage and host, and the member UUIDs are described as read off a live box (pre-existing, unchanged by this PR). Rewrite the docstring without them.
 - [ ] tests/test_secret_shapes.py:4 the docstring now says "only Alice may override" the Codex runner's secret refusal; a blanket rename turned a statement about the real operator into a fictional one, which no longer describes who overrides it
 
@@ -66,11 +66,11 @@
 - [ ] src/sheafmd/hub/handler.py:1019 `_share` builds the tick edit from `e.live.current()[1]` after releasing the name's lock, but passes `after` as the save's base hash; if another writer lands between the two lock regions, `LiveDocument.save` merges an edit whose block index `i` was computed on the newer text as if it were against `after` (live.py `merge_edits(base, text, edits)`), so it can tick or overwrite the wrong block. Compute the edit from the text whose hash is `after` (capture it in `change`). Window is the gap between two lock acquisitions in one request.
 - [ ] src/sheafmd/hub/core.py:1090 `may_open` (the save guard's under-lock recheck) returns True for any member on a loose page with a plain Share later narrowed to names, because the loose page keeps `visibility: project` (names_only is skipped for loose roots) and `may_open` does not ask `shared_with`/`member_owns`; only the pre-lock gate `_owned` does. A save by a member dropped from the names in the gap between gate and lock is written.
 - [ ] src/sheafmd/mcp.py:454 `_told_text` uses `str.replace(real, told)` on the whole error text, so a real address that is a prefix of another address in the same text is rewritten inside it too (cosmetic).
-- [ ] src/sheafmd/hub/loose.py:182 `Loose.owner_of` re-reads loose.json and realpaths every folder on each call; it is now called several times per row and per stream event (`loose_owner`, `giver`, `shared_with`, `mine`). Performance only.
+- [x] src/sheafmd/hub/loose.py:182 `Loose.owner_of` re-reads loose.json and realpaths every folder on each call; it is now called several times per row and per stream event (`loose_owner`, `giver`, `shared_with`, `mine`). Performance only. **[fixed on main 4a34dd8c, src/sheafmd/hub/loose.py:289: owner_of reads through _registry(), which a listing holds once via remembered() (loose.py:~180), so loose.json is read once per listing; only the cheap realpath per folder remains.]**
 
 ## PR #395
 
-- [ ] src/sheafmd/mcp.py:377 Every member door write that declares X-Sheaf-Session now stores a laptop target, including the shipped `sheaf FILE.md` send (src/sheafmd/send.py:119 always sends the header; the library door's sheaf_door.py forwards it). From deploy on, that member's Tells go to session-tells.json, which `documents` and the library door Notice do not list, and no shipped client calls `tells` (the mod and the library pass-through are separate PRs). The page shows "Waiting for ...: it is not listening now" with Cancel, so nothing is lost or hidden, but before this PR those Tells reached the agent through `documents`. Ship the mod and the door pass-through together with this deploy.
+- [x] src/sheafmd/mcp.py:377 Every member door write that declares X-Sheaf-Session now stores a laptop target, including the shipped `sheaf FILE.md` send (src/sheafmd/send.py:119 always sends the header; the library door's sheaf_door.py forwards it). From deploy on, that member's Tells go to session-tells.json, which `documents` and the library door Notice do not list, and no shipped client calls `tells` (the mod and the library pass-through are separate PRs). The page shows "Waiting for ...: it is not listening now" with Cancel, so nothing is lost or hidden, but before this PR those Tells reached the agent through `documents`. Ship the mod and the door pass-through together with this deploy. **[does not hold on main 4a34dd8c, n/a: A deploy-ordering note (ship the mod and library door pass-through with this deploy), not a code defect on main.]**
 - [ ] src/sheafmd/page/page.js:2375 `retargets()` drops `agent:<token>` when it equals `targetNow()`. A laptop target's shape is kind "agent" with the same token, so `targetNow()` is `agent:<token>`, and a member whose only agent is that laptop token gets no Retarget button. The target picker also shows that agent as already chosen.
 - [ ] src/sheafmd/hub/handler.py:1817 `_retarget` picks the target inside `_reading`, then calls `start_member_tell` and on refusal `targets.restore` outside it. A `/_/target` that lands between them is overwritten by the restore.
 
@@ -94,21 +94,21 @@
 
 - [ ] src/sheafmd/send.py:67 the "cannot trust" branch matches any ssl.SSLError wrapped in URLError, so an SSLEOFError/connection reset during the TLS handshake (an outage, not a bad certificate) exits 1 with "cannot trust" instead of falling back to the laptop hub; and an ssl.SSLError raised bare during r.read() has a string .reason, so it goes to Unreachable: the two TLS paths are classified inconsistently.
 - [ ] src/sheafmd/send.py:141 the post-write recovery text says a rerun will answer "a page of that name exists already, and it is this one", but on rerun _create (send.py:277) turns that answer into "exists already ... was not sent from this file. Rename" because no state row was kept; after a timed-out update the rerun's stale-hash check writes FILE.tiroir.md holding the laptop's own text. No data loss, but the guidance does not match what the user sees.
-- [ ] src/sheafmd/send.py:81 CONNECT_TIMEOUT applies per message, so the worst case before fallback is about 10 s (initialize plus notifications/initialized), not the 5 s the PR description states; SPEC 13 ("5 s each") is accurate.
+- [x] src/sheafmd/send.py:81 CONNECT_TIMEOUT applies per message, so the worst case before fallback is about 10 s (initialize plus notifications/initialized), not the 5 s the PR description states; SPEC 13 ("5 s each") is accurate. **[does not hold on main 4a34dd8c, src/sheafmd/send.py:49: Concerns the PR description only; SPEC.md:1709 says "5 s each" and the code comment says the messages before a call, so nothing in the repo is wrong.]**
 
 ## PR #400
 
 - [ ] src/sheafmd/hub/repos.py:113 _read returns {} for an unparseable reports.json, so the next _write in _settle replaces the file and drops every owner record of every repo; a corrupt file is silently reset instead of refused.
 - [ ] src/sheafmd/hub/repos.py:279 `repo not in self._queues` is read outside self._guard; a report racing the drain thread's pop can call provider.token a second time or skip the no-app check for one report. No wrong record follows (the thread re-checks the token).
 - [ ] src/sheafmd/hub/repos.py:195 the ssh -G cache self._hosts is written from request threads without a lock and never expires; a changed ~/.ssh/config alias is not seen until restart.
-- [ ] src/sheafmd/send.py:517 with hub.repos unwired (PR known limit) every repo page on a connected laptop now costs an initialize + tools/call round trip (up to 5 s each when slow) and a revoked token turns a repo-page render into exit 1 where it used to render locally; intended per SPEC 13, but a visible behaviour change for all connected laptops.
+- [x] src/sheafmd/send.py:517 with hub.repos unwired (PR known limit) every repo page on a connected laptop now costs an initialize + tools/call round trip (up to 5 s each when slow) and a revoked token turns a repo-page render into exit 1 where it used to render locally; intended per SPEC 13, but a visible behaviour change for all connected laptops. **[does not hold on main 4a34dd8c, src/sheafmd/hub/server.py:543: hub.repos is now wired (repos_mod.from_config); the remaining round trip is the intended SPEC behaviour, not a defect.]**
 
 ## PR #401
 
 - [ ] src/sheafmd/tells_poll.py:48 _origin_of_server/_has_helper read only the top-level mcpServers of ~/.claude.json (connect.claude_json()); a door entry in project scope (.mcp.json or a project block) fails --check/--server, so an MCP write never arms the mod there (fails closed, a sheaf FILE.md send still arms)
 - [ ] plugin/sheaf/hooks/core.ts:81 followSession is exported but never called (register.ts does not import it); Poller.session is set in arm() and read nowhere: dead code
 - [ ] plugin/sheaf/hooks/register.ts:38 leave() clears held and doors but not p.delivered, so the set of delivered Tell ids grows for the life of the process across /clear and forks (harmless: ids are unique, memory only)
-- [ ] src/sheafmd/cli.py:1239 behaviour change: an existing file or folder without .md named like any command (pull, headers, connect, ...) is now the command, no longer opened; documented in the help and SPEC 13, ./name still opens it
+- [x] src/sheafmd/cli.py:1239 behaviour change: an existing file or folder without .md named like any command (pull, headers, connect, ...) is now the command, no longer opened; documented in the help and SPEC 13, ./name still opens it **[does not hold on main 4a34dd8c, src/sheafmd/cli.py:1305: Intended and documented behaviour ("a command name wins over a file of that name: ./name opens the file"), no defect.]**
 
 ## PR #402
 
@@ -138,22 +138,22 @@
 
 ## PR #406
 
-- [ ] src/sheafmd/hub/repos.py:63 _git_version is @functools.cache'd including a None result, so one transient failure of `git --version` (timeout under load, OSError) disables the request-path look for the hub's whole lifetime; caching only a successful read would avoid that.
+- [x] src/sheafmd/hub/repos.py:63 _git_version is @functools.cache'd including a None result, so one transient failure of `git --version` (timeout under load, OSError) disables the request-path look for the hub's whole lifetime; caching only a successful read would avoid that. **[fixed on main 4a34dd8c, src/sheafmd/hub/repos.py:80: _cache_good (introduced for _git_version) caches only a non-None read and retries after RETRY_READ_EVERY=60 s.]**
 - [ ] src/sheafmd/hub/repos.py:314 on a git before 2.44 every ok report returns commit_known False, so `sheaf` (send.py:495) prints "could not find commit ... is it pushed to GitHub?" for commits that are pushed and held by the clone; the page still renders locally as on the True path (send.py:499-503), so only the message is wrong, but the hub logs nothing to tell an operator why.
 
 ## PR #407
 
 - [ ] src/sheafmd/hub/commits.py:121 root_config forces commit=True, push=True on any root with `clone` set, but Hub.clone_of/read_only_line (core.py:358) return "" when hub.repos is None: a hub restarted without [proxy.repos] keeps the clone roots in roots.json, applies no read-only check and no token, and a write by the hub's person on such a page commits on the clone's HEAD (the default branch) and tries to push it. Gate the forced settings on the same condition, or refuse writes to a clone root when repos is None.
 - [ ] src/sheafmd/hub/repos.py:604 decide() without a token (saves_on after a restart) reads `origin/HEAD:.sheaf.toml` with GIT_NO_LAZY_FETCH; when that blob is not in the blobless clone (HEAD on another branch whose .sheaf.toml differs), `named` is None and the clone is cached read-only until the next render report, though the named branch exists. Fails safe (read-only), not wrong-branch.
-- [ ] src/sheafmd/mcp.py:1166 (and mcp.py:620 `_write`, mcp.py:1047 `_created`) the door's `_writable` runs before the visibility check, so a caller who cannot see the page gets the read-only line (repo name, default branch) instead of the missing-document answer. The line does not depend on whether the page exists; it does tell that the clone root is served.
+- [x] src/sheafmd/mcp.py:1166 (and mcp.py:620 `_write`, mcp.py:1047 `_created`) the door's `_writable` runs before the visibility check, so a caller who cannot see the page gets the read-only line (repo name, default branch) instead of the missing-document answer. The line does not depend on whether the page exists; it does tell that the clone root is served. **[does not hold on main 4a34dd8c, src/sheafmd/mcp.py:420: In _update, _reply and _move the address comes from _address, which judges visibility first (mcp.py:422-438); _created checks root ownership before _writable (mcp.py:1052-1059), so the read-only line is not shown to a caller who cannot see the page.]**
 - [ ] src/sheafmd/hub/repos.py:643 a stale `_why` from an earlier failed switch is shown as the reason while HEAD is off the branch, even after the decided branch changed (e.g. dev appeared); the text can name a cause that no longer applies until the next switch attempt.
 - [ ] src/sheafmd/hub/proxy.py:424 the new owner-name uniqueness check compares each member's owner key (short, else id) only; SPEC says a member's short or id is checked against every other member's short AND id. Member A short "nell" plus member B id "nell" with short "bea" starts without error. Matching stays unambiguous (owner_of matches owner_key only), so this is a SPEC/code mismatch, not a wrong owner.
-- [ ] src/sheafmd/hub/visibility.py:170 owner_of now matches a member without a `short` by their id on every root, not only clones: a non-clone page whose `owner` equals such a member's id now becomes theirs (it matched nobody before). This is intended per SPEC, but it widens access on existing pages.
+- [x] src/sheafmd/hub/visibility.py:170 owner_of now matches a member without a `short` by their id on every root, not only clones: a non-clone page whose `owner` equals such a member's id now becomes theirs (it matched nobody before). This is intended per SPEC, but it widens access on existing pages. **[does not hold on main 4a34dd8c, src/sheafmd/hub/visibility.py:169: owner_of matching on owner_key (short, else id) is the SPEC.md:997 behaviour, as the finding itself says; not a defect.]**
 
 ## PR #408
 
-- [ ] src/sheafmd/hub/archive.py:238 restore_trash uses os.rename with the comment "rename, not replace: a page that came in between is not overwritten"; on Linux os.rename replaces an existing file silently, so the only guard is the lexists check under loose-keep.lock, and a writer that does not take that lock and creates the page between the check and the rename is overwritten. Window is microseconds; use os.link+unlink or renameat2(RENAME_NOREPLACE) to make the comment true.
-- [ ] src/sheafmd/hub/archive.py:141-148 _sweep_root reads Marks and later stamps ARCHIVED without holding loose-keep.lock across both; a Restore or Keep by the owner that lands between the read and the stamp is undone (the page is re-archived, a just-kept page shows archived). Narrow window, recoverable by another Restore.
+- [x] src/sheafmd/hub/archive.py:238 restore_trash uses os.rename with the comment "rename, not replace: a page that came in between is not overwritten"; on Linux os.rename replaces an existing file silently, so the only guard is the lexists check under loose-keep.lock, and a writer that does not take that lock and creates the page between the check and the rename is overwritten. Window is microseconds; use os.link+unlink or renameat2(RENAME_NOREPLACE) to make the comment true. **[fixed on main 4a34dd8c, src/sheafmd/hub/archive.py:253: restore_trash now uses os.link (no replace) under file_lock(dest) and loose-keep.lock, with a Taken check (commit c10c4f69).]**
+- [x] src/sheafmd/hub/archive.py:141-148 _sweep_root reads Marks and later stamps ARCHIVED without holding loose-keep.lock across both; a Restore or Keep by the owner that lands between the read and the stamp is undone (the page is re-archived, a just-kept page shows archived). Narrow window, recoverable by another Restore. **[fixed on main 4a34dd8c, src/sheafmd/hub/archive.py:136: _sweep_root now reads Marks and stamps ARCHIVED in one hold of loose-keep.lock.]**
 - [ ] src/sheafmd/hub/repos.py:205 if a previous _wake failed (git non-zero), "restore" stays; a later sleep overwrites it with the current shrunk listing, so the folders to widen again are lost (they come back on demand through _widen per report).
 - [ ] src/sheafmd/hub/archive.py:246-257 purge scandirs .sheaf/trash following a symlinked .sheaf or .sheaf/trash (only the stamp entries are checked with follow_symlinks=False), so rmtree can act on digit-named folders older than 30 days in a linked target; trash() refuses linked folders, purge does not. Needs the owner to plant the link.
 - [ ] src/sheafmd/hub/sheaf_view.py:161-165 marks_of applies the owner's archived marks to rows shared with another member, so a recipient's shared page leaves their default view when the owner archives it; recipients get no Restore button for it. Not stated in the PR.
@@ -167,7 +167,7 @@
 
 ## PR #410
 
-- [ ] src/sheafmd/page/page.js:3017 the Team tab renders a reply as r.body, but team._shape goes through comments.Comment.as_dict, which emits each reply's text as "text" (comments.py:170-171); a reply made through POST /_/team (op reply) shows up as the author's name with an empty body
+- [x] src/sheafmd/page/page.js:3017 the Team tab renders a reply as r.body, but team._shape goes through comments.Comment.as_dict, which emits each reply's text as "text" (comments.py:170-171); a reply made through POST /_/team (op reply) shows up as the author's name with an empty body **[fixed on main 4a34dd8c, src/sheafmd/page/page.js:3133: Reply now renders the reply's text field (esc(r.text)); fixed by commit 9d49bd10 "Team tab: a reply shows its text".]**
 - [ ] src/sheafmd/hub/handler.py:1072 _with_team json.loads the client page's meta block (op "page") outside any try; a meta block that is not valid JSON turns the relayed 200 page into a 500, while the doc/mount branch falls back to the body unchanged
 - [ ] src/sheafmd/hub/team.py:56 Team comments are keyed by the agency-side address Clients/<client>/<path>; when the client moves or renames the page, its Team comments stay on the old address and are no longer shown (no Forward is followed)
 
@@ -183,7 +183,7 @@
 
 - [ ] src/sheafmd/hub/handler.py:1093 `holds_loose(m, doc) or visible(...)` makes `visible` dead for the owner (owner_of(root) == m.id already implies holds_loose), so rule A and the file-read checks inside `visible` no longer run for Archive/Keep/Delete; `Archive.trash` (archive.py:201) lstat-s only the last path component, so a folder link placed in a loose root by someone with filesystem access would let Delete move a file from outside the root. Not reachable by a remote member through the hub; worth an explicit `os.path.realpath` containment check in `trash`.
 - [ ] src/sheafmd/hub/handler.py:322 a FileNotFoundError/NotFound on a request whose doc is missing is now answered 404 without `record_exception`, so a genuine bug on that path no longer reaches `sheaf diag`.
-- [ ] src/sheafmd/hub/archive.py:261 `os.unlink(src)` after a successful `os.link` is unguarded: if it fails the page exists at both the address and in the trash and the request answers 500.
+- [x] src/sheafmd/hub/archive.py:261 `os.unlink(src)` after a successful `os.link` is unguarded: if it fails the page exists at both the address and in the trash and the request answers 500. **[fixed on main 4a34dd8c, src/sheafmd/hub/archive.py:250: The unlink after os.link is now guarded: except OSError calls _drop(dest) and raises loose.Refused (409), so the page is not left at both places.]**
 - [ ] src/sheafmd/hub/archive.py:256 `os.link` on a filesystem without hard links (vfat, some FUSE mounts) now refuses every Restore-trash with 409, where `os.rename` worked.
 
 ## PR #415
@@ -202,14 +202,14 @@
 
 ## PR #417
 
-- [ ] tests/conftest.py:308 the guard covers os.kill only; os.killpg (used by signals.send_group in hub/commits.py, hub/jobs.py, hub/tell.py) is not wrapped, so a group signal to a process group the test did not start is not refused
-- [ ] tests/test_real_hub_untouched.py:84 `while proc_state(done.pid) == "alive": pass` spins a core with no sleep and no deadline until the child exits
+- [x] tests/conftest.py:308 the guard covers os.kill only; os.killpg (used by signals.send_group in hub/commits.py, hub/jobs.py, hub/tell.py) is not wrapped, so a group signal to a process group the test did not start is not refused **[does not hold on main 4a34dd8c, tests/conftest.py:325: signals.send_group (src/sheafmd/signals.py:92) takes only a Popen child that leads its own group and refuses anything else, so a group signal to a process the test did not start cannot be sent; no killpg guard is needed.]**
+- [x] tests/test_real_hub_untouched.py:84 `while proc_state(done.pid) == "alive": pass` spins a core with no sleep and no deadline until the child exits **[fixed on main 4a34dd8c, tests/test_real_hub_untouched.py:86: The spin loop is replaced by wait_until_ended(done.pid), which has a deadline.]**
 - [ ] tests/conftest.py:314 a refused signal to a live process whose environ cannot be read (another user's) waits the full EXEC_WINDOW (1 s) in is_ending before the AssertionError
 
 ## PR #422
 
-- [ ] src/sheafmd/hub/outgoing.py:56 `urllib.request.urlopen` follows a 3xx and copies the `Authorization: Bearer <peer token>` header onto the redirected request (urllib's redirect_request keeps all non-content headers), so a paired tiroir that answers 302 hands the peer token to the redirect target; use the `connect._NO_REDIRECT` opener as send.py does (already listed as a follow-up in the PR).
-- [ ] src/sheafmd/hub/writelog.py:207 `WriteLog.restore` undoes a failed landing in memory only; the carried lines and the `transfer` line stay in the append-only log file and reappear at that address after a hub restart (already listed as a follow-up in the PR).
+- [x] src/sheafmd/hub/outgoing.py:56 `urllib.request.urlopen` follows a 3xx and copies the `Authorization: Bearer <peer token>` header onto the redirected request (urllib's redirect_request keeps all non-content headers), so a paired tiroir that answers 302 hands the peer token to the redirect target; use the `connect._NO_REDIRECT` opener as send.py does (already listed as a follow-up in the PR). **[fixed on main 4a34dd8c, src/sheafmd/hub/outgoing.py:59: post now opens through connect._NO_REDIRECT, so the bearer is not sent to a redirect target (commit 9921afbf).]**
+- [x] src/sheafmd/hub/writelog.py:207 `WriteLog.restore` undoes a failed landing in memory only; the carried lines and the `transfer` line stay in the append-only log file and reappear at that address after a hub restart (already listed as a follow-up in the PR). **[fixed on main 4a34dd8c, src/sheafmd/hub/writelog.py:243: undo and restore append a `retracted` line and the kept lines to the file, so a restart does not bring the carried lines back (commits 9921afbf, 2b0db61e).]**
 - [ ] src/sheafmd/hub/incoming.py:155 `_unkeep` and `_unarchive` share one `contextlib.suppress` block, so when `_unkeep` raises `loose.Refused`/`OSError` the archived mark the landing wrote is not taken back.
 - [ ] src/sheafmd/hub/outgoing.py:56 the sender's `timeout` is urllib's per-socket-operation timeout while the receiver's deadline counts from `Req.arrived`; a landing that finishes just under the receiver's deadline can reach a sender that has already timed out. The kept `outgoing.json` id makes the resend land once, but a page edited in between gets a new id and is refused `name_taken` on the other side (two copies, no loss).
 
@@ -229,7 +229,7 @@
 ## PR #427
 
 - [ ] src/sheafmd/hub/state.py:318 (unchanged by this PR) when write_json fails inside Forwards.drop_leading_to, _change has already replaced self._data with the dropped dict, so the in-memory Forward is gone while forwards.json on disk keeps it; the next _change of any kind re-reads the file and the stale Forward to the deleted address comes back. The new 200 path in handler.py:1196-1199 makes this reachable without a 409; the failure is logged as delete-forward-failed, so it is visible in diagnostics.
-- [ ] src/sheafmd/hub/handler.py:1198 `except Exception` is broader than the OSError the comment describes; acceptable since the page is already trashed and the traceback is recorded.
+- [x] src/sheafmd/hub/handler.py:1198 `except Exception` is broader than the OSError the comment describes; acceptable since the page is already trashed and the traceback is recorded. **[does not hold on main 4a34dd8c, src/sheafmd/hub/handler.py:1548: The comment now says "a Forward that cannot be written is a row in the diagnostics log" and does not claim OSError, so the broad except Exception matches its comment.]**
 
 ## PR #428
 
@@ -244,11 +244,11 @@
 
 ## PR #430
 
-- [ ] tests/test_repo_pages.py:1059 the new test calls _on_branch on tmp_path, which is not a git clone, so git fails and only the spy filter is exercised, not a real look; adequate for what it asserts
+- [x] tests/test_repo_pages.py:1059 the new test calls _on_branch on tmp_path, which is not a git clone, so git fails and only the spy filter is exercised, not a real look; adequate for what it asserts **[does not hold on main 4a34dd8c, tests/test_repo_pages.py:1059: Observation that the test asserts only the spy filter on a non-clone dir, which is what its docstring says it tests (which Repos made the look); no defect.]**
 
 ## PR #431
 
-- [ ] tests/test_hub_lifecycle.py:454 the new guard test monkeypatches sender.cmdline, so it checks the fake (pid <= 2**22) and not /proc; it would stay green if SENDER_PID were set back to any value above 2**22 only, which is the intent, but it does not prove the kernel limit itself (PID_MAX_LIMIT 2**22 on 64-bit; /proc/sys/kernel/pid_max reads 4194304 here)
+- [x] tests/test_hub_lifecycle.py:454 the new guard test monkeypatches sender.cmdline, so it checks the fake (pid <= 2**22) and not /proc; it would stay green if SENDER_PID were set back to any value above 2**22 only, which is the intent, but it does not prove the kernel limit itself (PID_MAX_LIMIT 2**22 on 64-bit; /proc/sys/kernel/pid_max reads 4194304 here) **[does not hold on main 4a34dd8c, tests/test_hub_lifecycle.py:454: Observation, no defect: the test's job is that the made-up SENDER_PID (tests/test_hub_lifecycle.py:234) stays above 2**22 against a faked cmdline; the kernel limit is stated in the comment at :233 and cannot be proved by a test.]**
 
 ## PR #432
 
@@ -258,7 +258,7 @@
 
 - [ ] src/sheafmd/page/page.js:1213 a clone page opened before the hub upgrade (old page.js, no CFG.branch) gets a 400 on every save, and its draft (no branch) is then refused by Restore after reload; the edits are kept to copy, not lost, but there is no transition path for in-flight drafts
 - [ ] src/sheafmd/hub/handler.py:997 the branch check is skipped on a rid replay (live.save answers `again` before the guard); correct since nothing is written, but the 200 `again` answer hides the switch from the page
-- [ ] src/sheafmd/hub/core.py:1540 catch_up rebuilds when the recorded branch differs from HEAD; if the rebuild keeps failing, it is retried on every request (bounded by the existing _rebuild_failed path, no crash)
+- [x] src/sheafmd/hub/core.py:1540 catch_up rebuilds when the recorded branch differs from HEAD; if the rebuild keeps failing, it is retried on every request (bounded by the existing _rebuild_failed path, no crash) **[does not hold on main 4a34dd8c, src/sheafmd/hub/core.py:1668: Not a defect: catch_up's docstring (1656-1659) states a failed rebuild is tried again on the next request, and _rebuild_failed (core.py:1799ff) bounds the logging; the finding itself says no crash.]**
 
 ## PR #435
 
@@ -271,7 +271,7 @@
 - [ ] src/sheafmd/hub/repos.py:416 provider.token(repo) (an App token request) runs while holding the clone's non-reentrant commit lock (Commits._repo_lock), so saves, pulls and commits of that repo wait on the token call.
 - [ ] src/sheafmd/hub/repos.py:413 every owner write to an awake clone page takes the commit lock and rewrites clones.json via _use: extra lock traffic and a file write per save.
 - [ ] src/sheafmd/hub/repos.py:278 sleep_moved updates an already-sleeping row without the clone's lock, so a wake() that passed its moved check can leave the row moved with sleeping=False; read_only_line still refuses (moved is checked first), but a later sleep step on that row records restore=[] over the folders it held.
-- [ ] src/sheafmd/hub/core.py:380 the absolute-path branch takes realpath(doc) relative to root.path without resolving root.path; a root registered through a symlink raises ValueError, caught, so the write wakes nothing (no crash).
+- [x] src/sheafmd/hub/core.py:380 the absolute-path branch takes realpath(doc) relative to root.path without resolving root.path; a root registered through a symlink raises ValueError, caught, so the write wakes nothing (no crash). **[does not hold on main 4a34dd8c, src/sheafmd/hub/core.py:380: roots.lookup matches only on realpath (roots.py:408, _find compares r.path to a realpath'd folder) and roots are stored realpath'd (roots.py:321), so root.path is already resolved when relative_to runs at core.py:383.]**
 
 ## PR #439
 
@@ -281,15 +281,15 @@
 
 ## PR #440
 
-- [ ] src/sheafmd/connect.py:122 use_peer_file lets OSError from mkdir/os.open escape (cmd_peer catches only ConnectError/TokenError, main has no OSError handler), so an unwritable --dir gives a traceback at f5901098; already fixed on current main (same command now prints "cannot keep the token in /proc/nope ... nothing was written")
+- [x] src/sheafmd/connect.py:122 use_peer_file lets OSError from mkdir/os.open escape (cmd_peer catches only ConnectError/TokenError, main has no OSError handler), so an unwritable --dir gives a traceback at f5901098; already fixed on current main (same command now prints "cannot keep the token in /proc/nope ... nothing was written") **[fixed on main 4a34dd8c, src/sheafmd/connect.py:134-153: use_peer_file now wraps mkdir/os.open/replace in `except OSError` and raises ConnectError("cannot keep the token in ... nothing was written").]**
 - [ ] src/sheafmd/cli.py:1134 `peer add` still tells the user to run `sheaf peer use <address> <token>`, the form this PR documents as discouraged (token in ps/history)
 - [ ] src/sheafmd/connect.py:82 peer_credential_name maps ':' to '-', so https://a.example:8443 and a host literally named a.example-8443 share one credential file name (contrived)
 - [ ] src/sheafmd/connect.py:121 an existing --dir keeps its mode; only a newly created folder is 0700 (the file itself is 0600, so the token is not exposed)
 
 ## PR #441
 
-- [ ] src/sheafmd/connect.py:140 if os.replace(tmp, target) fails, the .new file holding the token stays on disk (outer except converts to ConnectError without unlinking tmp); already fixed after the merge by 6fe7ec3a ("no temp token left on failure")
-- [ ] src/sheafmd/connect.py:98 the corrupt-credential warning is printed on every peer_token_for call, not once; already fixed after the merge by 6fe7ec3a ("one warning per corrupt credential file")
+- [x] src/sheafmd/connect.py:140 if os.replace(tmp, target) fails, the .new file holding the token stays on disk (outer except converts to ConnectError without unlinking tmp); already fixed after the merge by 6fe7ec3a ("no temp token left on failure") **[fixed on main 4a34dd8c, src/sheafmd/connect.py:134-153: Both except branches (OSError :146, BaseException :149) unlink the temp when `made`, so no .new token is left after a failed os.replace.]**
+- [x] src/sheafmd/connect.py:98 the corrupt-credential warning is printed on every peer_token_for call, not once; already fixed after the merge by 6fe7ec3a ("one warning per corrupt credential file") **[fixed on main 4a34dd8c, src/sheafmd/connect.py:98-104: _WARNED (:78) records the file name; the warning prints only when the name is not yet in it, once per process.]**
 
 ## PR #442
 
@@ -332,7 +332,7 @@
 - [ ] tests/page/pagehelp.py:550 LEAVING_JS clears __leaving whenever a handler called preventDefault/returnValue, but page.js:4064 calls preventDefault on every unload with unsaved edits, and Chromium proceeds with the navigation when the frame has no sticky user activation (no dialog is shown): such a reload is then not seen as leaving, and close_context falls back to the old unguarded close (the e2 hang), not a wrong result.
 - [ ] tests/page/conftest.py:183 the tab teardown goes through landed() -> settled(), which waits for #rd-menu-btn; a test that ends leaving for a non-sheaf page would wait PAGE_TIMEOUT_MS and fail, while close_context uses the selector-free landed_page. No current test was found doing that (CI slices 1,3-6 green on the merge commit).
 - [ ] tests/page/pagehelp.py:586 settled()/landed() see only a reload that has already begun; a reload that starts after the check is still closed under (acknowledged in the PR as follow-up finding 4).
-- [ ] CI on merge commit 0268cfc1: slice 2/6 failed in test_page_writing.py::test_a_change_heard_between_a_replys_answer_and_its_end_reloads_when_the_send_ends_and_says_it_waited (toast 'text changed while you wrote' never seen), a test this PR does not touch and a flake already filed as .scratch/chat-box/issues/137 and 141; the branch head 85e27cae was 6/6 green.
+- [x] CI on merge commit 0268cfc1: slice 2/6 failed in test_page_writing.py::test_a_change_heard_between_a_replys_answer_and_its_end_reloads_when_the_send_ends_and_says_it_waited (toast 'text changed while you wrote' never seen), a test this PR does not touch and a flake already filed as .scratch/chat-box/issues/137 and 141; the branch head 85e27cae was 6/6 green. **[does not hold on main 4a34dd8c, .scratch/chat-box/issues/137, 141: A CI flake record of a test the PR did not touch; already filed as tickets 137 and 141, nothing to fix here.]**
 
 ## PR #452
 
@@ -348,14 +348,14 @@
 
 ## PR #454
 
-- [ ] PR #454 description/title are stale: they still describe the `Gate` fixture and the /_/doc wait from round 1, while the merged code (299c9a9a) waits for `#rd-menu` and holds mount.css with a page.route; the commit log is the accurate record.
+- [x] PR #454 description/title are stale: they still describe the `Gate` fixture and the /_/doc wait from round 1, while the merged code (299c9a9a) waits for `#rd-menu` and holds mount.css with a page.route; the commit log is the accurate record. **[does not hold on main 4a34dd8c, GitHub PR #454 text: The finding is about the PR description on GitHub, not a repo file; nothing to change on main.]**
 - [ ] tests/page/test_mount_sheaf.py:271 the held-stylesheet test asserts the byline lacks "Claude Code" only via the rendered text; it relies on mount.js:453 awaiting link.onload before create (verified) and page.js:178 takeAgent running before #rd-menu is appended at page.js:604 (verified), so it is correct today but couples to that ordering without a comment at the call sites in src.
 
 ## PR #455
 
 - [ ] src/sheafmd/hub/boxwait.py:126 `d.state = state` runs before `_end`, so `_end`'s own `delivered` check misses and the clear is re-done by hand (`was == "delivered"`); correct as written, but setting state after `_end` (or not at all, since the drop is discarded) would remove the duplicated rule
 - [ ] src/sheafmd/hub/core.py:1465 the pass settles drops against the file before reading statuses, so when the Starter writes `answered` after its reply (the contract in SPEC 9.15), the reply usually ends the drop first and `answered` is never told to the page; harmless (the reply clears the line), but the new state is mostly unobserved in practice
-- [ ] tests/test_hub_work.py:760 hub test not run locally (laptop load 10.5, above the limit of 8); the two page tests are Playwright, CI only
+- [x] tests/test_hub_work.py:760 hub test not run locally (laptop load 10.5, above the limit of 8); the two page tests are Playwright, CI only **[does not hold on main 4a34dd8c, tests/test_hub_work.py:760: A note that the author did not run the test locally; not a defect in code.]**
 
 ## PR #457
 
@@ -374,11 +374,11 @@
 - [ ] src/sheafmd/hub/server.py:200 a Shared replaced under the same sid (old.close()) keeps its server loop and thread alive, idle, until the peer closes: the loop never checks `sub.closed`
 - [ ] src/sheafmd/hub/handler.py:298 `/_/live/leave` with a non-string key answers 200 without checking the stream or its owner (inconsistent with the 404 the SPEC row documents)
 - [ ] src/sheafmd/page/live.js:487 every tab that wins the `sheaf-live` lock opens `/_/live?shared=` even when no page in the browser asked for a stream (a read-through page, a page whose document is gone): one idle connection
-- [ ] PR #474 description (GitHub, not the repo) names a client ("Chien Vert placement sheet"); the merged files add no private names (checked every added line)
+- [x] PR #474 description (GitHub, not the repo) names a client ("Chien Vert placement sheet"); the merged files add no private names (checked every added line) **[does not hold on main 4a34dd8c, GitHub PR #474 text: About the PR description on GitHub, not a repo file; the finding itself says the merged files add no private names.]**
 
 ## PR #475
 
-- [ ] src/sheafmd/edit.py:681 the depth walk only treats <table> as raw HTML; any other block pandoc writes as raw HTML (where a backslash is not an escape) would show a doubled backslash. Probed dl, details, div, sup, link text, br: all round-trip correctly today, so no case was found.
+- [x] src/sheafmd/edit.py:681 the depth walk only treats <table> as raw HTML; any other block pandoc writes as raw HTML (where a backslash is not an escape) would show a doubled backslash. Probed dl, details, div, sup, link text, br: all round-trip correctly today, so no case was found. **[does not hold on main 4a34dd8c, src/sheafmd/edit.py:~764-775: The finding states it probed dl, details, div, sup, link text, br and found no failing case; no defect.]**
 
 ## PR #476
 
@@ -388,7 +388,7 @@
 ## PR #477
 
 - [ ] src/sheafmd/hub/the_list.py:367 `check` only tests that the block itself renders; when that render succeeds but box_number's render of the flipped content fails (pandoc non-zero exit or 120 s timeout), box_number returns None (uncached) and a real action is dropped for that read. Reproduced on the merge tree: with the flipped render forced to fail, read_rectoverso of "- item / fenced code / - [ ] Done" returns no actions instead of ["Done"]. Transient: the list row loses its button for one poll, and the save guard (handler.py:1662/1666, unticks_one_off / ticks_another_move via _boxes) can misjudge one save. The docstring's "no real action may go" does not hold for this case; falling back to the line reading when box_number cannot render would match it.
-- [ ] src/sheafmd/hub/the_list.py:368 a block that matches _MAY_HOLD_CODE_RE (any loose list with a 4-space nested item, any line starting with `<`) now costs one pandoc render per action line on first read (box_number renders the flipped content each time), in the poll, core.actions and the save guard; cached afterwards by (content, at), so only the first read of each new text pays it.
+- [x] src/sheafmd/hub/the_list.py:368 a block that matches _MAY_HOLD_CODE_RE (any loose list with a 4-space nested item, any line starting with `<`) now costs one pandoc render per action line on first read (box_number renders the flipped content each time), in the poll, core.actions and the save guard; cached afterwards by (content, at), so only the first read of each new text pays it. **[does not hold on main 4a34dd8c, src/sheafmd/hub/the_list.py:368: Describes a one-time render cost per new text (cached by (content, at)); an observation, no defect to fix.]**
 
 ## PR #479
 
@@ -397,7 +397,7 @@
 ## PR #480
 
 - [ ] src/sheafmd/page/page.js:3980 on a legacy `- [ ] Move to <slug> (ref …)` line the hub's label is `Belongs to <slug>`, so hideWord (words `Belongs to <slug>`, `Belongs to`) finds no match and the line shows the button `Belongs to <slug>` followed by the visible text `Move to <slug> (ref …)`: the slug is said twice; cosmetic, legacy pages only. Passing the `Move to` form as a third word would hide it.
-- [ ] src/sheafmd/hub/the_list.py:446 a page or list loaded before the deploy sends word `Move to` with its press; tick_edit compares against `Belongs to` and returns None, so that one press is refused until the page reloads; transient across the restart only.
+- [x] src/sheafmd/hub/the_list.py:446 a page or list loaded before the deploy sends word `Move to` with its press; tick_edit compares against `Belongs to` and returns None, so that one press is refused until the page reloads; transient across the restart only. **[does not hold on main 4a34dd8c, src/sheafmd/hub/the_list.py:443-449: Transient across the ticket 168 restart only (a page loaded before the deploy); the window has passed, no code to change.]**
 - [ ] GLOSSARY.md:180 still says "the code still says Move to until ticket 168", and GLOSSARY.md:194 "a Move to is a one-off too": stale now that 168 is merged (GLOSSARY not touched by this PR).
 
 ## PR #481
@@ -441,7 +441,7 @@
 ## PR #487
 
 - [ ] src/sheafmd/page/page.js:2607 on the new 409 the catch path does not call off(), so the thread keeps its Tell shown as running until reload; harmless because forget_root (core.py:1008-1024) already ended every Tell and job under the forgotten root, but the page shows a stale state next to the "reload the page" error
-- [ ] src/sheafmd/hub/handler.py:2378 a root forgotten and re-added for the same folder gets a new id, so its old page's cancel is now refused with 409 where it was an ok before; nothing of that page is left running (forget cancelled it), so only the message changes
+- [x] src/sheafmd/hub/handler.py:2378 a root forgotten and re-added for the same folder gets a new id, so its old page's cancel is now refused with 409 where it was an ok before; nothing of that page is left running (forget cancelled it), so only the message changes **[does not hold on main 4a34dd8c, src/sheafmd/hub/handler.py:2386: Describes accepted behaviour (only the message changes, nothing left running); no defect to fix.]**
 
 ## PR #498
 

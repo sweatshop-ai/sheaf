@@ -36,7 +36,7 @@
 - [ ] **Pins in memory have no age.** *(PR #543)* `Live._pins` (`src/sheafmd/hub/live.py:74`, `:486-491`) is capped at `PINS` but never expires; on disk pins expire after 7 days (`src/sheafmd/hub/state.py:37`, `:254`).
 - [ ] **The 16-pin cap is per document, not per member** *(open: needs the owner's decision: per-member key, proxy members, SPEC change)* (`state.py:36`, `:208`; `live.py:490`). One member pinning many versions can push out another member's pin.
 - [x] **"An Ask answered with unsaved edits keeps the hash without a pin."** *(traced by Omar 2026-11-20, not browser-verified beyond #544: an Ask answer, like any outside change, reaches `reloadWhenFree` (`page.js`). With a form open it goes to `holdReload`, which pins `hash`. With no form it goes to `settle`, which saves each dirty block first (`save(true)`, at most 3 passes, each up to 120 s) and then `reloadKeep`; a merged save there keeps the old hash with no pin, but only for that window, and a form opened during it is sent to `reloadWhenFree` -> `holdReload` (`page.js:1310`), which pins. No unpinned long hold; no change made.)*
-- [ ] **Test gap: no page-level test pins the merged-save `was` hash.** *(PR #544)* The page tests at `tests/page/test_page_writing.py:1276-1350` cover the served hash only; the `was` pin is tested at hub and live level.
+- [x] **Test gap: no page-level test pins the merged-save `was` hash.** *(PR #544)* The page tests at `tests/page/test_page_writing.py:1276-1350` cover the served hash only; the `was` pin is tested at hub and live level. Done in #544, merged as b416bf80.
 
 ## Writers and Windows
 

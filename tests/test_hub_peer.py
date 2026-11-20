@@ -54,6 +54,7 @@ def proc(tmp_path, monkeypatch):
     folder.mkdir()
     monkeypatch.setattr(peer, "PROC_NET", folder)
     monkeypatch.setattr(peer, "PLATFORM", "linux")
+    monkeypatch.setattr(peer, "NETLINK", False)     # the rows below are what the hub reads, not the kernel's
     fake = FakeProcNet(folder)
     fake.write()
     return fake

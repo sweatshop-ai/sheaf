@@ -1197,7 +1197,7 @@ def stops_of(hub):
 
 def test_a_signal_after_the_hub_was_told_of_a_restart_is_an_upgrade_stop(browser):
     seen = stops_of(browser.hub)
-    assert browser.post("/_/restarting", cookie=False, key=True).json() == {"ok": True}
+    assert browser.post("/_/restarting", cookie=False, key=True).json()["ok"] is True
     browser.hub.request_stop("signal")
     assert seen == ["upgrade"] and browser.hub.stop_requested == "upgrade"
     assert browser.hub.told_restart is True
@@ -1244,6 +1244,25 @@ def test_a_restart_announced_again_after_it_was_taken_back_is_expected_again(bro
     browser.post("/_/restarting", cookie=False, key=True)
     browser.hub.request_stop("signal")
     assert seen == ["upgrade"] and browser.hub.told_restart is True
+
+
+def test_a_restart_announced_returns_a_token_the_take_back_must_carry(browser):
+    seen = stops_of(browser.hub)
+    token = browser.post("/_/restarting", cookie=False, key=True).json()["token"]
+    other = browser.post("/_/restarting", cookie=False, key=True).json()["token"]
+    assert token != other
+    r = browser.request("DELETE", f"/_/restarting?token={token}", cookie=False, key=True)
+    assert r.status == 200 and r.json() == {"ok": True}
+    browser.hub.request_stop("signal")                 # the older run's take-back left the newer announcement up
+    assert seen == ["upgrade"]
+
+
+def test_a_take_back_with_the_current_token_forgets_the_announcement(browser):
+    seen = stops_of(browser.hub)
+    token = browser.post("/_/restarting", cookie=False, key=True).json()["token"]
+    browser.request("DELETE", f"/_/restarting?token={token}", cookie=False, key=True)
+    browser.hub.request_stop("signal")
+    assert seen == ["signal"]
 
 
 def stop_with(browser, reason):

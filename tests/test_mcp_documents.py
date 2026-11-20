@@ -200,14 +200,40 @@ def test_a_root_whose_folder_cannot_be_entered_is_a_row_that_says_why_and_names_
     assert docs(browser, token=token, root="shut") == [told]
 
 
-def test_a_walked_root_stops_at_two_thousand_files(browser, tmp_path, monkeypatch):
-    import sheafmd.mcp as mcp
-    monkeypatch.setattr(mcp, "WALK_LIMIT", 3)
+def test_a_document_past_the_index_cap_with_open_comments_is_still_listed(browser, tmp_path, monkeypatch):
+    """The cap is the index page's (D15). The door is an agent's view and never hides what waits: a Tell or an
+    open comment on a file past that cap is listed, because the door lists up to the hub's count limit."""
+    import sheafmd.hub.roots as roots
+    monkeypatch.setattr(roots, "LIST_CAP", 3)
     root = tmp_path / "wiki"
     for i in range(6):
         doc(root, f"{i}.md")
     browser.hub.roots.for_document(root / "0.md")
-    assert len(docs(browser, open_only=False)) == 3
+    comment(root / "5.md")
+    assert names(docs(browser)) == ["wiki/5.md"]
+    assert len(docs(browser, open_only=False)) == 6
+
+
+def test_a_root_past_the_count_limit_says_how_many_more_it_holds(browser, tmp_path, monkeypatch):
+    import sheafmd.hub.roots as roots
+    monkeypatch.setattr(roots, "COUNT_LIMIT", 4)
+    monkeypatch.setattr(roots, "LIST_CAP", 4)
+    root = tmp_path / "wiki"
+    for i in range(7):
+        doc(root, f"{i}.md")
+    browser.hub.roots.for_document(root / "0.md")
+    rows = docs(browser, open_only=False)
+    assert len(rows) == 5 and rows[-1] == {"root": "wiki", "more": 3}
+
+
+def test_a_git_root_does_not_list_what_lies_in_its_sheaf_folder(browser, tmp_path):
+    repo = tmp_path / "proj"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    doc(repo, "a.md")
+    doc(repo, ".sheaf/theme.md")
+    browser.hub.roots.for_document(repo / "a.md")
+    assert names(docs(browser, open_only=False)) == ["proj/a.md"]
 
 
 # ── who may ask ──────────────────────────────────────────────────────────────
@@ -242,4 +268,6 @@ def test_a_document_in_a_git_directory_is_not_listed_whether_its_root_is_a_git_r
     if how != "runs":
         git_fails(how, monkeypatch, tmp_path)
     token = Tokens().add("codex") if who == "token" else None
-    assert names(docs(browser, token=token)) == ["proj/a.md", "proj/b.md", "wiki/a.md", "wiki/sub/b.md"]
+    # where git gives no answer a git root lists nothing it has not vouched for (8.6); a plain folder is walked
+    listed = ["wiki/a.md", "wiki/sub/b.md"] if how != "runs" else ["proj/a.md", "proj/b.md", "wiki/a.md", "wiki/sub/b.md"]
+    assert names(docs(browser, token=token)) == listed

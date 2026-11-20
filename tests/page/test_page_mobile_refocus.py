@@ -1,6 +1,6 @@
 """iOS may not raise the keyboard after a selection (ticket 03, Alice's phone trial 2026-11-09), so a box that is open with its field
 unfocused takes the cursor on one touch in its empty area (band, thread background, composer frame), inside that touch's own event.
-A control keeps its meaning (×, −, ⋯, a link), a bubble and its selected text are content, and a scroll is not a tap."""
+A control keeps its meaning (×, the check, ⋯, a link), a bubble and its selected text are content, and a scroll is not a tap."""
 import pytest
 
 from pagehelp import at, open_with_comment, select_by_touch, until

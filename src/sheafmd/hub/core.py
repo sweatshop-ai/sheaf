@@ -419,10 +419,12 @@ class Hub:
         return self._repos.read_only_line(repo, waking)
 
     def committed(self, address: str, member=None, what: str = "edit", by: str | None = None,
-                  gone: str | None = None, author: Author | None = None):
+                  gone: str | None = None, author: Author | None = None, root_id: str = ""):
         """A write went to `address`, by `member` (a proxy.Member), by `by` (the display name of a door
         caller), by `author` when given (the hub itself, for a move of the poll) or else by the hub's person:
-        a commit, in a root that commits (8.11). `gone`: the path in the root the document moved from (9.11). The
+        a commit, in a root that commits (8.11). `gone`: the path in the root the document moved from (9.11).
+        `root_id`: the id of the root the write went to, as the writer resolved it; a root forgotten since, and its name
+        taken by another, is refused, never committed in (a write is never carried to the other repo). The
         caller holds the rectoverso's name (`place.held`): a write and its commit are one step under it, so no other
         write of the name comes between, and a commit never carries another's write."""
         if not place.owns(self, address):
@@ -430,6 +432,9 @@ class Hub:
         a = roots_mod.Address.parse(address)
         root = self.roots.get(a.root)
         if root is None:
+            return
+        if root_id and root.id != root_id:
+            self.record("commit-refused", address, why="its root was forgotten, and another took the name, since the write")
             return
         if place.applies(self, a.root):
             try:
@@ -448,6 +453,12 @@ class Hub:
         else:
             who = Author(by or self.person, "")
         self.commits.saved(root, rel, who, what, gone=gone, key=a.rel)
+
+    def root_id_of(self, address: str) -> str:
+        """The id of the root `address` is in now, "" when there is none: what a writer hands `committed` as the root its
+        write went to, read before the write."""
+        root = self.roots.get(roots_mod.Address.parse(address).root)
+        return root.id if root is not None else ""
 
     def file(self, address: str, placed: bool | None = None, bound: str = "") -> Path:
         """The path of the file the document at `address` names, there or not, unchecked: in the list's root the one
@@ -571,7 +582,7 @@ class Hub:
             e.live = LiveDocument(file, render=lambda text: self._rendered(e, text), entry=e,
                                   publish=e.bus.publish, by=self.person, clock=self.clock,
                                   versions=(lambda: self._store_of(address, root, e.file_root)) if self.private_roots and place.applies(self, name)
-                                  else self._versions_of(root), address=address, hold=hold)
+                                  else (lambda: self._versions_of(root)), address=address, hold=hold)
             e.live.session_to = lambda: self.session_name(address)
             e.live.agent_tells = lambda: self.waiting_tells.waits(address, None, sweep=False)   # the hub person's (9.8)
             e.live.tells_lock = self.waiting_tells._lock

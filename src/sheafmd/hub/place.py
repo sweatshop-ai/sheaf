@@ -739,6 +739,7 @@ def place(hub, address: str, member=None, by: str | None = None, commit: bool = 
     if got is None:
         return None
     root, top, name = got
+    rid = hub.root_id_of(address)               # the root the move goes in, for its commit (8.11)
     with _name_lock(top, name):
         if undecided(hub, name):
             if (address, "undecided") not in hub.told_place:      # its own key: the refusal that comes later is still told
@@ -766,9 +767,9 @@ def place(hub, address: str, member=None, by: str | None = None, commit: bool = 
         hub.wrote(address, moved=True)
         if commit:
             if member is None and by is None:
-                hub.committed(address, what="move", gone=gone, author=commits_mod.Author(*commits_mod.COMMITTER))
+                hub.committed(address, what="move", gone=gone, author=commits_mod.Author(*commits_mod.COMMITTER), root_id=rid)
             else:
-                hub.committed(address, member, "move", by, gone=gone)
+                hub.committed(address, member, "move", by, gone=gone, root_id=rid)
     return gone
 
 

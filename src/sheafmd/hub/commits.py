@@ -209,6 +209,21 @@ def _repo(folder: Path) -> str:
     return os.path.realpath(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip() else os.path.realpath(folder)
 
 
+def _is_top(folder: Path) -> bool:
+    """Whether `folder` is the top of a git work tree now, as a root of a repo is (SPEC 8.2)."""
+    try:
+        r = _git(folder, "rev-parse", "--show-toplevel")
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0 and os.path.realpath(r.stdout.strip()) == os.path.realpath(folder)
+
+
+def _is_git(root) -> bool:
+    """Whether `root` is a repo now: the registry's flag is as of its registration, and a folder registered before
+    `git init` keeps `git = false`, so git is asked when the flag is false (8.11)."""
+    return root.git or _is_top(root.path)
+
+
 def _ignored(folder: Path, rel: str) -> bool:
     """Whether the repo's ignore rules name `rel` and the index does not hold it. `check-ignore` takes
     paths, not pathspecs: `--literal-pathspecs` makes it fail."""
@@ -369,7 +384,7 @@ class Commits:
         pushing while the push waited is never carried by it."""
         split = {True: [], False: []}
         for r in [root] + [r for r in self._roots() if r.path != root.path]:
-            if not r.git or (r is not root and _repo(r.path) != repo):
+            if not _is_git(r) or (r is not root and _repo(r.path) != repo):
                 continue
             try:
                 rc = root_config(r)
@@ -408,7 +423,7 @@ class Commits:
             return
         if not rc.commit:
             return
-        if not root.git:
+        if not _is_git(root):
             self._record("commit-not-git", address)
             return
         # The file the write went to: a link inside the root is staged as the link, not what it names.
@@ -505,7 +520,7 @@ class Commits:
             if now - self._polled.get(root.path, float("-inf")) < FETCH_SECONDS:
                 continue
             self._polled[root.path] = now             # before the config: a root that does not push is read once a minute too
-            if not root.git:
+            if not _is_git(root):
                 continue
             try:
                 rc = root_config(root)
@@ -732,7 +747,7 @@ class Commits:
         seen = set()
         for root in roots:
             try:
-                if not root.git or (repo := _repo(root.path)) in seen:
+                if not _is_git(root) or (repo := _repo(root.path)) in seen:
                     continue
                 seen.add(repo)
                 branch = _git(root.path, "symbolic-ref", "-q", "--short", "HEAD").stdout.strip()
@@ -778,7 +793,7 @@ class Commits:
                     self._swept.pop((repo, doc), None)
             return record, done
         for r in [root] + [r for r in self._roots() if r.path != root.path]:
-            if not r.git or (r is not root and _repo(r.path) != repo):
+            if not _is_git(r) or (r is not root and _repo(r.path) != repo):
                 continue
             try:
                 rc = root_config(r)

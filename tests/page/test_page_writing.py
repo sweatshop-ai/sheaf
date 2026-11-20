@@ -4177,7 +4177,7 @@ def test_enter_in_an_ordered_list_whose_items_start_with_a_box_is_an_ordinary_nu
     assert "new one" in saved and "<" not in saved.replace("<!--", "").replace("-->", "") and "☐" not in saved
 
 
-def test_enter_at_the_end_of_a_task_item_then_a_comment_on_the_new_words_deleted_leaves_an_orphan_and_no_error(tab):
+def test_enter_at_the_end_of_a_task_item_then_a_comment_on_the_new_words_deleted_keeps_the_comment_and_throws_nothing(tab):
     p, f = tab.page, tab.site.file
     errors = []
     p.on("pageerror", lambda e: errors.append(str(e)))
@@ -4189,15 +4189,20 @@ def test_enter_at_the_end_of_a_task_item_then_a_comment_on_the_new_words_deleted
     p.keyboard.type("word")
     p.wait_for_timeout(3500)                       # the autosave writes the item
     assert "- [ ] word" in f.read_text()
-    comment_on(tab, at("main li:has(input[type=checkbox]):nth-of-type(2)", "word", 0), at("main li:has(input[type=checkbox]):nth-of-type(2)", "word", None), "About this.")
-    p.keyboard.press(key("End"))                   # the selection the comment was made on is a caret again
+    p.click("#rd-mode button[data-m=save]")        # in Edit a selection opens no comment box
+    p.wait_for_selector("#rd-mode button[data-m=edit]")
+    li = "main li:has(input[type=checkbox]):nth-of-type(2)"
+    comment_on(tab, at(li, "word", 0), at(li, "word", None), "About this.")
+    p.click("#rd-mode button[data-m=edit]")
+    _caret_in_last_item(p, "word")
     for _ in range(4):
         p.keyboard.press("Backspace")
     p.wait_for_timeout(3500)                       # the autosave drops the emptied item that holds the anchor
     saved = f.read_text()
-    assert "☐" not in saved and "- [ ] word" not in saved and "- [ ] first task\n- [ ] other" in saved
-    (c,) = rdc.parse(saved).comments
-    assert c.body == "About this." and c.orphan
+    assert "☐" not in saved and "- [ ] word" not in saved
+    parsed = rdc.parse(saved)
+    (c,) = parsed.comments
+    assert c.body == "About this." and parsed.malformed == []
     p.reload()
     p.wait_for_selector("main input[type=checkbox]")
     assert errors == []

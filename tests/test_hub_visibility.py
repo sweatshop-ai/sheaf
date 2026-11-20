@@ -1452,3 +1452,16 @@ def test_editing_share_with_names_into_a_plain_share_while_the_box_is_ticked_ope
     after = (work / DOC).read_text(encoding="utf-8")
     assert "- [x] Share\n" in after and front_matter(after)["visibility"] == "project"
     assert team.get(f"/work/{DOC}", member=BOB).status == 200
+
+
+@pytest.mark.parametrize("by, seen_by_hub", [("Bob", False), ("Alice", True)])
+def test_the_doors_dot_for_a_member_is_the_one_of_their_index(team, browser, work, by, seen_by_hub):
+    """One dot for both (8.6, 9.9): a member's own thread is not unread to them, and what the hub account has seen is
+    not what the member has."""
+    team.hub.proxy = members(work, bob=["james-bob"])
+    address = put(team, work, "acme/tiroir/open.md", "# Open\n\n" + THREAD.replace('by="Alice"', f'by="{by}"') + "\n")
+    if seen_by_hub:
+        team.hub.seen.mark(address, "c1", 1)
+    [row] = [d for r in team.get("/_/index.json", member=BOB).json()["roots"] for d in r["docs"] if d["doc"] == address]
+    [mine] = [d for d in call(browser, "documents", token=Tokens().add("james-bob"))[1] if d.get("doc") == address]
+    assert (mine["dot"], mine["unread"]) == (row["dot"], row["unread"])

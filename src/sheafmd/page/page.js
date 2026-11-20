@@ -2604,7 +2604,7 @@ var create = function (ROOT, CFG, opts) {
     };
     var waited = waits[id];
     try {
-      await post('/_/cancel', { id: id });
+      await post('/_/cancel', { id: id, root: CFG.root });
       off();
       if (!waited) say('Tell ' + AGENT + ' cancelled. If it had arrived, the session was told to stop.');
     } catch (e) {

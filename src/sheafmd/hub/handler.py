@@ -2370,6 +2370,13 @@ class Handler:
         that is gone, or whose root was forgotten, has nothing left to stop, and the answer is ok."""
         doc = self._owned(req, req.body.get("doc"))
         cid = self._comment_id(req)
+        # A page sends the id of the root it was served from; a folder that took the name after a forget has
+        # another, and its thread of the same id is not this page's to stop. A root that holds no name now, and
+        # a caller with no page (the CLI, the door), are never refused (SPEC 8.5).
+        sent = req.body.get("root")
+        now = self._root_id(req, doc)
+        if isinstance(sent, str) and now is not None and now != sent:
+            raise Refuse(409, "another folder now holds this document's name: reload the page", answer={"root": now})
         # A Tell that waits for an agent ends here, the reader's own and no other's (9.8). A member has no
         # session to stop: theirs is only a waiting Tell.
         self.hub.waiting_tells.end(doc, cid, "cancelled", member=req.member, only_member=True)

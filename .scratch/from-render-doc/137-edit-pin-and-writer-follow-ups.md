@@ -68,3 +68,9 @@
 - [ ] **A bare URL in a table that pandoc writes as raw HTML lands as plain text in the `<td>`** (from #524, `edit.py` where the words come back): it is not escaped and is no longer a link. Probed for markup: it cannot carry live markup, because `_BARE_URL` takes no `<`, `>` or white space and a `&name;` in the text reads as the character, never as a tag; `"` and `'` are text there, and a probed `http://x.com/a\&amp;lt;img&amp;gt;` and `http://x.com/a\b&amp;c` came out as the page's own text. A minor loss of the link, not an injection.
 - [ ] **A bare URL ending in a mark GFM trims** (`.`, `)`, `,`) that holds a backslash goes through pandoc as before; pandoc writes `<url.>` and the unwrap at the end of `html_block_to_md` then drops the brackets, so the address loses the mark. Also fails on main.
 - [ ] **A link with a backslash in its address that is not a bare URL** (`[x](http://a\\b)`, other schemes): the address is written as pandoc leaves it, so `\\` reads back as one backslash and `\*` as a star. Also fails on main.
+
+## Found while fixing the shortcode follow-ups (PR #529)
+
+- [ ] **A literal `\:name:` is kept by name, not by place**: the block's source holding `\:smile:` once keeps the backslash on every `:smile:` of the page text, so a `:smile:` the reader types elsewhere in that block, meaning the emoji, is saved escaped.
+- [ ] **A failed emoji lookup writes the shortcode bare** (literal case) or as `:name:` (raw-HTML table): `_emoji_drawn` gives None on a pandoc failure, so the literal text can draw its emoji, or a raw table can show the name, until the next save.
+- [ ] **The table depth counts `<table` anywhere in the output**, also a literal `\<table` in a paragraph or code block, so a `\:name:` after it loses its backslash (same for the pipe and backslash tokens before it).

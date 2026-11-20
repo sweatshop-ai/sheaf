@@ -66,6 +66,8 @@
 ## Found while fixing the bare-URL and math items (PRs #517, #524)
 
 - [ ] **A bare URL in a table that pandoc writes as raw HTML lands as plain text in the `<td>`** (from #524, `edit.py` where the words come back): it is not escaped and is no longer a link. Probed for markup: it cannot carry live markup, because `_BARE_URL` takes no `<`, `>` or white space and a `&name;` in the text reads as the character, never as a tag; `"` and `'` are text there, and a probed `http://x.com/a\&amp;lt;img&amp;gt;` and `http://x.com/a\b&amp;c` came out as the page's own text. A minor loss of the link, not an injection.
+- [ ] **A written-out link whose text equals its address, right after a word character, becomes a bare URL** (from #524 round 3, `edit.py:722`): `[http://x.com/a\b](http://x.com/a\b)` placed straight after a letter is swapped for the bare URL, which GFM only autolinks at the start of a line or after a space, `*`, `_`, `~` or `(`; the link is lost.
+- [ ] **Test gap: a bare URL with a backslash in a table pandoc writes as raw HTML** (from #524 round 3, `tests/test_edit_backslash_math_url.py:43-55`): the test at line 46 covers a pipe table cell whose URL holds a `|`, so no swap happens; the raw-HTML table case above has no test.
 - [ ] **A bare URL ending in a mark GFM trims** (`.`, `)`, `,`) that holds a backslash goes through pandoc as before; pandoc writes `<url.>` and the unwrap at the end of `html_block_to_md` then drops the brackets, so the address loses the mark. Also fails on main.
 - [ ] **A link with a backslash in its address that is not a bare URL** (`[x](http://a\\b)`, other schemes): the address is written as pandoc leaves it, so `\\` reads back as one backslash and `\*` as a star. Also fails on main.
 

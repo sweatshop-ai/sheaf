@@ -6,7 +6,7 @@ ten times, so the triggers and the matrix are decided and these tests hold them:
   schedule, 01:00       ubuntu x {3.11, 3.13, 3.14}, on main
   workflow_dispatch     ubuntu, and macOS too only when started with `macos` ticked; one Python or all
 
-and where it runs: an ubuntu job of this repository on the organisation's runners (t-compute), the rest on GitHub's.
+and where it runs: an ubuntu job of this repository on the organisation's runners, the rest on GitHub's.
 """
 import os
 import subprocess
@@ -119,7 +119,7 @@ def test_the_matrix_is_ubuntu_on_every_trigger_and_macos_only_when_a_manual_run_
 
 
 def test_a_job_runs_the_whole_suite_unless_it_is_on_githubs_runners_for_a_fork_or_for_macos(text):
-    # On t-compute each Python is one job with the whole suite (an empty slice: tests/conftest.py then keeps every test).
+    # On the organisation's runners each Python is one job with the whole suite (an empty slice: tests/conftest.py then keeps every test).
     # A fork's pull request and a manual run with macOS keep six jobs, each with a sixth of the tests.
     job = section(section(text, "jobs"), "test", 2)
     assert "        " + SLICE in job.splitlines()
@@ -169,7 +169,7 @@ def test_an_ubuntu_job_of_this_repository_runs_on_the_organisations_runners_and_
     # The label is a function of the event and of the head of the pull request: a push, the nightly run, a manual run and
     # a pull request whose head is a branch of this repository are trusted; a fork's pull request is not, and macOS never
     # leaves GitHub's runners. The fork's own copy of this file can name any label, so the repository setting that holds
-    # a fork's workflows for approval is the guard; this expression only keeps an honest fork run off t-compute.
+    # a fork's workflows for approval is the guard; this expression only keeps an honest fork run off those runners.
     line = re.search(r"^\s*runs-on: (.*)$", text, flags=re.M).group(1)
     assert line == (f"${{{{ matrix.os == 'ubuntu-24.04' && {TRUSTED} && {ORG_RUNNERS} || matrix.os }}}}")
     assert "pull_request_target" not in text
@@ -184,7 +184,7 @@ def test_the_organisations_runners_run_sixteen_workers_that_steal_work_and_githu
 
 
 def test_a_self_hosted_job_installs_no_package_and_no_service_and_keeps_no_token(text):
-    # t-compute is a shared machine: the apt install of the browsers' libraries, the user service of tools/ci and the cache
+    # the organisation's machine is shared: the apt install of the browsers' libraries, the user service of tools/ci and the cache
     # (which names an image it has not) are for a GitHub-hosted runner only, and the checkout leaves no token behind.
     assert "          persist-credentials: false\n" in text
     hosted = "runner.environment == 'github-hosted'"

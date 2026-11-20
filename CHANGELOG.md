@@ -4,6 +4,50 @@ sheafmd is released by merging a pull request that sets `__version__` in `src/sh
 Its page assets are cached by version (`/_/mount.css?v=<version>`, immutable), so the version
 changes whenever an asset does. The entries name pull requests of sweatshop-ai/sheaf.
 
+## 1.3.0 (2026-11-20)
+
+Everything merged since 1.2.1 (#472), up to #515. Version 1.2.1 was never tagged; this release carries it.
+
+### Added
+
+- A page a job generates can be marked as generated, read-only for text edits: the mark is set, shown and guarded by the door (#486, #503, ticket 156).
+- The comment box moves by its band, with a mouse or a finger (#501, ticket 174).
+- Resolve in the comment box is a check mark, not a minus (#500, ticket 175).
+- The list action `Move to` is now `Belongs to`; a box still carrying the old word is read (#480, ticket 168).
+- `sheaf restart` announcements carry a token, so an older restart no longer clears a newer one's (#489, ticket 99).
+
+### Changed
+
+- A stop under way is never overridden by a newer command (#508, ticket 99).
+- The door lists a root's files with the hub's own lister, and a root past the cap gets a "more" row (#492, ticket 93).
+- One dot cascade serves the index page and the door (#504, ticket 93).
+- A door `create` by a member who is not in the project is refused with a sentence that names the project (#490, ticket 167).
+- A cancel from a page of another root is refused with 409 (#487, ticket 91).
+- A render with new settings no longer rebuilds the page under the hub's lock (#496, ticket 91).
+- A commit goes to the root the write went to; `root.git` is no longer fixed at registration (#495, ticket 162).
+- The page's check of an action line is a superset of the hub's (#507).
+- A kept new-comment draft is matched by a longer lead (#510, ticket 146).
+- SPEC section 13 is narrowed to the command line's output; the footer credit stays (#485, ticket 91).
+- Attach is offered only for a window whose client and project parts are valid slugs (#502).
+- A connection's owner is read from the kernel's socket diagnostics, with `/proc/net/tcp*` as the fallback; no visible change yet (#488, ticket 139).
+
+### Fixed
+
+- A page edit keeps the backslashes of the text, writes a shortcode back as the shortcode, and no longer turns a no-break space after a break in a table cell into a lost break (#475, #479, #482, ticket 137).
+- A paste from an online word processor keeps its bold and leaves no backslash paragraphs (#481, ticket 142).
+- Enter with the caret in a loose task item moves to the item's text (#476, ticket 144).
+- A task line inside code held by a list item is no action (#477, ticket 164).
+- A box ticked with another edit in the same save no longer reads shared on an owner-only sheaf (#511).
+- The hub does not publish a refresh of a file that moved under the read (#483, ticket 94).
+- A frozen leader tab hands the live stream over, and a crashed tab leaves the count when its lock frees (#484, #515, tickets 169, 170).
+- A listing abandoned by its caller ends without a BrokenPipeError in the log (#505).
+- `openat2` is used only on Linux: its syscall number ended the process with SIGSYS on macOS (#514, ticket 173).
+
+### Tests and tooling
+
+- CI: the browser install is bounded and its leftover `apt-get` ended (#493, #513); pushes to main share one concurrency group (#506); comment fixes (#499).
+- Page tests: wait for the Laptops list before Connect (#497); rewrite files whole (#498, ticket 94).
+
 ## 1.2.1 (2026-11-20)
 
 Everything merged since 1.2.0 (#465), up to #474.

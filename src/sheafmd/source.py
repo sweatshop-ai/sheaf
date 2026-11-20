@@ -198,10 +198,13 @@ def _write_atomic(p: Path, text: str):
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), mode)
         data = text.encode("utf-8")
         with os.fdopen(fd, "wb") as f:
-            os.fchmod(f.fileno(), mode)        # open() applies the umask
+            if hasattr(os, "fchmod"):          # not on native Windows before Python 3.13
+                os.fchmod(f.fileno(), mode)    # open() applies the umask
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
+        if not hasattr(os, "fchmod"):
+            os.chmod(tmp, mode)
         if CHECKS_THE_NAMES:
             _replace_if_ours(tmp, target, data)
         else:

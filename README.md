@@ -145,7 +145,9 @@ document you render. The hub listens on loopback only, checks the `Host` and `Or
 request, and talks only to a browser that holds its key; the key is never in a page, and another
 local user without it gets nothing but the hub's name and version. The sign-in link that
 `sheaf open` hands your browser works once, and on Linux only for a browser of your own user: another
-user who reads it from the process list is refused (macOS cannot check that). Raw HTML in a document is
+user who reads it from the process list is refused. On Linux the key and the sign-in cookie work only
+over a connection that belongs to your own user too (macOS and Windows cannot check that, and the hub says
+so when it starts). A browser reaching a remote hub through `ssh -L` is the user who logged in over ssh. Raw HTML in a document is
 sanitised and every page carries a content security policy, also for a page an agent wrote. An
 agent's token reaches the door's tools and nothing else: it cannot use the page's routes, run Tell,
 or add a folder, and it reads, makes and changes pages only when it was made with

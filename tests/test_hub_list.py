@@ -784,6 +784,16 @@ def test_an_action_inside_a_fence_that_holds_a_shorter_or_other_fence_is_no_acti
     assert [(w, short) for w, short, _, _ in s.actions] == [("Done", "")]
 
 
+@pytest.mark.parametrize("inner", ["  ```\n  - [ ] Approve\n  ```\n", "  <!--\n  - [ ] Approve\n  -->\n",
+                                   "\n      - [ ] Approve\n"])
+def test_an_action_inside_code_in_a_list_item_is_no_action_and_the_real_one_ticks(inner):
+    text = f"# T\n\n- item\n{inner}- [ ] Done\n"
+    s = the_list.read_rectoverso("a.md", text)
+    assert [w for w, *_ in s.actions] == ["Done"]
+    edit = the_list.tick_edit(text, 0, "Done")
+    assert edit is not None and "checked" in edit["html"]
+
+
 def test_an_action_inside_an_html_comment_is_no_action():
     s = the_list.read_rectoverso("a/b/c.md", "# A rectoverso\n\n<!--\n- [ ] Approve\n-->\n\n- [ ] Done\n")
     assert [(w, line) for w, _, line, _ in s.actions] == [("Done", 6)]

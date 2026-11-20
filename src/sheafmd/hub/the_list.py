@@ -338,9 +338,7 @@ def read_rectoverso(rel: str, text: str) -> Rectoverso:
         if b.kind == "heading" and title is None and own[0].startswith("# "):
             title = _title(own[0][2:])          # the first only, as the page's title: one left empty gives none
         elif b.kind == "list":
-            for k, line in enumerate(own):
-                if not (m := _ACTION_RE.fullmatch(line.removesuffix("\r"))):
-                    continue
+            for k, m in _drawn_actions(b):
                 box = (_word(m), m["short"] or "", b.start + k, _slug(m))
                 if m["mark"] == " ":
                     actions.append(box)
@@ -353,6 +351,25 @@ def read_rectoverso(rel: str, text: str) -> Rectoverso:
     return Rectoverso(rel, title or rel.rsplit("/", 1)[-1][:-3], issue, fm_text(fm, "assistant"),
                  fm_text(fm, "kind"), visibility.effective(fm), tuple(actions), visibility.sources(fm),
                  fm_text(fm, "owner"), fm_text(fm, "shared"), md_hash(text), "moved_to" in fm, tuple(pressed))
+
+
+_MAY_HOLD_CODE_RE = re.compile(r"```|~~~|<|^(?:\t| {4,})", re.M)     # a fence, an HTML block or comment, or an indented line
+
+
+def _drawn_actions(b):
+    """(line in the block, match) of each action line of the list block `b` whose mark draws a box. A fence, an HTML
+    block or indented code inside a list item stays part of the list block, and a task line in it is text, no action
+    (SPEC 9.10): the render says which marks are boxes, as `tick_edit` asks it. Asked only where the block has
+    something that could hold code, so a plain list costs no render."""
+    own = b.content.removesuffix("\n").split("\n")
+    check = _MAY_HOLD_CODE_RE.search(b.content) is not None
+    state = {m.start(): m.start(2) for m in task_marks(b.content)} if check else {}
+    offset = 0
+    for k, line in enumerate(own):
+        if m := _ACTION_RE.fullmatch(line.removesuffix("\r")):
+            if not check or ((at := state.get(offset)) is not None and box_number(b.content, at) is not None):
+                yield k, m
+        offset += len(line) + 1
 
 
 def _title(heading: str) -> str:
@@ -416,9 +433,8 @@ def _boxes(text: str):
     the actions are read."""
     for b in split_md_blocks(text):
         if b.kind == "list":
-            for line in b.content.removesuffix("\n").split("\n"):
-                if m := _ACTION_RE.fullmatch(line.removesuffix("\r")):
-                    yield m
+            for _, m in _drawn_actions(b):
+                yield m
 
 
 def tick_edit(text: str, n: int, word: str, release: bool = False):

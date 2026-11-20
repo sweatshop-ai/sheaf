@@ -25,7 +25,7 @@ def docs(browser, **args):
 
 
 def names(rows):
-    return sorted(r["doc"] for r in rows)
+    return sorted(r["doc"] for r in rows if "doc" in r)
 
 
 @pytest.fixture
@@ -270,4 +270,55 @@ def test_a_document_in_a_git_directory_is_not_listed_whether_its_root_is_a_git_r
     token = Tokens().add("codex") if who == "token" else None
     # where git gives no answer a git root lists nothing it has not vouched for (8.6); a plain folder is walked
     listed = ["wiki/a.md", "wiki/sub/b.md"] if how != "runs" else ["proj/a.md", "proj/b.md", "wiki/a.md", "wiki/sub/b.md"]
-    assert names(docs(browser, token=token)) == listed
+    rows = docs(browser, token=token)
+    assert names(rows) == listed
+    # ... and the git root that listed nothing is not silent about it
+    assert [r for r in rows if "doc" not in r] == ([{"root": "proj", "closed": "git gave no answer"}] if how != "runs" else [])
+
+
+# ── a root the door cannot finish says so (8.6) ──────────────────────────────
+
+@pytest.mark.parametrize("how", GIT_FAILS)
+@pytest.mark.parametrize("who", ["key", "token"])
+def test_a_git_root_that_git_cannot_answer_has_a_row_of_its_own(browser, tmp_path, monkeypatch, who, how):
+    """An agent must not take the silence of a root for nothing waiting there."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    git(proj, "init", "-q")
+    browser.hub.roots.for_document(doc(proj, "a.md"))
+    comment(proj / "a.md")
+    git_fails(how, monkeypatch, tmp_path)
+    token = Tokens().add("codex") if who == "token" else None
+    assert docs(browser, token=token) == [{"root": "proj", "closed": "git gave no answer"}]
+
+
+def test_a_plain_folder_past_the_time_budget_says_where_it_stopped(browser, tmp_path, monkeypatch):
+    """The walk stops at the budget; what it found before is listed, and the root says it was left unfinished."""
+    import sheafmd.mcp as mcp
+    root = tmp_path / "wiki"
+    for i in range(5):
+        doc(root, f"{i}.md")
+    browser.hub.roots.for_document(root / "0.md")
+    comment(root / "0.md")
+    monkeypatch.setattr(mcp, "DOCUMENTS_SECONDS", -1)
+    assert docs(browser) == [{"root": "wiki", "stopped": "time budget reached"}]
+
+
+def test_a_root_whose_files_are_opened_past_the_time_budget_says_so(browser, tmp_path, monkeypatch):
+    """The walk finishes in time but the opening of the files does not: the ones opened are listed."""
+    import sheafmd.mcp as mcp
+    root = tmp_path / "wiki"
+    for i in range(3):
+        doc(root, f"{i}.md")
+        comment(root / f"{i}.md")
+    browser.hub.roots.for_document(root / "0.md")
+    real = mcp.list_documents
+    monkeypatch.setattr(mcp, "list_documents", lambda src, cap=None, deadline=None: real(src, cap=cap))
+    monkeypatch.setattr(mcp, "DOCUMENTS_SECONDS", -1)
+    assert docs(browser) == [{"root": "wiki", "stopped": "time budget reached"}]
+
+
+def test_the_description_of_more_says_it_is_a_lower_bound():
+    import sheafmd.mcp as mcp
+    text = mcp.TOOLS["documents"]["description"]
+    assert "at least" in text and "stopped" in text

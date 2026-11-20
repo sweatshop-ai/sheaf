@@ -1,6 +1,8 @@
 # 168: Rename the List's "Move to <slug>" to "Belongs to <slug>"
 
-**Status:** open
+**Claimed by:** Karim 2026-11-20 15:56
+
+**Status:** in-progress
 
 **Blocked by:** none
 

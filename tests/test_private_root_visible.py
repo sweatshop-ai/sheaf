@@ -1335,3 +1335,18 @@ def test_the_comment_cache_is_keyed_by_the_file_opened(world, monkeypatch):
     _person_tells(w)                # `touch` looks only while an index stream is open
     index.touch(w.address)
     assert str(listed_path) not in index._cache
+
+
+def test_documents_counts_the_overflow_of_a_members_private_root_to_that_member_alone(world, monkeypatch):
+    """`more` of the door's `documents` tells a member what their own private root left out, summed under the list root's
+    name as their files are listed under it (rule D); another member, and a token bound to nobody, are told none of it.
+    A private root is listed under the list root only, which is the hub's own and no other member's loose root, so
+    the overflow is never dropped for the root it is listed under."""
+    import sheafmd.hub.roots as roots
+    w = world
+    monkeypatch.setattr(roots, "COUNT_LIMIT", 3)
+    for i in range(5):
+        (w.two.private_repo / f"loose{i}.md").write_text("# loose\n", encoding="utf-8")
+    answers = {n: call(w.door, "documents", token=w.tokens[n], open_only=False) for n in ("tok-a", "tok-b", "loose")}
+    assert answers["tok-a"] == (False, [{"root": w.root.name, "more": 2}])
+    assert answers["tok-b"] == (False, []) and answers["loose"] == (False, [])

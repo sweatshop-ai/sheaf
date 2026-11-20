@@ -84,6 +84,8 @@ class Found(NamedTuple):
 class Listing(NamedTuple):
     docs: list                  # [Found], sorted by path
     more: int                   # documents left out at the cap
+    failed: bool = False        # a git root that git gave no answer for: it lists nothing, and says so
+    stopped: bool = False       # the walk or the count ran past its deadline: the list is what was met before
 
 
 def _new_id() -> str:
@@ -629,10 +631,16 @@ def _kept(root: Root) -> Callable[[str, bool], bool]:
     return kept
 
 
-def _walk(top: Path) -> Iterator[str]:
+class _Late(Exception):
+    """The deadline of a listing passed."""
+
+
+def _walk(top: Path, deadline: float | None = None) -> Iterator[str]:
     """The name of every markdown file under `top`, in walk order, skipping `.git`, `node_modules`
-    and every folder whose name starts with `.` (D15)."""
+    and every folder whose name starts with `.` (D15). `_Late` when `deadline` passes between two folders."""
     for folder, dirs, files in os.walk(top):
+        if deadline is not None and time.monotonic() > deadline:
+            raise _Late
         dirs[:] = sorted(d for d in dirs if d != "node_modules" and not d.startswith("."))
         under = os.path.relpath(folder, top).replace(os.sep, "/")
         for name in sorted(files):
@@ -640,32 +648,40 @@ def _walk(top: Path) -> Iterator[str]:
                 yield name if under == "." else f"{under}/{name}"
 
 
-def _capped(top: Path, names: Iterable[str], kept: Callable[[str, bool], bool], cap: int = LIST_CAP) -> Listing:
+def _capped(top: Path, names: Iterable[str], kept: Callable[[str, bool], bool], cap: int = LIST_CAP,
+            deadline: float | None = None) -> Listing:
     """The first LIST_CAP of `names` that are documents of the root: what `resolve` would serve,
     a regular file inside it, and kept by `kept`; the rest of them counted (D15), up to
-    `COUNT_LIMIT`, where the count stops."""
-    docs, more, folders = [], 0, {}
-    for rel in names:
-        if not (_servable(rel) and (found := _stat_inside(top, rel, folders)) and kept(rel, found[1])):
-            continue
-        if len(docs) < cap:
-            docs.append(Found(rel, found[0]))
-        else:
-            more += 1
-            if more >= COUNT_LIMIT:
-                break
-    return Listing(sorted(docs, key=lambda d: d.rel), more)
+    `COUNT_LIMIT`, where the count stops, as it does at `deadline`, which `stopped` says."""
+    docs, more, folders, stopped = [], 0, {}, False
+    try:
+        for rel in names:
+            if deadline is not None and time.monotonic() > deadline:
+                raise _Late
+            if not (_servable(rel) and (found := _stat_inside(top, rel, folders)) and kept(rel, found[1])):
+                continue
+            if len(docs) < cap:
+                docs.append(Found(rel, found[0]))
+            else:
+                more += 1
+                if more >= COUNT_LIMIT:
+                    break
+    except _Late:
+        stopped = True
+    return Listing(sorted(docs, key=lambda d: d.rel), more, stopped=stopped)
 
 
-def list_documents(root: Root, cap: int | None = None) -> Listing:
+def list_documents(root: Root, cap: int | None = None, deadline: float | None = None) -> Listing:
     """The markdown files of a root, sorted by path. A git root asks git (tracked and
     untracked, minus gitignored; nothing when git gives no answer); any other folder is walked.
     What `resolve` would refuse is not listed, nor what `document` would: a file that 8.2 keeps
-    from the root for lying in a git directory, which is its own folder's root (rule 3)."""
+    from the root for lying in a git directory, which is its own folder's root (rule 3). Past `deadline`
+    (a `time.monotonic()` value) the walk and the count stop, and the listing says so."""
     top = Path(config.realpath(root.path))
     if not os.path.isdir(top):              # gone, or the hub may not enter it (`Root.closed`)
         return Listing([], 0)
     names = _git_names(top) if root.git else _NOT_A_REPO
     if names is None:                      # git gave no answer: list nothing it has not vouched for
-        return Listing([], 0)
-    return _capped(top, _walk(top) if names is _NOT_A_REPO else sorted(set(names)), _kept(root), LIST_CAP if cap is None else cap)
+        return Listing([], 0, failed=True)
+    return _capped(top, _walk(top, deadline) if names is _NOT_A_REPO else sorted(set(names)), _kept(root),
+                   LIST_CAP if cap is None else cap, deadline)

@@ -22,7 +22,7 @@ CI = WORKFLOWS / "ci.yml"
 MATRIX_OS = ("os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.macos && "
              "'[\"ubuntu-24.04\",\"macos-26\"]' || '[\"ubuntu-24.04\"]') }}")
 TRUSTED = "(github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)"
-T_COMPUTE = "fromJSON('[\"self-hosted\",\"linux\",\"t-compute\"]')"
+T_COMPUTE = "fromJSON('[\"self-hosted\",\"linux\",\"sheaf-ci\"]')"
 RUNS_ON = f"runs-on: ${{{{ matrix.os == 'ubuntu-24.04' && {TRUSTED} && {T_COMPUTE} || matrix.os }}}}"
 SLICED = ("((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) || "
           "(github.event_name == 'workflow_dispatch' && inputs.macos))")

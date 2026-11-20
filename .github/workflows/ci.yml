@@ -65,7 +65,7 @@ jobs:
     # request from a fork, and macOS always, run on GitHub's. The label of the runner is chosen by the workflow file the
     # run reads, and a fork's pull request reads the fork's: so the repository setting that holds a fork's workflows until
     # someone has read them (all external contributors) is what keeps a fork off t-compute, not this line (SPEC 18).
-    runs-on: ${{ matrix.os == 'ubuntu-24.04' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","t-compute"]') || matrix.os }}
+    runs-on: ${{ matrix.os == 'ubuntu-24.04' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","linux","sheaf-ci"]') || matrix.os }}
     # An ubuntu run takes about 25 minutes; 45 still stops a hang. A macOS runner (3 cores, an M1 VM) runs the
     # same suite about four times slower: a process start costs 50 ms there and pandoc's 210 ms, against 1 and
     # 4 ms on ubuntu (run 40997993309), and the tests start thousands. Its non-page tests alone take about

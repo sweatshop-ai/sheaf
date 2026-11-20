@@ -6,7 +6,9 @@
 
 **Blocked by:** None.
 
-**Status:** open
+**Status:** done
 
-- [ ] The waits of this test no longer pass a string to `wait_for_function`
-- [ ] The test no longer fails when the runner is slow (run it 20 times on t-compute under load)
+- [x] The waits of this test no longer pass a string to `wait_for_function`
+- [x] The test no longer fails when the runner is slow (run it 20 times on t-compute under load)
+
+  Evidence 2026-11-20: already on main in b184c39f (function predicates; tests/test_page_predicates.py guards it); both tests run 20 times in a row on t-compute at origin/main 3f5271bd (load 64-83 on 32 cores): 20 of 20 runs passed (3 tests each, the writing one in two parametrized cases), none failed.

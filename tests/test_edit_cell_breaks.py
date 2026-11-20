@@ -34,6 +34,20 @@ def test_a_break_between_words_is_kept():
     assert "x<br>z" in saved_cell("x<br>z")
 
 
-def test_a_table_with_a_backslash_drops_the_break_and_the_space_at_the_end_of_a_cell():
-    row = saved_cell("x<br>\u00a0", "| a | b |\n|---|---|\n| x | a\\\\b |")
-    assert "<br>" not in row and "\u00a0" not in row
+def saved_table(html, src):
+    out, rep = rde.apply_edits("# Title\n\n" + src + "\n", [{"i": 1, "html": html}])
+    assert rep["skipped"] == []
+    return out[len("# Title\n\n"):]
+
+
+def test_a_table_with_a_backslash_stays_a_pipe_table_with_the_cut_in_its_cell():
+    src = "| a | b |\n|---|---|\n| x | a\\\\b |"
+    html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", ">x<br>\u00a0<")
+    out = saved_table(html, src)
+    assert "<table" not in out and "<br" not in out
+
+
+def test_a_break_in_code_in_a_cell_stays_a_pipe_table():
+    src = "| a |\n|---|\n| x |"
+    html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", "><code>x<br>\u00a0</code><")
+    assert "<table" not in saved_table(html, src)

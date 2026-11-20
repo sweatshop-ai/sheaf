@@ -552,13 +552,16 @@ def _without_placeholder_breaks(fragment: str) -> str:
             if el is None or el.name == "[document]" or el.name in _BREAK_ENDS:
                 return el
 
+    table_is_taken = "\\" not in fragment and not SHORTCODE_RE.search(fragment)
     cleared = []
     for br in reversed(soup.find_all("br")):
         block = block_ended_by(br)
         # Python's strip() takes a no-break space for white space and the page does not: one after a break
-        # in a cell is Enter's cut, which _cell_breaks sorts from a typed one.
-        if (block is not None and block.name in ("td", "th")
-                and type(br.next_sibling) is NavigableString and br.next_sibling.startswith("\xa0")):
+        # in a cell is Enter's cut, which _cell_breaks sorts from a typed one: only where it takes the table
+        # (not with a backslash or a shortcode in it) and the break is not the code's.
+        if (block is not None and block.name in ("td", "th") and table_is_taken
+                and type(br.next_sibling) is NavigableString and br.next_sibling.startswith("\xa0")
+                and not br.find_parent(["code", "pre"])):
             continue
         if block is not None and not any(block is b for b in cleared):
             cleared.append(block)

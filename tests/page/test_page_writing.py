@@ -1955,9 +1955,11 @@ def test_the_keys_that_wrapped_a_paragraph_in_raw_html_save_plain_paragraphs(fro
         assert rows[0]["doc"].endswith("plan.md") and rows[0]["source"] == "hub"
 
 
-# A paste puts the clipboard's text/html into the paragraph. Each clipboard here is a synthetic text/html written
-# by hand in the shape of its source (a mail client, a word processor, a web page); none was copied from the real
-# program, and the test says so by its ids.
+# A paste puts the clipboard's text/html into the paragraph. The ids say where each clipboard comes from:
+# `synthetic-*` was written by hand in the shape of its source (a mail client, a word processor, a web page);
+# `captured-*` is the text/html a real program put on the clipboard, read in the browser on 2026-11-20 and scrubbed
+# (the words replaced, the structure kept); `reconstructed-*` is the structure of a real program's clipboard as the
+# owner described it, never recorded (the capture listener was lost each time a paste saved the page, ticket 142).
 PASTED = {
     "synthetic-mail-shaped": ('<meta charset="utf-8"><div dir="ltr" style="font-family:Arial"><span style="font-size:12pt">'
                     'Pasted <b>bold</b> and <a href="https://example.com/x">a link</a>.</span></div>'
@@ -1967,6 +1969,20 @@ PASTED = {
                               '<p dir="ltr" style="line-height:1.38"><span style="font-size:11pt;font-weight:400">'
                               'Doc one.</span></p><p dir="ltr"><span style="font-size:11pt">Doc two.</span></p></b>',
                               "Doc one.\n\nDoc two.\n"),
+    # A web mail client: a div per line, an empty line as <div><br></div>, a list with its sublist written inside the
+    # <ul> and not inside an <li>.
+    "captured-web-mail": ('<div>Pasted line:</div><div><br></div><div><ul><li>one</li><li>two</li><li>three</li>'
+                          '<ul><li>three one</li></ul></ul></div>',
+                          "line:\n\n- one\n- two\n- three\n  - three one\n"),
+    # An online word processor: the wrapper <b> that says it is not bold, bold as a styled span, an empty paragraph
+    # as a <br> between two <p>.
+    "reconstructed-online-word-processor": ('<meta charset="utf-8"><b style="font-weight:normal" id="docs-internal-guid-1">'
+                          '<p dir="ltr" style="line-height:1.38"><span style="font-size:11pt;font-weight:700">Two</span>'
+                          '<span style="font-size:11pt"> paragraphs, this is </span><span style="font-size:11pt;font-weight:700">'
+                          'bold</span></p><br><p dir="ltr"><span style="font-size:11pt">Here is a link to </span>'
+                          '<a href="https://example.com/"><span style="font-size:11pt;text-decoration:underline">the page</span></a>'
+                          '<span>.</span></p></b>',
+                          "this is **bold**\n\nHere is a link to [the page](https://example.com/).\n"),
     "synthetic-web-page-shaped": ('<h2 class="title" style="color:red">A heading</h2><p class="lead" style="margin:0">'
                         'Web <em>text</em> <span class="x">here</span>.</p>',
                         "## A heading\n\nWeb *text* here.\n")}

@@ -6,6 +6,7 @@ two ways of failing on purpose: the netlink socket that cannot be had, and a mac
 hub's own uid nothing."""
 import os
 import socket
+import struct
 import sys
 
 import pytest
@@ -88,12 +89,31 @@ def test_a_kernel_that_will_not_answer_over_netlink_is_asked_in_proc(ends, monke
 
 
 @linux
-def test_a_kernel_that_answers_nothing_over_netlink_is_believed_and_proc_is_not_asked(ends, monkeypatch, tmp_path):
+def test_a_netlink_answer_that_is_cut_short_is_asked_in_proc(ends, monkeypatch):
+    cli, acc = pair()
+    ends += [cli, acc]
+
+    def cut(*a, **k):
+        raise struct.error("unpack requires a buffer of 4 bytes")
+    monkeypatch.setattr(peer, "_netlink_owners", cut)
+    assert peer.owners(conn_of(cli)) == [ME]
+
+
+@linux
+def test_a_kernel_that_finds_nothing_over_netlink_is_asked_again_in_proc(ends, monkeypatch):
+    """The kernel's "no such socket" is also what a host with no tcp_diag handler answers."""
     cli, acc = pair()
     ends += [cli, acc]
     monkeypatch.setattr(peer, "_netlink_owners", lambda local, remote: [])
-    monkeypatch.setattr(peer, "PROC_NET", tmp_path / "no-such-folder")
-    assert peer.owners(conn_of(cli)) == []
+    assert peer.owners(conn_of(cli)) == [ME]
+
+
+@pytest.mark.skipif(ME == 0, reason="root is the hub's own user here")
+def test_root_is_not_the_hubs_own_user(monkeypatch):
+    monkeypatch.setattr(peer, "PLATFORM", "linux")
+    monkeypatch.setattr(peer, "owners", lambda conn: [0])
+    no = peer.check(peer.Conn(("127.0.0.1", 50000), ("127.0.0.1", 27419)))
+    assert no is not None and no.kind == peer.OTHER_USER
 
 
 def test_the_self_test_passes_where_the_hub_can_read_its_own_connection():

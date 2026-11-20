@@ -12,8 +12,8 @@
 #      uv.lock, so no browser of the old image is restored.
 #   5. Start a manual run on the branch with python=all and macos ticked:
 #      `gh workflow run ci.yml --ref <branch> -f python=all -f macos=true`.
-#      The macOS job must fail on nothing that main's last manual macOS run passed (macOS is not green yet,
-#      see the matrix); once it is green, it must stay green.
+#      The macOS job must fail on nothing that main's last manual macOS run passed (main's run 44776626154 was
+#      red on every Python, see the matrix); once it is green, it must stay green.
 #   6. Merge only when both runs are green, page tests included. 24.04 stays supported by GitHub for years and
 #      its retirement is announced with brownouts, so there is no hurry to move before Playwright is ready.
 name: CI
@@ -68,8 +68,8 @@ jobs:
         # ubuntu-24.04, never ubuntu-latest: that label moved to 26.04 on 2026-10-29 and Playwright 1.58 refused
         # it, so the page tests broke with no change of ours. The image moves only in a pull request.
         # macos-26, never macos-latest, for the same reason: it is the image macos-latest ran on 2026-10-30
-        # (macos-26-arm64, run 40980723217). That run was red on sheaf's side (test_hub_recover and others), so
-        # no macOS run has been green yet; the pin keeps the image from moving under that work.
+        # (macos-26-arm64, run 40980723217). macOS has been green once, on a branch (run 41025108862, py3.13),
+        # and red on main (run 44776626154, every Python); the pin keeps the image from moving under that work.
         os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.macos && '["ubuntu-24.04","macos-26"]' || '["ubuntu-24.04"]') }}
         python: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.python != 'all' && format('["{0}"]', inputs.python) || (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && '["3.11","3.13","3.14"]' || '["3.13"]') }}
         # Each Python runs as six jobs, each with a sixth of the tests (SHEAF_TEST_SLICE, tests/conftest.py):

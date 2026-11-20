@@ -54,8 +54,8 @@
 
 ## Found while fixing the backslash item (PR #475), both also fail on main
 
-- [ ] **A backslash in the text of a bare-URL link.** `http://x.com/a\b` as an autolink saves as `[http://x.com/a\\\b](http://x.com/a\b)`; fix idea: treat text of an `<a>` whose text equals its href as raw.
-- [ ] **Inline math with a backslash.** `$a\\b$` saves as `<span class="math inline">\$a\\b\$</span>`, and the page text changes.
+- [x] **A backslash in the text of a bare-URL link.** *(merged: #524, ba789b15)* `http://x.com/a\b` as an autolink saves as `[http://x.com/a\\\b](http://x.com/a\b)`; fix idea: treat text of an `<a>` whose text equals its href as raw.
+- [x] **Inline math with a backslash.** *(merged: #524, ba789b15)* `$a\\b$` saves as `<span class="math inline">\$a\\b\$</span>`, and the page text changes.
 - [x] **A backslash right before a comment or footnote citation.** *(merged: #517, 811f20b6; tests/test_edit_backslash_placeholder.py, 3 of 7 red before the fix)* `apply_edits` swaps them for `RDCMT…` placeholders, which start with a letter, so the backslash is left bare and escapes what comes back: `a\\<!-- c -->here` saves as `a\<!-- c -->there` (comment shows as text), `x\\[^1] here` loses the citation. Fix: always tokenize a backslash directly before a placeholder (`edit.py:1485`, `:1503-1505`).
 - [ ] **`\:smile:` typed on the page saves as `\\:smile:` and renders as an emoji** (same family as the emoji item).
 - [ ] **Emoji in a table pandoc writes as raw HTML shows as text** (`:+1:`, from #479): restore the emoji character there, as the backslash and pipe tokens do by depth (`edit.py` end of `html_block_to_md`).

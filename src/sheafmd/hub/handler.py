@@ -1308,7 +1308,7 @@ class Handler:
                 gone = moved[0] if moved else self._placed(e, ticked)
                 if got["changed"] and not got.get("again"):
                     moved.clear()
-                    self.hub.committed(e.address, req.member, "edit", gone=gone)
+                    self.hub.committed(e.address, req.member, "edit", gone=gone, root_id=e.root_id)
                     self._page_wrote(req, e, "save")
                 # The buttons of the text written, under its lock (10.11): the page numbers its presses by them.
                 h, text = e.live.current()
@@ -1380,7 +1380,7 @@ class Handler:
                 self.hub.index.touch(e.address)
                 gone = moved[0] if moved else self._placed(e, ticked)
                 moved.clear()
-                self.hub.committed(e.address, req.member, "untick" if release else "tick", gone=gone)
+                self.hub.committed(e.address, req.member, "untick" if release else "tick", gone=gone, root_id=e.root_id)
                 self._page_wrote(req, e, "tick")
         if "Stop James" in ticked:
             self._stop_james(req, e)
@@ -1468,7 +1468,7 @@ class Handler:
                 raise Refuse(400, "the text holds a character that cannot be written to the .md") from None
             if after != read:               # an unticked line of the page's own wrote nothing here
                 self.hub.index.touch(e.address)
-                self.hub.committed(e.address, req.member, "edit")
+                self.hub.committed(e.address, req.member, "edit", root_id=e.root_id)
                 self._page_wrote(req, e, "share")
         try:
             edit = the_list.share_edit(e.live.current()[1])
@@ -1596,7 +1596,7 @@ class Handler:
         if not undone:
             return
         self.hub.index.touch(e.address)
-        self.hub.committed(e.address, req.member, "edit")
+        self.hub.committed(e.address, req.member, "edit", root_id=e.root_id)
         self._page_wrote(req, e, "share")
 
     def _mover(self, e, ticked):
@@ -1629,7 +1629,7 @@ class Handler:
             yield
         finally:
             if moved:
-                self.hub.committed(e.address, member, what, gone=moved.pop())
+                self.hub.committed(e.address, member, what, gone=moved.pop(), root_id=e.root_id)
 
     def _placed(self, e, ticked) -> str | None:
         """After a write that shared the rectoverso or withdrew its Share, under the lock of its name, its file goes to
@@ -1805,7 +1805,7 @@ class Handler:
             with place.held(self.hub, e.address):       # the write and its commit, one step (9.11)
                 e.live.comment("reply", {"id": thread, "body": self.STOPPED}, None, by=name, announce=True)
                 self.hub.index.touch(e.address)
-                self.hub.committed(e.address, member, "comment")
+                self.hub.committed(e.address, member, "comment", root_id=e.root_id)
         except NotFound:
             return "the rectoverso is gone"
         except (rdc.AnchorError, rdc.NoComment, KeyError, ValueError) as ex:
@@ -2038,7 +2038,7 @@ class Handler:
                 return
             if moved:
                 self.hub.index.touch(address)
-                self.hub.committed(address, by=caller.display, what="session")
+                self.hub.committed(address, by=caller.display, what="session", root_id=e.root_id)
         self._drop_waiting(address, seq)
         if moved:
             self.hub.record("session-recorded", address, transcript=sid, by="james")
@@ -2125,7 +2125,7 @@ class Handler:
             except work.NotRewritten as ex:
                 raise Refuse(409, str(ex)) from None
             self.hub.index.touch(e.address)
-            self.hub.committed(e.address, req.member, "fork")
+            self.hub.committed(e.address, req.member, "fork", root_id=e.root_id)
         via = {"via": "code", "code": code.id} if code is not None else {}
         if code is not None:
             self.hub.record("code-used", address, code=code.id, route="sessions", **self._who(req))
@@ -2212,7 +2212,7 @@ class Handler:
                 raise Refuse(400, str(ex)) from None
             self.hub.index.touch(e.address)
             if not snap.get("again") and snap.pop("wrote", True):   # a write that changed nothing commits nothing
-                self.hub.committed(e.address, member, "comment")
+                self.hub.committed(e.address, member, "comment", root_id=e.root_id)
         if not snap.get("again") and (op == "delete" or (op == "status" and b.get("status") == "resolved")
                                       or (op == "reply" and b.get("resolve"))):
             self.hub.waiting_tells.end(e.address, b["id"], "cancelled", reason="closed")   # nothing left to answer (9.8)

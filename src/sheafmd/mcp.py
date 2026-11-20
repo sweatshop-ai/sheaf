@@ -526,7 +526,9 @@ class Door:
         root = self.hub.roots.get(Address.parse(real).root)
         # Only a page Shared with the caller has an opaque name: a made-up name in another's root is none, and writes none.
         told = self.hub.alias(member, real) if root is not None and self.hub.shared_with(member, root, real) else doc
-        return text.replace(real, told) if told != real else text
+        if told == real:
+            return text
+        return re.sub(rf"(?<![\w/-]){re.escape(real)}(?![\w/-]|\.\w)", lambda _: told, text)    # the whole address, not the start of a longer name
 
     def _told(self, address: str, caller: Caller) -> dict:
         """`doc` and `url` of the page at `address` as `caller` is told of it: a page Shared with its member by another is told
@@ -1312,8 +1314,7 @@ class Door:
             try:
                 before, _ = update_beneath(top.path, rel, change, move=move)
             except BaseException:
-                if address in self.hub.writes._own:     # a write that failed after it was expected leaves nothing to expect
-                    self.hub.writes.told(address)
+                self.hub.writes.told(address)           # a write that failed after it was expected leaves nothing to expect
                 raise
         except (OSError, UnicodeDecodeError, NotFound):
             raise ToolError(f"{address} could not be written.", "not written") from None

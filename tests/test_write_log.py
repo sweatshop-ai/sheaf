@@ -392,3 +392,12 @@ def test_an_undo_keeps_a_renamed_lines_address_and_brings_back_the_lines_the_lan
     assert [l.writer for l in log.lines("new.md")] == ["Bea", "Cal", "Dan"]
     assert {l.address for l in log.lines("new.md")} == {"new.md"}
     assert [l.writer for l in WriteLog(keep=3).lines("new.md")] == ["Bea", "Cal", "Dan"]
+
+
+def test_the_last_line_and_the_last_way_back_come_from_one_look_at_the_log():
+    log = WriteLog()
+    log.add(address="a.md", writer="Ada", place="page", via="save", session=SESSION)
+    log.add(address="a.md", writer="Bea", place="page", via="save")
+    last, way_back = log.last_and_way_back("a.md")
+    assert (last, way_back) == (log.last("a.md"), log.last_way_back("a.md")) and (last.writer, way_back.writer) == ("Bea", "Ada")
+    assert log.last_and_way_back("none.md") == (None, None)

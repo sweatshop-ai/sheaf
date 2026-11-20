@@ -14,6 +14,7 @@ import sheafmd.comments as rdc
 from sheafmd.edit import ticked_html
 from sheafmd.blocks import split_md_blocks
 from sheafmd.hub import proxy, roots, the_list
+from sheafmd.mcp import Caller
 from sheafmd.hub.state import Tokens
 from sheafmd.hub.visibility import audience
 from sheafmd.source import md_hash
@@ -623,6 +624,15 @@ def test_an_error_about_a_shared_page_names_it_by_its_opaque_name(team, monkeypa
     name = told(team, BOB, doc)
     bad, why = call(team, "bob", "update", doc=name, text="# Deep plan\n", expected_hash="0" * 16)
     assert bad and "private-matters" not in why
+
+
+def test_an_error_text_swaps_only_the_whole_address_it_names_for_the_opaque_name(team):
+    doc = deep(team)
+    name = told(team, BOB, doc)
+    caller = Caller("Claude Code (Bob)", token=next(r for r in Tokens().list() if r.name == "bob-claude"))
+    text = f"{doc}.bak is not {doc}, nor x{doc}, nor {doc}y; see {doc}."
+    got = team.door.handler.door._told_text(text, {"doc": name}, caller)
+    assert got == f"{doc}.bak is not {name}, nor x{doc}, nor {doc}y; see {name}."
 
 
 def test_a_recipients_update_is_told_by_the_opaque_name_and_written_to_the_log_by_the_real_one(team):

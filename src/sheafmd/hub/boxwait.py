@@ -123,11 +123,10 @@ class BoxWaits:
             if state == "failed":
                 self._end(doc, thread)
                 return "failed", was
-            d.state = state
-            if state == "answered":         # done: the drop ends with no Tell-wait toast, and a member's orange goes
-                if was == "delivered":
-                    self._cleared.add(doc)
+            if state == "answered":         # done: the drop ends with no Tell-wait toast, and a member's orange goes (`_end` clears a delivered one)
                 self._end(doc, thread)
+            else:
+                d.state = state
             return "state", was
 
     def end(self, doc: str, thread: str) -> bool:

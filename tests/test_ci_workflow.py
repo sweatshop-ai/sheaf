@@ -22,8 +22,8 @@ CI = WORKFLOWS / "ci.yml"
 MATRIX_OS = ("os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.macos && "
              "'[\"ubuntu-24.04\",\"macos-26\"]' || '[\"ubuntu-24.04\"]') }}")
 TRUSTED = "(github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)"
-T_COMPUTE = "fromJSON('[\"self-hosted\",\"linux\",\"sheaf-ci\"]')"
-RUNS_ON = f"runs-on: ${{{{ matrix.os == 'ubuntu-24.04' && {TRUSTED} && {T_COMPUTE} || matrix.os }}}}"
+ORG_RUNNERS = "fromJSON('[\"self-hosted\",\"linux\",\"sheaf-ci\"]')"
+RUNS_ON = f"runs-on: ${{{{ matrix.os == 'ubuntu-24.04' && {TRUSTED} && {ORG_RUNNERS} || matrix.os }}}}"
 SLICED = ("((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) || "
           "(github.event_name == 'workflow_dispatch' && inputs.macos))")
 SLICE = ("slice: ${{ fromJSON(" + SLICED + " && '[\"1/6\",\"2/6\",\"3/6\",\"4/6\",\"5/6\",\"6/6\"]' || '[\"\"]') }}")
@@ -165,19 +165,19 @@ def test_one_job_asks_for_a_runner_and_nothing_else_does(text):
     assert keys(section(text, "jobs"), 2) == ["test"]
 
 
-def test_an_ubuntu_job_of_this_repository_runs_on_t_compute_and_a_fork_and_macos_run_on_githubs(text):
+def test_an_ubuntu_job_of_this_repository_runs_on_the_organisations_runners_and_a_fork_and_macos_run_on_githubs(text):
     # The label is a function of the event and of the head of the pull request: a push, the nightly run, a manual run and
     # a pull request whose head is a branch of this repository are trusted; a fork's pull request is not, and macOS never
     # leaves GitHub's runners. The fork's own copy of this file can name any label, so the repository setting that holds
     # a fork's workflows for approval is the guard; this expression only keeps an honest fork run off t-compute.
     line = re.search(r"^\s*runs-on: (.*)$", text, flags=re.M).group(1)
-    assert line == (f"${{{{ matrix.os == 'ubuntu-24.04' && {TRUSTED} && {T_COMPUTE} || matrix.os }}}}")
+    assert line == (f"${{{{ matrix.os == 'ubuntu-24.04' && {TRUSTED} && {ORG_RUNNERS} || matrix.os }}}}")
     assert "pull_request_target" not in text
     # No host name, address or runner name of the organisation in this public file.
-    assert not re.search(r"t-compute-\d|\b\d{1,3}(\.\d{1,3}){3}\b|tailscale|\.ts\.net", text, flags=re.I)
+    assert not re.search(r"t-compute|\b\d{1,3}(\.\d{1,3}){3}\b|tailscale|\.ts\.net", text, flags=re.I)
 
 
-def test_t_compute_runs_sixteen_workers_that_steal_work_and_github_four(text):
+def test_the_organisations_runners_run_sixteen_workers_that_steal_work_and_github_four(text):
     runs = [ln for ln in text.splitlines() if "pytest -v" in ln and "-m page" not in ln]
     assert len(runs) == 1
     assert "${{ runner.environment == 'self-hosted' && '-n 16 --dist worksteal' || '-n 4' }}" in runs[0]

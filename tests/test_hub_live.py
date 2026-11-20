@@ -978,3 +978,13 @@ def test_a_refresh_that_a_write_moved_under_publishes_nothing_and_the_next_one_t
     snap = doc.refresh()
     assert snap["hash"] == rds.md_hash(whole) and snap["base"] == rds.md_hash(DOC)
     assert [n for n, _ in events] == ["changed"] and events[0][1]["base"] == rds.md_hash(DOC)
+
+
+def test_a_torn_read_that_a_refresh_gives_up_is_not_kept_as_a_version(made):
+    doc, md, rendered, events, _ = made()
+    torn, whole = "# Title\n\nFirst par", DOC.replace("First paragraph.", "First, reworded.")
+    md.write_text(torn, encoding="utf-8")
+    writes = iter([lambda: md.write_text(whole, encoding="utf-8")])
+    doc._render = lambda text: next(writes, lambda: None)()
+    assert doc.refresh() is None
+    assert rds.md_hash(torn) not in doc._versions

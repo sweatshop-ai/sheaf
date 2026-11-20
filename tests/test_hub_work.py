@@ -1183,7 +1183,7 @@ def test_a_window_name_tmux_or_a_shell_would_read_otherwise_gets_no_attach(team,
 
 @pytest.mark.parametrize("rel", ["a_b/c", "a/b_c", "Acme/tiroir", "-a/b", "a/-b", "a/B"])
 def test_a_part_james_would_not_name_a_window_for_gets_no_attach(team, box, work, rel):
-    # James's SLUG is [a-z0-9][a-z0-9-]* (agency-tiroir james.py project_window): he makes no window for
+    # James's SLUG is [a-z0-9][a-z0-9-]* (`project_window` in agency-tiroir): he makes no window for
     # another part, and a_b/c and a/b_c would name one window for two projects.
     doc = f"{rel}/2026-10-28-a.md"
     put(team, work, doc, SHEAF)

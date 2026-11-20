@@ -4829,6 +4829,27 @@ def test_a_kept_comment_goes_to_the_paragraph_that_ends_with_its_words_not_to_on
     assert p.input_value("#rd-popover textarea") == "about the pears"
 
 
+# Paragraph P was refused because its ending changed, and another paragraph Q ends with P's old last 12 characters.
+# The words P ends with said Q; P's longer lead (the 40 characters it opens with, which did not change) says P.
+def test_a_kept_comment_goes_to_the_paragraph_whose_opening_it_has_not_to_another_that_ends_like_it_did(tab):
+    f = tab.site.file
+    opening = "Second paragraph, about pears, which are green and sweet and grow"
+    old_p = opening + " in the trees nearby."
+    rewrite(f, f.read_text().replace("First paragraph, about apples.", "First paragraph, about apples, which fall in the trees nearby.")
+                 .replace("Second paragraph, about pears.", opening + " in the orchard."))
+    tab.open()
+    keep_on_disk(tab, kept_entry("pears", "about the pears", 3, "Secondparagr", tail="treesnearby.",
+                                 lead=re.sub(r"\s+", "", old_p)[:40]))
+    p = tab.page
+    p.reload()
+    p.wait_for_selector(PINNED)
+    open_comment_form(tab, P1, "apples")
+    assert p.input_value("#rd-popover textarea") == "", "the paragraph that ends like the refused one did got its comment"
+    p.click("#rd-popover button[data-a=minimize]")
+    open_comment_form(tab, P2, "pears")
+    assert p.input_value("#rd-popover textarea") == "about the pears"
+
+
 # Two kept comments with one quote, in two paragraphs: the input handler of the kept popover cleared by quote, so
 # editing one replaced the other.
 def test_two_kept_comments_with_one_quote_in_two_paragraphs_do_not_replace_each_other_when_one_is_edited(tab):

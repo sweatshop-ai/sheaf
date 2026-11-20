@@ -12,9 +12,9 @@ Lower priority, same code:
 
 **Blocked by:** None.
 
-**Status:** open
+**Status:** done, merged as f0035acf (#512)
 
-- [ ] A git root that git cannot answer says so in the door's `documents`, or SPEC says why it does not
-- [ ] One `documents` call on a large plain folder is bounded in time, and the answer says when it stopped
-- [ ] `more` says it is a lower bound where it is
-- [ ] The member-bound `more` cases (private-root overflow, another member's loose root) have tests
+- [x] A git root that git cannot answer says so in the door's `documents`, or SPEC says why it does not (`{root, closed: "git gave no answer"}`; `test_a_git_root_that_git_cannot_answer_has_a_row_of_its_own`, both git failures, passed on t-compute and in CI run 44796262082)
+- [x] One `documents` call on a large plain folder is bounded in time, and the answer says when it stopped (10 s `DOCUMENTS_SECONDS`, `{root, stopped}`; two tests, one for the walk and one for the opening, passed)
+- [x] `more` says it is a lower bound where it is (tool description and SPEC say "at least"; `test_the_description_of_more_says_it_is_a_lower_bound`)
+- [x] The member-bound `more` cases (private-root overflow, another member's loose root) have tests (private-root overflow: `test_documents_counts_the_overflow_of_a_members_private_root_to_that_member_alone`; the other-member's-loose-root case cannot occur, since a private root is listed under the list root only, `place.applies`, so it has no code and no test)

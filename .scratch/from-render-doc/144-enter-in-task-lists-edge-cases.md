@@ -1,6 +1,6 @@
 # 144: Enter in a task list: nested and ordered lists, an emptied item with a comment, a loose item
 
-**Claimed by:** Felix 2026-11-20 16:00
+**Claimed by:** Mira 2026-11-20 16:00
 
 **Status:** in-progress
 

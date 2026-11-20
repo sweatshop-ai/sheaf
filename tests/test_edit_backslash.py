@@ -48,3 +48,12 @@ def test_a_backslash_in_code_is_not_doubled():
 def test_a_backslash_in_a_table_cell_keeps_its_text():
     src = "| a | b |\n|---|---|\n| x\\\\\\\\y | here |"
     assert page_fragment(saved(src)) == page_fragment(src.replace("here", "there"))
+
+
+@pytest.mark.parametrize("src", [
+    "## a\\\\\\\\b here",
+    "- a\\\\\\* here",
+    "> c\\\\\\_d here",
+])
+def test_a_backslash_in_a_heading_a_list_item_or_a_quote_keeps_its_text(src):
+    assert page_fragment(saved(src)) == page_fragment(src.replace("here", "there"))

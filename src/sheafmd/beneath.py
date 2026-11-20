@@ -19,6 +19,9 @@ import stat
 import sys
 from collections import deque
 
+# A descriptor that reads nothing, for the identity of a file that cannot be read: `O_PATH` on Linux, `O_EVTONLY` on macOS
+# (Python names neither it nor its value there: 0x8000 in <sys/fcntl.h>); none elsewhere.
+_NO_READ = getattr(os, "O_PATH", 0x8000 if sys.platform == "darwin" else None)
 FALLBACK = False                  # tests: take the walk of our own although the kernel has openat2
 MAX_HOPS = 40                     # links followed in one walk; more is a loop
 _RESOLVE_NO_SYMLINKS = 0x04
@@ -244,10 +247,10 @@ def _walk(top, rel: str, meta: bool = False):
                         fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | (0 if last else os.O_DIRECTORY),
                                      dir_fd=stack[-1])
                     except PermissionError:
-                        if not (meta and last):
+                        if not (meta and last and _NO_READ is not None):
                             raise
                         # a file that cannot be read still has an identity: a descriptor that reads nothing
-                        fd = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=stack[-1])
+                        fd = os.open(name, _NO_READ | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=stack[-1])
                 except OSError as e:
                     if e.errno not in (errno.ELOOP, errno.ENOTDIR):
                         raise

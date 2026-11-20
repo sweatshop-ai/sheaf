@@ -188,10 +188,10 @@ def test_restart_forces_the_upgrade_stop_because_the_person_asked_for_it(sheaf, 
     sheaf("start")
     real, sent = hubclient.HubClient.call, []
 
-    def call(self, method, path, body=None):
+    def call(self, method, path, body=None, **kw):
         if path == "/_/stop":
             sent.append(body)
-        return real(self, method, path, body)
+        return real(self, method, path, body, **kw)
     monkeypatch.setattr(hubclient.HubClient, "call", call)
     assert sheaf("restart").code == 0
     assert sent == [{"reason": "upgrade", "force": True}]

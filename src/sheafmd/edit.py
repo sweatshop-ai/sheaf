@@ -699,13 +699,30 @@ def _text_backslashes(fragment: str):
         return fragment, None
     soup = BeautifulSoup(fragment, "html.parser")
     texts = [t for t in _texts(soup) if "\\" in t and not any(
-        u.name in ("code", "pre", "script", "style") or "math" in (u.get("class") or []) for u in t.parents)]
+        u.name in ("code", "pre", "script", "style") for u in t.parents)]
     token = next((t for t in (chr(0xF800) + chr(0xF801 + k) for k in range(1024)) if t not in fragment), None)
     if not texts or token is None:
         return fragment, None
     for t in texts:
         t.replace_with(NavigableString(_BACKSLASH_ESCAPES.sub(token, t)))
     return str(soup), token
+
+
+def _bare_urls_as_words(fragment: str):
+    """(the fragment with each bare URL that holds a backslash as a word, {word: the URL}). A bare URL is its own
+    text and address, read as written: pandoc writes it as a link, whose label and address are read with escapes,
+    and takes characters after a backslash."""
+    from bs4 import BeautifulSoup
+
+    if "\\" not in fragment:
+        return fragment, {}
+    soup, put = BeautifulSoup(fragment, "html.parser"), {}
+    for a in soup.find_all("a", href=True):
+        if "\\" in a["href"] and a.get_text() == a["href"] and not a.find_parent(["code", "pre"]) and not a.find(True):
+            word = next(w for w in ("RDURL" + os.urandom(5).hex().upper() for _ in iter(int, 1)) if w not in fragment)
+            put[word] = a["href"]
+            a.replace_with(word)
+    return (str(soup), put) if put else (fragment, {})
 
 
 # A shortcode drawn as its emoji: the name is in `data-emoji`, the emoji itself is the span's text.
@@ -752,6 +769,7 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     clean = _without_placeholder_breaks(_boxes_as_text(_typed_tasks(sanitize(_sanitize(fragment, source, strays)))))
     if not clean.strip():
         return ""
+    clean, urls = _bare_urls_as_words(clean)
     clean, slash = _text_backslashes(clean)
     clean, pipe = _cell_code_pipes(clean)
     cells, token = _cell_breaks(clean)
@@ -778,6 +796,8 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     # noise on every line of a table the moment one cell is edited. Unwrap them. The
     # scheme makes the match unambiguous against real tags.
     out = re.sub(r"<(https?://[^>\s]+)>", r"\1", out)
+    for word, url in urls.items():
+        out = out.replace(word, url)
     if emoji:
         out = _EMOJI_TOKEN.sub(lambda m: f":{emoji[int(m.group(1))]}:", out)
     return copyblock.restore(out).strip("\n")

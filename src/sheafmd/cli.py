@@ -35,7 +35,6 @@ from .hub import client as hubclient
 from .hub import roots as hubroots
 from .hub import server as hubserver
 from .hub.auth import agent_name, clean_display, name_key
-from .hub.roots import url_path
 from .hub.state import PEER_SCOPES, TokenError, Tokens
 from .render import RenderError, UnclosedComment, render_file
 from .source import StaleError, Source, now, update_file
@@ -1133,7 +1132,7 @@ def cmd_peer(argv: list[str]) -> int:
     _out(f"  + peer token {name}, for {origin}, scopes: {', '.join(scopes)}")
     _out(f"    {token}")
     _out(f"  Written to {Tokens.path()}")
-    _out(f"  Shown once. Give it to the other shared Sheaf: run `sheaf peer use <this Sheaf's address>` there, with the token piped in on the standard input.")
+    _out("  Shown once. Give it to the other shared Sheaf: run `sheaf peer use <this Sheaf's address>` there, with the token piped in on the standard input.")
     return EXIT_OK
 
 

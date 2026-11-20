@@ -4,7 +4,11 @@
 
 **Blocked by:** None.
 
-**Status:** open
+**Status:** ready for merge (PR to be filled in at merge)
 
-- [ ] Decide which reading is right (the hub's raw markdown, probably) and make the page ask the hub's reading (the answer's actions) instead of its own regex, or make the two agree
-- [ ] A test with each of the three lines above
+- [x] Decide which reading is right: the hub's raw markdown. The page cannot ask the hub when it needs the answer (it does not know the file's buttons then) and holds only rendered HTML, so its check is made a superset of the hub's: a rendered line that begins with one of the words and a space or its end, whatever follows
+- [x] A test with each of the three lines above, and with a plain line that only begins with the letters of a word (`tests/page/test_page_action_line.py`)
+
+## Resolution
+
+The page's `ACTION_LINE` no longer checks the argument of a word, so `Merge <!-- note -->` and `Merge ![](x)` (rendered `Merge`) are held like any action. The false positive `**Merge** a/b#1` (hub: no action) is accepted: it waits for a reload, which costs less than a hub action ticked as a plain box. A plain word that only begins with the letters of an action (`Mergers are hard`) is still a plain box. SPEC 10.11 says so.

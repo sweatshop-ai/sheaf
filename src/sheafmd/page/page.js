@@ -3795,14 +3795,15 @@ var create = function (ROOT, CFG, opts) {
   var boxWaits = new WeakSet();       // a box whose block's save is out: a second click would toggle it back
   // The eleven words as the hub reads them (the_list.WORDS and _ACTION_RE), so a box no button names yet can be told.
   var ACTION_WORDS = ['Approve', 'Run it', 'Don\'t run', 'Undo skip', 'Done', 'Share', 'Stop James', 'Belongs to', 'Merge', 'Deploy', 'Install'];
-  // Belongs to (and Move to, its old name) takes `<slug> (ref <thread>)`, Merge, Deploy and Install the rest of the line, the others nothing.
-  var MOVE_ARG = '\\s+[A-Za-z0-9._\\\\-]+\\s+\\(ref\\s+[^()\\s]+\\)(?:\\s+@[A-Za-z0-9._-]+)?';
-  var ACTION_ARG = { 'Belongs to': MOVE_ARG,
-                     'Merge': '\\s+\\S.*', 'Deploy': '\\s+\\S.*', 'Install': '\\s+\\S.*' };
-  // Share's tick box may say it in its own words (the_list.LABELS).
+  // The page judges a box from its rendered text, the hub from the raw markdown (the_list._ACTION_RE), and the page cannot ask the
+  // hub when it needs to: it does not know the file's buttons. So the page's check is a superset of the hub's: a line that
+  // begins with one of the words (then a space or its end) may be an action, whatever follows it, markup the rendering takes out
+  // included. A hub action is then never taken for a plain box, the harm; a line the hub does not read (`**Merge** a/b#1`)
+  // only waits for a reload.
+  // Share's tick box may say it in its own words (the_list.LABELS); Move to is the old name of Belongs to, read while an open page carries it.
   var ACTION_LINE = new RegExp('^(?:' + ACTION_WORDS.map(function (w) {
-    return w.replace(/'/g, '[\'’]').replace(/^Share$/, 'Share(?:d with the team)?') + (ACTION_ARG[w] || '(?:\\s+@[A-Za-z0-9._-]+)?');
-  }).concat('Move to' + MOVE_ARG).join('|') + ')$');     // Move to: the old name, read while an open page carries it
+    return w.replace(/'/g, '[\'’]').replace(/^Share$/, 'Share(?:d with the team)?');
+  }).concat('Move to').join('|') + ')(?=\\s|$)');
   // The text of a box's own item, its nested lists left out; null for a box in no item.
   function itemLine(t) {
     var li = t.closest && t.closest('li');

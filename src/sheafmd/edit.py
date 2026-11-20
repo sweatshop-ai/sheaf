@@ -689,7 +689,9 @@ def _cell_code_pipes(fragment: str):
     return str(soup), token
 
 
-_BACKSLASH_ESCAPES = re.compile(r"\\(?=[!-/:-@\[-`{-~\n]|\Z)")
+# A backslash before the placeholder of a comment or a citation (`_convert_with_comments`) escapes what takes its place.
+# A raw tag's placeholder (`_tags_as_text`) opens with a bracket that is punctuation, so it is matched above.
+_BACKSLASH_ESCAPES = re.compile(r"\\(?=[!-/:-@\[-`{-~\n]|\Z|RDCMT[0-9A-F]{10})")
 
 
 def _text_backslashes(fragment: str):

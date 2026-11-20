@@ -197,6 +197,7 @@ class Hub:
         self.upgrading = False
         self.told_restart = False                # an upgrade stop that came as a signal, after `expect_restart`
         self._restart_told_at: float | None = None
+        self._restart_token = 0                         # which announcement `_restart_told_at` is (8.4)
         self.tell_wait = config.tell_wait()
         self.versions.prune()
         # Every Tell child, and the address a push says it comes from (SPEC 8.10, 11.4).
@@ -1841,17 +1842,26 @@ class Hub:
             self.on_stop(reason)
         return True
 
-    def expect_restart(self):
+    def expect_restart(self) -> int:
         """`sheaf restart` through the service tells the hub before the service manager stops it
         (SPEC 8.4): the SIGTERM that follows within RESTART_TOLD_TTL is an upgrade stop, so the
         exit row and the tabs say `upgrade`, as on the direct path. A restart that never comes
-        is forgotten, and a later logout is a signal again."""
-        self._restart_told_at = self.clock()
+        is forgotten, and a later logout is a signal again. Returns the token of this announcement:
+        a later one replaces it, and only its own token takes it back."""
+        with self._stop_lock:
+            self._restart_token += 1
+            self._restart_told_at = self.clock()
+            return self._restart_token
 
-    def forget_restart(self):
+    def forget_restart(self, token: int | None = None):
         """The restart that `expect_restart` announced will not come: the service manager failed to
-        make it. The next SIGTERM is a logout or a `systemctl stop`, a signal again (8.4)."""
-        self._restart_told_at = None
+        make it. The next SIGTERM is a logout or a `systemctl stop`, a signal again (8.4). With a
+        `token`, only the announcement it names is forgotten: the take-back of a run that a newer
+        one has replaced leaves the newer one up. Without one (a command that never read its token,
+        a command of the version before) whatever is announced is forgotten."""
+        with self._stop_lock:
+            if token is None or token == self._restart_token:
+                self._restart_told_at = None
 
     def busy(self) -> bool:
         """Whether a Tell waits anywhere (what `GET /_/jobs` lists), or a Tell's

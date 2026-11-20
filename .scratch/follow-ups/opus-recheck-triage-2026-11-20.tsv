@@ -191,7 +191,7 @@
 386	476	a	tests/test_edit_followups.py:1206-1215	TASK_LISTS ids "ordered"/"ordered from three" still name task lists though gfm renders `1. [ ]` as plain text; rename the ids or comment.	
 390	477	c	src/sheafmd/hub/the_list.py:368-373	check still requires _render_source of the block but box_number None (flipped render fails) drops the action; falling back to line reading changes what counts as an action and the save guard, so it needs a decision.	
 391	477	STALE	src/sheafmd/hub/the_list.py:368	Describes a one-time render cost per new text (cached by (content, at)); an observation, no defect to fix.	
-395	479	b	src/sheafmd/edit.py:781	→ 137 item 4 (Emil's). _EMOJI_TOKEN is still replaced by `:name:` regardless of table depth, so a raw-HTML table saves <th>:+1:</th>; inside <table depth substitute the emoji glyph (as the pipe/slash loop at 768-776 does).	-
+395	479	b	src/sheafmd/edit.py:781	→ 137 item 4. _EMOJI_TOKEN is still replaced by `:name:` regardless of table depth, so a raw-HTML table saves <th>:+1:</th>; inside <table depth substitute the emoji glyph (as the pipe/slash loop at 768-776 does).	-
 399	480	b	src/sheafmd/page/page.js:4038	inlineButton words are still [label, a.word] where _word (the_list.py:397) maps legacy "Move to" to "Belongs to"; pass "Move to" as a third word.	4
 400	480	STALE	src/sheafmd/hub/the_list.py:443-449	Transient across the ticket 168 restart only (a page loaded before the deploy); the window has passed, no code to change.	
 401	480	a	GLOSSARY.md:180,194	Code now says Belongs to (the_list.py:65, MOVE_OLD only a legacy read at :66), so drop 'until ticket 168' and reword 'a Move to is a one-off too' to Belongs to.	

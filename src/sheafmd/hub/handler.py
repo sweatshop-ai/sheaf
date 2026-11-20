@@ -1320,6 +1320,13 @@ class Handler:
         if line := self.hub.read_only_line(address):
             raise Refuse(403, line)
 
+    def _text_writable(self, req: Req, address: str, endpoint: str):
+        """Refuse a write to the text of a generated page (SPEC 7.2): 403 with the page's sentence, and a diagnostics row
+        naming the endpoint and `generated`, never the text. Comments, replies and resolve do not pass here."""
+        if line := self.hub.generated_line(address):
+            self.hub.record("generated-refused", address, endpoint=endpoint, why="generated", **self._who(req))
+            raise Refuse(403, line)
+
     def _read_on(self, address: str, given) -> str:
         """The branch a save of a repo clone's page was read on, as the page's meta gave it; "" for any other page. A save of
         a clone page names it (SPEC 14): without it the hub cannot tell a save of this branch from one of another."""
@@ -1347,6 +1354,7 @@ class Handler:
         b = req.body
         e = self._entry_to_write(req, b.get("doc"))
         self._writable(e.address)
+        self._text_writable(req, e.address, "/_/save")
         h, edits = b.get("hash"), b.get("edits")
         _shape(isinstance(h, str) and h != "", "hash must be the hash of the version the edits were made against")
         _shape(isinstance(edits, list), "edits must be a list")
@@ -1402,6 +1410,7 @@ class Handler:
         b = req.body
         e = self._entry_to_write(req, b.get("doc"))
         self._writable(e.address)
+        self._text_writable(req, e.address, "/_/tick")
         n, word, read, release = b.get("action"), b.get("word"), b.get("hash"), b.get("release", False)
         where = b.get("where", "list")
         _shape(where in ("list", "page"), "where must be list or page")
@@ -1500,6 +1509,7 @@ class Handler:
         b = req.body
         e = self._entry_to_write(req, b.get("doc"))
         self._writable(e.address)           # before the first write: the Share line is committed before its tick is saved
+        self._text_writable(req, e.address, "/_/share")
         read, names = b.get("hash"), b.get("with", [])
         _shape(isinstance(read, str) and read != "", "hash must be the hash of the version the row read")
         _shape(names == [] or visibility.valid_names(names), "with must be a list of short names")

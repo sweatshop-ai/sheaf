@@ -1691,7 +1691,7 @@ Comment writes of the door go through the document's `LiveDocument` (or straight
 
 ## 13. The CLI
 
-`sheaf --help` and every output stay free of any tiroir mention. Exit codes: 0 done, 1 failed, 2 usage error. The first argument is a file when it ends in `.md` or names an existing path; otherwise it is a subcommand.
+`sheaf --help` and every output of the command line stay free of any tiroir mention. The credit line of the index page (8.6) and the README are the two places that carry it. Exit codes: 0 done, 1 failed, 2 usage error. The first argument is a file when it ends in `.md` or names an existing path; otherwise it is a subcommand.
 
 | Command | Does |
 |---|---|

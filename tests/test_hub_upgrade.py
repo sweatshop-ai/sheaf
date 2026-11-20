@@ -456,10 +456,10 @@ def test_a_hub_that_will_not_say_whether_a_job_runs_is_not_restarted(port, threa
     hub = thread_hub(OLD)
     real = hubclient.HubClient.call
 
-    def call(self, method, path, body=None):
+    def call(self, method, path, body=None, **kw):
         if path == "/_/jobs":
             return 500, {"ok": False}
-        return real(self, method, path, body)
+        return real(self, method, path, body, **kw)
     monkeypatch.setattr(hubclient.HubClient, "call", call)
     out, err = [], []
     hubclient.ensure_hub("cli", out.append, err.append)
@@ -477,11 +477,11 @@ def stub_the_stop(monkeypatch, after, status=200):
     """The hub answers the stop with `status`; what `challenge()` says from then on is `after` of its answer."""
     real_call, real_challenge, posted = hubclient.HubClient.call, hubclient.HubClient.challenge, []
 
-    def call(self, method, path, body=None):
+    def call(self, method, path, body=None, **kw):
         if path == "/_/stop":
             posted.append(body)
             return status, {"ok": status == 200}
-        return real_call(self, method, path, body)
+        return real_call(self, method, path, body, **kw)
 
     def challenge(self):
         got = real_challenge(self)

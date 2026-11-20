@@ -68,3 +68,10 @@ def test_the_version_check_of_a_replaced_hub_asks_nothing_of_the_new_one(live, s
         client._meet_version(c, {**got, "boot": "the-boot-of-the-hub-before", "version": "0.0.1"},
                              warn=lambda *a: None)
     assert "/_/jobs" not in sent and "/_/stop" not in sent
+
+
+def test_a_pin_that_holds_no_boot_id_never_matches_the_hub(live, sent):
+    c, got = live
+    with pytest.raises(client.HubChanged):
+        c.call("GET", "/_/jobs", boot="")
+    assert sent == ["/_/health"]

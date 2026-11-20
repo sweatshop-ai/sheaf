@@ -149,7 +149,7 @@ def via_service(verb: str) -> int | None:
                 # Tell the hub its reason now: the service manager's SIGTERM would be a "signal",
                 # and open tabs would show the stop banner (8.4). An older hub has no such route.
                 try:
-                    _, announced = c.call("POST", "/_/restarting")
+                    _, announced = c.call("POST", "/_/restarting", boot=before.get("boot") or "")
                 except hubclient.HubLost:       # the hub may have applied it though the answer never came
                     _take_back_restart(c)
                     raise
@@ -221,7 +221,7 @@ def cmd_rotate(argv: list[str]) -> int:
                 paths.rotate_key()
                 _out(f"  no hub is running; the key was replaced in the file; {again}")
                 return EXIT_OK
-        status, res = c.call("POST", "/_/rotate")
+        status, res = c.call("POST", "/_/rotate", boot=got.get("boot") or "")
     except hubclient.Impostor as e:
         return _hub_failure(e)
     if status != 200 or not res.get("ok"):

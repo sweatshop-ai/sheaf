@@ -1,6 +1,8 @@
 # 94: The hub can publish a half-written file to open pages
 
-**Status:** open
+**Claimed by:** Gudrun 2026-11-20 17:42
+
+**Status:** in-progress
 
 **Blocked by:** none
 

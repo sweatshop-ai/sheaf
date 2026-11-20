@@ -222,38 +222,42 @@ def test_the_timer_of_an_earlier_cancel_does_not_take_the_places_of_a_later_canc
             emit(*a, **k)
     holding = False
     site.hub.waiting_tells._emit = watch
-    tab.page.fill("#rd-popover textarea", "Please do.")
-    tab.page.click("#rd-popover .rd-form button.rd-tell")
-    until(lambda: bool(line(tab)), what="the waiting line")
-    mark("first line")
-    tab.page.hover("#rd-popover button[data-a=cancel-tell]")
-    tab.page.click("#rd-popover button[data-a=cancel-tell]")                  # a Tell nobody had seen: its timer starts
-    until(lambda: line(tab) == [], what="the first line to go")
-    mark("after the first Cancel")
-    tab.page.clock.run_for(1500)                                              # the second Cancel's own timer then ends 1.5 s after the first's
-    tab.page.fill("#rd-popover textarea", "Please do, again.")
-    tab.page.click("#rd-popover .rd-form button.rd-tell")
-    until(lambda: bool(line(tab)), what="the second waiting line")
-    mark("second line")
-    call(browser_on(site.hub), "documents", token=token)
-    until(lambda: line(tab) == [f"{name} has seen it; its action appears in this thread."], what="the seen line")
-    mark("seen line")
-    holding = True
-    tab.page.hover("#rd-popover button[data-a=cancel-tell]")
-    tab.page.click("#rd-popover button[data-a=cancel-tell]")                  # the answer comes, the event is held
-    until(lambda: line(tab) == [] and len(held) == 1, what="the second answer")
-    mark("after the second Cancel, event held")
-    tab.page.clock.run_for(3600)             # the first timer (5 s after its Cancel) fires; the second (5 s after the second Cancel) does not
-    mark("after the first timer")
-    holding = False
-    for a, k in held:
-        emit(*a, **k)
-    site.hub.waiting_tells._emit = emit
     try:
+        tab.page.fill("#rd-popover textarea", "Please do.")
+        tab.page.click("#rd-popover .rd-form button.rd-tell")
+        until(lambda: bool(line(tab)), what="the waiting line")
+        mark("first line")
+        tab.page.hover("#rd-popover button[data-a=cancel-tell]")
+        tab.page.click("#rd-popover button[data-a=cancel-tell]")                  # a Tell nobody had seen: its timer starts
+        until(lambda: line(tab) == [], what="the first line to go")
+        mark("after the first Cancel")
+        tab.page.clock.run_for(1500)                                              # the second Cancel's own timer then ends 1.5 s after the first's
+        tab.page.fill("#rd-popover textarea", "Please do, again.")
+        tab.page.click("#rd-popover .rd-form button.rd-tell")
+        until(lambda: bool(line(tab)), what="the second waiting line")
+        mark("second line")
+        call(browser_on(site.hub), "documents", token=token)
+        until(lambda: line(tab) == [f"{name} has seen it; its action appears in this thread."], what="the seen line")
+        mark("seen line")
+        holding = True
+        tab.page.hover("#rd-popover button[data-a=cancel-tell]")
+        tab.page.click("#rd-popover button[data-a=cancel-tell]")                  # the answer comes, the event is held
+        until(lambda: line(tab) == [] and len(held) == 1, what="the second answer")
+        mark("after the second Cancel, event held")
+        tab.page.clock.run_for(3600)             # the first timer (5 s after its Cancel) fires; the second (5 s after the second Cancel) does not
+        mark("after the first timer")
+        holding = False
+        for a, k in held:
+            emit(*a, **k)
         toasted(tab.page, f"{name} had already seen it; look at the document before you Tell again.")
     except AssertionError as e:
+        # No cause is known for the CI timeout on 'the seen line' (ticket flaky-waiting-tell-timer-test): a red says what the page and the hub held.
         mark("failure")
-        raise AssertionError(f"{e}\n" + "\n".join(map(repr, trace))) from None
+        shown = (tab.page.locator("#rd-popover").count(), tab.page.url)      # a page that reloaded has no popover open
+        raise AssertionError(f"{e}\nhub waits {site.hub.waiting_tells.waits(DOC)}; held {len(held)}; popover and url {shown}\n"
+                             + "\n".join(map(repr, trace))) from None
+    finally:
+        site.hub.waiting_tells._emit = emit
 
 
 def test_a_snapshot_that_is_not_the_answer_to_a_send_does_not_keep_a_seen_line(tab, site):

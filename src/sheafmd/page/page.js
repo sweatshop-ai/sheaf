@@ -2023,7 +2023,7 @@ var create = function (ROOT, CFG, opts) {
     keepThread();
     if (!dock()) {
       undock();
-      if (pop._target && pop._target.isConnected && pop.style.position !== 'fixed') place(pop, pop._target);
+      if (pop._target && pop._target.isConnected && pop.style.position !== 'fixed' && !pop._moved) place(pop, pop._target);
     }
     if (atEnd) sc.scrollTop = sc.scrollHeight;       // a thread that was at its last message stays there when the box changes size
   }
@@ -2081,6 +2081,49 @@ var create = function (ROOT, CFG, opts) {
   // A popover with no place in the text (a kept comment, a thread whose badge is hidden or gone) is pinned
   // beside the panel.
   function pin(p) { p.style.position = 'fixed'; p.style.top = '80px'; p.style.left = ''; p.style.right = '390px'; }
+
+  // The box is moved by its band, with a mouse or a finger (pointer events). A press on a control of the band (Resolve, Close, the
+  // menu, a link) is a click; a press that moves less than MOVE_SLOP px is a click too. The box is held inside the visible area
+  // and stays where it was dropped for as long as it is open (`_moved`: replace() no longer places it again); the next box is
+  // placed as usual. A box docked to the keyboard is not moved: replace() would put it back on the next change of the visual
+  // viewport, and undock() gives back the place it was dragged to. The band takes no selection and no scroll (CSS), so a drag
+  // makes no selection of the page's words to offer a Comment button for.
+  var MOVE_SLOP = 4, MOVE_EDGE = 8, drag = null;
+  function bandOf(e) {
+    var t = e.target, head = t && t.closest && t.closest('#rd-popover .rd-head');
+    return head && pop && pop.contains(head) && !pop.classList.contains('rd-docked') && !t.closest('button, a, summary, details') ? head : null;
+  }
+  listen(PAGE_EV, 'mousedown', function (e) { if (e.button === 0 && bandOf(e)) e.preventDefault(); });      // no selection, the cursor stays in the field
+  listen(PAGE_EV, 'pointerdown', function (e) {
+    var head = e.isPrimary && e.button === 0 && bandOf(e);
+    if (!head) return;
+    var r = pop.getBoundingClientRect();
+    drag = { id: e.pointerId, head: head, x: e.clientX, y: e.clientY, left: r.left, top: r.top, on: false };
+  });
+  listen(document, 'pointermove', function (e) {
+    if (!drag || e.pointerId !== drag.id) return;
+    if (!pop || pop.classList.contains('rd-docked')) { drag = null; return; }
+    var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+    if (!drag.on) {
+      if (Math.abs(dx) < MOVE_SLOP && Math.abs(dy) < MOVE_SLOP) return;
+      drag.on = true;
+      try { drag.head.setPointerCapture(e.pointerId); } catch (_) { /* a pointer that is gone */ }
+    }
+    var v = viewRect(), w = pop.offsetWidth, h = pop.offsetHeight, o = pageOrigin();
+    var x = Math.max(v.left + MOVE_EDGE, Math.min(drag.left + dx, v.right - w - MOVE_EDGE));
+    var y = Math.max(v.top + MOVE_EDGE, Math.min(drag.top + dy, v.bottom - h - MOVE_EDGE));
+    var fixed = pop.style.position === 'fixed';
+    pop.style.left = (fixed ? x : o.x + x) + 'px';
+    pop.style.top = (fixed ? y : o.y + y) + 'px';
+    pop.style.right = '';
+    pop._moved = true;
+  });
+  function dropped(e) {
+    if (!drag || e.pointerId !== drag.id) return;
+    drag = null;
+  }
+  listen(document, 'pointerup', dropped);
+  listen(document, 'pointercancel', dropped);
 
   // Comments and replies are written in markdown, an agent's especially. A small safe
   // subset is rendered: everything is escaped first, so no tag in a comment ever

@@ -1,6 +1,8 @@
 # 164: The list reads a task line inside a fenced code block in a list item as an action
 
-**Status:** open
+**Claimed by:** Gustav 2026-11-20 15:56
+
+**Status:** in-progress
 
 **Blocked by:** none
 

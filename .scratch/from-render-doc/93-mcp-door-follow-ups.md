@@ -2,7 +2,7 @@
 
 **Claimed by:** Piotr 2026-11-20 17:44
 
-**Status:** in-progress
+**Status:** done
 
 **Blocked by:** none
 
@@ -20,4 +20,6 @@
 
   Done in #504, merged as 106cc9dc. `Index.dot()` in `src/sheafmd/hub/index.py` is the one cascade; `Index._row` and the door's `documents` call it, `Door._dot` is gone. Evidence: `test_the_doors_dot_for_a_member_is_the_one_of_their_index` in `tests/test_hub_visibility.py` (two cases, red before); 248 passed over `tests/test_hub_visibility.py`, `tests/test_mcp_documents.py`, `tests/test_hub_index.py`; CI run 44789548234 green.
 
-- [ ] **A CLI command proves the hub on one connection and sends its request on another.** `HubClient.challenge()` (`src/sheafmd/hub/client.py:177`) proves the hub, then `HubClient.call()` (`:216`) does a second proof on a new connection and carries no expected boot id. A hub restart between the two means `stop_and_explain` (`:325`) and `_meet_version` (`:386`) mix the pid, boot and version of one hub with answers from another. No key leaks, because both hubs hold the same key, but the wrong process can be waited on. Fix: `call` carries the boot id it expects and the hub refuses on a mismatch, or the command reuses the proved connection.
+- [x] **A CLI command proves the hub on one connection and sends its request on another.** `HubClient.challenge()` (`src/sheafmd/hub/client.py:177`) proves the hub, then `HubClient.call()` (`:216`) does a second proof on a new connection and carries no expected boot id. A hub restart between the two means `stop_and_explain` (`:325`) and `_meet_version` (`:386`) mix the pid, boot and version of one hub with answers from another. No key leaks, because both hubs hold the same key, but the wrong process can be waited on. Fix: `call` carries the boot id it expects and the hub refuses on a mismatch, or the command reuses the proved connection.
+
+  Done in #518, merged as f9ddbd25: `call(boot=)` raises `HubChanged` before sending, pinned in `stop_and_explain`, `_meet_version`, `sheaf stop`, `restart`, `rotate-key`, `list` and `roots forget`. **Still unpinned, on record:** `Door`/`DoorLink` and `sheaf code` (no earlier challenge to pin to), and the `ensure_hub` callers (`render`, `signin`), which discard the hub's answer and so have no boot id to carry. Evidence: `tests/test_client_boot_pinned.py` (5 tests, red before); 93 passed and 1 skipped on t-compute over `tests/test_hub_upgrade.py`, `tests/test_client_hub_stopping.py`, `tests/test_client_boot_pinned.py` and `tests/test_hub_lifecycle.py`; merged head d43c4ae9.

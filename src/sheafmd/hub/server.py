@@ -128,15 +128,21 @@ class _Http(BaseHTTPRequestHandler):
         if res.stream is not None:
             self._stream(res)
             return
-        self.send_response(res.status)
-        for k, v in res.headers.items():
-            self.send_header(k, v)
-        self.send_header("Content-Length", str(len(res.body)))
-        if self.close_connection:
-            self.send_header("Connection", "close")
-        self.end_headers()
-        if self.command != "HEAD" and res.body and res.status not in (204, 304):
-            self.wfile.write(res.body)
+        try:
+            self.send_response(res.status)
+            for k, v in res.headers.items():
+                self.send_header(k, v)
+            self.send_header("Content-Length", str(len(res.body)))
+            if self.close_connection:
+                self.send_header("Connection", "close")
+            self.end_headers()
+            if self.command != "HEAD" and res.body and res.status not in (204, 304):
+                self.wfile.write(res.body)
+        except OSError:
+            if res.status != 499:
+                raise
+            self.close_connection = True     # the 499 is owed to a caller that has gone: nobody reads it, nothing to log
+            return
         if unread and (n > 0 or chunked):
             self._linger()
 

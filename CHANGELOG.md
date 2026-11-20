@@ -4,12 +4,17 @@ sheafmd is released by merging a pull request that sets `__version__` in `src/sh
 Its page assets are cached by version (`/_/mount.css?v=<version>`, immutable), so the version
 changes whenever an asset does. The entries name pull requests of sweatshop-ai/sheaf.
 
-## 1.2.1 (2026-11-19)
+## 1.2.1 (2026-11-20)
 
-Everything merged since 1.2.0 (#465), up to #470.
+Everything merged since 1.2.0 (#465), up to #474.
 
 ### Fixed
 
+- Tabs of one browser share one live connection to the hub: the tab holding the Web Lock `sheaf-live`
+  owns it and relays over a BroadcastChannel, so a seventh tab no longer waits behind Chrome's limit of
+  six connections per host and a comment sent from any tab goes out (#474, ticket 160).
+- A box in a list that holds an emoji shortcode such as `:100:` ticks again: the comparison of the
+  page against its source ignores the `data-emoji` attribute pandoc adds (#473).
 - The phone layout of the Sheaf pane switches on the pane's width, not the screen's:
   `sheaf.css` declares the pane an inline-size container and the layout is a container query at
   600 px and narrower. The tree's cap counts its padding, the table keeps its content height when
@@ -19,7 +24,6 @@ Everything merged since 1.2.0 (#465), up to #470.
 ### Tests and tooling
 
 - A test for a pane with no height of its own (#470).
-- (open: the 1000-row test, to be added before this release is merged)
 
 ## 1.2.0 (2026-11-19)
 

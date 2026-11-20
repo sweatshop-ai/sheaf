@@ -134,6 +134,11 @@ def lock_order(monkeypatch):
     lockorder.check()
 
 
+def _runs_in_another_engine(item):
+    params = getattr(getattr(item, "callspec", None), "params", {})
+    return any(v in ("firefox", "webkit") for v in params.values())
+
+
 @pytest.hookimpl(trylast=True)
 def pytest_collection_modifyitems(config, items):
     """SHEAF_TEST_SLICE=i/n keeps the i-th of every n tests that are left after -m: ci.yml runs each
@@ -148,19 +153,25 @@ def pytest_collection_modifyitems(config, items):
     if not slice_:
         return
     i, n = (int(x) for x in slice_.split("/"))
-    units, whole = [], {}
+    # A test that runs in Firefox or WebKit goes to the last slice, whatever its place in the deal, so the other
+    # slices install Chromium alone (ci.yml reads what each one collected).
+    units, whole, other_engine = [], {}, []
     for it in items:
         if getattr(it.module, "IN_ORDER", False):
             if it.module not in whole:
                 whole[it.module] = []
                 units.append(whole[it.module])
             whole[it.module].append(it)
+        elif _runs_in_another_engine(it):
+            other_engine.append(it)
         else:
             units.append([it])
     keep = [it for k, u in enumerate(units) if k % n == i - 1 for it in u]
+    if i == n:
+        keep += other_engine
     kept = set(keep)
     config.hook.pytest_deselected(items=[it for it in items if it not in kept])
-    items[:] = keep
+    items[:] = [it for it in items if it in kept]
 
 
 @pytest.fixture(autouse=True)

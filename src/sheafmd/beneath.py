@@ -98,6 +98,13 @@ class Opened:
     def idents(self) -> list:
         return [*self.dirs, self.file]
 
+    def stat(self):
+        """The file's status: of its descriptor, or, for a file opened by `meta` that cannot be read (no descriptor), of its
+        name in the folder it was found in."""
+        if self.fd is not None:
+            return os.fstat(self.fd)
+        return os.stat(self.name, dir_fd=self._parent, follow_symlinks=False)
+
     def bytes(self) -> bytes:
         with os.fdopen(os.dup(self.fd), "rb") as f:
             f.seek(0)
@@ -246,8 +253,14 @@ def _walk(top, rel: str, meta: bool = False):
                     except PermissionError:
                         if not (meta and last):
                             raise
-                        # a file that cannot be read still has an identity: a descriptor that reads nothing
-                        fd = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=stack[-1])
+                        # a file that cannot be read still has an identity, asked of its folder: no descriptor of it
+                        # (macOS refuses even `O_EVTONLY` there, CI run 44829164316)
+                        st = os.stat(name, dir_fd=stack[-1], follow_symlinks=False)
+                        if not stat.S_ISREG(st.st_mode):
+                            raise
+                        if st.st_nlink > 1:
+                            raise Linked(rel)
+                        return None, (st.st_dev, st.st_ino), seen, os.dup(stack[-1]), name
                 except OSError as e:
                     if e.errno not in (errno.ELOOP, errno.ENOTDIR):
                         raise

@@ -27,7 +27,7 @@ def test_read_gives_the_text_as_the_file_holds_it_and_its_hash(browser, plan):
     text = plan.read_text(encoding="utf-8")
     got = ok(browser, "read", doc=DOC)
     assert got == {"doc": DOC, "url": f"http://127.0.0.1:{browser.hub.port}/work/plan.md",
-                   "hash": md_hash(text), "text": text}
+                   "hash": md_hash(text), "text": text, "generated": None}
     assert "<!-- sheaf-comment id=c1" in got["text"]
 
 

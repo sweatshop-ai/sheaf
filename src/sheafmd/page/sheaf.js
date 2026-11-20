@@ -379,6 +379,7 @@ function create(ROOT, opts) {
     lseq++;
     lline.textContent = '';
     lmade.hidden = true;
+    lpanel.querySelector('.sheaf-laptop-copy').textContent = 'Copy';
     lpanel.querySelector('.sheaf-laptop-input').value = '';
     lpanel.hidden = true;
     main.classList.remove('laptops');
@@ -427,6 +428,7 @@ function create(ROOT, opts) {
     say('');
     lline.textContent = '';
     lmade.hidden = true;
+    lpanel.querySelector('.sheaf-laptop-copy').textContent = 'Copy';
     fetch('/_/laptops', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ name: name }) }).then(function (r) {
       return r.json().then(function (b) { return { ok: r.ok && !(b && b.ok === false), error: b && b.error, command: b && b.command }; }, function () { return { ok: false }; });
@@ -443,7 +445,7 @@ function create(ROOT, opts) {
       say(got.error || 'The laptop could not be connected.');
     }, function () {
       go.disabled = false;
-      if (!gone) say('The laptop could not be connected: the hub does not answer.');
+      if (!gone && !lpanel.hidden) say('The laptop could not be connected: the hub does not answer.');
     });
   }
   function laptopRevoke(button) {

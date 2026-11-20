@@ -1238,3 +1238,15 @@ def test_a_typed_task_line_with_only_a_leading_comment_anchor_before_the_box_and
     block = rde.split_md_blocks(f"Alpha{ADA_C1}\n")[0]
     md, _ = rde._convert_with_comments(block, f"<p>{anchor('c1')}- [x] </p>")
     assert "\\[x\\]" in md and "☒" not in md and "sheaf-comment id=c1" in md, md
+
+
+@pytest.mark.parametrize("tag", ["h1", "h3", "h6"])
+def test_a_styled_bold_span_in_a_heading_is_no_bold_in_the_saved_markdown(tag):
+    html = f'<{tag}><span style="font-weight:700">Title</span></{tag}>'
+    out = rde.html_block_to_md(html, source="Title")
+    assert out == "#" * int(tag[1]) + " Title", out
+
+
+def test_a_styled_italic_span_in_a_heading_stays_italic():
+    out = rde.html_block_to_md('<h2><span style="font-style:italic">Title</span></h2>', source="Title")
+    assert out == "## *Title*", out

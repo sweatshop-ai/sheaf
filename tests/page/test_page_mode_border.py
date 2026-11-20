@@ -3,7 +3,7 @@ Alice's trial 2026-11-09): grey when idle, green in Edit mode, red-orange when a
 border read the same variable, so they cannot disagree. The ball's colours do not change with the theme; both themes are checked."""
 import pytest
 
-from pagehelp import P1, until
+from pagehelp import P1, until, rewrite
 
 pytestmark = pytest.mark.page
 
@@ -30,7 +30,7 @@ def agree(p, colour):
 
 @pytest.fixture
 def doc(tab, site):
-    site.file.write_text(MD, encoding="utf-8")
+    rewrite(site.file, MD)
     return tab.open()
 
 

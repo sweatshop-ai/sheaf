@@ -7,7 +7,7 @@ handler as Nell, as tests/page/test_page_list.py does for the page of its own. T
 import json
 
 import pytest
-from pagehelp import HOST, RED, assert_readable, close_context, drop_host, new_context, until, wear_host
+from pagehelp import HOST, RED, assert_readable, close_context, drop_host, new_context, until, wear_host, rewrite
 from test_hub_list import JOEY, NELL, box, github, rectoversos  # noqa: F401  (the hub with its list, as there)
 from test_mount_page import KEEP_ROOT
 
@@ -158,7 +158,7 @@ def test_a_refusal_beside_a_press_that_went_through_is_said_after_the_remount_un
         mounted, rectoversos):  # noqa: F811
     m = mounted
     path = rectoversos / GA4[5:]
-    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Done @dora", "- [x] Done @dora"), encoding="utf-8")
+    rewrite(path, path.read_text(encoding="utf-8").replace("- [ ] Done @dora", "- [x] Done @dora"))
     m.press(m.button(JOEY))
     m.press(m.button(GA4))
     m.page.clock.run_for(5100)
@@ -183,8 +183,8 @@ def test_an_unmount_while_a_press_waits_sends_nothing(mounted, rectoversos):  # 
 
 def test_a_title_with_markup_is_shown_as_its_text_in_the_mounted_list(chromium, box, rectoversos):  # noqa: F811
     joey = rectoversos / JOEY[5:]
-    joey.write_text(joey.read_text(encoding="utf-8").replace(
-        "# Reply to Joey about column L", "# Reply <img src=/x onerror=window.__pwned=1> & co"), encoding="utf-8")
+    rewrite(joey, joey.read_text(encoding="utf-8").replace(
+        "# Reply to Joey about column L", "# Reply <img src=/x onerror=window.__pwned=1> & co"))
     box.hub.the_list.poll()
     for m in mount_the_list(chromium, box):
         m.page.wait_for_timeout(200)

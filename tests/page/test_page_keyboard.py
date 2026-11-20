@@ -7,7 +7,7 @@ are drawn by the system; the test leaves ACCESSORY px for them), and whether iOS
 test shows the cause the page controls: a 14px font, and a page wider than the screen). Only a real iPhone shows it."""
 import pytest
 
-from pagehelp import at, open_with_comment, select, select_by_touch
+from pagehelp import at, open_with_comment, select, select_by_touch, rewrite
 
 pytestmark = pytest.mark.page
 
@@ -29,7 +29,7 @@ FAKE_VV = """(() => {
 
 @pytest.fixture
 def phone(touch_tab, site):
-    site.file.write_text(MD, encoding="utf-8")
+    rewrite(site.file, MD)
     touch_tab.page.add_init_script(FAKE_VV)
     return touch_tab.open()
 
@@ -143,7 +143,7 @@ def test_a_pinch_zoom_is_not_a_keyboard_and_leaves_the_form_where_it_is(phone):
 
 
 def test_with_a_mouse_the_form_is_never_docked(tab, site):
-    site.file.write_text(MD, encoding="utf-8")
+    rewrite(site.file, MD)
     tab.page.add_init_script(FAKE_VV)
     tab.open()
     select(tab.page, at(MAIN, "Second"), at(MAIN, "paragraph", None))

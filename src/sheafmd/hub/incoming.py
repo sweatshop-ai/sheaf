@@ -227,6 +227,8 @@ def _root_shape(b) -> str | None:
     pages = b.get("pages")
     if not (isinstance(pages, list) and len(pages) <= MAX_PAGES):
         return "the root's move has no list of pages"
+    if len({p.get("path") for p in pages if isinstance(p, dict)}) != len(pages):
+        return "a page of the root's move is listed twice"
     for p in pages:
         if not (isinstance(p, dict) and isinstance(p.get("path"), str) and p["path"] and "\0" not in p["path"]
                 and "\\" not in p["path"] and not p["path"].startswith("/") and ".." not in p["path"].split("/")):

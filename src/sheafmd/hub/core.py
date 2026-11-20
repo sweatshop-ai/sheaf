@@ -1681,7 +1681,8 @@ class Hub:
         got = e.live.refresh()
         if got is not None:
             hash_ = e.live.current()[0]
-            if not self.writes.is_pull(e.address, hash_) and not self.writes.is_own(e.address, hash_):
+            own = self.writes.is_own(e.address, hash_)         # both asked, so that a look that is a pull's settles a door
+            if not self.writes.is_pull(e.address, hash_) and not own:   # write's expectation too, and never leaves it to swallow a later write
                 self.writes.add(e.address, "?", "tiroir", "disk")
         return got
 

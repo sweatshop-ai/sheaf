@@ -823,11 +823,23 @@ _EMOJI_TOKEN = re.compile("\uF8FE([0-9]+)\uF8FF")
 
 
 @lru_cache(maxsize=256)
-def _emoji_drawn(name: str):
-    """The emoji pandoc draws for `:name:`, or None."""
+def _emoji_looked_at(name: str):
     r = _pandoc.run(["-f", "gfm", "-t", "html5"], f":{name}:")
-    m = _EMOJI_SPAN.search(r.stdout) if r.returncode == 0 else None
+    if r.returncode != 0:
+        raise _Unread                   # an exception is not cached: a failed run must not make the name no emoji
+    m = _EMOJI_SPAN.search(r.stdout)
     return m.group(2) if m else None
+
+
+def _emoji_drawn(name: str):
+    """The emoji pandoc draws for `:name:`, or None (also when pandoc failed, which is not remembered)."""
+    try:
+        return _emoji_looked_at(name)
+    except _Unread:
+        return None
+
+
+_emoji_drawn.cache_clear = _emoji_looked_at.cache_clear
 
 
 def _emoji_as_tokens(fragment: str, source):
@@ -847,6 +859,31 @@ def _emoji_as_tokens(fragment: str, source):
     return _EMOJI_SPAN.sub(token, fragment), names
 
 
+_SHORTCODE_TEXT = re.compile(r":([a-z0-9_+-]+):")
+_LITERAL_COLON = "\uF8FD"
+
+
+def _literal_shortcodes(fragment: str, source):
+    """(the fragment with a mark before each `:name:` of its text that the source wrote as `\\:name:`, whether it
+    marked any). The page shows such a shortcode as the words it is; written bare, the next render would draw its
+    emoji. A shortcode the reader typed on the page has no `\\:` in the source and stays as typed."""
+    from bs4 import BeautifulSoup
+
+    if not source or "\\:" not in source or _LITERAL_COLON in fragment or ":" not in fragment:
+        return fragment, False
+    soup, found = BeautifulSoup(fragment, "html.parser"), False
+    for t in _texts(soup):
+        if ":" not in t or any(u.name in ("code", "pre", "script", "style") or "math" in (u.get("class") or [])
+                               for u in t.parents):
+            continue
+        new = _SHORTCODE_TEXT.sub(lambda m: _LITERAL_COLON + m.group(0)
+                                  if f"\\:{m.group(1)}:" in source and _emoji_drawn(m.group(1)) else m.group(0), str(t))
+        if new != str(t):
+            t.replace_with(new)
+            found = True
+    return (str(soup), True) if found else (fragment, False)
+
+
 def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     """Convert one edited HTML block back to GitHub-flavoured markdown. With `source`, the block's markdown,
     markup the source did not have is unwrapped (`_unwrap_strays`) and named in `strays`."""
@@ -862,6 +899,7 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     if not clean.strip():
         return ""
     clean, urls = _bare_urls_as_words(clean)
+    clean, literal = _literal_shortcodes(clean, source)
     clean, slash = _text_backslashes(clean)
     clean, pipe = _cell_code_pipes(clean)
     cells, token = _cell_breaks(clean)
@@ -873,15 +911,22 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     if r.returncode != 0:
         raise EditError(f"pandoc: {r.stderr.strip()[:200]}")
     out = r.stdout if token is None else r.stdout.replace(token, "<br>")
-    if pipe is not None or slash is not None:
+    if pipe is not None or slash is not None or emoji or literal:
         # A table pandoc writes as raw HTML has no cell for a bare pipe to end, and `\\|` would show; nor does
-        # HTML read a backslash as an escape.
+        # HTML read a backslash as an escape, nor a shortcode as its emoji.
         parts, depth = re.split(r"(</?table\b)", out), 0
         for k, part in enumerate(parts):
             depth = depth + 1 if part == "<table" else max(0, depth - 1) if part == "</table" else depth
             if pipe is not None:
                 part = part.replace(pipe, "|" if depth else "\\|")
-            parts[k] = part if slash is None else part.replace(slash, "\\" if depth else "\\\\")
+            if slash is not None:
+                part = part.replace(slash, "\\" if depth else "\\\\")
+            if literal:
+                part = part.replace(_LITERAL_COLON, "" if depth else "\\")
+            if emoji:
+                part = _EMOJI_TOKEN.sub(lambda m: (_emoji_drawn(emoji[int(m.group(1))]) or f":{emoji[int(m.group(1))]}:")
+                                        if depth else f":{emoji[int(m.group(1))]}:", part)
+            parts[k] = part
         out = "".join(parts)
     # Pandoc's gfm writer wraps every bare URL as <https://...>. GFM autolinks a bare
     # URL anyway, so the two render identically - but the angle brackets show up as
@@ -890,8 +935,6 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     out = re.sub(r"<(https?://[^>\s]+)>", r"\1", out)
     for word, url in urls.items():
         out = out.replace(word, url)
-    if emoji:
-        out = _EMOJI_TOKEN.sub(lambda m: f":{emoji[int(m.group(1))]}:", out)
     return copyblock.restore(out).strip("\n")
 
 

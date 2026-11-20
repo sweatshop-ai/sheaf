@@ -1235,6 +1235,33 @@ def test_while_a_reply_holds_the_reload_the_edit_and_the_reply_are_taken_after_m
     assert [json.loads(d)["hash"] for d in pins] == [held]
 
 
+def test_a_save_that_merges_while_a_reply_is_written_pins_the_version_it_was_made_against(frozen):
+    # A merged save brings a reload and the page keeps the hash of the text it showed until then (`kept`, `was`). The
+    # reply is begun while the save is out, so the hold starts with the answer and not with a change from outside: the
+    # version pinned is the one the save was made against, not the file's hash the answer names.
+    p, f = frozen.page, frozen.site.file
+    pins = []
+    p.on("request", lambda r: pins.append(json.loads(r.post_data)["hash"]) if r.url.endswith("/_/pin") else None)
+    out = []
+    p.route("**/_/save", lambda route: out.append(route))
+    served = md_hash(f.read_text())
+    type_at_end(p, P2, " and plums")
+    p.keyboard.press("Control+s")
+    until(lambda: out or p.wait_for_timeout(20), what="the save to be out")
+    rewrite(f, f.read_text() + "\nA new paragraph from outside.\n")
+    p.click(".rd-badge")
+    p.wait_for_selector("#rd-popover textarea")
+    open_reply(frozen, "my reply text")
+    mark(p)
+    out[0].continue_()
+    until(lambda: "and plums" in f.read_text(), what="the saved edit in the file")
+    until(lambda: pins or p.wait_for_timeout(20), what="the page pinning the version of its save")
+    p.wait_for_timeout(500)
+    assert pins == [served], "the page pinned a version other than the one its save was made against"
+    assert p.evaluate("window.__same_load") is True, "the page reloaded under the reply"
+    assert p.input_value("#rd-popover textarea") == "my reply text"
+
+
 def fails(e):
     raise e
 

@@ -546,8 +546,8 @@ def test_a_line_the_file_deleted_from_the_pages_split_save_does_not_bring_anothe
 
 
 # The grid: each shape of the split save, each of its lines deleted by the file, and each second save (nothing
-# changed, a line typed on, a line dropped). No line of the page's own is written twice, and a line the page did not
-# touch stays deleted.
+# changed, a line typed on, a line dropped). No line of the page's own is written twice, and the deleted line stays
+# deleted.
 SPLIT_SHAPES = {
     "typed above": ["Typed above.", "Second paragraph here."],
     "split off": ["Second paragraph here.", "Split off."],
@@ -573,10 +573,12 @@ def test_no_line_of_the_pages_split_save_is_written_twice_where_the_file_deleted
     saved = lines_html(lines)
     once, _ = rde.apply_edits(FOUR, [{"i": 2, "html": saved}])
     cur = once.replace(lines[gone] + "\n\n", "")
-    html = lines_html(dict(second_saves(lines))[second])
+    after = dict(second_saves(lines))[second]
+    html = lines_html(after)
     new, rep = rde.merge_edits(FOUR, cur, second_save(2, html, saved), at="2026-10-18T10:00")
     paragraphs = rde._prose(new).split("\n\n")
     assert len(paragraphs) == len(set(paragraphs)), new
     assert rep["conflicts"] == []
-    if "typed on" not in second and "dropped" not in second:
+    # Where the page's save leaves only the deleted line, the block comes back as it did (nothing is left to keep).
+    if [x for x in after if x != lines[gone]]:
         assert lines[gone] not in paragraphs, new

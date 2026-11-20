@@ -218,7 +218,9 @@ def test_the_playwright_cache_key_names_the_runner_image(text):
     run = re.search(r"^\s*run: (.*)$", step, flags=re.M).group(1)
     assert subprocess.run(["bash", "-n", "-c", run], capture_output=True).returncode == 0, run
     key = re.search(r"^\s*key: (playwright-.*)$", text, flags=re.M).group(1)
-    assert key == "playwright-${{ runner.os }}-${{ steps.image.outputs.os }}-${{ hashFiles('uv.lock') }}"
+    # The engines are in the key: slices that install Chromium alone save a cache with Chromium alone, and a slice that
+    # runs Firefox and WebKit must not restore that one and download them again on every run.
+    assert key == "playwright-${{ runner.os }}-${{ steps.image.outputs.os }}-${{ steps.engines.outputs.set }}-${{ hashFiles('uv.lock') }}"
 
 
 def test_the_move_to_a_new_ubuntu_image_with_playwright_is_written_down(text):
@@ -236,7 +238,7 @@ def test_it_installs_from_the_lock_and_runs_pytest_without_the_page_marks_first(
 
 def test_both_pytest_runs_name_their_tests_and_go_through_the_stall_watch(text):
     """A job that hung for 24 minutes printed dots and no test name."""
-    runs = [ln for ln in text.splitlines() if "pytest" in ln and "uv run" in ln]
+    runs = [ln for ln in text.splitlines() if "pytest" in ln and "uv run" in ln and "--collect-only" not in ln]
     assert len(runs) == 2
     for ln in runs:
         assert "tools/ci/stall_watch.py --" in ln and "pytest -v " in ln and "pytest -q" not in ln
@@ -268,9 +270,9 @@ def test_the_wheel_is_built_and_installed_as_a_user_would(text):
 
 def test_the_browsers_system_packages_are_installed_by_the_job_only_where_it_can_use_sudo(text):
     # `--with-deps` runs apt through sudo, so the job passes it only where sudo exists.
-    block = text[text.index("Page tests (Playwright, Chromium, Firefox, WebKit)"):]
+    block = text[text.index("Page tests (Playwright)"):]
     assert re.search(r'if \[ "\$RUNNER_OS" = "Linux" \] && command -v sudo >/dev/null; then deps="--with-deps"; fi', block)
-    assert 'playwright install $deps chromium firefox webkit' in block
+    assert 'playwright install $deps $engines' in block
 
 
 def test_a_slow_package_mirror_cannot_hold_the_page_test_step_for_an_hour(text):
@@ -278,20 +280,20 @@ def test_a_slow_package_mirror_cannot_hold_the_page_test_step_for_an_hour(text):
     # runner's mirror) and the page tests, 4 minutes of work, ended 50 minutes in, 10 under the job's limit. The same install took
     # 2 min 13 s in another slice of the same run. The install is bounded, tried again (apt keeps what it fetched), and the step
     # has a limit of its own, so a job names the install when it is the one that stands still.
-    i = text.index("- name: Page tests (Playwright, Chromium, Firefox, WebKit)")
+    i = text.index("- name: Page tests (Playwright)")
     j = text.index("\n      - name:", i + 1)
     block = text[i:j]
     assert re.search(r"^        timeout-minutes: (\d+)$", block, flags=re.M), "the step has a limit of its own"
     assert int(re.search(r"^        timeout-minutes: (\d+)$", block, flags=re.M).group(1)) < 60
     assert re.search(r'command -v timeout >/dev/null; then bounded="timeout -k 30 \d+"', block), "macOS has no timeout: the bound is there only where it exists"
-    assert re.search(r"for try in 1 2 3; do \$bounded uv run --no-sync playwright install \$deps chromium firefox webkit && break", block)
+    assert re.search(r"for try in 1 2 3; do \$bounded uv run --no-sync playwright install \$deps \$engines && break", block)
 
 
 def test_a_try_that_timed_out_ends_the_apt_it_left_running_before_the_next_try_starts(text):
     # Runs 44789430505 (slice 4) and 44790768975 (slice 2): the mirror was slow, `timeout` ended the first try at 600 s and
     # killed playwright, but the apt-get it had started under sudo went on and kept the dpkg lock. Tries 2 and 3 failed in
     # two seconds each on "Could not get lock /var/lib/dpkg/lock-frontend" (exit 100), after every test had passed.
-    i = text.index("- name: Page tests (Playwright, Chromium, Firefox, WebKit)")
+    i = text.index("- name: Page tests (Playwright)")
     j = text.index("\n      - name:", i + 1)
     block = text[i:j]
     assert "stop_apt()" in block
@@ -312,12 +314,12 @@ def test_no_step_name_holds_a_colon_and_a_space_or_a_hash_that_YAML_reads_as_syn
             assert ": " not in m["v"] and " #" not in m["v"], ln
 
 
-def test_the_other_engines_are_installed_only_in_the_page_test_step(text):
+def test_the_other_engines_are_named_and_installed_only_in_the_steps_of_the_page_tests(text):
     # The mount tests (#116) run in Chromium, Firefox and WebKit. The install is scoped to the step that runs
     # them, so a pull request that skips the page tests pays for no extra browser, and the unit-test step is as fast as before.
-    i = text.index("- name: Page tests (Playwright, Chromium, Firefox, WebKit)")
+    i = text.index("- name: Page tests (Playwright)")
     j = text.index("\n      - name:", i + 1)
-    assert "firefox" in text[i:j]
+    assert "firefox" in text[text.index("- name: Name the browsers this slice runs"):j]
     assert "install" not in text[text.index("- name: Install from the lock"):text.index("- name: Tests")].replace("Install from the lock", "").replace("uv sync", "")
     assert text.count("playwright install") == 1          # one install line, and it is the one in this step
 
@@ -470,3 +472,65 @@ def test_the_changed_files_name_a_move_by_both_paths_and_a_non_ascii_name_unquot
     files = page_paths().changed_files()
     assert sorted(files) == ["docs/x.py", "docs/é.md", "src/x.py"]
     assert page_paths().decide("pull_request", files)[0] is True
+
+
+def engine_step(text):
+    i = text.index("- name: Name the browsers this slice runs")
+    return text[i:text.index("\n      - name:", i + 1)]
+
+
+def engine_run(text):
+    """The script of that step, unindented from the 10 columns it has under `run: |`."""
+    step = engine_step(text) + "\n      - name:"
+    body = re.search(r"^        run: \|\n(.*?)(?=\n      - name:)", step, flags=re.M | re.S).group(1)
+    return "\n".join(ln[10:] for ln in body.splitlines())
+
+
+def test_a_slice_installs_the_browsers_of_the_page_tests_it_collected_and_chromium_always(text):
+    # Run 44788361173: Firefox and WebKit are 126 MB and 181 packages of apt in every slice, and the one slice that
+    # holds their tests (tests/conftest.py deals them to the last) is the only one that needs them.
+    step = engine_step(text)
+    assert "id: engines" in step and "if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'" in step
+    run = engine_run(text)
+    assert "pytest -m page --collect-only" in run, "what the slice collected decides, not a list kept in two places"
+    assert '>> "$GITHUB_OUTPUT"' in run
+    assert subprocess.run(["bash", "-n", "-c", run], capture_output=True).returncode == 0, run
+
+
+def run_engine_step(text, tmp_path, collected, uv_exit=0):
+    run = engine_run(text)
+    fake = tmp_path / "bin"
+    fake.mkdir(exist_ok=True)
+    (fake / "uv").write_text(f"#!/bin/sh\ncat {tmp_path / 'collected'}\nexit {uv_exit}\n")
+    (fake / "uv").chmod(0o755)
+    (tmp_path / "collected").write_text(collected)
+    out = tmp_path / "out"
+    r = subprocess.run(["bash", "-c", run], capture_output=True, text=True, env={
+        "PATH": f"{fake}:{os.environ['PATH']}", "GITHUB_OUTPUT": str(out)})
+    if uv_exit:
+        return r
+    assert r.returncode == 0, r.stderr
+    return dict(ln.split("=", 1) for ln in out.read_text().splitlines())
+
+
+def test_a_slice_with_no_firefox_or_webkit_test_installs_chromium_alone(text, tmp_path):
+    got = run_engine_step(text, tmp_path, "tests/page/test_page_boot.py::test_a[1]\ntests/page/test_mount_page.py::test_b[chromium]\n")
+    assert got == {"engines": "chromium", "set": "chromium"}
+    # a Chromium id that holds the name of an engine in a later part of it is not a test in that engine
+    got = run_engine_step(text, tmp_path, 'tests/page/test_user_modify.py::test_a[chromium-<p style="-webkit-user-modify: read-write">x</p>]\n')
+    assert got == {"engines": "chromium", "set": "chromium"}
+
+
+def test_a_slice_with_a_firefox_or_a_webkit_test_installs_that_engine_too(text, tmp_path):
+    got = run_engine_step(text, tmp_path, "tests/page/test_mount_page.py::test_b[firefox]\ntests/page/test_mount_selection.py::test_c[webkit-02]\n")
+    assert got == {"engines": "chromium firefox webkit", "set": "chromium-firefox-webkit"}
+    got = run_engine_step(text, tmp_path, "tests/page/test_page_mobile_composer.py::test_b[webkit]\n")
+    assert got == {"engines": "chromium webkit", "set": "chromium-webkit"}
+    got = run_engine_step(text, tmp_path, "tests/page/test_mount_allowlist.py::test_x[firefox-07]\n")
+    assert got == {"engines": "chromium firefox", "set": "chromium-firefox"}
+
+
+def test_a_collection_that_fails_fails_the_step_instead_of_installing_chromium_alone(text, tmp_path):
+    r = run_engine_step(text, tmp_path, "tests/page/test_mount_page.py::test_b[webkit]\n", uv_exit=2)
+    assert r.returncode == 1 and "did not collect" in r.stdout
+    assert not (tmp_path / "out").exists(), "no answer is written"

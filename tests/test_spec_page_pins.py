@@ -103,10 +103,11 @@ def test_the_out_mark_names_its_wall_clock_limit_beside_the_open_form_one():
     assert "a form that another page already has open is not withdrawn when the send goes out" in s
 
 
-def test_the_known_limit_of_a_kept_comment_found_by_the_words_a_paragraph_ends_with_is_written():
+def test_a_kept_comment_whose_paragraph_changed_in_its_ending_is_told_by_a_longer_lead_and_the_old_entry_keeps_its_limit():
     s = flat(section("10.4"))
-    assert "Known limit: a paragraph that opens with the entry's words is not offered the entry" in s
-    assert "cannot tell this from a paragraph that took over the entry's opening words" in s
+    assert "A third key, `lead` (the 40 characters the paragraph opens with)" in s
+    assert "a paragraph whose `lead` is the entry's is the entry's, whoever else ends like it did" in s
+    assert "An entry kept before `lead` existed has none and is told as above" in s
 
 
 def test_a_cancel_given_up_takes_the_cancel_button_away_whether_or_not_it_reached_the_hub():

@@ -58,7 +58,7 @@
 
 ## PR #393
 
-- [ ] src/sheafmd/page/page.js:153 wayBackWhere.say always calls say(t, true), so the informational "this name now opens its Remote Control link directly" shows as a red 7 s error toast and is written as a 'toast' incident (page.js:685); the Sheaf rows show the same text as a neutral line.
+- [x] src/sheafmd/page/page.js:153 wayBackWhere.say always calls say(t, true), so the informational "this name now opens its Remote Control link directly" shows as a red 7 s error toast and is written as a 'toast' incident (page.js:685); the Sheaf rows show the same text as a neutral line. **[fixed on main: #527, fbde84aa]**
 - [ ] src/sheafmd/page/page.js:144 a member page loaded without the mount bundle (sheaf.js only ships in MOUNT_ASSETS, hub/assets.py:16) shows the session name as plain text with no link, so the byline's way back exists only on the mounted page; matches the PR's stated fallback, not documented in SPEC 6.2 item 11.
 
 ## PR #394
@@ -293,7 +293,7 @@
 
 ## PR #442
 
-- [ ] src/sheafmd/page/sheaf.js:416 submitting the field unchanged (to == folder) is sent to the hub, which answers 409 "A folder cannot be moved into itself." — a misleading message for a no-op; the form could close or say nothing changed instead
+- [x] src/sheafmd/page/sheaf.js:416 submitting the field unchanged (to == folder) is sent to the hub, which answers 409 "A folder cannot be moved into itself." — a misleading message for a no-op; the form could close or say nothing changed instead **[fixed on main: #527, fbde84aa]**
 - [ ] src/sheafmd/page/sheaf.js:396 a refusal is written to the Sheaf's shared status line (say), not beside the open form, so with several Rename/Move forms open the message does not say which one it answers
 
 ## PR #443
@@ -323,7 +323,7 @@
 
 ## PR #449
 
-- [ ] src/sheafmd/page/page.js:3061 a refused delete (403/410) leaves teamAsk set, so the button still reads "Confirm delete" and the next single click sends the delete again without the two-click ask
+- [x] src/sheafmd/page/page.js:3061 a refused delete (403/410) leaves teamAsk set, so the button still reads "Confirm delete" and the next single click sends the delete again without the two-click ask **[fixed on main: #527, fbde84aa]**
 - [ ] src/sheafmd/page/page.js:3033 teamBusy drops every Team-tab click (Reply, Edit, Cancel) while one write is out, not only a second send; the click does nothing and says nothing
 - [ ] src/sheafmd/page/page.js:3054 Send with an empty or whitespace-only textarea returns silently, with no message to the member
 

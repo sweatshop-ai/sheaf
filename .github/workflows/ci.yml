@@ -147,7 +147,16 @@ jobs:
           # one goes on from the packages apt already holds. macOS has no `timeout` and no apt, so it installs unbounded.
           bounded=""
           if command -v timeout >/dev/null; then bounded="timeout -k 30 600"; fi
-          for try in 1 2 3; do $bounded uv run --no-sync playwright install $deps chromium firefox webkit && break; if [ "$try" = 3 ]; then echo "::error::the browsers did not install in three tries"; exit 1; fi; done
+          # `timeout` ends playwright, not the apt-get it started under sudo (root's, so no signal of ours reaches it): that one
+          # goes on, holds the dpkg lock and a next try fails on it in two seconds (exit 100; runs 44789430505, 44790768975).
+          # So after a try, root ends the apt-get; a dpkg it had started finishes its package, and `dpkg --configure -a`
+          # settles a half-done one. The wait of 60 s at most is a safety net, not the plan.
+          stop_apt() {
+            sudo pkill -TERM -x apt-get || true; sleep 3; sudo pkill -KILL -x apt-get || true
+            timeout 60 bash -c 'while pgrep -x apt-get >/dev/null || pgrep -x dpkg >/dev/null; do sleep 2; done' || true
+            sudo dpkg --configure -a || true
+          }
+          for try in 1 2 3; do $bounded uv run --no-sync playwright install $deps chromium firefox webkit && break; if [ "$try" = 3 ]; then echo "::error::the browsers did not install in three tries"; exit 1; fi; if [ -n "$deps" ]; then stop_apt; fi; done
           uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v --durations=25 -m page -rs 2>&1 | tee page-tests.txt
           # A page test that cannot start its browser skips with a reason. Here that is a failure.
           if grep -Eq '[0-9]+ skipped' page-tests.txt; then

@@ -2,7 +2,7 @@
 
 **Claimed by:** Habib 2026-11-20 16:21
 
-**Status:** PR open: https://github.com/sweatshop-ai/sheaf/pull/481 (head eb4eea0c, review GO recorded by boss_review.py, exit 0; CI 5 of 6 slices green, slice 1 red only on `test_mount_sheaf.py::test_connect_a_laptop_names_it_and_shows_one_line_once`, which also fails on main, run 44769354075)
+**Status:** merged as 48a49fa0 (PR 481; the two open items below remain). PR: https://github.com/sweatshop-ai/sheaf/pull/481 (head eb4eea0c, review GO recorded by boss_review.py, exit 0; CI 5 of 6 slices green, slice 1 red only on `test_mount_sheaf.py::test_connect_a_laptop_names_it_and_shows_one_line_once`, which also fails on main, run 44769354075)
 
 **Blocked by:** none (the owner runs the paste live with a guiding worker, 2026-11-20)
 

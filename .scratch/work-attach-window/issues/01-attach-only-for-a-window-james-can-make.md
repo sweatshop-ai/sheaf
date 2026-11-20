@@ -10,7 +10,7 @@
 
 **Blocked by:** None (can start immediately)
 
-**Status:** ready-for-agent
+**Status:** in-progress (claimed 2026-11-20)
 
 - [ ] Test first: `a_b/c` and `a/b_c` each get no `attach` key (evidence: a test with both addresses on a member with a shell and `attach` configured)
 - [ ] A part with an uppercase letter or a leading `-` gets no `attach` key either (evidence: a test for `Acme/tiroir` and `-a/b`)

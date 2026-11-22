@@ -11,7 +11,7 @@
 
 **Status:** done (PR 298, merge c7ab758)
 
-**Par où commencer :** F3 d'abord (attendre les deux réponses, sur t-compute, jamais sur le portable ; vérifier le rouge sans le correctif), puis F2 (deux agents, un par fil : `Tokens().add` deux fois, un Tell chacun, le toast de chaque fil ne nomme que le sien). F1 : décider avec le propriétaire du SPEC entre limite écrite et correctif (file de toasts, ou un toast qui liste les fils).
+**Par où commencer :** F3 d'abord (attendre les deux réponses, sur le serveur auto-hébergé, jamais sur le portable ; vérifier le rouge sans le correctif), puis F2 (deux agents, un par fil : `Tokens().add` deux fois, un Tell chacun, le toast de chaque fil ne nomme que le sien). F1 : décider avec le propriétaire du SPEC entre limite écrite et correctif (file de toasts, ou un toast qui liste les fils).
 
 - [x] F1 : décision écrite (corriger ou limite dans le SPEC), pour les deux moitiés
 - [x] F2 : le test a deux agents et affirme le nom de chaque fil

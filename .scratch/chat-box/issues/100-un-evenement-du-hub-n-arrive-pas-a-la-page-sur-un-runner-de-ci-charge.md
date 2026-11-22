@@ -1,14 +1,14 @@
 # 100: Un événement du hub n'arrive pas à la page sur un runner de CI chargé
 
-**What to build:** Trois tests de page ont échoué en CI parce qu'un événement que le hub envoie à la page n'est jamais arrivé (ou arrivé trop tard), jamais sur t-compute à la main :
+**What to build:** Trois tests de page ont échoué en CI parce qu'un événement que le hub envoie à la page n'est jamais arrivé (ou arrivé trop tard), jamais sur le serveur auto-hébergé à la main :
 
-- `tests/page/test_page_writing.py::test_a_send_again_that_fails_to_reach_the_hub_does_not_hide_that_the_send_before_it_was_taken` : run 43616701956, tentative 3 (tête f76b1f5, avec le correctif du ticket 79). Le message dit `the toasts that went by: ['Your reply did not go out: the hub is unreachable.']` : après ce toast, ni « New reply on c1 by Ada » ni « What you sent reached the hub after all » en 8 s d'attente avec l'horloge qu'on fait avancer. Les 7 autres lancements (CI et t-compute) ont passé, avec la même chronologie.
+- `tests/page/test_page_writing.py::test_a_send_again_that_fails_to_reach_the_hub_does_not_hide_that_the_send_before_it_was_taken` : run 43616701956, tentative 3 (tête f76b1f5, avec le correctif du ticket 79). Le message dit `the toasts that went by: ['Your reply did not go out: the hub is unreachable.']` : après ce toast, ni « New reply on c1 by Ada » ni « What you sent reached the hub after all » en 8 s d'attente avec l'horloge qu'on fait avancer. Les 7 autres lancements (CI et le serveur auto-hébergé) ont passé, avec la même chronologie.
 - `tests/page/test_page_writing.py::test_a_page_that_opens_a_thread_while_a_send_of_it_is_out_on_another_page_does_not_draw_its_text` : run 43621112432, tentative 1, job 132526782610, « timed out waiting for the send to go out » (`pagehelp.py:184`).
 - `tests/page/test_page_writing.py::test_a_change_heard_between_a_replys_answer_and_its_end_reloads_when_the_send_ends_and_says_it_waited` : run 43621112432, tentative 2, job 132530249342, « timed out waiting for a toast saying 'text changed while you wrote' ».
 
 **Écarté (ticket 79, PR 317) :**
 - Ce n'est pas la file des toasts seule : avec l'horloge qu'on fait avancer pendant qu'un toast est à l'écran, le toast attendu n'est jamais venu dans le cas du send-again.
-- Ce n'est pas la lenteur de la machine pour la chronologie : sur t-compute (10 lancements, dont avec le processeur saturé par 4 boucles sur son cœur, et 64 boucles sur 32 cœurs) et sur une exécution de CI qui passe, la chronologie est la même au dixième de seconde près (« did not go out » à 7,2 s, « New reply » à 14,2 s, TAKEN à 16,8 s, soit 9,6 s après la libération du hub).
+- Ce n'est pas la lenteur de la machine pour la chronologie : sur le serveur auto-hébergé (10 lancements, dont avec le processeur saturé par 4 boucles sur son cœur, et 64 boucles sur 32 cœurs) et sur une exécution de CI qui passe, la chronologie est la même au dixième de seconde près (« did not go out » à 7,2 s, « New reply » à 14,2 s, TAKEN à 16,8 s, soit 9,6 s après la libération du hub).
 - Quatre exécutions de CI avec un vidage de l'état de la page à l'échec (branche jetable, supprimée) sont toutes passées : rien attrapé.
 
 **Piste, non vérifiée :** l'événement `changed` du hub (flux SSE) ou la réponse de `/_/doc` n'arrive pas à la page, ou la page ne le traite pas, sur un runner où six travailleurs poussent de la CI en même temps. À établir par une mesure, pas par une hypothèse.

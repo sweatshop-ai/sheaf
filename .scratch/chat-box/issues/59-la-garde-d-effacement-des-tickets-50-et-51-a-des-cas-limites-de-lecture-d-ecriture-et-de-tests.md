@@ -25,7 +25,7 @@ Classe : c, d.
 
 **Status:** done — PR 301, fusionnée le 2026-11-14 (e5e71ab) ; suite : ticket 82
 
-**Par où commencer :** F7 d'abord (tests sans attente fixe, sur t-compute, pas sur le portable), puis F1 : un test où `unsentLine` lève pendant la purge. Pour F2 à F5, décider avec le propriétaire du SPEC s'il s'agit d'une limite à écrire ou d'un correctif.
+**Par où commencer :** F7 d'abord (tests sans attente fixe, sur le serveur auto-hébergé, pas sur le portable), puis F1 : un test où `unsentLine` lève pendant la purge. Pour F2 à F5, décider avec le propriétaire du SPEC s'il s'agit d'une limite à écrire ou d'un correctif.
 
 - [x] F1 : une levée de `unsentLine` dans la purge ne passe ni pour une lecture refusée ni ne sort d'une lecture non stricte — test, rouge avant — preuve : PR 301 ; rouge en CI sur 8e469c3 (« the redraw ran inside the read »), vert sur 688e070 puis 5fa6787 (3/3)
 - [x] F2 à F5 : décision écrite par cas (corriger ou limite dans le SPEC) — preuve : les décisions sont écrites plus haut ; F2 corrigé (même test que F1), F3 à F5 dans le SPEC (paragraphe après « A store written by an older page »)

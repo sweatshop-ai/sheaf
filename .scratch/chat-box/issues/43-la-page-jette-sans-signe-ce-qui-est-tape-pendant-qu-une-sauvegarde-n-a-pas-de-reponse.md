@@ -18,7 +18,7 @@
 
 **Décision (Halima, 2026-11-12) :** voie (b), pas de file. Pendant que la garde `beforeinput` refuse, le bloc édité porte `rd-saving` (trait pointillé, curseur `not-allowed`) et la première touche refusée est dite une fois par sauvegarde (« Saving… »). Pas de rejeu : rejouer à travers une sauvegarde dont la réponse peut recharger la page est la classe de course du jour.
 
-**Fait :** branche `chat-box/43` (test `test_typing_while_a_save_has_no_answer_is_said_once_and_the_block_shows_it_is_saving`, rouge avant le correctif sur t-compute, vert après; writing+drafts+actions 374 verts). Revue Codex : un P2 (la classe entrait dans `ser()` et dans le brouillon), corrigé dans `clean()`, avec une assertion sur le brouillon.
+**Fait :** branche `chat-box/43` (test `test_typing_while_a_save_has_no_answer_is_said_once_and_the_block_shows_it_is_saving`, rouge avant le correctif sur le serveur auto-hébergé, vert après; writing+drafts+actions 374 verts). Revue Codex : un P2 (la classe entrait dans `ser()` et dans le brouillon), corrigé dans `clean()`, avec une assertion sur le brouillon.
 
 **Claimed by:** Saskia 2026-11-12
 

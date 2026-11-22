@@ -11,7 +11,7 @@ Le code est déjà sur la branche `cleo/chat-box` ; ce ticket finit le travail e
 **Status:** done
 
 - [x] Les anciens tests du formulaire décrivent le nouveau contrat : un champ vide n'est pas « en train d'écrire », un texte tapé est gardé au lieu de bloquer la fermeture, il n'y a plus de Cancel sauf pour Edit
-  - Preuve : tests/page complet sur t-compute (clone de 4f826a6 puis 49b95c7, `-rfE --tb=line`) : 101 échecs au premier passage, 69 au second ; les 68 restants attendent `#rd-comment-btn` après une sélection (liste du ticket 02, par nom dans handoff-Suraya-2026-11-09c.md), et le 69e est corrigé en 99240fd (1 passed sur t-compute). Épingles hors page : `pytest tests/test_page_assets.py tests/test_spec_page_pins.py` 19 + 3 passed.
+  - Preuve : tests/page complet sur le serveur auto-hébergé (clone de 4f826a6 puis 49b95c7, `-rfE --tb=line`) : 101 échecs au premier passage, 69 au second ; les 68 restants attendent `#rd-comment-btn` après une sélection (liste du ticket 02, par nom dans handoff-Suraya-2026-11-09c.md), et le 69e est corrigé en 99240fd (1 passed sur le serveur auto-hébergé). Épingles hors page : `pytest tests/test_page_assets.py tests/test_spec_page_pins.py` 19 + 3 passed.
 - [x] Un rechargement nécessaire n'est retenu que par un texte tapé, jamais par le champ vide
   - Preuve : `pytest tests/page/test_page_chat_box.py -k empty_box_does_not_hold` passe ; cassé exprès dans `writingNow` : `return false` fait échouer le test (« Timeout waiting .rd-hold »), `return !!(pop && pop.querySelector('textarea'))` le fait échouer (« timed out waiting for the page to reload »). Code rétabli.
 - [x] La liste « not sent » nomme correctement un message sans numéro (aujourd'hui « 1 reply »)

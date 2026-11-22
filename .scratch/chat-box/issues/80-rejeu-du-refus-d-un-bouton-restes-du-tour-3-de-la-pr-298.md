@@ -15,7 +15,7 @@
 
 **Status:** done (merged into main as 16fb935, PR 327)
 
-**Par où commencer :** le point `pressSaid` jamais remis à zéro : écrire le test rouge (A refusé, B réussi, rechargement dans la fenêtre de A), sur t-compute, jamais sur le portable.
+**Par où commencer :** le point `pressSaid` jamais remis à zéro : écrire le test rouge (A refusé, B réussi, rechargement dans la fenêtre de A), sur le serveur auto-hébergé, jamais sur le portable.
 
 - [x] Chaque point c : corrigé avec son test rouge d'abord, ou la limite écrite dans le SPEC — PR 327 (16fb935) : `page.js:3847` remet `pressSaid` à zéro à chaque appui ; `:3886` le pose aussi quand un rechargement est en attente ; `:4559-4562` met `msg` puis le refus en file et regarde le refus rejoué pour un second rechargement ; tests `tests/page/test_page_actions.py:324` et `:361` ; limite des toasts perdus au rechargement écrite dans SPEC.md:1381
 - [x] `tests/page/test_page_actions.py:287-289` n'attend plus 500 ms de temps réel — PR 327 : attend l'événement `changed` par `until(lambda: heard(p, "changed"))` (`tests/page/test_page_actions.py:285`, `HEARD` à `:56`)

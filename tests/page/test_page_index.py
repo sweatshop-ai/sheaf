@@ -5,7 +5,7 @@ from importlib import resources
 import pytest
 
 from helpers import comment
-from pagehelp import until
+from pagehelp import close_context, new_context, until
 from sheafmd.hub import index
 
 pytestmark = pytest.mark.page
@@ -95,3 +95,38 @@ def test_the_index_page_says_reconnecting_and_not_stopped_when_the_hub_restarts_
     until(lambda: index_tab.hub_line() == "Reconnecting to the hub…", what="the line that the page reconnects")
     site.start()
     until(lambda: index_tab.hub_line() == "", timeout=15, what="the line gone once the hub runs again")
+
+
+@pytest.fixture
+def shared(chromium, site):
+    """A browser whose tabs share one stream (page/live.js), as every browser with Web Locks does."""
+    c = new_context(chromium, shared=True, viewport={"width": 1100, "height": 800})
+    c.add_cookies([site.cookie()])
+    yield c
+    close_context(c)
+
+
+def test_the_index_page_joins_again_after_its_join_is_refused(site, shared):
+    """A join the hub does not take (429, a network error, a 404 at a rollover) closes the index's stream for good
+    (readyState 2), and the page said "Reconnecting to the hub…" for ever. It asks for a new stream, as the document
+    page does: the line goes, and a change reaches the list."""
+    refused = []
+
+    def once(route):
+        if route.request.post_data_json.get("doc") == "" and not refused:
+            refused.append(1)
+            route.fulfill(status=429, content_type="application/json", body='{"ok": false, "error": "too many"}')
+        else:
+            route.continue_()
+    shared.route("**/_/live/join", once)
+    tab = IndexTab.__new__(IndexTab)
+    tab.page, tab.errors = shared.new_page(), []
+    tab.page.on("pageerror", lambda e: tab.errors.append(str(e)))
+    tab.page.goto(f"{site.base}/")
+    tab.page.wait_for_selector("#roots", state="attached")
+    until(lambda: refused, what="the index's first join refused")
+    until(lambda: site.hub.index_bus.count() == 1, timeout=15, what="the index stream open on the hub again")
+    until(lambda: tab.hub_line() == "", what="no line about the hub once it is joined")
+    comment(site.file)
+    until(lambda: tab.dot() == "blue", timeout=15, what="the dot of a document with an open comment")
+    assert tab.errors == []

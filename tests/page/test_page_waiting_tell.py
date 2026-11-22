@@ -71,6 +71,20 @@ def test_cancel_ends_the_wait_and_says_the_agent_had_seen_it(tab, site):
     assert site.hub.waiting_tells.waits(DOC) == []
 
 
+def test_a_cancel_the_hub_refuses_because_the_folder_changed_takes_the_waiting_line_off(tab, site):
+    ask_agent(tab, site)
+    tab.page.fill("#rd-popover textarea", "Please do.")
+    tab.page.click("#rd-popover .rd-form button.rd-tell")
+    until(lambda: bool(line(tab)), what="the waiting line")
+    tab.page.route("**/_/cancel", lambda route: route.fulfill(
+        status=409, content_type="application/json",
+        body='{"ok": false, "error": "another folder now holds this document\'s name: reload the page", "root": "other"}'))
+    tab.page.hover("#rd-popover button[data-a=cancel-tell]")
+    tab.page.click("#rd-popover button[data-a=cancel-tell]")
+    toasted(tab.page, "another folder now holds this document")
+    until(lambda: line(tab) == [], what="the line to go: the Tell is not this page's to wait on any more")
+
+
 def test_an_action_reply_ends_the_wait(tab, site):
     token = ask_agent(tab, site)
     tab.page.wait_for_selector("#rd-popover textarea")

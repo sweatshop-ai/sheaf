@@ -113,7 +113,7 @@
 212	422	FIXED	src/sheafmd/hub/writelog.py:243	undo and restore append a `retracted` line and the kept lines to the file, so a restart does not bring the carried lines back (commits 9921afbf, 2b0db61e).	
 213	422	FIXED	src/sheafmd/hub/incoming.py:158	_unkeep and _unarchive still share one contextlib.suppress; give each its own suppress so a failed _unkeep does not skip _unarchive.	1
 214	422	c	src/sheafmd/hub/outgoing.py:59	The sender's timeout is still urllib's per-socket-operation timeout; a total-deadline call is a design change.	
-218	423	b	tests/test_helpers_wait.py:22	The unreaped test still asserts nothing after the wait; add assert proc_state(done.pid) == "zombie" before done.wait.	4
+218	423	FIXED	tests/test_helpers_wait.py:22	The unreaped test still asserts nothing after the wait; add assert proc_state(done.pid) == "zombie" before done.wait.	4
 222	425	c	src/sheafmd/hub/archive.py:143	_sweep_root still lists pages outside any lock and does not take moves._LOCK; adding it changes the hub's lock order for the sweep, a decision.	
 223	425	FIXED	src/sheafmd/hub/handler.py:1536	_own_loose still runs under moves._LOCK (also in _delete); the finding calls it a throughput cost only, so add a comment stating the cost is accepted.	
 227	426	b	tests/page/test_sheaf_buttons.py:113	The assert right after the first Delete click still has no wait; add a short until-stable check that no POST went out.	5
@@ -130,7 +130,7 @@
 259	434	c	src/sheafmd/page/page.js:1219	An old page without CFG.branch sends no branch and handler._read_on (handler.py:1257-1262) answers 400 for a clone page; tolerating a missing branch would weaken the guard, so a transition path is a decision.	
 260	434	c	src/sheafmd/hub/handler.py:1294	_save passes the branch guard into e.live.save, which answers an rid replay `again` before calling it, so the switch is hidden on a replay; showing it needs a decision on the answer shape.	
 261	434	STALE	src/sheafmd/hub/core.py:1668	Not a defect: catch_up's docstring (1656-1659) states a failed rebuild is tried again on the next request, and _rebuild_failed (core.py:1799ff) bounds the logging; the finding itself says no crash.	
-265	435	b	tests/test_page_predicates.py:11	A_FUNCTION still accepts `(` followed by anything; anchor it as r"^\s*(async\s*)?(\(.*?\)\s*=>|[\w$]+\s*=>|function\b)".	4
+265	435	FIXED	tests/test_page_predicates.py:11	A_FUNCTION still accepts `(` followed by anything; anchor it as r"^\s*(async\s*)?(\(.*?\)\s*=>|[\w$]+\s*=>|function\b)".	4
 266	435	b	tests/test_page_predicates.py:16	PAGE_TESTS.glob("*.py") is top level only; tests/page has no subfolder today, so no gap now; use rglob.	5
 270	438	b	src/sheafmd/hub/repos.py:413	wake() calls _use (sleeping=False, writes clones.json) before _restore at :417; move _use after a successful _restore (keep it for the nothing-out return) so a failed widen leaves the row asleep.	3
 271	438	c	src/sheafmd/hub/repos.py:416	provider.token(repo) runs inside `with self.holding(dest)` (:408); fetching it outside the lock needs the sleeping/restore check redone after, a lock-order and race decision.	
@@ -151,7 +151,7 @@
 301	443	c	src/sheafmd/connect.py:135	`made = True` follows os.open at :134-135; a one-statement window only a KeyboardInterrupt reaches and no code change closes it fully; accept or restructure with a decision.	
 302	443	FIXED	src/sheafmd/connect.py:143	os.close(fd) in the finally can replace the write/fsync error with close's; catch OSError around the close when an exception is already propagating.	5
 306	444	c	src/sheafmd/mcp.py:452	Door._asleep returns None for an unbound token (member None), as the SPEC 13 comment in core.wake_for_write says the front matter of a sleeping page cannot be read, so whether it is `visibility: project` is unknown; giving it the asleep line is a policy decision.	
-310	445	b	tests/public_tree.py:106	tracked() decodes with errors="replace" (:107); decode with surrogateescape (os.fsdecode) so a non-UTF-8 name resolves to its real file.	4
+310	445	FIXED	tests/public_tree.py:106	tracked() decodes with errors="replace" (:107); decode with surrogateescape (os.fsdecode) so a non-UTF-8 name resolves to its real file.	4
 311	445	FIXED	tests/public_tree.py:3	Docstring says a hit is never the matched text, but a name in a path prints in `path:0 term N` (add(path, 0, key) at :122); reword the docstring and SPEC row to say the path is printed.	
 312	445	c	tests/public_tree.py:128	The guard's own files skip every address of every ALLOW entry (`key in {k for _, k in allow}`), documented as intended; narrowing it to one entry per file is a policy change.	
 316	446	c	src/sheafmd/page/mount.js:452	For a list/Sheaf page, create() runs before the stylesheet wait and `page` stays assigned when stale() returns at :454; unmounting it there changes the mount lifecycle shared by the overtaking draw, needs a decision.	

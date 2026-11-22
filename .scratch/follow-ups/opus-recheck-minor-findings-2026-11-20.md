@@ -215,7 +215,7 @@
 
 ## PR #423
 
-- [ ] tests/test_helpers_wait.py:23 the unreaped-process test asserts nothing after the wait returns; it does not check that proc_state is "zombie" rather than "gone", so it would also pass if the helper returned for the wrong reason
+- [x] tests/test_helpers_wait.py:23 the unreaped-process test asserts nothing after the wait returns; it does not check that proc_state is "zombie" rather than "gone", so it would also pass if the helper returned for the wrong reason **[fixed on main: #546, fdf71566]**
 
 ## PR #425
 
@@ -262,7 +262,7 @@
 
 ## PR #435
 
-- [ ] tests/test_page_predicates.py:11 A_FUNCTION accepts any string starting with "(", so a parenthesised expression such as "(window.x === 1)" passes the guard although Playwright evaluates it as an expression through eval; anchoring on "\(.*?\)\s*=>" would close that gap.
+- [x] tests/test_page_predicates.py:11 A_FUNCTION accepts any string starting with "(", so a parenthesised expression such as "(window.x === 1)" passes the guard although Playwright evaluates it as an expression through eval; anchoring on "\(.*?\)\s*=>" would close that gap. **[fixed on main: #546, fdf71566]**
 - [ ] tests/test_page_predicates.py:16 PAGE_TESTS.glob("*.py") scans only the top level of tests/page; a page test in a subdirectory or a helper outside tests/page (e.g. a conftest elsewhere) is not checked.
 
 ## PR #438
@@ -307,7 +307,7 @@
 
 ## PR #445
 
-- [ ] tests/public_tree.py:106 tracked() decodes `git ls-files -z` with errors="replace", so a tracked file whose name is not UTF-8 resolves to a path that does not exist and its content is skipped silently by the is_file() check at line 121 (the path itself is still scanned).
+- [x] tests/public_tree.py:106 tracked() decodes `git ls-files -z` with errors="replace", so a tracked file whose name is not UTF-8 resolves to a path that does not exist and its content is skipped silently by the is_file() check at line 121 (the path itself is still scanned). **[fixed on main: #546, fdf71566]**
 - [x] tests/public_tree.py:142 a name found in a path is reported as `path:0 term N`, and the path printed holds the name; the docstring (line 3) and SPEC row say a hit never prints the matched text. No new exposure (the path is already public), but the claim is not exact. **[fixed on main: #521, ee67ff2a]**
 - [ ] tests/public_tree.py:125 the guard's own two files are exempt from every address any ALLOW entry lists, whatever file that entry names; documented as intended, but it is broader than one entry per file.
 

@@ -101,48 +101,58 @@ def test_a_tab_that_closes_leaves_the_count_and_the_leaders_tab_hands_over(share
 FREEZABLE_JS = """(() => {
   const Native = window.BroadcastChannel, post = Native.prototype.postMessage;
   window.__frozen = false;
+  window.__queued = [];        // what the tab's channels received while frozen, delivered after `resume` as Chrome does
   window.BroadcastChannel = class extends Native {
     constructor(name) {
       super(name);
-      // Added before the page sets `onmessage`, so it runs first and keeps a message from a frozen tab.
-      super.addEventListener('message', ev => { if (window.__frozen) ev.stopImmediatePropagation(); });
+      // Added before the page sets `onmessage`, so it runs first and holds a message back from a frozen tab.
+      super.addEventListener('message', ev => {
+        if (window.__frozen && !ev.__replayed) { ev.stopImmediatePropagation(); window.__queued.push([this, ev.data]); }
+      });
     }
     postMessage(m) { if (!window.__frozen) post.call(this, m); }
+  };
+  window.__thaw = () => {
+    window.__frozen = false;
+    document.dispatchEvent(new Event('resume'));
+    const q = window.__queued.splice(0);
+    q.forEach(([chan, data]) => { const ev = new MessageEvent('message', { data }); ev.__replayed = true; chan.dispatchEvent(ev); });
   };
 })()"""
 
 # This tab's Web Locks client id: the holder of a lock it takes for a moment.
-CLIENT_ID = """() => { const n = 'id-' + Math.random();
+CLIENT_ID_JS = """() => { const n = 'id-' + Math.random();
   return navigator.locks.request(n, () => navigator.locks.query().then(s => s.held.find(l => l.name === n).clientId)); }"""
-HOLDER = "() => navigator.locks.query().then(s => (s.held.find(l => l.name === 'sheaf-live') || {}).clientId || null)"
+HOLDER_JS = "() => navigator.locks.query().then(s => (s.held.find(l => l.name === 'sheaf-live') || {}).clientId || null)"
 
 
 def freeze(p):
     """What Chrome does to a background tab it freezes, as far as the other tabs can tell: `freeze` fires, then the tab
-    runs nothing (here: hears and sends nothing on its channels)."""
+    sends nothing and hears nothing until it resumes (FREEZABLE_JS: its channels only; timers and fetches still run)."""
     p.evaluate("() => { document.dispatchEvent(new Event('freeze')); window.__frozen = true; }")
 
 
 def resume(p):
-    p.evaluate("() => { window.__frozen = false; document.dispatchEvent(new Event('resume')); }")
+    """The tab is thawed: `resume` fires, then what its channels received while frozen is delivered."""
+    p.evaluate("() => window.__thaw()")
 
 
 def holder(p):
     """The client id that holds `sheaf-live`, read in tab `p`; a read that falls on a reload is None."""
     try:
-        return p.evaluate(HOLDER)
+        return p.evaluate(HOLDER_JS)
     except Exception as e:
         if any(said in str(e) for said in RELOADING):
             return None
         raise
 
 
-def freezable(context, site, n=3):
-    """`n` tabs that can be frozen, counted by the hub, and their Web Locks client ids; the first holds the lock."""
+def freezable(context, site):
+    """Three tabs that can be frozen, counted by the hub, and their Web Locks client ids; the first holds the lock."""
     context.add_init_script(FREEZABLE_JS)
-    pages = [opened(context, site) for _ in range(n)]
-    until(lambda: site.hub.tabs(DOC) == n, what=f"{n} tabs counted")
-    ids = [p.evaluate(CLIENT_ID) for p, _ in pages]
+    pages = [opened(context, site) for _ in range(3)]
+    until(lambda: site.hub.tabs(DOC) == 3, what="three tabs counted")
+    ids = [p.evaluate(CLIENT_ID_JS) for p, _ in pages]
     until(lambda: holder(pages[1][0]) == ids[0], what="the first tab holding the lock")
     return pages, ids
 
@@ -190,23 +200,12 @@ def test_a_comment_written_while_the_leader_is_frozen_reaches_the_tabs(shared, s
     next leader's reaches no tab. The page makes up for it on the `hello` of its new join (`checkText`). The joins are
     held in every tab, so the comment falls in the gap for certain: the leader freezes, the hub counts no tab, a
     comment is written and taken in, and only then do the tabs join. The freeze is dispatched (FREEZABLE_JS).
-    The index page loses nothing in such a gap: while no index stream is joined the hub tells the index nothing
-    (`touch` and `tick` in hub/index.py return at once), and the page reads its list again on every `hello`."""
-    pages, ids = freezable(shared, site)
-    for p, _ in pages:
-        p.evaluate(HOLD_JOINS_JS)
-    freeze(pages[0][0])
-    until(lambda: sum(p.evaluate("window.__held") for p, _ in pages[1:]) >= 1, what="a join held")
-    until(lambda: site.hub.tabs(DOC) == 0, what="no tab counted while the joins are held")
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
-                                                     "Ada", "2026-10-14T10:00")[0])
-    e = site.hub.entries[DOC]
-    until(lambda: (site.hub.catch_up(e), "Why?" in e.live.current()[1])[1], what="the hub reading the comment")
-    for p, _ in pages[1:]:
-        p.evaluate("window.__release()")
-    for n, (p, _) in enumerate(pages[1:], 2):
-        until(lambda: badges(p) >= 1, what=f"the comment in tab {n}")
-    assert [e for _, e in pages] == [[]] * 3
+    The index page has no test of its own: it reads its list again on every `hello` (`soon()` in page/index.js), and
+    while no index stream of any browser is joined the hub tells the index nothing (`touch` and `tick` in
+    hub/index.py return at once)."""
+    pages, _ = freezable(shared, site)
+    comment_in_the_gap(site, pages, lambda: freeze(pages[0][0]))
+    assert pages[0][1] == []
 
 
 def test_a_tab_that_leaves_without_a_leave_is_dropped_when_its_lock_frees(shared, site):
@@ -221,6 +220,28 @@ def test_a_tab_that_leaves_without_a_leave_is_dropped_when_its_lock_frees(shared
     until(lambda: site.hub.tabs(DOC) == 2, timeout=1.0, what="two tabs counted after the tab went")
 
 
+def comment_in_the_gap(site, pages, cut):
+    """Hold every join of the tabs, `cut` the leader (it closes or freezes), write a comment while the hub counts no
+    tab, then let the joins go: the other tabs must show the comment, which they hear of only through the `hello` of
+    their new join (`checkText`)."""
+    for p, _ in pages:
+        p.evaluate(HOLD_JOINS_JS)
+    cut()            # its stream ends; the lock passes to another tab, whose join waits on the gate
+    until(lambda: sum(p.evaluate("window.__held") for p, _ in pages[1:]) >= 1, what="a join held")
+    until(lambda: site.hub.tabs(DOC) == 0, what="no tab counted while the joins are held")
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
+                                                     "Ada", "2026-10-14T10:00")[0])
+    # No tab holds a stream now, so the watcher skips the document (`catch_up` in hub/core.py): the hub takes the
+    # write in as a request for the page would, and the `comments` event it emits reaches no tab.
+    entry = site.hub.entries[DOC]
+    until(lambda: (site.hub.catch_up(entry), "Why?" in entry.live.current()[1])[1], what="the hub reading the comment")
+    for p, _ in pages[1:]:
+        p.evaluate("window.__release()")
+    for n, (p, _) in enumerate(pages[1:], 2):
+        until(lambda: badges(p) >= 1, what=f"the comment in tab {n}")
+    assert [errors for _, errors in pages[1:]] == [[]] * 2
+
+
 def test_a_comment_written_while_the_leader_hands_over_reaches_the_tabs(shared, site):
     """An event the hub emits after the old leader's stream closed and before a tab joins the new one reaches no
     tab. The page makes up for it on the `hello` of its new join: `checkText` reads the document again, and a
@@ -229,22 +250,7 @@ def test_a_comment_written_while_the_leader_hands_over_reaches_the_tabs(shared, 
     (The index page reads its list again on every `hello`, `soon()` in page/index.js.)"""
     pages = [opened(shared, site) for _ in range(3)]
     until(lambda: site.hub.tabs(DOC) == 3, what="three tabs counted")
-    for p, _ in pages:
-        p.evaluate(HOLD_JOINS_JS)
-    pages[0][0].close()          # its stream ends; the lock passes to another tab, whose join waits on the gate
-    until(lambda: sum(p.evaluate("window.__held") for p, _ in pages[1:]) >= 1, what="a join held")
-    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
-                                                     "Ada", "2026-10-14T10:00")[0])
-    # No tab holds a stream now, so the watcher skips the document (`catch_up` in hub/core.py): the hub takes the
-    # write in as a request for the page would, and the `comments` event it emits reaches no tab.
-    e = site.hub.entries[DOC]
-    until(lambda: (site.hub.catch_up(e), "Why?" in e.live.current()[1])[1], what="the hub reading the comment")
-    for p, _ in pages[1:]:
-        p.evaluate("window.__release()")
-    for n, (p, _) in enumerate(pages[1:], 2):
-        until(lambda: badges(p) >= 1,
-              what=f"the comment in tab {n}")
-    assert [e for _, e in pages[1:]] == [[]] * 2
+    comment_in_the_gap(site, pages, lambda: pages[0][0].close())
 
 
 def test_a_join_refused_for_another_owner_reopens_the_shared_stream(shared, site):

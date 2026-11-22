@@ -101,10 +101,12 @@ def _request(req, timeout: float = TIMEOUT) -> tuple[int, dict | None, dict]:
                               "Nothing was sent.") from None
         return e.code, None, {}
     except (urllib.error.URLError, OSError) as e:
-        if isinstance(getattr(e, "reason", e), ssl.SSLError):   # a certificate it cannot trust is no outage
-            raise SendError(f"cannot trust {req.full_url.split('/', 3)[2]}: {getattr(e, 'reason', e)}. "
+        # A URLError carries its cause as `reason`; an SSLError read from the socket is its own cause (its `reason` is a word).
+        why = e.reason if isinstance(e, urllib.error.URLError) else e
+        if isinstance(why, ssl.SSLCertVerificationError):       # a certificate it cannot trust is no outage; a reset is
+            raise SendError(f"cannot trust {req.full_url.split('/', 3)[2]}: {why}. "
                             "Nothing was sent.") from None
-        raise Unreachable(f"cannot reach {req.full_url.split('/', 3)[2]}: {getattr(e, 'reason', e)}. "
+        raise Unreachable(f"cannot reach {req.full_url.split('/', 3)[2]}: {why}. "
                         "Nothing was sent.") from None
     return status, connect._json_of(raw.decode("utf-8", "replace")) if raw.strip() else None, headers
 

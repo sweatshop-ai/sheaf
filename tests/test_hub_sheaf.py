@@ -366,3 +366,8 @@ def test_the_team_overlay_leaves_a_page_whose_meta_is_not_json_as_it_is():
     body = '<p>x</p><script id="rd-edit-meta" type="application/json">{not json</script>'
     me = SimpleNamespace(hub=SimpleNamespace(team=SimpleNamespace(list=lambda doc: [])))
     assert Handler._with_team(me, "page", body, "r/a.md", "bea") == body
+
+
+def test_another_members_session_with_an_id_that_is_not_a_plain_id_still_has_its_remote_control_link(two):
+    two.hub.writes.add("work/plan.md", "Claude Code (Cal)", "laptop", "update", session="not a plain id", link=RC)
+    assert link_of(two) == {"kind": "remote", "href": RC}

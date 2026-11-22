@@ -1,6 +1,6 @@
 # 177: The refused-join loop test cannot tell a leader loop from the page's own pace
 
-**Claimed by:** nobody
+**Claimed by:** Kenji 2026-11-22
 
 **Status:** open
 

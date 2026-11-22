@@ -2,7 +2,7 @@
 
 **Claimed by:** Emil 2026-11-22
 
-**Status:** in review. PR 574 (lines 19, 20, 34): review round 1 GO on 3ca0f215, CI green; waits on the merge order.
+**Status:** in-progress. Part 1 merged (PR 574, 192b3c7d); open: peer-check items with 139, the self-test case, the optional security read, refactors, macOS tests, names (155).
 
 **Blocked by:** none
 
@@ -16,8 +16,9 @@
 
 - [ ] **The peer-uid check on every cookie and key request is not built.** Today only `/_/open?nonce=` is checked (`src/sheafmd/hub/peer.py:94-122`, called from `src/sheafmd/hub/handler.py:716-719`); `SPEC.md:877` says so. The full design and its open decision are in ticket 139; these items close with it: a missed row on a busy machine (`_owners`, `peer.py:75-85`, reads `/proc/net/tcp*` whole instead of asking the kernel with NETLINK_SOCK_DIAG); a closed client reading as uid 0 (`_owners` matches the two ends with no TCP-state filter); a relay running as another user is a dead end (`handler.py:60-68`, `LINK_OTHER_USER` has no way in, `LINK_UNKNOWN` names `signin-url`); macOS or a Linux without `/proc/net` behaving differently (`peer.py:48-50`, `supported()` is Linux only).
 - [ ] **By hand, never done:** a `sheaf open` link followed by a second real OS user must get 401, no `Set-Cookie`, and an `open-401` diagnostics row naming both uids; and a browser through `ssh -L` to a remote hub signing in.
-- [ ] **`LINK_USED` advises `sheaf rotate` even on Linux** (`src/sheafmd/hub/handler.py:52-56`, used at `:716`), where the peer check means another user could not have taken the cookie. Decide whether the Linux page drops that advice.
-- [ ] **The no-peer-check warning shows only after a failure.** On platforms where the peer check cannot run, `LINK_LIMIT` (`handler.py:57-59`) appears only on the page of a link that failed; decide whether `sheaf open` prints it on every run there.
+- [x] **`LINK_USED` advises `sheaf rotate` even on Linux** (`src/sheafmd/hub/handler.py:52-56`, used at `:716`), where the peer check means another user could not have taken the cookie. Decide whether the Linux page drops that advice. *(PR 574, merged as 192b3c7d: where the check runs the page gives only `sheaf open` again; the rotate advice (`LINK_ROTATE`) and `LINK_LIMIT` stay where it is off. Red first: `test_where_the_hub_checks_the_user_a_used_link_does_not_advise_a_rotate` failed on `sheaf rotate` in the page.)*
+- [x] **The no-peer-check warning shows only after a failure.** On platforms where the peer check cannot run, `LINK_LIMIT` (`handler.py:57-59`) appears only on the page of a link that failed; decide whether `sheaf open` prints it on every run there. *(PR 574, merged as 192b3c7d: where `peer.supported()` is false, `sheaf open` prints `LINK_LIMIT` once on stderr on every run. Red first: `test_where_the_hub_cannot_check_the_user_every_open_warns_once_on_stderr`.)*
+- [ ] A Linux hub whose peer self-test fails (`peer_off`): `sheaf open` stays silent while the page carries `LINK_LIMIT`; needs a hub field the command can read (PR 574 review, minor).
 - [ ] Optional: a second-opinion security read of the nonce peer check (`src/sheafmd/hub/peer.py` and the `/_/open` path in `src/sheafmd/hub/handler.py:700-725`); never done on the merged code.
 
 ## Restart and stop
@@ -31,7 +32,7 @@
 
 ## HTTP
 
-- [ ] **`Accept` is matched as a substring** (`src/sheafmd/hub/handler.py:320`): `text/html;q=0` counts as asking for HTML, and case matters. Parse it as a media-type list.
+- [x] **`Accept` is matched as a substring** (`src/sheafmd/hub/handler.py:320`): `text/html;q=0` counts as asking for HTML, and case matters. Parse it as a media-type list. *(PR 574, merged as 192b3c7d: `/_/open` already used `_asks_for_html`; the 403 page now does too. Red first: 5 of 6 new Accept cases in `test_hub_peer_gate.py`.)*
 
 ## Refactors left on purpose
 

@@ -198,7 +198,7 @@
 - [x] src/sheafmd/hub/outgoing.py:78 send_root calls answer.get(...) without checking that the peer's body is a dict; a peer answering a JSON list or string raises AttributeError instead of holding the batch as "failed". send_root has no caller yet. **[fixed on main: #528, b55b2d17]**
 - [ ] src/sheafmd/hub/root_moves.py:95 Moves.sent and Moves.hold index row["sent"] / row["held"] directly; a root_moves.json row missing those keys (hand-edited or from an older shape) raises KeyError, although _read treats an unreadable file as empty.
 - [ ] src/sheafmd/hub/incoming.py:143 _root_shape accepts an empty owner_email and duplicate page paths; owner_for turns the empty one into no_email and a duplicate is judged twice under one key, so no wrong result follows, but the shape check is looser than its message says.
-- [ ] src/sheafmd/send.py:498 moved_to from the hub is printed to the terminal unfiltered (no control-character stripping); the hub is the member's own tiroir, so this is hardening only.
+- [x] src/sheafmd/send.py:498 moved_to from the hub is printed to the terminal unfiltered (no control-character stripping); the hub is the member's own tiroir, so this is hardening only. **[fixed on main: #556, b6aa9afe]**
 
 ## PR #417
 
@@ -299,7 +299,7 @@
 ## PR #443
 
 - [ ] src/sheafmd/connect.py:135 `made = True` is set on the line after os.open returns, so a KeyboardInterrupt delivered between the two leaves the temp behind and the fd open; a one-statement window, not reachable by an ordinary failure.
-- [ ] src/sheafmd/connect.py:143 os.close(fd) in `finally` replaces the original write/fsync error if close also fails; the temp is still removed and the message still says nothing was written, only the strerror shown is close's.
+- [x] src/sheafmd/connect.py:143 os.close(fd) in `finally` replaces the original write/fsync error if close also fails; the temp is still removed and the message still says nothing was written, only the strerror shown is close's. **[fixed on main: #556, b6aa9afe]**
 
 ## PR #444
 

@@ -105,7 +105,7 @@
 198	416	FIXED	src/sheafmd/hub/outgoing.py:268	send_root still calls answer.get on whatever post returned (None for an empty body, or a list); guard with isinstance(answer, dict) and hold the batch as "failed".	2
 199	416	b	src/sheafmd/hub/root_moves.py:103	Moves.sent indexes row["sent"] and row["held"] (and hold row["held"] at :154) directly; use row.get(..., default) to survive an old or hand-edited row.	3
 200	416	b	src/sheafmd/hub/incoming.py:233	_root_shape still accepts an empty owner_email and duplicate paths; require a non-empty owner_email and a set of unique paths.	4
-201	416	b	src/sheafmd/send.py:541	report.moved_to is still printed unfiltered; require .isprintable() on moved_to in the report check at send.py:310.	5
+201	416	FIXED	src/sheafmd/send.py:541	report.moved_to is still printed unfiltered; require .isprintable() on moved_to in the report check at send.py:310.	5
 205	417	STALE	tests/conftest.py:325	signals.send_group (src/sheafmd/signals.py:92) takes only a Popen child that leads its own group and refuses anything else, so a group signal to a process the test did not start cannot be sent; no killpg guard is needed.	
 206	417	FIXED	tests/test_real_hub_untouched.py:86	The spin loop is replaced by wait_until_ended(done.pid), which has a deadline.	
 207	417	c	tests/leakguard.py:136	is_ending still waits up to EXEC_WINDOW for a live process whose environ cannot be read; telling unreadable from empty is a change of the guard's rule.	
@@ -149,7 +149,7 @@
 296	442	FIXED	src/sheafmd/page/sheaf.js:523	Submit sends to /_/move-folder even when input.value.trim() === at, and moves.py:189 answers 409 "A folder cannot be moved into itself."; in the submit handler, form.remove() and return when the value is unchanged.	2
 297	442	c	src/sheafmd/page/sheaf.js:583	A refusal goes to the shared say() line (:355), not beside the form; where to show it (per-form line) is a UI decision.	
 301	443	c	src/sheafmd/connect.py:135	`made = True` follows os.open at :134-135; a one-statement window only a KeyboardInterrupt reaches and no code change closes it fully; accept or restructure with a decision.	
-302	443	b	src/sheafmd/connect.py:143	os.close(fd) in the finally can replace the write/fsync error with close's; catch OSError around the close when an exception is already propagating.	5
+302	443	FIXED	src/sheafmd/connect.py:143	os.close(fd) in the finally can replace the write/fsync error with close's; catch OSError around the close when an exception is already propagating.	5
 306	444	c	src/sheafmd/mcp.py:452	Door._asleep returns None for an unbound token (member None), as the SPEC 13 comment in core.wake_for_write says the front matter of a sleeping page cannot be read, so whether it is `visibility: project` is unknown; giving it the asleep line is a policy decision.	
 310	445	b	tests/public_tree.py:106	tracked() decodes with errors="replace" (:107); decode with surrogateescape (os.fsdecode) so a non-UTF-8 name resolves to its real file.	4
 311	445	FIXED	tests/public_tree.py:3	Docstring says a hit is never the matched text, but a name in a path prints in `path:0 term N` (add(path, 0, key) at :122); reword the docstring and SPEC row to say the path is printed.	

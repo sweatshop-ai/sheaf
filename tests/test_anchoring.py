@@ -418,16 +418,16 @@ def test_a_cell_with_an_unclosed_opener_takes_the_block_before_it():
 def _slow(md):
     """Seconds `heading_anchor` takes for `md` (the scan, not the pandoc projection that anchoring
     also pays for, which a loaded laptop makes slow)."""
-    t = time.perf_counter()
+    t = time.process_time()
     rdc.heading_anchor(md)
-    return time.perf_counter() - t
+    return time.process_time() - t
 
 
 @pytest.mark.parametrize("heading", [
     "Title\n=====\n",                                                # setext: the text is the lines above
     "# Title\n",
 ])
-def test_a_long_heading_full_of_tags_before_an_unclosed_opener_is_read_in_linear_time(heading):
+def test_a_long_heading_full_of_tags_before_an_unclosed_opener_is_read_in_linear_time(heading, no_gc):
     # Point 1: 9 KB of tags then `<!--` took 1.6 s, 36 KB took 21.8 s (each pass searched on from
     # the position again), and the hub is blocked while a comment is anchored.
     tags = "<b>x</b> " * 1000
@@ -492,13 +492,13 @@ def test_code_after_an_unclosed_ordinary_opener_is_not_a_broken_comment():
     assert rdc._mask_code("a <!-- b `x` c") == "a <!-- b     c"
 
 
-def test_a_block_of_many_unclosed_openers_is_read_in_linear_time():
+def test_a_block_of_many_unclosed_openers_is_read_in_linear_time(no_gc):
     # Opus narrow review: every later opener repeated the failed search for `-->`, 597 ms at 80 KB.
     md = "a " + "<!-- x " * 12000 + " `z`\n"
-    t = time.perf_counter()
+    t = time.process_time()
     assert rdc._mask_code(md).count("`") == 0
     assert rdc._unclosed_opener(md) == 2
-    assert time.perf_counter() - t < 0.3
+    assert time.process_time() - t < 0.3
 
 
 # ── ticket 72: what is left of PR 291 ──
@@ -516,26 +516,26 @@ def test_a_heading_with_an_escaped_backtick_before_its_comment_is_found():
     assert [c.id for c in rdc.parse(out).comments] == [cid]
 
 
-def test_a_block_of_escaped_backticks_that_open_nothing_is_read_in_linear_time():
+def test_a_block_of_escaped_backticks_that_open_nothing_is_read_in_linear_time(no_gc):
     # Opus review 1, a: each leftover backtick of an escaped run opens a span nothing closes, and a
     # lazy search to the end of the block from every one of them took 1 s at 16 KB.
     md = "a " + "\\`` " * 4000 + "x\n"
-    t = time.perf_counter()
+    t = time.process_time()
     rdc._mask_code(md)
     rdc.parse(md)
-    assert time.perf_counter() - t < 0.3
+    assert time.process_time() - t < 0.3
 
 
 # ── ticket 76: what is left of PR 300 ──
 
 @pytest.mark.parametrize("unit", ["\\` <!--x--> ", "a <!--x--> "])
-def test_the_comment_spans_of_a_block_of_many_comments_are_read_in_linear_time(unit):
+def test_the_comment_spans_of_a_block_of_many_comments_are_read_in_linear_time(unit, no_gc):
     # Point 1: every comment cost a fresh search for the next code span and the next opener, 12 s at 52 KB.
     n = 3000
     md = unit * n + "\n"
-    t = time.perf_counter()
+    t = time.process_time()
     spans = rdc._comment_spans(md)
-    assert time.perf_counter() - t < 0.3
+    assert time.process_time() - t < 0.3
     assert len(spans) == n
 
 

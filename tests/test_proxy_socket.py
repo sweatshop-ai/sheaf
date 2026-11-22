@@ -2,11 +2,13 @@
 "Host and Origin", "The credential"; 18 Proxy mode). The proxy stands in as `front`: a request from
 the proxy's account with `X-Sheaf-Member` set, as after a 2xx of the verifier. The same hub's
 loopback port is `browser`, which never reads the member header."""
+import os
 import pwd
 import re
 
 import pytest
-from helpers import BEA, FRONT, hub_rows, page_meta
+from helpers import BEA, CAL, FRONT, hub_rows, page_meta, writes_from_outside
+from sheafmd.hub import live, proxy, state
 from sheafmd.source import md_hash
 
 DOC = "work/plan.md"
@@ -148,6 +150,27 @@ def test_a_member_pins_the_version_their_page_holds_as_the_hubs_person_does(fron
     """A member's page holds a reload for a form as any page does, and saves and replies after it (7.4)."""
     assert front.post("/_/pin", {"doc": DOC, "hash": md_hash(plan.read_text(encoding="utf-8"))}).status == 200
     assert front.post("/_/pin", {"doc": DOC, "hash": "0" * 16}).status == 409
+
+
+def test_another_members_pins_never_push_out_a_members_pin(front, plan, work):
+    """The cap of 16 pins is per member (7.4): Cal pinning more versions of the same document than the cap
+    leaves Bea's pin, and her save against it merges after more writes than the hub keeps."""
+    front.hub.proxy = proxy.parse({"origin": FRONT, "socket": "/run/sheaf-proxy/hub.sock",
+                                   "proxy_user": pwd.getpwuid(os.getuid()).pw_name,
+                                   "members": {BEA: {"name": "Bea", "roots": [str(work)]},
+                                               CAL: {"name": "Cal", "roots": [str(work)]}}}, "the test")
+    assert front.get(URL).status == 200
+    held = md_hash(plan.read_text(encoding="utf-8"))
+    doc = front.hub.entry(DOC).live
+    writes_from_outside(plan, doc, 1)
+    assert front.post("/_/pin", {"doc": DOC, "hash": held}).status == 200
+    for _ in range(max(live.PINS, state.PINS_KEPT) + 1):
+        writes_from_outside(plan, doc, 1)
+        assert front.post("/_/pin", {"doc": DOC, "hash": md_hash(plan.read_text(encoding="utf-8"))},
+                          member=CAL).status == 200
+    writes_from_outside(plan, doc, max(live.VERSIONS, state.VERSIONS_KEPT) + 1)
+    r = front.post("/_/save", {"doc": DOC, "hash": held, "edits": []})
+    assert r.status == 200, r.text
 
 
 @pytest.mark.parametrize("method,path", MEMBER_ROUTES + NOT_HERE)

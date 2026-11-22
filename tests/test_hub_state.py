@@ -259,6 +259,80 @@ def test_forgetting_texts_takes_the_ones_named_and_leaves_another_documents_at_t
     assert v.get(ADDR, new) == "the folder that took the name\n"
 
 
+def member_pins(member):
+    return pins_dir() / state.member_key(member)
+
+
+def test_each_member_keeps_the_16_versions_they_pinned_last():
+    """The cap is per member, not per document (137): one member pinning many versions never pushes out
+    another's pin. The owner (the hub's person, no member id) is one member among them."""
+    v = state.Versions()
+    bea = v.pin(ADDR, "Bea's version\n", member="bea")
+    mine = v.pin(ADDR, "the owner's version\n")
+    for i in range(state.PINS_KEPT + 4):
+        h = v.pin(ADDR, f"Cal's {i}\n", member="cal")
+        os.utime(member_pins("cal") / f"{h}.md", (1000 + i, 1000 + i))
+    again = state.Versions()                                     # another process, after a restart
+    assert again.get(ADDR, bea) == "Bea's version\n" and again.get(ADDR, mine) == "the owner's version\n"
+    assert again.get(ADDR, md_hash("Cal's 3\n")) is None and again.get(ADDR, md_hash("Cal's 4\n")) == "Cal's 4\n"
+    assert len(list(member_pins("cal").glob("*.md"))) == state.PINS_KEPT
+    assert stat.S_IMODE(member_pins("cal").stat().st_mode) == 0o700
+
+
+def test_a_member_id_is_never_a_file_name():
+    """A root's own store goes to git (7.4): the folder of a member's pins is named by a digest of the id."""
+    v = state.Versions()
+    v.pin(ADDR, "pinned\n", member="bea@example.com")
+    names = [p.name for p in (paths.state_dir() / "versions").rglob("*")]
+    assert not [n for n in names if "bea" in n]
+    assert state.member_key("bea@example.com") != state.member_key("cal@example.com")
+    assert state.member_key("") is None
+
+
+def test_pins_written_before_the_cap_was_per_member_are_read_as_the_owners():
+    """The format before 137: every pin of a document in `pins/<hash>.md`. Such a file is still found after
+    an upgrade, a member's pins never push it out, the owner's do (it counts among the owner's 16), and it goes
+    after 7 days as before."""
+    before = "pinned before\n"
+    old = pins_dir() / f"{md_hash(before)}.md"
+    old.parent.mkdir(parents=True, mode=0o700)
+    old.write_text("pinned before\n")
+    os.utime(old, (time.time() - 86400, time.time() - 86400))
+    v = state.Versions()
+    assert v.get(ADDR, old.stem) == "pinned before\n"
+    for i in range(state.PINS_KEPT + 1):
+        v.pin(ADDR, f"Cal's {i}\n", member="cal")
+    v.prune()
+    assert state.Versions().get(ADDR, old.stem) == "pinned before\n"
+    for i in range(state.PINS_KEPT):
+        v.pin(ADDR, f"the owner's {i}\n")
+    assert v.get(ADDR, old.stem) is None
+    old.write_text("pinned before\n")
+    eight_days = time.time() - 8 * 86400
+    os.utime(old, (eight_days, eight_days))
+    v.prune()
+    assert v.get(ADDR, old.stem) is None
+
+
+def test_a_members_pins_older_than_7_days_go_when_the_hub_starts_and_their_folders_with_the_last():
+    v = state.Versions()
+    old, new = v.pin(ADDR, "old\n", member="bea"), v.pin(ADDR, "new\n", member="cal")
+    eight_days = time.time() - 8 * 86400
+    os.utime(member_pins("bea") / f"{old}.md", (eight_days, eight_days))
+    state.Versions().prune()
+    assert v.get(ADDR, old) is None and v.get(ADDR, new) == "new\n" and not member_pins("bea").exists()
+    os.utime(member_pins("cal") / f"{new}.md", (eight_days, eight_days))
+    state.Versions().prune()
+    assert not pins_dir().parent.exists()
+
+
+def test_forgetting_texts_takes_a_members_pins_too():
+    v = state.Versions()
+    pinned = v.pin(ADDR, "old pinned\n", member="bea")
+    v.forget_texts(ADDR, {pinned})
+    assert v.get(ADDR, pinned) is None
+
+
 def test_a_pin_whose_content_is_not_its_name_is_not_believed():
     v = state.Versions()
     h = v.pin(ADDR, "real\n")

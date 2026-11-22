@@ -760,6 +760,31 @@ def test_a_document_keeps_the_versions_pinned_last_and_no_more(made):
     assert [doc.knows(h) for h in pinned] == [True, False] + [True] * (rdl.PINS - 1)
 
 
+def test_one_members_pins_never_push_out_anothers(made):
+    """The PINS are per member (137): another member pinning many versions keeps a member's pin, and a member's
+    own PINS + 1st pin pushes out their own oldest."""
+    doc, md, *_ = made()
+    bea = doc.current()[0]
+    assert doc.pin(bea, "bea") is True
+    cal = []
+    for _ in range(rdl.PINS + 1):
+        writes_from_outside(md, doc, 1)
+        cal.append(doc.current()[0])
+        assert doc.pin(cal[-1], "cal") is True
+    writes_from_outside(md, doc, rdl.VERSIONS + 1)
+    assert doc.knows(bea) is True
+    assert [doc.knows(h) for h in cal] == [False] + [True] * rdl.PINS
+
+
+def test_a_members_pin_in_memory_expires_as_the_owners_does(made):
+    doc, md, _, _, clock = made()
+    old = doc.current()[0]
+    assert doc.pin(old, "bea") is True
+    clock.t += state.PINS_MAX_AGE + 1
+    writes_from_outside(md, doc, rdl.VERSIONS + 1)
+    assert doc.knows(old) is False
+
+
 def test_a_pin_in_memory_expires_when_a_pin_on_disk_does(made):
     """On disk a pin goes after PINS_MAX_AGE since a page last pinned it; the one in memory goes with it, and
     pinned again, a version counts from then."""
@@ -789,6 +814,20 @@ def test_a_pinned_version_is_known_after_a_restart_and_more_writes_than_the_disk
     h = rds.md_hash(DOC)
     writes_from_outside(md, doc, 1)
     assert doc.pin(h) is True
+    writes_from_outside(md, doc, max(rdl.VERSIONS, state.VERSIONS_KEPT) + 1)
+    again, *_ = stored(md.read_text(encoding="utf-8"))
+    got = again.save(h, edit_first(DOC))
+    assert got["merged"] is True and "First, saved." in md.read_text(encoding="utf-8")
+
+
+def test_a_members_pin_outlives_another_members_pins_and_a_restart(stored):
+    doc, md, *_ = stored()
+    h = rds.md_hash(DOC)
+    writes_from_outside(md, doc, 1)
+    assert doc.pin(h, "bea") is True
+    for _ in range(max(rdl.PINS, state.PINS_KEPT) + 1):
+        writes_from_outside(md, doc, 1)
+        assert doc.pin(doc.current()[0], "cal") is True
     writes_from_outside(md, doc, max(rdl.VERSIONS, state.VERSIONS_KEPT) + 1)
     again, *_ = stored(md.read_text(encoding="utf-8"))
     got = again.save(h, edit_first(DOC))

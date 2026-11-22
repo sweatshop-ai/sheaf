@@ -28,7 +28,7 @@ COMMAND_HELP: dict = {}
 
 # ── a hub that holds its port and does not answer (8.4, 9.4) ─────────────────
 
-def recover_silent_hub(c: hubclient.HubClient, silent: hubclient.HubSilent, verb: str) -> bool:
+def recover_silent_hub(c: hubclient.HubClient, silent: hubclient.HubSilent, verb: service.Verb) -> bool:
     """`stop` and `restart` met a hub that holds the port and did not answer (`silent`). Stop the
     process the pid file names when the rule of `recover` holds, and say in one line what was
     stopped and why. Returns False then: the process is gone and the caller goes on as if no hub ran.
@@ -100,7 +100,7 @@ def _take_back_restart(c: hubclient.HubClient, token: int | None = None):
         pass
 
 
-def via_service(verb: str) -> int | None:
+def via_service(verb: service.Verb) -> int | None:
     """`start` or `restart` of an installed service goes through it (SPEC 14.3). None when the
     service is not installed: the caller does what it always did. `start` with a hub already
     running asks nothing of the service. A `restart` that meets a hub that holds the port and does
@@ -109,7 +109,7 @@ def via_service(verb: str) -> int | None:
         if not service.installed():
             return None
     except service.ServiceError as e:      # it cannot be told: neither around the service nor through it
-        return _running_or_failure(e) if verb == "start" else _hub_failure(e)
+        return _running_or_failure(e) if verb == service.Verb.START else _hub_failure(e)
     asked = told = False
     token = None
     try:
@@ -117,14 +117,14 @@ def via_service(verb: str) -> int | None:
         try:
             before = c.meet()
         except hubclient.HubSilent as silent:
-            if verb != "restart":
+            if verb != service.Verb.RESTART:
                 raise
             asked = recover_silent_hub(c, silent, verb)         # True: the manager was asked; False: stopped here
                                                                 # (HubDidNotStart when it did not end, a HubSilent that says why when it may not)
             before = None
-        if verb == "start" and before is not None:
+        if verb == service.Verb.START and before is not None:
             return _running(c)
-        if verb == "restart" and before is not None:
+        if verb == service.Verb.RESTART and before is not None:
             if before.got.get("service"):
                 # Tell the hub its reason now: the service manager's SIGTERM would be a "signal",
                 # and open tabs would show the stop banner (8.4). An older hub has no such route.
@@ -161,7 +161,7 @@ def via_service(verb: str) -> int | None:
 def cmd_restart(argv: list[str]) -> int:
     _parser("restart", "restart", "Stop the hub and start it again: the new code after an upgrade."
             ).parse_args(argv)
-    done = via_service("restart")
+    done = via_service(service.Verb.RESTART)
     if done is not None:
         return done
     try:
@@ -170,7 +170,7 @@ def cmd_restart(argv: list[str]) -> int:
         try:
             met = c.meet()
         except hubclient.HubSilent as silent:
-            recover_silent_hub(c, silent, "restart")        # stopped here, or raises (a HubSilent that says why, HubDidNotStart)
+            recover_silent_hub(c, silent, service.Verb.RESTART)        # stopped here, or raises (a HubSilent that says why, HubDidNotStart)
             met, recovered = None, True
         # An upgrade stop, not a plain one: open tabs ride through it as through an outage, with
         # no "the hub was stopped" banner for a hub that is back in a second (8.4, 10.7).

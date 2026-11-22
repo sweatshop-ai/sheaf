@@ -1029,3 +1029,14 @@ def test_the_service_is_never_asked_to_stop_on_macos(fake, macos):
     with pytest.raises(service.ServiceError):
         service.control("stop")
     assert fake.calls() == []
+
+
+@pytest.mark.parametrize("verb", ["install", "uninstall"])
+def test_both_refusals_on_an_unsupported_system_say_the_same_sentence(sheaf, monkeypatch, verb):
+    monkeypatch.setattr(service, "kind", lambda: None)
+    r = sheaf("service", verb)
+    assert r.code == 1 and "the user service is for Linux (systemd) and macOS (launchd)" in r.err
+
+
+def test_the_verb_prints_as_its_bare_word():
+    assert f"{service.Verb.RESTART}" == "restart" and service.Verb.STOP == "stop"

@@ -51,7 +51,8 @@ def test_a_bare_url_ending_in_a_mark_gfm_trims_keeps_the_mark(src):
 
 
 @pytest.mark.parametrize("src", ["see http://x.com/ab. here", "(see http://x.com/ab) here",
-                                 "see *http://x.com/ab* here", "see http://x.com/a\\b here"])
+                                 "see *http://x.com/ab* here", "see http://x.com/a\\b here",
+                                 "see http://x.com/a(b) here"])
 def test_a_bare_url_gfm_links_as_written_is_still_written_bare(src):
     out = saved(src)
     same_page(src, out)

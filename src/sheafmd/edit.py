@@ -831,6 +831,14 @@ def _text_backslashes(fragment: str):
 _BARE_URL = re.compile(r"https?://[^|\s<>]*[^|\s<>.,:;!?*_~'\")]")
 
 
+def _fresh_word(prefix: str, fragment: str, taken) -> str:
+    """A word of `prefix` and random capitals that is neither in `fragment` nor in `taken`."""
+    word = prefix + os.urandom(5).hex().upper()
+    while word in fragment or word in taken:
+        word = prefix + os.urandom(5).hex().upper()
+    return word
+
+
 def _bare_urls_as_words(fragment: str):
     """(the fragment with each bare URL that holds a backslash as a word, {word: the URL}). A bare URL is its own
     text and address, read as written: pandoc writes it as a link, whose label and address are read with escapes,
@@ -842,9 +850,7 @@ def _bare_urls_as_words(fragment: str):
     soup, put = BeautifulSoup(fragment, "html.parser"), {}
     for a in soup.find_all("a", href=True):
         if _BARE_URL.fullmatch(a["href"]) and "\\" in a["href"] and a.get_text() == a["href"] and not a.find_parent(["code", "pre"]) and not a.find(True):
-            word = "RDURL" + os.urandom(5).hex().upper()
-            while word in fragment or word in put:
-                word = "RDURL" + os.urandom(5).hex().upper()
+            word = _fresh_word("RDURL", fragment, put)
             put[word] = a["href"]
             a.replace_with(word)
     return (str(soup), put) if put else (fragment, {})
@@ -873,19 +879,22 @@ def _hrefs_as_words(fragment: str):
             continue
         if "\\" not in href and a.get_text() == href and not a.find(True):
             continue                    # pandoc writes it as `<address>`, which takes no escape and holds the `)`
-        word = "RDHREF" + os.urandom(5).hex().upper()
-        while word in fragment or word in put:
-            word = "RDHREF" + os.urandom(5).hex().upper()
+        word = _fresh_word("RDHREF", fragment, put)
         put[word] = href
         a["href"] = word
     return (str(soup), put) if put else (fragment, {})
 
 
-def _written_bare(out: str, start: int, end: int, url: str) -> bool:
+# A bare URL GFM links whole: `_BARE_URL`, or one ending in a `)` its own `(` balance, which GFM keeps.
+_BARE_URL_PAREN = re.compile(r"https?://[^|\s<>]*\)")
+
+
+def _gfm_links_bare(out: str, start: int, end: int, url: str) -> bool:
     """Whether `url`, written bare at out[start:end], is a link of that address in GFM: only at the start of a
     line, after white space, `*`, `_`, `~` or `(`, and whole, up to white space or a tag after the marks GFM trims
     off its end."""
-    if not _BARE_URL.fullmatch(url) or (start and out[start - 1] not in " \t\n*_~("):
+    whole = _BARE_URL.fullmatch(url) or (_BARE_URL_PAREN.fullmatch(url) and url.count("(") >= url.count(")"))
+    if not whole or (start and out[start - 1] not in " \t\n*_~("):
         return False
     marks = ".,:!?*_~" if "(" in url else ".,:!?*_~)"
     return re.match(rf"[{re.escape(marks)}]*(?:\s|<|$)", out[end:]) is not None
@@ -1081,11 +1090,11 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     # Pandoc's gfm writer wraps every bare URL as <https://...>. GFM autolinks a bare
     # URL anyway, so the two render identically - but the angle brackets show up as
     # noise on every line of a table the moment one cell is edited. Unwrap them. The
-    # scheme makes the match unambiguous against real tags. Only where GFM links it as written (`_written_bare`).
+    # scheme makes the match unambiguous against real tags. Only where GFM links it as written (`_gfm_links_bare`).
     out = re.sub(r"<(https?://[^>\s]+)>",
-                 lambda m: m.group(1) if _written_bare(m.string, m.start(), m.end(), m.group(1)) else m.group(0), out)
+                 lambda m: m.group(1) if _gfm_links_bare(m.string, m.start(), m.end(), m.group(1)) else m.group(0), out)
     for word, url in urls.items():
-        out = re.sub(word, lambda m, url=url: url if _written_bare(m.string, m.start(), m.end(), url) else f"<{url}>",
+        out = re.sub(word, lambda m, url=url: url if _gfm_links_bare(m.string, m.start(), m.end(), url) else f"<{url}>",
                      out)
     for word, href in hrefs.items():
         # An address in a link: every backslash, parenthesis and pipe escaped, so that it reads back as it is.

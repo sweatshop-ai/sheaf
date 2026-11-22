@@ -862,29 +862,37 @@ def _bare_urls_as_words(fragment: str):
 _PANDOC_AUTOLINK = re.compile(r"(?:https?|ftp|file)://", re.I)
 
 
-def _restore_dropped_hrefs(fragment: str, source) -> str:
+def _restore_dropped_hrefs(fragment: str, source, emoji=()) -> str:
     """The fragment with the address back on each link of the source the sanitiser took it from: any scheme outside
-    SPEC 9.5's list (`ftp:`, also `javascript:`), so only an address the source already held, never a new one. The page shows such a link as its text, and sends it as an `<a>` with no address;
-    the .md keeps the address the source wrote, as it keeps a raw tag. The k-th `<a>` of a text with no address is
-    the k-th such link of the source with that text; one the source did not have gets none."""
+    SPEC 9.5's list (`ftp:`, also `javascript:`), so only an address the source already held, never a new one. The
+    page shows such a link as its text and sends it as an `<a>` with no address; the .md keeps the address the
+    source wrote, as it keeps a raw tag. The links are matched by their text, the k-th with the k-th, and only where
+    the page holds as many such links of that text as the source: after one was deleted, which went is unknown, and
+    each stays its text. An `<a>` with a name or an id is an anchor of the source's own, not such a link. `emoji` is
+    `_emoji_as_tokens`' list, so a link's text reads as the source's render shows it."""
     from bs4 import BeautifulSoup
 
     if not source or not re.search(r"<a(?:\s[^>]*)?>", fragment):
         return fragment
     soup = BeautifulSoup(fragment, "html.parser")
-    bare = [a for a in soup.find_all("a") if not a.has_attr("href")]
+    bare = [a for a in soup.find_all("a") if not any(a.has_attr(k) for k in ("href", "name", "id"))]
     html = _render_source(source) if bare else None
     if not html:
         return fragment
-    dropped = {}
+
+    def text(a):
+        return _EMOJI_TOKEN.sub(lambda m: emoji[int(m.group(1))][1], a.get_text())
+
+    dropped, shown = {}, Counter(text(a) for a in bare)
     for a in BeautifulSoup(html, "html.parser").find_all("a", href=True):
         if not _url_ok(a, "href", a["href"]):
             dropped.setdefault(a.get_text(), []).append(a["href"])
     put = False
     for a in bare:
-        hrefs = dropped.get(a.get_text())
-        if hrefs:
+        hrefs = dropped.get(text(a))
+        if hrefs and len(hrefs) == shown[text(a)]:
             a["href"] = hrefs.pop(0)
+            shown[text(a)] -= 1
             put = True
     return str(soup) if put else fragment
 
@@ -1079,7 +1087,7 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     # of its own would show. Task boxes and comments survive it; a paragraph typed as
     # `- [ ] words` becomes a task item (`_typed_tasks`).
     clean = _boxes_as_text(_typed_tasks(sanitize(_sanitize(fragment, source, strays))))
-    clean = _restore_dropped_hrefs(clean, source)
+    clean = _restore_dropped_hrefs(clean, source, emoji)
     # The backslashes go first: `_without_placeholder_breaks` and `_cell_breaks` each decide whether the table is
     # one `_cell_breaks` takes, by a backslash in the fragment, and must see the same one. A bare URL is taken before
     # them, so that its backslashes stay the URL's.

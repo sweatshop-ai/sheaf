@@ -80,3 +80,21 @@ def test_a_link_the_sanitiser_drops_is_matched_by_its_text():
 def test_a_link_the_source_did_not_have_gets_no_address():
     out = rde.html_block_to_md('<p><a>z</a> there</p>', "[x](ftp://a.com/b) here", [])
     assert out == "z there"
+
+
+def test_two_such_links_of_one_text_after_one_was_deleted_stay_text():
+    # Which of the two went is unknown: the one left must not take the other's address.
+    src = "[x](ftp://a.com/b) and [x](ftp://c.com/d) here"
+    out = rde.html_block_to_md('<p>and <a>x</a> there</p>', src, [])
+    assert out == "and x there"
+
+
+def test_an_anchor_with_a_name_gets_no_address():
+    src = '<a name="x">x</a> and [x](ftp://a.com/b) here'
+    out = rde.html_block_to_md('<p><a name="x">x</a> and <a>x</a> there</p>', src, [])
+    assert out.endswith(" and [x](ftp://a.com/b) there")
+
+
+def test_a_link_with_an_emoji_in_its_text_keeps_its_address():
+    src = "[go :smile:](ftp://a.com/b) here"
+    assert page_links(saved(src)) == ["ftp://a.com/b"]

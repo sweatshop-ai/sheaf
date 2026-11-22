@@ -95,6 +95,10 @@ class _Http(BaseHTTPRequestHandler):
         self._looked = None
         if self.via == "port" and peer.supported() and not self.handler.peer_off:
             self._looked = peer.look(self.client_address[:2], self.connection.getsockname()[:2], self.connection)
+            if self._looked.refusal is None and self.handler.peer_selftest_raised:
+                # A connection read as the hub's own user, whatever it asks, shows that lookups work: a
+                # self-test that raised at start met a passing failure, and its leniency ends (9.1).
+                self.handler.peer_selftest_raised = None
 
     def _serve(self):
         again, self.served = self.served, True
@@ -306,7 +310,14 @@ class HubServer:
         self.stopping = threading.Event()
         self.closing = threading.Event()
         shared = Handler(hub)
-        off = peer.startup()
+        started = peer.startup()
+        off = started.off
+        if started.raised:
+            shared.peer_selftest_raised = started.raised
+            hub.record("peer-selftest-failed", None, error=started.raised)
+            print(f"sheaf: the hub could not test whether it can see which user of this machine is at the other end "
+                  f"of a connection ({started.raised}); it checks every sign-in link anyway and refuses one whose "
+                  f"owner it cannot read: if a link fails, `sheaf signin-url` signs the browser in.", file=sys.stderr)
         if off:
             shared.peer_off = off
             hub.record("peer-check-off", None, error=off)

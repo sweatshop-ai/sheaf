@@ -69,6 +69,11 @@ LINK_OTHER_USER = ("The hub did not sign this browser in, and the link is spent:
                    "another user of this machine than the one that runs the hub. A sign-in link works only "
                    "in a browser of the hub's own user. On the machine that runs the hub, run "
                    "<code>sheaf open &lt;the document&gt;</code> again, as that user.")
+LINK_UNTESTED = ("When it started, the hub could not test whether it can see which user of this machine is at the "
+                 "other end of a connection, and it could not tell who followed this link, so it signed no one in, "
+                 "and the link is spent. On the machine that runs the hub, run <code>sheaf signin-url</code> and "
+                 "open what it prints in this browser; <code>sheaf diag</code> shows the "
+                 "<code>peer-selftest-failed</code> row.")
 LINK_UNKNOWN = ("The hub could not tell which user of this machine followed this link, so it signed no one in, "
                 "and the link is spent. On the machine that runs the hub, run "
                 "<code>sheaf open &lt;the document&gt;</code> again. If it keeps happening, run "
@@ -292,6 +297,7 @@ class Handler:
         self.hub = hub
         self.peer_check = peer_check
         self.peer_off: str | None = None    # why the hub does not check who owns a connection (`peer.startup`), once it knows
+        self.peer_selftest_raised: str | None = None  # why the start-up self-test raised: the check stays on (ticket 178)
         self._peer_row_times = {}           # when `peer-refused` was last written, for each kind of refusal
         self._peer_row_lock = threading.Lock()
         self.door = Door(hub)
@@ -795,8 +801,15 @@ class Handler:
             return None
         conn = req.conn
         if getattr(conn, "looked", False):
-            return conn.refusal
+            return self._judged(conn)
         return self.peer_check(conn)
+
+    def _judged(self, conn):
+        """The refusal the server found for `conn`, or None. A connection read as the hub's own user shows that
+        lookups work, so a self-test that raised at start was a passing failure: its leniency ends (ticket 178)."""
+        if conn.refusal is None and self.peer_selftest_raised:
+            self.peer_selftest_raised = None
+        return conn.refusal
 
     def _checks_peer(self) -> bool:
         """Whether this hub judges a sign-in link, a cookie and the key by the user of the connection:
@@ -809,9 +822,10 @@ class Handler:
         """A key or a cookie is good only from the hub's own user (9.3): a caller whose connection the hub
         looked at when it accepted it, and found owned by another user or by no one it could name, is
         refused before anything is read or done. A caller that closed its connection before the hub
-        could say is told to try again, never that it was refused: its write is not applied."""
+        could say is told to try again, never that it was refused: its write is not applied. After a start-up
+        self-test that raised, a connection read as no one's is let in until one is read as the hub's own."""
         conn = req.conn
-        if self.peer_off or not getattr(conn, "looked", False) or conn.refusal is None:
+        if self.peer_off or not getattr(conn, "looked", False) or self._judged(conn) is None:
             return
         # A closed caller reads as no one's (uid 0), so only an answer that could be that is a "try again";
         # another user's uid stays a refusal, with its row, whether or not the caller has closed since.
@@ -819,6 +833,10 @@ class Handler:
         if conn.closed is not None and conn.closed() and (no.kind != peer.OTHER_USER or no.uid == 0):
             raise Refuse(503, "try again: the connection closed before the hub could tell who sent this",
                          {"Retry-After": "1"}, row=False)
+        if self.peer_selftest_raised and no.kind != peer.OTHER_USER:
+            # The self-test raised, so a lookup that fails may fail every time: the key and the cookie, which
+            # no other user can read, are let through then; only the nonce, on a command line, fails closed.
+            return
         no, mine = conn.refusal, os.geteuid()
         other = no.kind == peer.OTHER_USER
         row = "peer-refused"
@@ -856,8 +874,9 @@ class Handler:
                              else f"{LINK_USED} {LINK_ROTATE} {LINK_LIMIT}")
             no = self._owner(req)
             if no is not None:
-                raise Refuse(401, no.message, page=LINK_OTHER_USER if no.kind == peer.OTHER_USER else LINK_UNKNOWN,
-                             detail=no.detail)
+                page = (LINK_OTHER_USER if no.kind == peer.OTHER_USER
+                        else LINK_UNTESTED if self.peer_selftest_raised else LINK_UNKNOWN)
+                raise Refuse(401, no.message, page=page, detail=no.detail)
         elif not req.auth.key_ok(req.query.get("key")):
             raise Refuse(401, "that is not this hub's key", page=WRONG_KEY)
         else:

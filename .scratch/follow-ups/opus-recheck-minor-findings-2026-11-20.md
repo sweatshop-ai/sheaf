@@ -163,7 +163,7 @@
 
 - [x] src/sheafmd/hub/repos.py:80 the lock is held across `git --version` (timeout 10 s), so while one read hangs every other caller, including _look_is_safe on the request path, waits up to 10 s instead of getting None at once; bounded and only during a read, so not a defect **[fixed on main: #521, ee67ff2a]**
 - [x] src/sheafmd/hub/repos.py:170 the "said once, at the hub's start" message is printed on every Repos() construction, not once per process; true only because the tiroir builds one Repos per hub **[fixed on main: #521, ee67ff2a]**
-- [ ] tests/test_repo_pages.py:1162 the start-message tests replace _git_version with a lambda and never check that a real failed read at start is later announced as recovered; the recovery line is only covered by the cache test
+- [x] tests/test_repo_pages.py:1162 the start-message tests replace _git_version with a lambda and never check that a real failed read at start is later announced as recovered; the recovery line is only covered by the cache test **[fixed on main: #557, c496cdec]**
 
 ## PR #410
 
@@ -224,7 +224,7 @@
 
 ## PR #426
 
-- [ ] tests/page/test_sheaf_buttons.py:113 asserts own_rows and the file right after the first Delete click without waiting; it holds because sheaf.js:638-642 relabels synchronously and posts nothing, but the assert proves no absence of a delayed POST
+- [x] tests/page/test_sheaf_buttons.py:113 asserts own_rows and the file right after the first Delete click without waiting; it holds because sheaf.js:638-642 relabels synchronously and posts nothing, but the assert proves no absence of a delayed POST **[fixed on main: #557, c496cdec]**
 
 ## PR #427
 
@@ -263,7 +263,7 @@
 ## PR #435
 
 - [x] tests/test_page_predicates.py:11 A_FUNCTION accepts any string starting with "(", so a parenthesised expression such as "(window.x === 1)" passes the guard although Playwright evaluates it as an expression through eval; anchoring on "\(.*?\)\s*=>" would close that gap. **[fixed on main: #546, fdf71566]**
-- [ ] tests/test_page_predicates.py:16 PAGE_TESTS.glob("*.py") scans only the top level of tests/page; a page test in a subdirectory or a helper outside tests/page (e.g. a conftest elsewhere) is not checked.
+- [x] tests/test_page_predicates.py:16 PAGE_TESTS.glob("*.py") scans only the top level of tests/page; a page test in a subdirectory or a helper outside tests/page (e.g. a conftest elsewhere) is not checked. **[fixed on main: #557, c496cdec]**
 
 ## PR #438
 

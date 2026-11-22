@@ -278,6 +278,27 @@ def reloaded(page, timeout=8.0):
 RELOADING = ("Cannot read properties of null (reading 'textContent')", "Execution context was destroyed")
 
 
+def opened(context, site):
+    """A new tab of `context` on the site's document, loaded, with the list its page errors go to."""
+    p = context.new_page()
+    errors = []
+    p.on("pageerror", lambda e: errors.append(str(e)))
+    p.goto(site.url)
+    p.wait_for_selector("#rd-menu-btn", state="attached")
+    return p, errors
+
+
+def shows(p, text):
+    """Whether the page shows `text`. A change from outside reloads the page, so a read can fall on the reload:
+    that is not yet."""
+    try:
+        return text in p.evaluate("document.body.textContent")
+    except Exception as e:
+        if any(said in str(e) for said in RELOADING):
+            return False
+        raise
+
+
 def toast(page):
     """The text of the toast; "" while the page reloads and has none yet."""
     try:

@@ -5,7 +5,7 @@ once, found the lock neither held nor pending, and dropped the tab: the hub coun
 heard a change until it was reloaded. The headless shell orders the two the other way, so the tests there passed."""
 import pytest
 
-from pagehelp import DOC, RELOADING, close_context, launch_engine, new_context, rewrite, until
+from pagehelp import DOC, close_context, launch_engine, new_context, opened, rewrite, shows, until
 
 pytestmark = pytest.mark.page
 
@@ -24,24 +24,6 @@ def shared(full_chromium, site):
     c.add_cookies([site.cookie()])
     yield c
     close_context(c)
-
-
-def opened(context, site):
-    p = context.new_page()
-    errors = []
-    p.on("pageerror", lambda e: errors.append(str(e)))
-    p.goto(site.url)
-    p.wait_for_selector("#rd-menu-btn", state="attached")
-    return p, errors
-
-
-def shows(p, text):
-    try:
-        return text in p.evaluate("document.body.textContent")
-    except Exception as e:
-        if any(said in str(e) for said in RELOADING):
-            return False
-        raise
 
 
 def test_full_chromium_counts_every_tab_and_a_follower_hears_a_change(shared, site):

@@ -330,19 +330,21 @@ def _lines_as_items(soup) -> None:
                     last = item
                     work.append(item)
                     continue
-                m = _TYPED_TASK.match(first) if isinstance(first, NavigableString) else None
+                # a comment anchored at the very start of the line is its token first in the text, not the line's words
+                token_end = _LEADING_TOKENS.match(first).end() if isinstance(first, NavigableString) else 0
+                m = _TYPED_TASK.match(first, token_end) if isinstance(first, NavigableString) else None
                 own = ""  # the words before the first list, block or line: pandoc writes a box before one as a character
                 for t in item.find_all(string=True):
                     if t.find_parent(["ul", "ol", "blockquote", "pre", "table", "div", "p"]):
                         break
                     own += t
-                if m and not (_shows(own[m.end():]) or item.find("img")):
-                    # a typed box with no words after it is words itself, as in a paragraph: an item without a box
+                if m and not (_shows(_COMMENT_TOKEN.sub("", own[m.end():])) or item.find("img")):
+                    # a typed box with no words after it (a comment's token is none) is words itself, as in a paragraph: an item without a box
                     last.insert_after(item)
                     last = item
                     continue
                 if m:
-                    first.replace_with(NavigableString(first[m.end():]))
+                    first.replace_with(NavigableString(first[:token_end] + first[m.end():]))
                     _trim_lead(item, 0)  # a break after the typed box
                 box = soup.new_tag("input", type="checkbox")
                 if m and m.group(1) in "xX":

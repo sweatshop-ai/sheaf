@@ -1305,6 +1305,23 @@ def test_the_label_of_an_ordered_task_ends_before_a_block_under_its_words():
     assert html.index("</label>") < html.index("<pre")
 
 
+def test_a_typed_task_line_after_enter_in_a_task_item_that_starts_with_a_comment_anchor_becomes_a_task_item_and_keeps_the_comment():
+    block = rde.split_md_blocks(f"- [ ] Buy\n- [ ] milk{ADA_C1}\n")[0]
+    md, _ = rde._convert_with_comments(
+        block, f'<ul><li><input type="checkbox"> Buy<div>{anchor("c1")}- [ ] milk</div></li></ul>')
+    assert "\\[" not in md and "sheaf-comment id=c1" in md, md
+    assert md.count("- [ ]") == 2 and md.rindex("- [ ]") < md.index("milk"), md
+
+
+@pytest.mark.parametrize("lead", ["", "c2"])
+def test_a_typed_box_followed_only_by_a_comment_anchor_has_no_words_and_stays_words_itself(lead):
+    block = rde.split_md_blocks(f"- [ ] Buy\n- [ ] milk{ADA_C1}\n")[0]
+    before = anchor(lead) if lead else ""
+    md, _ = rde._convert_with_comments(
+        block, f'<ul><li><input type="checkbox"> Buy<div>{before}- [ ] {anchor("c1")}</div></li></ul>')
+    assert md.count("- [ ]") == 1 and "\\[ \\]" in md and "sheaf-comment id=c1" in md, md
+
+
 # ── Enter after a word of a heading (ticket 137) ──
 # The hub gets the same <h2>Ab<div>cd</div></h2> for Enter after a word and for Enter at the end with a line typed after
 # it. The page marks the line Enter split off from inside the heading's words (`data-rd-split`): that line stays a heading

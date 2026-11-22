@@ -38,6 +38,7 @@ PINS_MAX_AGE = 7 * 86400        # seconds since a page last pinned it
 _HASH_RE = re.compile(r"[0-9a-f]{16}")
 _ADDRESS_FILE = "address"       # in each versions folder: the address it is the key of
 _PINS_DIR = "pins"              # in each versions folder: the versions pages keep
+_MEMBER_PINS = "m-"             # in `pins/`: the prefix of a member's own folder (`member_key`)
 INSIDE = Path(".sheaf") / "versions"    # a root's own versions store, inside it (7.4)
 
 
@@ -149,11 +150,12 @@ def read_json(path: Path, default, kind=None, aside=True):
 
 def member_key(member: str) -> str | None:
     """The folder in `pins/` of a member's pins: `m-` and the first 16 hex of the sha256 of their id, so the id is
-    never a file name (a root's own store goes to git, 7.4). None for the owner, whose pins are in `pins/` itself,
-    where every pin went before the cap was per member: those are read as the owner's."""
+    never a file name (a root's own store goes to git, 8.11). None for the hub's person (a request with no member
+    id: the loopback port), whose pins are in `pins/` itself, where every pin went before the cap was per member:
+    those are read as the hub's person's."""
     if not member:
         return None
-    return "m-" + hashlib.sha256(member.encode("utf-8")).hexdigest()[:16]
+    return _MEMBER_PINS + hashlib.sha256(member.encode("utf-8")).hexdigest()[:16]
 
 
 def doc_key(address: str) -> str:
@@ -166,8 +168,8 @@ class Versions:
     restart still merges. `<state>/versions/<doc-key>/<hash>.md`, the newest 60 per document,
     nothing older than 7 days after `prune()` (run when the hub starts). Beside them, in `pins/`,
     the versions pages said they keep past a change of the file (`pin`): the newest 16 of each member
-    (the owner's in `pins/`, another member's in `pins/<member_key>/`), none pinned last more than 7
-    days before `prune()`. Each folder also holds `address`, the
+    (the hub's person's in `pins/`, a member's in `pins/<member_key>/`), none pinned last more than 7
+    days before (`get` does not believe one, `prune()` deletes it). Each folder also holds `address`, the
     `<root>/<path>` it is the key of, so a whole root's folders can be found."""
 
     def __init__(self, root: Path | None = None, name: str = ""):
@@ -233,16 +235,24 @@ class Versions:
         return self._keep(self._make_folder(address), text, VERSIONS_KEPT)
 
     def pin(self, address: str, text: str, member: str = "") -> str:
-        """Keep `text` as a version a page of `member` keeps (the owner's: ""), apart from the newest 60,
+        """Keep `text` as a version a page of `member` keeps (the hub's person's: ""), apart from the newest 60,
         which writes from outside push out, and apart from the pins of every other member."""
         folder = self._dir(self._make_folder(address) / _PINS_DIR)
         key = member_key(member)
         return self._keep(folder if key is None else self._dir(folder / key), text, PINS_KEPT)
 
+    @staticmethod
+    def _members(pins: Path) -> list[Path]:
+        """The members' folders in `pins/`: never a link, which could reach out of the store (a root's is a clone)."""
+        try:
+            return sorted(m for m in pins.glob(f"{_MEMBER_PINS}*") if m.is_dir() and not m.is_symlink())
+        except OSError:
+            return []
+
     def _pinned(self, folder: Path, h: str) -> list[Path]:
-        """Where a pin of `h` can be, in the document folder `folder`: the owner's, then each member's."""
+        """Where a pin of `h` can be, in the document folder `folder`: the hub's person's, then each member's."""
         pins = folder / _PINS_DIR
-        return [pins / f"{h}.md", *sorted(pins.glob(f"m-*/{h}.md"))]
+        return [pins / f"{h}.md", *(m / f"{h}.md" for m in self._members(pins))]
 
     def get(self, address: str, h) -> str | None:
         """The text with hash `h`, among the newest or the pinned, or None. `h` comes from a
@@ -251,8 +261,11 @@ class Versions:
         if not isinstance(h, str) or not _HASH_RE.fullmatch(h):
             return None
         folder = self._folder(address)
+        stale = time.time() - PINS_MAX_AGE
         for f in (folder / f"{h}.md", *self._pinned(folder, h)):
             try:
+                if f.parent != folder and f.stat().st_mtime < stale:
+                    continue        # a pin past its age, before any prune (a root's own store is never pruned)
                 text = f.read_text(encoding="utf-8")
             except (OSError, ValueError):
                 continue
@@ -336,7 +349,7 @@ class Versions:
             if not folder.is_dir():
                 continue
             pins = folder / _PINS_DIR
-            members = [m for m in pins.glob("m-*") if m.is_dir() and not m.is_symlink()]
+            members = self._members(pins)
             for files, max_age in ((folder, VERSIONS_MAX_AGE), (pins, PINS_MAX_AGE),
                                    *((m, PINS_MAX_AGE) for m in members)):
                 cutoff = now - max_age
@@ -352,7 +365,8 @@ class Versions:
                 except OSError:
                     pass
             try:
-                if not any(folder.glob("*.md")) and not any(pins.glob("*.md")) and not any(pins.glob("m-*/*.md")):
+                if not any(folder.glob("*.md")) and not any(pins.glob("*.md")) and \
+                        not any(any(m.glob("*.md")) for m in self._members(pins)):
                     shutil.rmtree(folder, ignore_errors=True)
             except OSError:
                 pass

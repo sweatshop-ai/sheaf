@@ -776,7 +776,8 @@ def test_one_members_pins_never_push_out_anothers(made):
     assert [doc.knows(h) for h in cal] == [False] + [True] * rdl.PINS
 
 
-def test_a_members_pin_in_memory_expires_as_the_owners_does(made):
+def test_a_members_pin_in_memory_expires_as_the_hubs_persons_does(made):
+    """137: a member's pin goes after PINS_MAX_AGE, as one with no member id does (SPEC 7.4)."""
     doc, md, _, _, clock = made()
     old = doc.current()[0]
     assert doc.pin(old, "bea") is True
@@ -821,6 +822,7 @@ def test_a_pinned_version_is_known_after_a_restart_and_more_writes_than_the_disk
 
 
 def test_a_members_pin_outlives_another_members_pins_and_a_restart(stored):
+    """137: the cap is per member on disk too, so after a restart Bea's version is still known (SPEC 7.4)."""
     doc, md, *_ = stored()
     h = rds.md_hash(DOC)
     writes_from_outside(md, doc, 1)

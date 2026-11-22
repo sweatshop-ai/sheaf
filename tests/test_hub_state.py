@@ -146,6 +146,10 @@ def test_putting_the_same_text_again_keeps_one_file():
 
 # ── the versions pages keep (pins/) ──────────────────────────────────────────
 
+# An order of pins by mtime, well within PINS_MAX_AGE: `get` does not believe a pin older than that (137).
+RECENT = time.time() - 3600
+
+
 def pins_dir():
     return paths.state_dir() / "versions" / state.doc_key(ADDR) / "pins"
 
@@ -167,7 +171,7 @@ def test_the_newest_16_pins_of_a_document_are_kept():
     v = state.Versions()
     for i in range(state.PINS_KEPT + 4):
         h = v.pin(ADDR, f"pin {i}\n")
-        os.utime(pins_dir() / f"{h}.md", (1000 + i, 1000 + i))
+        os.utime(pins_dir() / f"{h}.md", (RECENT + i, RECENT + i))
     assert len(list(pins_dir().glob("*.md"))) == state.PINS_KEPT
     assert v.get(ADDR, md_hash("pin 3\n")) is None and v.get(ADDR, md_hash("pin 4\n")) == "pin 4\n"
 
@@ -175,10 +179,10 @@ def test_the_newest_16_pins_of_a_document_are_kept():
 def test_a_text_pinned_again_counts_from_then():
     v = state.Versions()
     first = v.pin(ADDR, "first\n")
-    os.utime(pins_dir() / f"{first}.md", (1000, 1000))
+    os.utime(pins_dir() / f"{first}.md", (RECENT, RECENT))
     for i in range(state.PINS_KEPT - 1):
         h = v.pin(ADDR, f"pin {i}\n")
-        os.utime(pins_dir() / f"{h}.md", (2000 + i, 2000 + i))
+        os.utime(pins_dir() / f"{h}.md", (RECENT + 1000 + i, RECENT + 1000 + i))
     v.pin(ADDR, "first\n")                                      # now the newest
     v.pin(ADDR, "one more\n")
     assert v.get(ADDR, first) == "first\n" and v.get(ADDR, md_hash("pin 0\n")) is None
@@ -189,7 +193,7 @@ def test_entries_that_are_not_versions_take_no_slot_among_the_16_pins_nor_the_60
     # of its text): it takes no slot and is deleted for none.
     v = state.Versions()
     valid = v.pin(ADDR, "valid\n")
-    os.utime(pins_dir() / f"{valid}.md", (1000, 1000))
+    os.utime(pins_dir() / f"{valid}.md", (RECENT, RECENT))
     for i in range(state.PINS_KEPT):
         foreign = pins_dir() / f"foreign-{i}.md"
         foreign.write_text("not a version\n")
@@ -264,23 +268,23 @@ def member_pins(member):
 
 
 def test_each_member_keeps_the_16_versions_they_pinned_last():
-    """The cap is per member, not per document (137): one member pinning many versions never pushes out
-    another's pin. The owner (the hub's person, no member id) is one member among them."""
+    """The cap is per member, not per document (137, SPEC 7.4): one member pinning many versions never pushes
+    out another's pin. The hub's person (no member id) is one member among them."""
     v = state.Versions()
     bea = v.pin(ADDR, "Bea's version\n", member="bea")
-    mine = v.pin(ADDR, "the owner's version\n")
+    mine = v.pin(ADDR, "the hub's person's version\n")
     for i in range(state.PINS_KEPT + 4):
         h = v.pin(ADDR, f"Cal's {i}\n", member="cal")
-        os.utime(member_pins("cal") / f"{h}.md", (1000 + i, 1000 + i))
+        os.utime(member_pins("cal") / f"{h}.md", (RECENT + i, RECENT + i))
     again = state.Versions()                                     # another process, after a restart
-    assert again.get(ADDR, bea) == "Bea's version\n" and again.get(ADDR, mine) == "the owner's version\n"
+    assert again.get(ADDR, bea) == "Bea's version\n" and again.get(ADDR, mine) == "the hub's person's version\n"
     assert again.get(ADDR, md_hash("Cal's 3\n")) is None and again.get(ADDR, md_hash("Cal's 4\n")) == "Cal's 4\n"
     assert len(list(member_pins("cal").glob("*.md"))) == state.PINS_KEPT
     assert stat.S_IMODE(member_pins("cal").stat().st_mode) == 0o700
 
 
 def test_a_member_id_is_never_a_file_name():
-    """A root's own store goes to git (7.4): the folder of a member's pins is named by a digest of the id."""
+    """A root's own store goes to git (8.11): the folder of a member's pins is named by a digest of the id."""
     v = state.Versions()
     v.pin(ADDR, "pinned\n", member="bea@example.com")
     names = [p.name for p in (paths.state_dir() / "versions").rglob("*")]
@@ -289,9 +293,9 @@ def test_a_member_id_is_never_a_file_name():
     assert state.member_key("") is None
 
 
-def test_pins_written_before_the_cap_was_per_member_are_read_as_the_owners():
+def test_pins_written_before_the_cap_was_per_member_are_read_as_the_hubs_persons():
     """The format before 137: every pin of a document in `pins/<hash>.md`. Such a file is still found after
-    an upgrade, a member's pins never push it out, the owner's do (it counts among the owner's 16), and it goes
+    an upgrade, a member's pins never push it out, the hub's person's do (it counts among their 16), and it goes
     after 7 days as before."""
     before = "pinned before\n"
     old = pins_dir() / f"{md_hash(before)}.md"
@@ -305,7 +309,7 @@ def test_pins_written_before_the_cap_was_per_member_are_read_as_the_owners():
     v.prune()
     assert state.Versions().get(ADDR, old.stem) == "pinned before\n"
     for i in range(state.PINS_KEPT):
-        v.pin(ADDR, f"the owner's {i}\n")
+        v.pin(ADDR, f"the hub's person's {i}\n")
     assert v.get(ADDR, old.stem) is None
     old.write_text("pinned before\n")
     eight_days = time.time() - 8 * 86400
@@ -324,6 +328,22 @@ def test_a_members_pins_older_than_7_days_go_when_the_hub_starts_and_their_folde
     os.utime(member_pins("cal") / f"{new}.md", (eight_days, eight_days))
     state.Versions().prune()
     assert not pins_dir().parent.exists()
+
+
+@pytest.mark.parametrize("member", ["", "bea"], ids=["the hub's person", "a member"])
+@pytest.mark.parametrize("inside", [False, True], ids=["state folder", "root's own store"])
+def test_a_pin_last_pinned_more_than_7_days_ago_is_not_believed_before_any_prune(tmp_path, member, inside):
+    """Pins expire in memory after PINS_MAX_AGE (137); the disk copy, which the hub reads when memory has none,
+    must not bring one back. Only the state folder is pruned, at hub start: a root's own store never is."""
+    v = state.Versions(tmp_path, "r") if inside else state.Versions()
+    address = "r/plan.md" if inside else ADDR
+    h = v.pin(address, "pinned\n", member=member)
+    f = next(v.dir.rglob(f"pins/**/{h}.md"))
+    eight_days = time.time() - 8 * 86400
+    os.utime(f, (eight_days, eight_days))
+    assert v.get(address, h) is None
+    v.pin(address, "pinned\n", member=member)                  # pinned again: counts from now
+    assert v.get(address, h) == "pinned\n"
 
 
 def test_forgetting_texts_takes_a_members_pins_too():

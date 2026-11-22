@@ -75,7 +75,7 @@ class LiveDocument:
         # one can be merged onto the file as it is now instead of refused. The disk copy
         # (state.Versions) answers for a hash from before a restart.
         self._versions = {}
-        # The versions pages said they keep (`pin`), by member (the owner: ""), each member's last pinned
+        # The versions pages said they keep (`pin`), by member (the hub's person: ""), each member's last pinned
         # last: apart from `_versions`, so that writes from outside, however many, never push them out, and one
         # member's pins never push out another's. Each is `(text, when pinned)`: it goes after PINS_MAX_AGE, as
         # it does on disk.
@@ -180,7 +180,8 @@ class LiveDocument:
         text = self._versions.get(h)
         if text is None:
             self._expire_pins()
-            text = next((p[h][0] for p in list(self._pins.values()) if h in p), None)
+            # `get`, never `in` then `[h]`: a pin or an expiry on another thread can take `h` out in between
+            text = next((e[0] for p in list(self._pins.values()) if (e := p.get(h)) is not None), None)
         store = self._stored() if text is None else None
         if store is not None and self._address is not None:
             text = store.get(self._address, h)
@@ -547,7 +548,7 @@ class LiveDocument:
         """A page keeps the version `h` past a change of the file: a form holds the reload that change
         needs, a merged save's reload among them (SPEC 7.4, 10.4). Keep it beside the newest VERSIONS,
         so that what the page sends with it once the form is done (a save, a reply, a Tell) is
-        still taken however much was written meanwhile. The PINS each member (`member`, the owner "") pinned
+        still taken however much was written meanwhile. The PINS each member (`member`, the hub's person "") pinned
         last are kept, in memory and on disk; pinned again, a version counts from then. False when the document
         does not know `h`."""
         with self._held():

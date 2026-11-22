@@ -229,3 +229,13 @@ def test_a_write_whose_widen_fails_leaves_the_clone_asleep(napping, monkeypatch)
     monkeypatch.setattr(repos, "_restore", lambda *a, **kw: False)
     assert repos.wake(REPO) is False
     assert repos.sleeping(REPO)
+
+
+def test_a_folder_widened_after_a_failed_wake_is_kept_by_the_next_sleep(napping):
+    repos, clone = napping.hub.repos, the_clone(napping)
+    napping.now[0] += 31 * DAY
+    repos.sleep_idle()
+    assert repos.sleeping(REPO)
+    sh(clone, "sparse-checkout", "add", "--", "extra")          # what a report's widen adds while `restore` is still out
+    repos._sleep_one(REPO, clone, [], None)
+    assert sorted(repos._usage()[REPO]["restore"]) == ["docs", "extra", "notes"]

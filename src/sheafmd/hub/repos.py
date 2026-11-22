@@ -362,9 +362,11 @@ class Repos:
                         # A report that came during the shrink dates the clone anew (it takes no lock): it stays awake and
                         # the thread's drain widens the set again.
                         idle = moved is not None or self.clock() - row.get("last_used", 0) > SLEEP_DAYS * 86400
-                        # A clone already shrunk lists the shrunk set: the folders it is to get back stay.
+                        # A clone already shrunk lists the shrunk set: the folders it is to get back stay, and one a report
+                        # widened since (a failed wake leaves them out) joins them.
+                        kept = list(row.get("restore") or [])
                         data[repo] = {**row, "sleeping": idle or row.get("sleeping") is True,
-                                      "restore": row.get("restore") or [f for f in listed.stdout.split("\n") if f]}
+                                      "restore": kept + [f for f in listed.stdout.split("\n") if f and f not in kept]}
                         if moved is not None:
                             data[repo]["moved"] = moved
                         write_text_atomic(self._usage_file, json.dumps(data, indent=1, sort_keys=True) + "\n")

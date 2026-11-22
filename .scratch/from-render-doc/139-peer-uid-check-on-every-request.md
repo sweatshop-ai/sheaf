@@ -2,7 +2,7 @@
 
 **Claimed by:** Rhea 2026-11-22
 
-**Status:** in-review (the build merged as #509; the SPEC and tests are on main as 494ee891; the round-4 follow-ups are in PR #572 (review GO, CI running); the by-hand check passed on 2026-11-22)
+**Status:** done (the build merged as #509; the SPEC and tests are on main as 494ee891; the round-4 follow-ups merged as #572 (9a48aeae); the by-hand check passed on 2026-11-22). One minor box from the #572 review is still open below.
 
 **Blocked by:** none
 
@@ -40,7 +40,7 @@ Today only `/_/open?nonce=` checks who owns the connection. `SPEC.md:877` says t
   - as `nobody` via `/_/open?key=`: `403` with no `Set-Cookie`.
   One `peer-refused` row was written, with `peer_uid: 65534, hub_uid: 1000`. A Chrome on the laptop went through an `ssh -L` tunnel, signed in with `sheaf signin-url`, and an edit was saved to the document on disk. `ss` showed the forwarded connections as uid 1000. The second user was the existing `nobody` account, because creating a test account was refused.
 
-- [x] **Minor follow-ups from round 4 on #509** (none fixed there). All four were fixed in PR #572 (819e638e). The touched test files `tests/test_hub_peer.py`, `tests/test_hub_peer_gate.py`, `tests/test_hub_peer_lookup.py` and `tests/test_public_tree.py` gave 115 passed and 1 skipped.
+- [x] **Minor follow-ups from round 4 on #509** (none fixed there). All four were fixed in PR #572, merged as 9a48aeae (head 819e638e). The touched test files `tests/test_hub_peer.py`, `tests/test_hub_peer_gate.py`, `tests/test_hub_peer_lookup.py` and `tests/test_public_tree.py` gave 115 passed and 1 skipped.
   - [x] `tests/test_hub_peer_gate.py:127` (`test_a_caller_that_closed_before_the_hub_could_say_...`) breaks if the suite runs as root: with `ME == 0` it builds an OTHER_USER refusal with uid 1, which now gets 403, not 503. A root case should use an UNKNOWN refusal.
   - [x] A root hub and a root client that half-closes still gets `503` on every retry (and a spent nonce on `/_/open?nonce=`). The guard is `os.geteuid() == 0 and closed(sock)` in `peer.look`.
   - [x] The once-a-minute `peer-refused` throttle is shared across kinds: an UNKNOWN refusal can hold back the row of a later OTHER_USER refusal (with both uids) for up to a minute.

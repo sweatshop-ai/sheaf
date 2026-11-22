@@ -16,7 +16,7 @@
 - [x] La cause est écrite avec la preuve (la liste des tests par worker d'un run rouge, ou une reproduction avec `-n 2`) ; la lecture ci-dessus est confirmée ou corrigée
 - [x] Le test n'a plus besoin de l'ordre du fichier ni d'un état partagé entre deux tests ; il passe quel que soit le worker
 - [x] Les deux tests d'arrêt de hub de `test_service` sont relus pour le même défaut
-- [x] Les preuves de passage tournent en CI ou sur t-compute, pas ici ; CI verte sur deux passages de suite
+- [x] Les preuves de passage tournent en CI ou sur le serveur auto-hébergé, pas ici ; CI verte sur deux passages de suite
 
 **Claimed by:** Isolde 2026-11-12 16:03
 

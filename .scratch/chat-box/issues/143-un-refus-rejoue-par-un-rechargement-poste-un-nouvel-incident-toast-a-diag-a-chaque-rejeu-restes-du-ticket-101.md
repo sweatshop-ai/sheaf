@@ -8,6 +8,6 @@
 
 **Status:** done (PR 375, merged as c017752)
 
-**Par où commencer :** décider : le rejeu ne poste pas d'incident (un paramètre de `say`, ou un rejeu sans `err` pour le journal), ou la limite est écrite dans le SPEC 10.11 (« chaque rejeu est un incident »). Test rouge d'abord, sur t-compute, jamais sur le portable : un refus dit, un rechargement dans les 7 s, une seule ligne `toast` dans `/_/diag`.
+**Par où commencer :** décider : le rejeu ne poste pas d'incident (un paramètre de `say`, ou un rejeu sans `err` pour le journal), ou la limite est écrite dans le SPEC 10.11 (« chaque rejeu est un incident »). Test rouge d'abord, sur le serveur auto-hébergé, jamais sur le portable : un refus dit, un rechargement dans les 7 s, une seule ligne `toast` dans `/_/diag`.
 
 - [x] Le rejeu d'un refus ne poste pas d'incident, ou la limite est écrite dans le SPEC 10.11 (fait : `say(msg, err, replayed)` dans `page.js`, le rejeu du démarrage ne poste rien ; SPEC 10.11 le dit ; test rouge `tests/page/test_page_actions.py` `test_a_refusal_said_again_by_a_reload_posts_no_second_incident` ; PR 375, merge c017752)

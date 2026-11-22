@@ -12,6 +12,6 @@
 
 **Status:** done (merge bf55b05, PR 364)
 
-**Par où commencer :** `src/sheafmd/page/page.js` autour de 925, 1211 et 4517 ; tests dans `tests/page/test_page_actions.py` ; sur t-compute, jamais sur le portable.
+**Par où commencer :** `src/sheafmd/page/page.js` autour de 925, 1211 et 4517 ; tests dans `tests/page/test_page_actions.py` ; sur le serveur auto-hébergé, jamais sur le portable.
 
 - [x] Un `rd-toast` laissé par un rechargement qui n'a pas eu lieu n'est pas dit par un autre document, ou le SPEC dit pourquoi on le laisse

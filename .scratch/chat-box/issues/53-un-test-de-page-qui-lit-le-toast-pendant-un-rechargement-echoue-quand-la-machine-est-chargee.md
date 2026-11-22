@@ -6,7 +6,7 @@
 
 **Classe :** c (CI : un rouge sans lien avec le changement poussé).
 
-**Établi (preuves) :** sur t-compute (`~/work/elif-52`, afbe595 + PR 267, hors CI), huit passages de `tests/page/test_page_actions.py` entier, quatre brûleurs de CPU en parallèle, `--timeout=120` : quatre rouges sur huit, chacun de 1 test sur 40 (39 passed) :
+**Établi (preuves) :** sur le serveur auto-hébergé (`~/work/elif-52`, afbe595 + PR 267, hors CI), huit passages de `tests/page/test_page_actions.py` entier, quatre brûleurs de CPU en parallèle, `--timeout=120` : quatre rouges sur huit, chacun de 1 test sur 40 (39 passed) :
 - `test_a_replys_answer_that_reloads_the_page_waits_for_a_press_in_its_undo` (ligne 205 : `until(lambda: "reload the page" in toast(p), ...)`) : `Page.evaluate: TypeError: Cannot read properties of null (reading 'textContent')`, passages 2 et 4 ;
 - `test_a_change_from_outside_during_a_press_waits_for_its_answer_before_the_page_reloads` (ligne 151 : même ligne) : `Page.evaluate: Execution context was destroyed, most likely because of a navigation`, passages 5 et 6.
 Les deux tests sont ceux qui précèdent immédiatement le test du ticket 52 dans le fichier ; la même ligne de sondage. Sans charge (premier passage, 43 s) tout passe.
@@ -15,7 +15,7 @@ Les deux tests sont ceux qui précèdent immédiatement le test du ticket 52 dan
 
 - [x] La lecture du toast pendant un rechargement rend « pas encore » au lieu de lever, pour les deux erreurs relevées et pour elles seules
 - [x] Un test pose le cas à la main et échoue sans le correctif
-- [x] Huit passages du fichier entier sous quatre brûleurs sur t-compute, aucun rouge de ce type
+- [x] Huit passages du fichier entier sous quatre brûleurs sur le serveur auto-hébergé, aucun rouge de ce type
 
 **Claimed by:** Elias 2026-11-13 01:35
 

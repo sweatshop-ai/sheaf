@@ -12,6 +12,6 @@ Aussi, de la relecture r2 (`pr-101-reviews/r2-narrow.md`) :
 
 **Status:** done (merged as b130ac6, PR 345; leftovers in ticket 118)
 
-**Par où commencer :** `tests/page/test_page_actions.py`, le test du refus qui n'est plus rejoué après ses 7 secondes ; sur t-compute, jamais sur le portable.
+**Par où commencer :** `tests/page/test_page_actions.py`, le test du refus qui n'est plus rejoué après ses 7 secondes ; sur le serveur auto-hébergé, jamais sur le portable.
 
 - [x] Limite écrite dans le SPEC, ou refus porté tant qu'il est affiché, test rouge d'abord (tenu : la limite est gardée et écrite, SPEC.md 10.11 (l. 1381) « That limit is kept even when it cuts a refusal still on screen: said at 0 s … brought back by a reload at 5 s … » ; le test rouge est le ticket 118, PR 352, merge 65343aa : `tests/page/test_page_actions.py:393` `test_a_refusal_brought_back_by_a_reload_at_5_s_is_not_carried_by_a_second_reload_at_8_s` ; PR 345, merge b130ac6)

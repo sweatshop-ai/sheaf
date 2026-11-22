@@ -11,7 +11,7 @@
 
 **Status:** done (merge 65343aa, PR 352)
 
-**Par où commencer :** `tests/page/test_page_actions.py`, à côté du test du refus qui n'est plus rejoué après ses 7 secondes ; sur t-compute, jamais sur le portable.
+**Par où commencer :** `tests/page/test_page_actions.py`, à côté du test du refus qui n'est plus rejoué après ses 7 secondes ; sur le serveur auto-hébergé, jamais sur le portable.
 
 - [x] Le contrôle du document couvre `rd-toast` sans keep, ou le SPEC dit pourquoi non
 - [x] Un test rouge fixe la limite du refus rejoué (0 s, 5 s, 8 s)

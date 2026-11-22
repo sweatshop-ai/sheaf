@@ -15,7 +15,7 @@
 
 **Status:** done (merged 3e6980b, PR 339; leftovers in ticket 112)
 
-**Par où commencer :** le point 4, le test rouge du reset ; sur t-compute, jamais sur le portable.
+**Par où commencer :** le point 4, le test rouge du reset ; sur le serveur auto-hébergé, jamais sur le portable.
 
 - [x] Chaque point : corrigé (test rouge d'abord) ou la limite écrite dans le SPEC (vérifié sur origin/main, commit ad83e80 de la PR 339, merge 3e6980b ; reste d'un point : ticket 143) :
   - [x] 1 : fait. `page.js:3847` remet `pressSaid` à zéro dans `send()` ; le SPEC 10.11 (l. 1381) écrit « a press that goes past its Undo forgets an earlier one's refusal (a press undone does not…) ». Test : `tests/page/test_page_actions.py:345`.

@@ -12,5 +12,5 @@
 **Par où commencer :** décider si la `quote` doit porter la position (champ ou décalage dans le bloc) ou si le surlignage de la dernière occurrence est acceptable et se documente dans SPEC 10.4. Test d'abord : `## A and A`, sélection du premier `A`, le surlignage est sur le premier.
 
 - [x] Décision écrite (position enregistrée, ou limite documentée dans SPEC 10.4)
-- ~~`## A and A` avec le premier `A` choisi : la page surligne le premier — preuve : test de `page.js` (sur t-compute, pas sur le portable) et test de `edit.py` pour `_occurrence`~~ — décidé par Rhea le 2026-11-14 : limite documentée en SPEC 10.4, pas de position dans le format
+- ~~`## A and A` avec le premier `A` choisi : la page surligne le premier — preuve : test de `page.js` (sur le serveur auto-hébergé, pas sur le portable) et test de `edit.py` pour `_occurrence`~~ — décidé par Rhea le 2026-11-14 : limite documentée en SPEC 10.4, pas de position dans le format
 - [x] Un commentaire déjà écrit (sans position) se surligne comme avant (rien n'a changé dans page.js)

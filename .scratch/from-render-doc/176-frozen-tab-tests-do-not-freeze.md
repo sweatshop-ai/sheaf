@@ -10,7 +10,7 @@
 
 **Where (main b4d1d7d7):** `tests/page/test_page_shared_live.py` (`test_a_frozen_leader_hands_the_stream_over_and_takes_it_back_on_resume`, `test_a_frozen_tab_that_waits_for_the_lock_is_not_handed_it`), `src/sheafmd/page/live.js` (the `freeze` and `resume` listeners, `lock()`)
 
-Both frozen-tab tests send CDP `Page.setWebLifecycleState {state: "frozen"}` to a tab and then check that the other tabs still hear a change. A probe on t-compute (headless Chromium from the Playwright the CI installs, three tabs, leader frozen) measured:
+Both frozen-tab tests send CDP `Page.setWebLifecycleState {state: "frozen"}` to a tab and then check that the other tabs still hear a change. A probe on the CI runner host (headless Chromium from the Playwright the CI installs, three tabs, leader frozen) measured:
 
 - the leader's `freeze` listener ran 0 times (a counter on `document`, read after `{state: "active"}`);
 - `navigator.locks.query()` from another tab showed `sheaf-live` held by the leader's client at 1, 5, 15 and 40 s after the freeze;

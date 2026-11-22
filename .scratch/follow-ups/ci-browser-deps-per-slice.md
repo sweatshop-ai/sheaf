@@ -46,7 +46,7 @@ Every slice holds both engines, so skipping them per slice saves nothing until t
 
 ## Open question
 
-How much install time the other slices save is not measured. Before building, read the step timings of a green run: the `Installing dependencies...` to first test, per slice, with and without Firefox and WebKit (run `playwright install --with-deps chromium` against `... chromium firefox webkit` on t-compute, or compare the apt download sizes in the job log).
+How much install time the other slices save is not measured. Before building, read the step timings of a green run: the `Installing dependencies...` to first test, per slice, with and without Firefox and WebKit (run `playwright install --with-deps chromium` against `... chromium firefox webkit` on the CI runner host, or compare the apt download sizes in the job log).
 
 ## Do not
 

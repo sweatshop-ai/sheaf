@@ -10,7 +10,7 @@ Rien ne prouve que ce soit la cause du 137 ; elle est la première piste (une v�
 **À faire :** (1) sur un échec rouge, lire le journal « the event stream, page and hub », qui survit maintenant à un rechargement (`document starts`, `pagehide`) ; (2) établir la cause avant tout correctif, retry ou délai ; (3) correctif test-first dans la page ou le hub si c'est un défaut du produit, dans les aides de test si c'est le test.
 
 **Blocked by:**
-- External: un run rouge de l'un de ces deux tests avec un journal qui survit à un rechargement (PR 373 fusionnée, fc479f6), ou une reproduction sous charge sur t-compute (8 brûleurs au plus, 10 minutes au plus par lancement)
+- External: un run rouge de l'un de ces deux tests avec un journal qui survit à un rechargement (PR 373 fusionnée, fc479f6), ou une reproduction sous charge sur le serveur auto-hébergé (8 brûleurs au plus, 10 minutes au plus par lancement)
 
 **Claimed by:** (libre)
 

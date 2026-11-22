@@ -6,7 +6,7 @@
 
 **Classe :** c/d (test seulement, instable potentiel ; aucun test ne fait échouer un push sur ces hubs aujourd'hui, les pushs atteignent un dépôt distant existant et n'écrivent aucune ligne).
 
-**Établi (preuves) :** PR #252, trace sur t-compute, 7 968 tests hors navigateur : 25 lignes écrites par le hub d'un test antérieur. Le bug hunt Opus (`~/.claude/pm/chat-box-handoffs/pr-32-reviews/codex-1.md`) a lu les autres constructeurs de hub : aucun ne fait échouer un push aujourd'hui.
+**Établi (preuves) :** PR #252, trace sur le serveur auto-hébergé, 7 968 tests hors navigateur : 25 lignes écrites par le hub d'un test antérieur. Le bug hunt Opus (`~/.claude/pm/chat-box-handoffs/pr-32-reviews/codex-1.md`) a lu les autres constructeurs de hub : aucun ne fait échouer un push aujourd'hui.
 
 **Par où commencer :** régler tout hub à la fin du test depuis un seul endroit, pas fixture par fixture : par exemple une fixture autouse qui enregistre chaque `Hub` construit (enveloppe de `Hub.__init__`) et appelle `commits.settle` avant que `sheaf_env` ne soit défait. Attention : l'ordre de démontage (le réglage doit avoir lieu tant que l'environnement du test est encore en place) et les hubs que le test arrête lui-même (`stop_jobs`, le pusher se termine par `Stopped`).
 

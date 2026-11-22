@@ -10,40 +10,20 @@ Each is a function `(argv) -> exit code`, registered in COMMANDS and given its u
 COMMAND_HELP, which the foot of cli.py merges into its own. This module does not import cli.py:
 cli.py imports this one.
 """
-import argparse
-import sys
-
 from . import agent_setup, paths
 from .agents.detect import detect
+from .cmdline import EXIT_FAILED, EXIT_OK
+from .cmdline import err as _err
+from .cmdline import hub_failure as _hub_failure
+from .cmdline import out as _out
+from .cmdline import parser as _parser
 from .hub import client as hubclient
 from .hub import recover
 from .hub import server as hubserver
 from .hub import service
 
-EXIT_OK, EXIT_FAILED, EXIT_USAGE = 0, 1, 2
-
 COMMANDS: dict = {}
 COMMAND_HELP: dict = {}
-
-
-def _out(line: str = ""):
-    print(line)
-
-
-def _err(line: str = ""):
-    print(line, file=sys.stderr)
-
-
-def _parser(name: str, usage: str, what: str) -> argparse.ArgumentParser:
-    return argparse.ArgumentParser(prog=f"sheaf {name}", usage=f"sheaf {usage}", description=what)
-
-
-def _hub_failure(e: Exception) -> int:
-    if isinstance(e, hubclient.Impostor):
-        _err(f"  ! {e}")
-    else:
-        _err(f"sheaf: {e}")
-    return EXIT_FAILED
 
 
 # ── a hub that holds its port and does not answer (8.4, 9.4) ─────────────────
@@ -135,7 +115,7 @@ def via_service(verb: str) -> int | None:
     try:
         c = hubclient.client()
         try:
-            before = c.challenge()
+            before = c.meet()
         except hubclient.HubSilent as silent:
             if verb != "restart":
                 raise
@@ -145,11 +125,11 @@ def via_service(verb: str) -> int | None:
         if verb == "start" and before is not None:
             return _running(c)
         if verb == "restart" and before is not None:
-            if before.get("service"):
+            if before.got.get("service"):
                 # Tell the hub its reason now: the service manager's SIGTERM would be a "signal",
                 # and open tabs would show the stop banner (8.4). An older hub has no such route.
                 try:
-                    _, announced = c.call("POST", "/_/restarting", boot=before.get("boot") or "")
+                    _, announced = before.call("POST", "/_/restarting")
                 except hubclient.HubLost:       # the hub may have applied it though the answer never came
                     _take_back_restart(c)
                     raise
@@ -166,7 +146,7 @@ def via_service(verb: str) -> int | None:
                     _take_back_restart(c, token)
                 raise
         got = hubclient.wait_for_start(
-            c, hubclient.START_WAIT, lambda got: before is None or got.get("boot") != before.get("boot"))
+            c, hubclient.START_WAIT, lambda got: before is None or got.get("boot") != before.got.get("boot"))
     except (hubclient.Impostor, hubclient.HubDidNotStart, service.ServiceError) as e:
         return _hub_failure(e)
     if got is None:
@@ -188,20 +168,20 @@ def cmd_restart(argv: list[str]) -> int:
         c = hubclient.client()
         recovered = False
         try:
-            got = c.challenge()
+            met = c.meet()
         except hubclient.HubSilent as silent:
             recover_silent_hub(c, silent, "restart")        # stopped here, or raises (a HubSilent that says why, HubDidNotStart)
-            got, recovered = None, True
+            met, recovered = None, True
         # An upgrade stop, not a plain one: open tabs ride through it as through an outage, with
         # no "the hub was stopped" banner for a hub that is back in a second (8.4, 10.7).
-        if got is not None and not hubclient.stop_and_wait(c, got, "upgrade", force=True):
+        if met is not None and not hubclient.stop_and_wait(met, "upgrade", force=True):
             _err("sheaf: the hub did not stop; see `sheaf diag`")
             return EXIT_FAILED
         c, _ = hubclient.ensure_hub("cli", _out, _err)
     except (hubclient.Impostor, hubclient.HubDidNotStart) as e:
         return _hub_failure(e)
     info = hubserver.read_pid_file() or {}
-    _out(f"  hub {'restarted' if got is not None or recovered else 'started'} on 127.0.0.1:{c.port} "
+    _out(f"  hub {'restarted' if met is not None or recovered else 'started'} on 127.0.0.1:{c.port} "
          f"(pid {info.get('pid', '?')})")
     return EXIT_OK
 
@@ -215,13 +195,13 @@ def cmd_rotate(argv: list[str]) -> int:
     try:
         c = hubclient.client()
         with paths.key_lock():             # a hub that is starting has read the key or waits for this
-            got = c.challenge()
-            if got is None:
+            met = c.meet()
+            if met is None:
                 # Nobody holds the old key, so the file is replaced where it lies.
                 paths.rotate_key()
                 _out(f"  no hub is running; the key was replaced in the file; {again}")
                 return EXIT_OK
-        status, res = c.call("POST", "/_/rotate", boot=got.get("boot") or "")
+        status, res = met.call("POST", "/_/rotate")
     except hubclient.Impostor as e:
         return _hub_failure(e)
     if status != 200 or not res.get("ok"):
@@ -253,12 +233,11 @@ def _make_room(reason: str = "stop"):
     """A hub that a command started holds the port the service needs: stop it, so the service
     starts the hub in its place. A hub the service already runs is left alone. `install` stops
     it with a plain stop; `restart` with an upgrade stop, so open tabs ride through (8.4)."""
-    c = hubclient.client()
-    got = c.challenge()
-    if got is None or got.get("service"):
+    met = hubclient.client().meet()
+    if met is None or met.got.get("service"):
         return
     _out("  stopping the hub that is running, so the service can take its place")
-    if not hubclient.stop_and_wait(c, got, reason, force=True):
+    if not hubclient.stop_and_wait(met, reason, force=True):
         raise service.ServiceError("the hub that is running did not stop; run `sheaf stop` and try again")
 
 

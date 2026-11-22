@@ -57,7 +57,7 @@ def test_a_request_for_another_boot_is_not_sent_and_says_run_it_again(live, sent
 def test_a_stop_asked_of_a_replaced_hub_sends_no_stop(live, sent):
     c, got = live
     with pytest.raises(client.HubChanged):
-        client.stop_and_explain(c, {**got, "boot": "the-boot-of-the-hub-before"}, "upgrade")
+        client.stop_and_explain(client.Met(c, {**got, "boot": "the-boot-of-the-hub-before"}), "upgrade")
     assert "/_/stop" not in sent
 
 
@@ -65,7 +65,7 @@ def test_the_version_check_of_a_replaced_hub_asks_nothing_of_the_new_one(live, s
     c, got = live
     monkeypatch.setattr(client, "__version__", "9.9.9")       # newer than the hub: it would ask GET /_/jobs
     with pytest.raises(client.HubChanged):
-        client._meet_version(c, {**got, "boot": "the-boot-of-the-hub-before", "version": "0.0.1"},
+        client._meet_version(client.Met(c, {**got, "boot": "the-boot-of-the-hub-before", "version": "0.0.1"}),
                              warn=lambda *a: None)
     assert "/_/jobs" not in sent and "/_/stop" not in sent
 

@@ -13,15 +13,10 @@ import urllib.request
 
 import pytest
 
-from helpers import gone, hub_rows, key, stranger
+from helpers import gone, hub_rows, key, run_hub, stranger, wait_alive
 from sheafmd import diagnostics, signals
 from sheafmd.hub import sender, server
 from sheafmd.hub.jobs import Job, Jobs
-
-
-def run_hub(*extra):
-    return subprocess.Popen([sys.executable, "-m", "sheafmd", "hub", *extra],
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
 
 def alive(port) -> bool:
@@ -30,17 +25,6 @@ def alive(port) -> bool:
         return True
     except OSError:
         return False
-
-
-def wait_alive(port):
-    """The hub is up: it has bound the port, written its pid file and then its hub-start row (the
-    row comes last, so a test that reads the log must wait for it too)."""
-    for _ in range(200):
-        info = server.read_pid_file()
-        if alive(port) and info and hub_rows("hub-start") and info["boot"] in {r["boot"] for r in hub_rows("hub-start")}:
-            return
-        time.sleep(0.05)
-    pytest.fail("the hub did not start")
 
 
 def kill_hard(p):

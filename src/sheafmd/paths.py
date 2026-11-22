@@ -70,7 +70,12 @@ def cache_dir() -> Path:
 
 def runtime_dir() -> Path:
     """Not under SHEAF_HOME. On macOS never under Application Support: a Unix
-    socket path with a space in it can pass the 104-byte limit."""
+    socket path with a space in it can pass the 104-byte limit. SHEAF_TEST_RUNTIME_DIR is for test
+    suites alone: an absolute folder of its own wins on every platform, so tests on macOS (which
+    ignores XDG_RUNTIME_DIR) do not share /tmp/sheaf-<uid>."""
+    t = os.environ.get("SHEAF_TEST_RUNTIME_DIR")
+    if t and os.path.isabs(t):
+        return Path(t) / "sheaf"
     v = os.environ.get("XDG_RUNTIME_DIR")
     if sys.platform != "darwin" and v and os.path.isabs(v):
         return Path(v) / "sheaf"

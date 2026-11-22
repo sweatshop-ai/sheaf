@@ -120,6 +120,24 @@ def wait_until_ended(pid: int, seconds: float = 10.0):
         time.sleep(0.005)
 
 
+def run_hub(*extra):
+    """A real `python -m sheafmd hub` under the test's own SHEAF_HOME and port; the test reaps it."""
+    return subprocess.Popen([sys.executable, "-m", "sheafmd", "hub", *extra],
+                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+
+
+def wait_alive(port):
+    """The hub is up: it has bound the port, written its pid file and then its hub-start row (the
+    row comes last, so a test that reads the log must wait for it too)."""
+    from sheafmd.hub import server
+    for _ in range(200):
+        info = server.read_pid_file()
+        if hub_alive(port) and info and hub_rows("hub-start") and info["boot"] in {r["boot"] for r in hub_rows("hub-start")}:
+            return
+        time.sleep(0.05)
+    pytest.fail("the hub did not start")
+
+
 def stop_hub(pid: int):
     """SIGTERM, then SIGKILL after five seconds, to one process of this user's (`sheafmd.signals`: a
     -1, 0 or 1 from `hub.pid` is refused on macOS as on Linux, sheaf#85). Where there is a /proc

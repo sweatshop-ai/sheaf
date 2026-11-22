@@ -9,7 +9,6 @@ import os
 import re
 import signal
 import subprocess
-import sys
 import threading
 import time
 from pathlib import Path
@@ -17,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from agent_fakes import PID, FakeClaude, write_record
-from helpers import PLAN, Impostor, Silent, gone, http_get, hub_alive, hub_rows, key, silent_message
+from helpers import PLAN, Impostor, Silent, gone, http_get, hub_alive, hub_rows, key, run_hub, silent_message, wait_alive
 from sheafmd import config, diagnostics, paths, seat, signals
 from sheafmd.hub import client as hubclient
 from sheafmd.hub import peer, server
@@ -440,6 +439,35 @@ def test_the_hub_process_listens_on_its_socket_and_a_stop_removes_it(sheaf, port
     assert not sock.exists()
 
 
+def test_a_stop_the_hub_refuses_says_so_with_the_hubs_reason_and_leaves_it_running(sheaf, port, monkeypatch):
+    sheaf("start")
+    real = hubclient.HubClient.call
+
+    def call(self, method, path, body=None, **kw):
+        if path == "/_/stop":
+            return 403, {"ok": False, "error": "not now"}
+        return real(self, method, path, body, **kw)
+
+    monkeypatch.setattr(hubclient.HubClient, "call", call)
+    r = sheaf("stop")
+    assert (r.code, r.out, r.err) == (1, "", "sheaf: the hub refused to stop: not now\n")
+    assert hub_alive(port)
+
+
+def test_a_hub_still_running_when_the_stop_wait_runs_out_is_an_error_that_says_how_long(sheaf, port, monkeypatch):
+    sheaf("start")
+    real = hubclient.HubClient.call
+
+    def call(self, method, path, body=None, **kw):     # the hub said yes and did not stop
+        return (200, {"ok": True}) if path == "/_/stop" else real(self, method, path, body, **kw)
+
+    monkeypatch.setattr(hubclient.HubClient, "call", call)
+    monkeypatch.setattr(hubclient, "STOP_WAIT", 0.3)
+    r = sheaf("stop")
+    assert (r.code, r.out, r.err) == (1, "", "sheaf: the hub is still running after 0.3 s\n")
+    assert hub_alive(port)
+
+
 def test_stop_with_no_hub_is_not_an_error(sheaf, port):
     r = sheaf("stop")
     assert r.code == 0 and "no hub is running" in r.out
@@ -464,19 +492,6 @@ def test_version_names_the_hub_that_runs(sheaf, port):
 
 
 # ── the hub as a process (8.4) ───────────────────────────────────────────────
-
-def run_hub(*extra):
-    return subprocess.Popen([sys.executable, "-m", "sheafmd", "hub", *extra],
-                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-
-
-def wait_alive(port):
-    for _ in range(200):
-        if hub_alive(port):
-            return
-        time.sleep(0.05)
-    pytest.fail("the hub did not start")
-
 
 def wait_started(pid):
     """The hub has written its start row: the port listens a little before that, and a test that

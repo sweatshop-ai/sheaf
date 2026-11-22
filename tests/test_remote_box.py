@@ -182,7 +182,7 @@ def account(tmp_path, name, port):
     (home / "run").mkdir(mode=0o700)
     (home / "tmp").mkdir()
     env = {k: v for k, v in os.environ.items()
-           if k not in ("SHEAF_PORT", "SHEAF_HOME") and not k.startswith("XDG_")}
+           if k not in ("SHEAF_PORT", "SHEAF_HOME", "SHEAF_TEST_RUNTIME_DIR") and not k.startswith("XDG_")}
     env.update(HOME=str(home), XDG_RUNTIME_DIR=str(home / "run"), TMPDIR=str(home / "tmp"))
     return env
 

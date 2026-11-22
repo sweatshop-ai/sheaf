@@ -21,10 +21,14 @@ CI = WORKFLOWS / "ci.yml"
 
 MATRIX_OS = ("os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.macos && "
              "'[\"ubuntu-24.04\",\"macos-26\"]' || '[\"ubuntu-24.04\"]') }}")
-TRUSTED = "(github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)"
+# A pull request is trusted when its head is a branch of this repository and Dependabot did not open it: a Dependabot
+# branch lives in this repository and skips the approval of a fork's workflows, but runs code of an updated dependency.
+OURS = ("(github.event.pull_request.head.repo.full_name == github.repository && "
+        "github.event.pull_request.user.login != 'dependabot[bot]')")
+TRUSTED = f"(github.event_name != 'pull_request' || {OURS})"
 ORG_RUNNERS = "fromJSON('[\"self-hosted\",\"linux\",\"sheaf-ci\"]')"
 RUNS_ON = f"runs-on: ${{{{ matrix.os == 'ubuntu-24.04' && {TRUSTED} && {ORG_RUNNERS} || matrix.os }}}}"
-SLICED = ("((github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) || "
+SLICED = (f"((github.event_name == 'pull_request' && !{OURS}) || "
           "(github.event_name == 'workflow_dispatch' && inputs.macos))")
 SLICE = ("slice: ${{ fromJSON(" + SLICED + " && '[\"1/6\",\"2/6\",\"3/6\",\"4/6\",\"5/6\",\"6/6\"]' || '[\"\"]') }}")
 MATRIX_PYTHON = ("python: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.python != 'all' && "
@@ -167,7 +171,8 @@ def test_one_job_asks_for_a_runner_and_nothing_else_does(text):
 
 def test_an_ubuntu_job_of_this_repository_runs_on_the_organisations_runners_and_a_fork_and_macos_run_on_githubs(text):
     # The label is a function of the event and of the head of the pull request: a push, the nightly run, a manual run and
-    # a pull request whose head is a branch of this repository are trusted; a fork's pull request is not, and macOS never
+    # a pull request whose head is a branch of this repository are trusted, unless Dependabot opened it; a fork's pull
+    # request is not, and macOS never
     # leaves GitHub's runners. The fork's own copy of this file can name any label, so the repository setting that holds
     # a fork's workflows for approval is the guard; this expression only keeps an honest fork run off those runners.
     line = re.search(r"^\s*runs-on: (.*)$", text, flags=re.M).group(1)

@@ -10,7 +10,7 @@ import stat
 import pytest
 from helpers import hub_rows
 from test_hub_work import (ADDRESS, BEA, DOC, FORK, BOB, LAPTOP, LIVE, OLDER, SHEAF, ALICE, TRANSCRIPT,  # noqa: F401
-                           box, put, sessions_of, team)
+                           box, generated, put, sessions_of, team)
 
 from sheafmd.hub import codes as codes_mod
 from sheafmd.hub import the_list
@@ -416,7 +416,6 @@ def test_an_empty_code_header_is_no_code(team, box):
 
 
 def test_a_fork_reported_with_a_code_on_a_generated_rectoverso_is_refused_and_writes_nothing(team, box, work):
-    from test_hub_work import generated
     code = code_of(team)
     assert fetch(team, code).status == 200
     generated(team)

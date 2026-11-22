@@ -53,6 +53,17 @@ def badges(p):
         raise
 
 
+# Every join of the tab waits until the test calls `window.__release()`; `window.__held` counts the joins held.
+HOLD_JOINS_JS = """(() => {
+  const send = window.fetch; let open; const gate = new Promise(r => { open = r; });
+  window.__held = 0; window.__release = open;
+  window.fetch = function (u, i) {
+    if (String(u).includes('/_/live/join')) { window.__held++; return gate.then(() => send.call(window, u, i)); }
+    return send.apply(this, arguments);
+  };
+})()"""
+
+
 def test_seven_tabs_load_count_and_all_hear_a_change(shared, site):
     pages = [opened(shared, site) for _ in range(TABS - 1)]
     until(lambda: site.hub.tabs(DOC) == TABS - 1, what="six tabs counted by the hub")
@@ -81,36 +92,121 @@ def test_a_tab_that_closes_leaves_the_count_and_the_leaders_tab_hands_over(share
     until(lambda: site.hub.tabs(DOC) == 2, what="two tabs counted after the reload")
 
 
+# A frozen tab, as the tests make one. CDP `Page.setWebLifecycleState {state: "frozen"}` freezes nothing here: in the
+# headless shell, in full Chromium (new headless) and headed under Xvfb, the tab's `freeze` listener never ran, the
+# tab still ran script, and it kept `sheaf-live` for 40 s and more (ticket 176). Chromium freezes only a hidden page,
+# and every page Playwright drives stays `visible`. So these tests dispatch `freeze` and `resume` on the document and
+# mute the tab's BroadcastChannels in between, as a frozen tab hears and says nothing. They test page/live.js's
+# listeners and what the other tabs do once a leader lets go, not that Chrome fires the events.
+FREEZABLE_JS = """(() => {
+  const Native = window.BroadcastChannel, post = Native.prototype.postMessage;
+  window.__frozen = false;
+  window.BroadcastChannel = class extends Native {
+    constructor(name) {
+      super(name);
+      // Added before the page sets `onmessage`, so it runs first and keeps a message from a frozen tab.
+      super.addEventListener('message', ev => { if (window.__frozen) ev.stopImmediatePropagation(); });
+    }
+    postMessage(m) { if (!window.__frozen) post.call(this, m); }
+  };
+})()"""
+
+# This tab's Web Locks client id: the holder of a lock it takes for a moment.
+CLIENT_ID = """() => { const n = 'id-' + Math.random();
+  return navigator.locks.request(n, () => navigator.locks.query().then(s => s.held.find(l => l.name === n).clientId)); }"""
+HOLDER = "() => navigator.locks.query().then(s => (s.held.find(l => l.name === 'sheaf-live') || {}).clientId || null)"
+
+
+def freeze(p):
+    """What Chrome does to a background tab it freezes, as far as the other tabs can tell: `freeze` fires, then the tab
+    runs nothing (here: hears and sends nothing on its channels)."""
+    p.evaluate("() => { document.dispatchEvent(new Event('freeze')); window.__frozen = true; }")
+
+
+def resume(p):
+    p.evaluate("() => { window.__frozen = false; document.dispatchEvent(new Event('resume')); }")
+
+
+def holder(p):
+    """The client id that holds `sheaf-live`, read in tab `p`; a read that falls on a reload is None."""
+    try:
+        return p.evaluate(HOLDER)
+    except Exception as e:
+        if any(said in str(e) for said in RELOADING):
+            return None
+        raise
+
+
+def freezable(context, site, n=3):
+    """`n` tabs that can be frozen, counted by the hub, and their Web Locks client ids; the first holds the lock."""
+    context.add_init_script(FREEZABLE_JS)
+    pages = [opened(context, site) for _ in range(n)]
+    until(lambda: site.hub.tabs(DOC) == n, what=f"{n} tabs counted")
+    ids = [p.evaluate(CLIENT_ID) for p, _ in pages]
+    until(lambda: holder(pages[1][0]) == ids[0], what="the first tab holding the lock")
+    return pages, ids
+
+
 def test_a_frozen_leader_hands_the_stream_over_and_takes_it_back_on_resume(shared, site):
-    """Chrome freezes a background tab (memory saver, battery saver). A frozen leader keeps its lock and relays
-    nothing, so the visible tabs would stop hearing changes. On `freeze` it lets go; on `resume` it queues again."""
-    pages = [opened(shared, site) for _ in range(3)]
-    until(lambda: site.hub.tabs(DOC) == 3, what="three tabs counted")
-    leader = pages[0][0]         # the first tab took the lock
-    cdp = shared.new_cdp_session(leader)
-    cdp.send("Page.enable")
-    cdp.send("Page.setWebLifecycleState", {"state": "frozen"})
+    """Chrome freezes a background tab (memory saver, battery saver). A frozen leader would keep its lock and relay
+    nothing, so the visible tabs would stop hearing changes. On `freeze` it lets go; on `resume` it queues again.
+    The freeze is dispatched, not Chrome's (FREEZABLE_JS): this tests the listeners, not the browser's lifecycle."""
+    pages, ids = freezable(shared, site)
+    leader = pages[0][0]
+    freeze(leader)
+    until(lambda: holder(pages[1][0]) in ids[1:], what="the lock passed to a tab that is not frozen")
+    until(lambda: site.hub.tabs(DOC) == 2, what="the frozen tab no longer counted")
     f = site.file
     f.write_text(f.read_text(encoding="utf-8") + "\nWhile frozen.\n", encoding="utf-8")
     for n, (p, _) in enumerate(pages[1:], 2):
         until(lambda: shows(p, "While frozen."), what=f"the change in tab {n} while the leader is frozen")
-    cdp.send("Page.setWebLifecycleState", {"state": "active"})
+    assert not shows(leader, "While frozen."), "the frozen tab heard a change: it was not muted"
+    until(lambda: site.hub.tabs(DOC) == 2, what="two tabs counted after their reload")
+    resume(leader)
     until(lambda: site.hub.tabs(DOC) == 3, what="three tabs counted after the resume")
     f.write_text(f.read_text(encoding="utf-8") + "\nAfter the resume.\n", encoding="utf-8")
     for n, (p, _) in enumerate(pages):
         until(lambda: shows(p, "After the resume."), what=f"the change in tab {n + 1} after the resume")
+    assert [e for _, e in pages] == [[]] * 3
 
 
 def test_a_frozen_tab_that_waits_for_the_lock_is_not_handed_it(shared, site):
-    """The leader and a second tab freeze together: the lock must pass to the third, not to the frozen second,
-    whose request was queued and could never run."""
-    pages = [opened(shared, site) for _ in range(3)]
-    until(lambda: site.hub.tabs(DOC) == 3, what="three tabs counted")
-    for p, _ in pages[:2]:
-        shared.new_cdp_session(p).send("Page.setWebLifecycleState", {"state": "frozen"})
+    """The leader and the second tab freeze: the lock must pass to the third, not to the second, whose request was
+    queued first and whose callback could not run. The second freezes first, so that its request is still queued
+    when the leader lets go; a dispatched freeze leaves the tab's script running, so had the request stayed, the
+    second would take the lock (and, muted, relay to nobody). The freeze is dispatched (FREEZABLE_JS)."""
+    pages, ids = freezable(shared, site)
+    freeze(pages[1][0])
+    freeze(pages[0][0])
+    until(lambda: holder(pages[2][0]) == ids[2], what="the lock held by the third tab")
+    until(lambda: site.hub.tabs(DOC) == 1, what="only the third tab counted")
     f = site.file
     f.write_text(f.read_text(encoding="utf-8") + "\nWith two tabs frozen.\n", encoding="utf-8")
     until(lambda: shows(pages[2][0], "With two tabs frozen."), what="the change in the third tab")
+
+
+def test_a_comment_written_while_the_leader_is_frozen_reaches_the_tabs(shared, site):
+    """Ticket 171, item 5: an event the hub emits after a frozen leader's stream closed and before a tab joins the
+    next leader's reaches no tab. The page makes up for it on the `hello` of its new join (`checkText`). The joins are
+    held in every tab, so the comment falls in the gap for certain: the leader freezes, the hub counts no tab, a
+    comment is written and taken in, and only then do the tabs join. The freeze is dispatched (FREEZABLE_JS).
+    The index page loses nothing in such a gap: while no index stream is joined the hub tells the index nothing
+    (`touch` and `tick` in hub/index.py return at once), and the page reads its list again on every `hello`."""
+    pages, ids = freezable(shared, site)
+    for p, _ in pages:
+        p.evaluate(HOLD_JOINS_JS)
+    freeze(pages[0][0])
+    until(lambda: sum(p.evaluate("window.__held") for p, _ in pages[1:]) >= 1, what="a join held")
+    until(lambda: site.hub.tabs(DOC) == 0, what="no tab counted while the joins are held")
+    update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
+                                                     "Ada", "2026-10-14T10:00")[0])
+    e = site.hub.entries[DOC]
+    until(lambda: (site.hub.catch_up(e), "Why?" in e.live.current()[1])[1], what="the hub reading the comment")
+    for p, _ in pages[1:]:
+        p.evaluate("window.__release()")
+    for n, (p, _) in enumerate(pages[1:], 2):
+        until(lambda: badges(p) >= 1, what=f"the comment in tab {n}")
+    assert [e for _, e in pages] == [[]] * 3
 
 
 def test_a_tab_that_leaves_without_a_leave_is_dropped_when_its_lock_frees(shared, site):
@@ -134,14 +230,7 @@ def test_a_comment_written_while_the_leader_hands_over_reaches_the_tabs(shared, 
     pages = [opened(shared, site) for _ in range(3)]
     until(lambda: site.hub.tabs(DOC) == 3, what="three tabs counted")
     for p, _ in pages:
-        p.evaluate("""(() => {
-          const send = window.fetch; let open; const gate = new Promise(r => { open = r; });
-          window.__held = 0; window.__release = open;
-          window.fetch = function (u, i) {
-            if (String(u).includes('/_/live/join')) { window.__held++; return gate.then(() => send.call(window, u, i)); }
-            return send.apply(this, arguments);
-          };
-        })()""")
+        p.evaluate(HOLD_JOINS_JS)
     pages[0][0].close()          # its stream ends; the lock passes to another tab, whose join waits on the gate
     until(lambda: sum(p.evaluate("window.__held") for p, _ in pages[1:]) >= 1, what="a join held")
     update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",

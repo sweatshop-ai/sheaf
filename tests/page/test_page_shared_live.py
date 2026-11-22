@@ -146,7 +146,10 @@ def test_a_comment_written_while_the_leader_hands_over_reaches_the_tabs(shared, 
     until(lambda: sum(p.evaluate("window.__held") for p, _ in pages[1:]) >= 1, what="a join held")
     update_file(site.file, lambda t: rdc.add_comment(t, *rdc.find_quote(t, "apples"), "apples", "Why?",
                                                      "Ada", "2026-10-14T10:00")[0])
-    until(lambda: "Why?" in site.hub.entries[DOC].live.current()[1], what="the hub reading the comment")   # nothing was listening for it
+    # No tab holds a stream now, so the watcher skips the document (`catch_up` in hub/core.py): the hub takes the
+    # write in as a request for the page would, and the `comments` event it emits reaches no tab.
+    e = site.hub.entries[DOC]
+    until(lambda: (site.hub.catch_up(e), "Why?" in e.live.current()[1])[1], what="the hub reading the comment")
     for p, _ in pages[1:]:
         p.evaluate("window.__release()")
     for n, (p, _) in enumerate(pages[1:], 2):

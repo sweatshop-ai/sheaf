@@ -1013,7 +1013,9 @@ class TheList:
         doc, acts = f"{root}/{s.rel}", []
         # A toggle's number is its place among the actions, or among the pressed boxes when it is pressed (#110).
         # A pressed one-off is drawn locked, with who pressed it, and names no action and no text.
-        for x in buttons(s, self._pressers(self.root(), s), self.hub, member, is_owner):
+        # A generated rectoverso draws none: its tick is refused with 403 (SPEC 7.2, 8.3), as on its page.
+        drawn = [] if self.hub.generated_line(doc) else buttons(s, self._pressers(self.root(), s), self.hub, member, is_owner)
+        for x in drawn:
             locked = not x["toggle"] and x["pressed"]
             label = f'{x["label"]} ✓' + (f' {x["by"]}' if x["by"] else "") if locked else x["label"]
             acts.append({"doc": doc, "word": x["word"], "label": label, "toggle": x["toggle"], "pressed": x["pressed"],

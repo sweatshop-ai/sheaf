@@ -308,11 +308,11 @@ class HubServer:
         shared = Handler(hub)
         started = peer.startup()
         off = started.off
-        if started.unsure:
-            shared.peer_unsure = started.unsure
-            hub.record("peer-selftest-failed", None, error=started.unsure)
+        if started.raised:
+            shared.peer_selftest_raised = started.raised
+            hub.record("peer-selftest-failed", None, error=started.raised)
             print(f"sheaf: the hub could not test whether it can see which user of this machine is at the other end "
-                  f"of a connection ({started.unsure}); it checks every sign-in link anyway and refuses one whose "
+                  f"of a connection ({started.raised}); it checks every sign-in link anyway and refuses one whose "
                   f"owner it cannot read: if a link fails, `sheaf signin-url` signs the browser in.", file=sys.stderr)
         if off:
             shared.peer_off = off

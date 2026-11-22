@@ -334,6 +334,40 @@ def test_a_self_test_that_raises_still_lets_the_key_in_where_no_owner_can_be_rea
         sock.close()
 
 
+def test_a_self_test_that_raises_still_tells_a_closed_caller_to_try_again_and_applies_nothing(monkeypatch, work):
+    sock, handler = started_while_the_self_test_raises(monkeypatch, work)
+    try:
+        r = ask(handler, handler.hub, "GET", "/_/index.json", seen(kind=peer.UNKNOWN, closed=True), "key")
+        assert r.status == 503 and r.headers["Retry-After"] == "1"
+    finally:
+        sock.close()
+
+
+def test_a_self_test_that_raises_names_signin_url_on_the_page_of_a_link_whose_owner_it_could_not_read(
+        monkeypatch, work):
+    sock, handler = started_while_the_self_test_raises(monkeypatch, work)
+    try:
+        hub = handler.hub
+        r = ask(handler, hub, "GET", f"/_/open?nonce={hub.auth.mint_signin()}&next=/work/plan.md",
+                seen(kind=peer.UNKNOWN), how=None, accept="text/html")
+        assert r.status == 401 and "could not test" in r.text and "sheaf signin-url" in r.text
+    finally:
+        sock.close()
+
+
+def test_the_first_connection_read_as_the_hubs_own_ends_the_leniency_a_raised_self_test_allowed(monkeypatch, work):
+    """A self-test that raised once at start may have met a passing failure: once a lookup names the hub's own
+    user, lookups work, and a key over a connection read as no one's is refused again (9.6)."""
+    sock, handler = started_while_the_self_test_raises(monkeypatch, work)
+    try:
+        hub = handler.hub
+        assert ask(handler, hub, "GET", "/_/index.json", seen(ME), "key").status == 200
+        assert handler.peer_selftest_raised is None
+        assert ask(handler, hub, "GET", "/_/index.json", seen(kind=peer.UNKNOWN), "key").status == 403
+    finally:
+        sock.close()
+
+
 def test_a_platform_with_no_way_to_read_owners_has_the_check_off(monkeypatch):
     monkeypatch.setattr(peer, "PLATFORM", "darwin")
     assert "darwin" in peer.startup().off

@@ -163,7 +163,7 @@
 
 - [x] src/sheafmd/hub/repos.py:80 the lock is held across `git --version` (timeout 10 s), so while one read hangs every other caller, including _look_is_safe on the request path, waits up to 10 s instead of getting None at once; bounded and only during a read, so not a defect **[fixed on main: #521, ee67ff2a]**
 - [x] src/sheafmd/hub/repos.py:170 the "said once, at the hub's start" message is printed on every Repos() construction, not once per process; true only because the tiroir builds one Repos per hub **[fixed on main: #521, ee67ff2a]**
-- [ ] tests/test_repo_pages.py:1162 the start-message tests replace _git_version with a lambda and never check that a real failed read at start is later announced as recovered; the recovery line is only covered by the cache test
+- [x] tests/test_repo_pages.py:1162 the start-message tests replace _git_version with a lambda and never check that a real failed read at start is later announced as recovered; the recovery line is only covered by the cache test **[fixed on main: #557, c496cdec]**
 
 ## PR #410
 
@@ -198,7 +198,7 @@
 - [x] src/sheafmd/hub/outgoing.py:78 send_root calls answer.get(...) without checking that the peer's body is a dict; a peer answering a JSON list or string raises AttributeError instead of holding the batch as "failed". send_root has no caller yet. **[fixed on main: #528, b55b2d17]**
 - [ ] src/sheafmd/hub/root_moves.py:95 Moves.sent and Moves.hold index row["sent"] / row["held"] directly; a root_moves.json row missing those keys (hand-edited or from an older shape) raises KeyError, although _read treats an unreadable file as empty.
 - [ ] src/sheafmd/hub/incoming.py:143 _root_shape accepts an empty owner_email and duplicate page paths; owner_for turns the empty one into no_email and a duplicate is judged twice under one key, so no wrong result follows, but the shape check is looser than its message says.
-- [ ] src/sheafmd/send.py:498 moved_to from the hub is printed to the terminal unfiltered (no control-character stripping); the hub is the member's own tiroir, so this is hardening only.
+- [x] src/sheafmd/send.py:498 moved_to from the hub is printed to the terminal unfiltered (no control-character stripping); the hub is the member's own tiroir, so this is hardening only. **[fixed on main: #556, b6aa9afe]**
 
 ## PR #417
 
@@ -215,7 +215,7 @@
 
 ## PR #423
 
-- [ ] tests/test_helpers_wait.py:23 the unreaped-process test asserts nothing after the wait returns; it does not check that proc_state is "zombie" rather than "gone", so it would also pass if the helper returned for the wrong reason
+- [x] tests/test_helpers_wait.py:23 the unreaped-process test asserts nothing after the wait returns; it does not check that proc_state is "zombie" rather than "gone", so it would also pass if the helper returned for the wrong reason **[fixed on main: #546, fdf71566]**
 
 ## PR #425
 
@@ -224,7 +224,7 @@
 
 ## PR #426
 
-- [ ] tests/page/test_sheaf_buttons.py:113 asserts own_rows and the file right after the first Delete click without waiting; it holds because sheaf.js:638-642 relabels synchronously and posts nothing, but the assert proves no absence of a delayed POST
+- [x] tests/page/test_sheaf_buttons.py:113 asserts own_rows and the file right after the first Delete click without waiting; it holds because sheaf.js:638-642 relabels synchronously and posts nothing, but the assert proves no absence of a delayed POST **[fixed on main: #557, c496cdec]**
 
 ## PR #427
 
@@ -262,8 +262,8 @@
 
 ## PR #435
 
-- [ ] tests/test_page_predicates.py:11 A_FUNCTION accepts any string starting with "(", so a parenthesised expression such as "(window.x === 1)" passes the guard although Playwright evaluates it as an expression through eval; anchoring on "\(.*?\)\s*=>" would close that gap.
-- [ ] tests/test_page_predicates.py:16 PAGE_TESTS.glob("*.py") scans only the top level of tests/page; a page test in a subdirectory or a helper outside tests/page (e.g. a conftest elsewhere) is not checked.
+- [x] tests/test_page_predicates.py:11 A_FUNCTION accepts any string starting with "(", so a parenthesised expression such as "(window.x === 1)" passes the guard although Playwright evaluates it as an expression through eval; anchoring on "\(.*?\)\s*=>" would close that gap. **[fixed on main: #546, fdf71566]**
+- [x] tests/test_page_predicates.py:16 PAGE_TESTS.glob("*.py") scans only the top level of tests/page; a page test in a subdirectory or a helper outside tests/page (e.g. a conftest elsewhere) is not checked. **[fixed on main: #557, c496cdec]**
 
 ## PR #438
 
@@ -299,7 +299,7 @@
 ## PR #443
 
 - [ ] src/sheafmd/connect.py:135 `made = True` is set on the line after os.open returns, so a KeyboardInterrupt delivered between the two leaves the temp behind and the fd open; a one-statement window, not reachable by an ordinary failure.
-- [ ] src/sheafmd/connect.py:143 os.close(fd) in `finally` replaces the original write/fsync error if close also fails; the temp is still removed and the message still says nothing was written, only the strerror shown is close's.
+- [x] src/sheafmd/connect.py:143 os.close(fd) in `finally` replaces the original write/fsync error if close also fails; the temp is still removed and the message still says nothing was written, only the strerror shown is close's. **[fixed on main: #556, b6aa9afe]**
 
 ## PR #444
 
@@ -307,7 +307,7 @@
 
 ## PR #445
 
-- [ ] tests/public_tree.py:106 tracked() decodes `git ls-files -z` with errors="replace", so a tracked file whose name is not UTF-8 resolves to a path that does not exist and its content is skipped silently by the is_file() check at line 121 (the path itself is still scanned).
+- [x] tests/public_tree.py:106 tracked() decodes `git ls-files -z` with errors="replace", so a tracked file whose name is not UTF-8 resolves to a path that does not exist and its content is skipped silently by the is_file() check at line 121 (the path itself is still scanned). **[fixed on main: #546, fdf71566]**
 - [x] tests/public_tree.py:142 a name found in a path is reported as `path:0 term N`, and the path printed holds the name; the docstring (line 3) and SPEC row say a hit never prints the matched text. No new exposure (the path is already public), but the claim is not exact. **[fixed on main: #521, ee67ff2a]**
 - [ ] tests/public_tree.py:125 the guard's own two files are exempt from every address any ALLOW entry lists, whatever file that entry names; documented as intended, but it is broader than one entry per file.
 

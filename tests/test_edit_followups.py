@@ -1303,3 +1303,50 @@ def test_the_label_of_an_ordered_task_ends_before_a_block_under_its_words():
     from sheafmd.render import pandoc_html
     html = pandoc_html("1. [ ] a\n\n   ```\n   code\n   ```\n")
     assert html.index("</label>") < html.index("<pre")
+
+
+# ── Enter after a word of a heading (ticket 137) ──
+# The hub gets the same <h2>Ab<div>cd</div></h2> for Enter after a word and for Enter at the end with a line typed after
+# it. The page marks the line Enter split off from inside the heading's words (`data-rd-split`): that line stays a heading
+# of the same level, as in common editors. An unmarked line is a paragraph, as before: an older page sends no mark.
+
+@pytest.mark.parametrize("html, md", [
+    ("<h2>Ab<div data-rd-split=\"\">cd</div></h2>", "## Ab\n\n## cd"),
+    ("<h3>A <em>long</em><div data-rd-split=\"\">title</div></h3>", "### A *long*\n\n### title"),
+    ("<h2>Ab<div data-rd-split=\"\">cd</div><div>A line under it.</div></h2>", "## Ab\n\n## cd\n\nA line under it."),
+    ("<h2>Ab<div data-rd-split=\"\">c<div data-rd-split=\"\">d</div></div></h2>", "## Ab\n\n## c\n\n## d"),
+    ("<h1>Ab<div data-rd-split=\"\"><br></div></h1>", "# Ab"),
+    ("<h2>Ab&nbsp;<div data-rd-split=\"\">cd</div></h2>", "## Ab\n\n## cd"),
+    ("<h2><div>Above it.</div>Ab<div data-rd-split=\"\">cd</div></h2>", "Above it.\n\n## Ab\n\n## cd"),
+    ("<p>Ab<div data-rd-split=\"\">cd</div></p>", "Ab\n\ncd"),
+    ("<h2>Ab<div>cd</div></h2>", "## Ab\n\ncd"),
+    ("<h2><div data-rd-split=\"\">cd</div></h2>", "## cd"),
+    ("<h2>Ab<div data-rd-split=\"\"><div>x</div>cd</div></h2>", "## Ab\n\nx\n\n## cd"),
+    ("<h2><div>Above</div><div data-rd-split=\"\">cd</div></h2>", "Above\n\n## cd"),
+],
+    ids=["after a word", "inline marks", "a split then a line", "split twice", "an empty split line",
+         "a space at the cut", "a line above", "a paragraph is not a heading", "unmarked stays a paragraph",
+         "the first half deleted", "a split line that starts with a nested line",
+         "the first half deleted under a line typed above"])
+def test_a_line_split_off_inside_a_heading_stays_a_heading_of_its_level(html, md):
+    assert rde.html_block_to_md(html) == md
+
+
+@pytest.mark.parametrize("source", [None, "- one\n"])
+def test_a_split_mark_outside_a_heading_is_no_part_of_the_md(source):
+    """A split line pasted into a list item before the save: the mark is the page's, and goes, as if it had none."""
+    marked = rde.html_block_to_md('<ul><li>one<div data-rd-split="">two</div></li></ul>', source=source)
+    assert marked == rde.html_block_to_md("<ul><li>one<div>two</div></li></ul>", source=source)
+    assert "rd-split" not in marked
+
+
+def test_a_split_heading_saves_as_two_headings_with_the_comment_on_its_half():
+    text = doc("# Title", "## A title here", "Last.")
+    blk, s, e = rdc.find_quote(text, "here")
+    text, cid = rdc.add_comment(text, blk, s, e, "here", "Why?", "Ada", "2026-10-18T10:00")
+    a = f'<span class="rd-anchor" data-rd-id="{cid}"></span>'
+    new, _ = rde.apply_edits(text, [{"i": 1, "html": f'<h2>A title<div data-rd-split="">here{a}</div></h2>'}])
+    assert [b.kind for b in split_md_blocks(new)].count("heading") == 3
+    assert "\n## A title\n" in new and "\n## here" in new
+    [c] = rdc.parse(new).comments
+    assert c.id == cid and not c.orphan

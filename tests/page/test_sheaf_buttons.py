@@ -110,7 +110,9 @@ def test_delete_asks_a_second_click_in_the_button_and_then_moves_the_page_to_the
     act(own, "alpha", "delete")
     until(lambda: own.js("return root.querySelector(arg + ' .sheaf-act[data-act=\"delete\"]').textContent;", row("alpha")) == "Really delete?",
           what="the second click asked for")
-    assert own_rows(own) == ["alpha", "beta"] and (own.root_path / "2026-11" / "alpha.md").exists()      # one click deletes nothing
+    with pytest.raises(AssertionError, match="timed out"):      # one click deletes nothing: a POST out after the button changed would show within this half second
+        until(lambda: own_rows(own) != ["alpha", "beta"] or not (own.root_path / "2026-11" / "alpha.md").exists(),
+              timeout=0.5, what="a delete after one click")
     act(own, "alpha", "delete")
     wait_rows(own, ["beta"], "alpha gone from Pages")
     assert not (own.root_path / "2026-11" / "alpha.md").exists()

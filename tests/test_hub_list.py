@@ -2209,14 +2209,14 @@ def test_a_tick_that_the_second_reading_made_in_place_is_still_made_in_place(src
     assert want is None or out == want
 
 
-def test_a_long_run_of_quote_marks_is_read_in_linear_time():
+def test_a_long_run_of_quote_marks_is_read_in_linear_time(no_gc):
     # Re-read of the b1 fix, b2: the chain accepted `>` twice over (the leading quotes and the chain), so a line of
     # n `>` cost n squared: 14.6 s at 5000 against 3 ms before ticket 128.
     import time
     from sheafmd.edit import task_marks
-    t = time.perf_counter()
+    t = time.process_time()
     assert task_marks("> " * 5000 + "x\n") == [] and task_marks("> " * 5000 + "- [ ] x\n") != []
-    assert time.perf_counter() - t < 1
+    assert time.process_time() - t < 1
 
 
 def test_a_list_tick_made_through_the_second_reading_is_offered_and_written():
@@ -2449,3 +2449,12 @@ def test_move_to_is_read_as_belongs_to():
     assert moved.actions == () and [p[0] for p in moved.pressed] == ["Belongs to"]
     assert the_list.ticks_another_move("- [x] Move to klium (ref t1)\n- [ ] Belongs to acme (ref t1)\n",
                                        "- [x] Move to klium (ref t1)\n- [x] Belongs to acme (ref t1)\n") == "klium"
+
+
+def test_a_generated_rectoverso_keeps_its_row_but_draws_no_action_button(box):
+    # Its tick is refused with 403 (SPEC 7.2, ticket 156): the row draws no button that would be refused.
+    box.hub.docs.put(JOEY, {**box.hub.docs.get(JOEY),
+                            "generated": {"by": "builder", "id": "tok1", "at": "2026-11-22T10:00:00+0100"}})
+    assert [b.doc for b in buttons(box.get("/list", member=NELL))] == ["list/initech/website/2026-10-27-ga4-property.md"]
+    titles = [r[0] for g in read(box.get("/list", member=NELL))["Waiting on you 2"].values() for r in g]
+    assert "Reply to Joey about column L James" in titles

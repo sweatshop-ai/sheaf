@@ -803,10 +803,15 @@ def silent_message(port, seconds=None):
     return f"the sheaf hub on 127.0.0.1:{port} did not answer{when}; try again, or run `sheaf restart`"
 
 
-def holds_number(text, n):
-    """Whether `n` stands alone in `text`: not inside a longer number (`2600`), a word or hex id
+def count_number(text, n):
+    """How many times `n` stands alone in `text`: not inside a longer number (`2600`), a word or hex id
     (`c8cd260c`), or a decimal or unit (`260.5`, `260px`)."""
-    return bool(re.search(rf"(?<![\w.]){n}(?![\w.])", text))
+    return len(re.findall(rf"(?<![\w.]){n}(?![\w.])", text))
+
+
+def holds_number(text, n):
+    """Whether `n` stands alone in `text` (see `count_number`)."""
+    return count_number(text, n) > 0
 
 
 # ── two shared Sheafs that talk to each other (ticket 20) ───────────────────

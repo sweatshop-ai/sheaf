@@ -660,7 +660,8 @@ def test_a_page_of_a_repo_that_is_anothers_private_root_renders_on_the_laptop_wi
     page = laptop / "docs" / "plan.md"
     code, out, err = run(capsys, page)
     assert code == 0 and local == [str(page)]
-    assert err.count("\n") == 1 and "not cloned" in err and "private" not in err and "cal" not in err.lower()
+    said = err.replace(str(page), "")                                   # a temp dir may hold either word (macOS: /private/var)
+    assert err.count("\n") == 1 and "not cloned" in said and "private" not in said and "cal" not in said.lower()
 
 
 def test_a_page_whose_commit_the_tiroir_cannot_find_renders_on_the_laptop_with_one_line(
@@ -1170,6 +1171,20 @@ def test_a_failed_read_of_the_git_version_is_tried_again_after_a_pause_and_only_
         clock[0] += repos_mod.RETRY_READ_EVERY
         assert [repos_mod._git_version() for _ in range(3)] == [(2, 53)] * 3
         assert len(calls) == 3
+        assert capsys.readouterr().err.strip().splitlines() == ["sheaf hub: git 2.53 read: commit look on"]
+    finally:
+        repos_mod._git_version.cache_clear()
+
+
+def test_a_read_that_fails_at_the_hubs_start_and_works_later_says_so_when_it_recovers(tmp_path, monkeypatch, capsys):
+    clock = [1000.0]
+    monkeypatch.setattr(repos_mod.time, "monotonic", lambda: clock[0])
+    try:
+        fake_git(monkeypatch, [subprocess.TimeoutExpired("git", 10), "git version 2.53.0\n"])
+        repos_mod.Repos(tmp_path, provider=None)            # the real read, not the replaced `_git_version`: it fails at the start
+        assert capsys.readouterr().err.strip().splitlines() == ["sheaf hub: git version unreadable: commit look off"]
+        clock[0] += repos_mod.RETRY_READ_EVERY
+        assert repos_mod._git_version() == (2, 53)
         assert capsys.readouterr().err.strip().splitlines() == ["sheaf hub: git 2.53 read: commit look on"]
     finally:
         repos_mod._git_version.cache_clear()

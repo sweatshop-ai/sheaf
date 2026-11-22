@@ -55,24 +55,37 @@
   }
 
   if (!window.EventSource) return;
-  var es = window.SheafLive ? SheafLive.source('') : new EventSource('/_/live');      // one stream for every tab (live.js, ticket 160)
+  // A stream the hub would not take (a refused join: 404 at a rollover, 429, a network error; or a native
+  // stream's refused answer) is closed for good, readyState 2, and a browser never asks again. The page asks
+  // for a new one itself, as the document page does (`streamClosed` in page.js), each time a little later.
+  var AGAIN_MS = 2000, AGAIN_MAX_MS = 30000;
+  var wait = AGAIN_MS, againTmr = null, gone = false;
   var stopped = false;   // the hub said it stopped; until its next `hello`
-  // `hello` is also what closes the gap between the page being written and the stream being
-  // open, and after a reconnect what moved while the hub was away.
-  es.addEventListener('hello', function () { stopped = false; say(''); soon(); });
-  es.addEventListener('status', soon);
-  // The hub's key was changed: this browser is no longer signed in. The server ends the stream;
-  // asking for the page again shows the sign-in page, and the list is no longer on screen.
-  es.addEventListener('signed-out', function () { es.close(); location.reload(); });
-  // The hub closes the stream after `hub-stopping`, which fires `onerror`: the line that the hub
-  // stopped stays until a `hello` says it runs again. A restart for an upgrade is no stop (the
-  // document page does the same): that gap reads "Reconnecting".
-  es.addEventListener('hub-stopping', function (ev) {
-    var d = {};
-    try { d = JSON.parse(ev.data); } catch (e) {}
-    if (d.reason !== 'stop' && d.reason !== 'signal') return;
-    stopped = true;
-    say('The hub stopped. This page updates again when it runs.');
-  });
-  es.onerror = function () { if (!stopped) say('Reconnecting to the hub…'); };
+  function connect() {
+    var es = window.SheafLive ? SheafLive.source('') : new EventSource('/_/live');      // one stream for every tab (live.js, ticket 160)
+    // `hello` is also what closes the gap between the page being written and the stream being
+    // open, and after a reconnect what moved while the hub was away.
+    es.addEventListener('hello', function () { wait = AGAIN_MS; stopped = false; say(''); soon(); });
+    es.addEventListener('status', soon);
+    // The hub's key was changed: this browser is no longer signed in. The server ends the stream;
+    // asking for the page again shows the sign-in page, and the list is no longer on screen.
+    es.addEventListener('signed-out', function () { gone = true; es.close(); location.reload(); });
+    // The hub closes the stream after `hub-stopping`, which fires `onerror`: the line that the hub
+    // stopped stays until a `hello` says it runs again. A restart for an upgrade is no stop (the
+    // document page does the same): that gap reads "Reconnecting".
+    es.addEventListener('hub-stopping', function (ev) {
+      var d = {};
+      try { d = JSON.parse(ev.data); } catch (e) {}
+      if (d.reason !== 'stop' && d.reason !== 'signal') return;
+      stopped = true;
+      say('The hub stopped. This page updates again when it runs.');
+    });
+    es.onerror = function () {
+      if (!stopped) say('Reconnecting to the hub…');
+      if (es.readyState !== 2 || gone || againTmr) return;
+      againTmr = setTimeout(function () { againTmr = null; connect(); }, wait);
+      wait = Math.min(wait * 2, AGAIN_MAX_MS);
+    };
+  }
+  connect();
 })();

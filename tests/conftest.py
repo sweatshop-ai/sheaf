@@ -126,8 +126,26 @@ LOCK_ORDER_SUITES = {"test_move_forward", "test_hub_tell", "test_hub_waiting", "
 
 
 @pytest.fixture
-def lock_order(monkeypatch):
-    """The hub's locks recorded and held to `sheafmd.hub.lockorder.ORDER` (tests/lockorder.py)."""
+def no_gc():
+    """A test that times computation reads `time.process_time()` under this: wall time counts the other xdist workers
+    of the machine (CI runs 16 of them on a shared one), and a collection of the worker's large heap inside the
+    timing costs far more CPU than the code under test."""
+    import gc
+    was = gc.isenabled()
+    gc.disable()
+    try:
+        yield
+    finally:
+        if was:
+            gc.enable()
+
+
+@pytest.fixture
+def lock_order(monkeypatch, every_hub_settles_its_pusher):
+    """The hub's locks recorded and held to `sheafmd.hub.lockorder.ORDER` (tests/lockorder.py). It asks for
+    `every_hub_settles_its_pusher` so that the two patches of `Hub.__init__` are laid and lifted in order: a test that
+    calls `monkeypatch.undo()` mid-test lifts this one, and `own_patches` would else restore it at the end and leave
+    the checker on every later hub of the process."""
     import lockorder
     lockorder.install(monkeypatch)
     yield

@@ -347,3 +347,12 @@ def test_a_collision_between_an_id_and_a_short_name_names_both_members():
 def test_ids_and_short_names_that_differ_are_read():
     got = members_of(nell={"short": "nelly"}, ann={}, bob={"short": "bob"})
     assert set(got.members) == {"nell", "ann", "bob"}
+
+
+@pytest.mark.parametrize("short", [".ada", "-ada"])
+def test_a_client_tiroirs_agency_short_must_be_one_a_share_box_can_name(short):
+    write_config(table(client="true") + f'agency = true\nshort = "{short}"\n')
+    with pytest.raises(ProxyError, match="no agency member"):
+        proxy.load()
+    write_config(table(client="true") + 'agency = true\nshort = "ada"\n')
+    assert proxy.load().members[ADA].short == "ada"

@@ -946,3 +946,14 @@ def test_a_mounted_page_reads_its_hash_and_its_branch_from_one_render_whatever_t
     assert hub_repos.hub.repos.switch(REPO, "dev", "ghs_faketoken") == ""
     got = hub_repos.hub.mount_doc(e)["config"]        # no catch_up: the entry's render is staging's
     assert (got["hash"], got["branch"]) == (old_hash, "staging"), got
+
+
+@DEV
+def test_the_reason_a_switch_failed_is_not_shown_for_another_save_branch(hub_repos, monkeypatch):
+    broken_checkout(hub_repos)
+    served(hub_repos)
+    assert "could not be moved" in hub_repos.hub.read_only_line(ADDRESS)
+    real = hub_repos.hub.repos.saves_on
+    monkeypatch.setattr(hub_repos.hub.repos, "saves_on", lambda repo: ("release", "") if repo == REPO else real(repo))
+    line = hub_repos.hub.read_only_line(ADDRESS)
+    assert "could not be moved" not in line and "release" in line

@@ -101,10 +101,7 @@
     else if (m.t === 'who') {
       // A new leader: the connection the open streams were on went with the old one. A browser would
       // fire `error` and try again, so they do the same before they join the new connection.
-      Object.keys(mine).forEach(function (k) {
-        if (mine[k].readyState === 1) mine[k]._fail(0);
-        ask({ t: 'join', key: k, doc: mine[k].doc, tab: TAB });
-      });
+      rejoin();
     }
   }
   chan.onmessage = function (ev) {
@@ -122,9 +119,20 @@
     chan.postMessage(m);
     hear(m);
   }
+  // Every stream of this tab joins the leader's connection again: what it had was dropped, or went with a connection.
+  // A browser would fire `error` and try again, so they do the same.
+  function rejoin() {
+    Object.keys(mine).forEach(function (k) {
+      if (mine[k].readyState === 1) mine[k]._fail(0);
+      ask({ t: 'join', key: k, doc: mine[k].doc, tab: TAB });
+    });
+  }
   window.addEventListener('pagehide', function () {
     Object.keys(mine).forEach(function (k) { chan.postMessage({ t: 'leave', key: k }); });
   });
+  // A page the browser kept (the back/forward cache) and shows again sent its leaves on `pagehide`: the leader
+  // dropped its streams. Chrome keeps no page that holds a Web Lock; others were not checked.
+  window.addEventListener('pageshow', function (ev) { if (ev.persisted) rejoin(); });
 
   // ---- the leader: the one tab that holds the connection ---------------------------
   var lead = null;
@@ -132,6 +140,9 @@
     this.joined = {};          // key -> {doc, tab, at}: every stream this browser wants
     this.sid = rnd();
     this.sent = {};            // key -> the last post for it, which the next one waits for
+    this.reopened = 0;         // when the connection was last opened again for a join the hub refused
+    this.again = null;         // the reopen waiting for RETRY after a join refused just after the last one
+    this.deferred = false;     // that reopen was used, and no join was taken since
     this.watch = {};           // tab -> the abort of its queued request for its lock, which is granted when the tab dies
     this.es = null;
     this.open = false;
@@ -142,6 +153,8 @@
   // This tab stops being the leader: its stream and its sweep end, and the tabs' joins on it go with them.
   Leader.prototype.stop = function () {
     clearInterval(this.timer);
+    clearTimeout(this.again);
+    this.again = null;
     if (this.es) { this.es.onerror = null; this.es.close(); this.es = null; }
     this.open = false;
     this.joined = {};          // a join still on the way must not refuse a stream on the next leader
@@ -177,12 +190,31 @@
   // A key's posts go one after another: a leave sent while its join is still on the way would reach the hub first
   // (join does more work) and find nothing, and the join would then leave a tab the hub counts for ever.
   Leader.prototype.post = function (what, key) {
-    var self = this, j = this.joined[key];
+    var self = this, j = this.joined[key], sid = this.sid;
     var body = what === 'join' ? { stream: this.sid, key: key, doc: j.doc } : { stream: this.sid, key: key };
     var send = function () {
       return fetch('/_/live/' + what, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
         .then(function (r) { return r.status; }, function () { return 0; })
         .then(function (status) {
+          // The hub has no such stream for this browser (404): the connection is the closed one of another member, which
+          // proxy mode keeps until it ends, or a rollover ended it. Open it again, which belongs to whoever asks now, and
+          // join every stream to it; once in RETRY, so a hub that refuses every join is not asked in a loop.
+          if (what === 'join' && status === 404 && self.joined[key] === j && self.es) {
+            // The others of the same refused batch come back after the first reopened: their keys joined the new
+            // connection already, so a refusal of the old one is no news.
+            if (sid !== self.sid) return;
+            var since = Date.now() - self.reopened;
+            if (since > RETRY) { self.reopen(); return; }
+            // Refused again just after a reopen (another rollover or member switch): open once more when RETRY is up,
+            // and the tabs' streams wait for that connection. Once only until a join is taken: a hub that refuses
+            // every join gets the refusal below, and each page asks again at its own pace.
+            if (!self.deferred) {
+              self.deferred = true;
+              self.again = setTimeout(function () { self.again = null; if (self.es) self.reopen(); }, RETRY - since);
+            }
+            if (self.again) return;
+          }
+          if (what === 'join' && status >= 200 && status <= 299) self.deferred = false;
           // A join the hub would not take (signed out, the connection gone, no answer) is that tab's stream refused.
           if (what === 'join' && (status < 200 || status > 299) && self.joined[key] === j) {
             delete self.joined[key];
@@ -193,6 +225,17 @@
     var p = (this.sent[key] || Promise.resolve()).then(send);
     this.sent[key] = p;
     p.then(function () { if (self.sent[key] === p) delete self.sent[key]; });
+  };
+  Leader.prototype.reopen = function () {
+    clearTimeout(this.again);
+    this.again = null;
+    this.reopened = Date.now();
+    this.es.onerror = null;
+    this.es.close();
+    this.sid = rnd();
+    this.sent = {};
+    tell({ t: 'down', s: 0 }); // the open streams were on the connection just closed: they error, as a browser's would
+    this.connect();            // `onopen` joins every stream in `joined` to the new connection
   };
   Leader.prototype.take = function (m) {
     if (m.t === 'join') {
@@ -267,10 +310,7 @@
   });
   document.addEventListener('resume', function () {
     // Its streams were on the connection it closed, or on another leader's that dropped them while it slept.
-    Object.keys(mine).forEach(function (k) {
-      if (mine[k].readyState === 1) mine[k]._fail(0);
-      ask({ t: 'join', key: k, doc: mine[k].doc, tab: TAB });
-    });
+    rejoin();
     if (!lead && !waiting) lock();
   });
   lock();

@@ -59,8 +59,14 @@ permissions:
 
 jobs:
   test:
-    name: ${{ matrix.os }} py${{ matrix.python }} slice ${{ matrix.slice }}/6
-    runs-on: ${{ matrix.os }}
+    name: ${{ matrix.os }} py${{ matrix.python }}${{ matrix.slice != '' && format(' slice {0}', matrix.slice) || '' }}
+    # An ubuntu job of this repository (a push, the nightly run, a manual run, a pull request whose head is a branch of
+    # this repository) runs on the organisation's own runners: the whole suite in one job, 16 workers. A pull
+    # request from a fork or opened by Dependabot (its branch is in this repository and skips the approval of a fork's
+    # workflows, but it runs the code of an updated dependency), and macOS always, run on GitHub's. The label of the runner is chosen by the workflow file the
+    # run reads, and a fork's pull request reads the fork's: so the repository setting that holds a fork's workflows until
+    # someone has read them (all external contributors) is what keeps a fork off those runners, not this line (SPEC 18).
+    runs-on: ${{ matrix.os == 'ubuntu-24.04' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && fromJSON('["self-hosted","linux","sheaf-ci"]') || matrix.os }}
     # An ubuntu run takes about 25 minutes; 45 still stops a hang. A macOS runner (3 cores, an M1 VM) runs the
     # same suite about four times slower: a process start costs 50 ms there and pandoc's 210 ms, against 1 and
     # 4 ms on ubuntu (run 40997993309), and the tests start thousands. Its non-page tests alone take about
@@ -76,17 +82,21 @@ jobs:
         # and red on main (run 44776626154, every Python); the pin keeps the image from moving under that work.
         os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.macos && '["ubuntu-24.04","macos-26"]' || '["ubuntu-24.04"]') }}
         python: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.python != 'all' && format('["{0}"]', inputs.python) || (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') && '["3.11","3.13","3.14"]' || '["3.13"]') }}
-        # Each Python runs as six jobs, each with a sixth of the tests (SHEAF_TEST_SLICE, tests/conftest.py):
-        # the page tests wait on the browser one at a time and were most of a run. On 4 xdist workers in one
-        # runner a different page test or two failed on every run, so they are split across jobs instead.
-        slice: [1, 2, 3, 4, 5, 6]
+        # On the organisation's runners each Python is one job with the whole suite (the value is empty, so SHEAF_TEST_SLICE is empty).
+        # On GitHub's runners, a pull request from a fork and a manual run with macOS, it is six jobs, each with a sixth
+        # of the tests (SHEAF_TEST_SLICE, tests/conftest.py): the page tests wait on the browser one at a time and were
+        # most of a run, and on 4 xdist workers in one hosted runner a different page test or two failed on every run,
+        # so there they are split across jobs.
+        slice: ${{ fromJSON(((github.event_name == 'pull_request' && !(github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) || (github.event_name == 'workflow_dispatch' && inputs.macos)) && '["1/6","2/6","3/6","4/6","5/6","6/6"]' || '[""]') }}
     env:
-      SHEAF_TEST_SLICE: ${{ matrix.slice }}/6
+      SHEAF_TEST_SLICE: ${{ matrix.slice }}
     steps:
       - uses: actions/checkout@v4
         with:
           # A pull request's checkout is its merge commit; two commits give the base as its first parent.
           fetch-depth: 2
+          # The workspace of a self-hosted runner outlives the job: no token is left in its git config.
+          persist-credentials: false
 
       - uses: astral-sh/setup-uv@v6
         with:
@@ -106,7 +116,10 @@ jobs:
         # from a fork has none.
         env:
           SHEAF_PUBLIC_TREE_TERMS: ${{ secrets.SHEAF_PUBLIC_TREE_TERMS }}
-        run: uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v -n 4 --durations=25 -m "not page"
+        # The organisation's machine has 32 cores for three runners: 16 workers cut a full run there from 137 s to 98 s, and 32 is no faster
+        # alone and slower with three runs at once (measured on another suite, 2026-11-16). GitHub's runner has 4 cores.
+        # `loadgroup`, not `worksteal`: only `loadgroup` keeps a file with IN_ORDER = True on one worker (tests/conftest.py).
+        run: uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v ${{ runner.environment == 'self-hosted' && '-n 16 --dist loadgroup' || '-n 4' }} --durations=25 -m "not page"
 
       # The page tests drive Chromium through Playwright (tests/page) and take about half of a pull
       # request's run. A pull request that changes no path they load skips them, and says so here
@@ -117,10 +130,11 @@ jobs:
         run: uv run --no-sync python tools/ci/page_paths.py
 
       # The cache key names the runner image, so a move of the image does not restore browsers built on the
-      # old one. ImageOS is set on GitHub's runners but is not in the env context of an expression.
+      # old one. ImageOS is set on GitHub's runners but is not in the env context of an expression. A self-hosted runner has no image
+      # to name and keeps its browsers in the home of its runner user from one job to the next: no cache there.
       - name: Name the runner image
         id: image
-        if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'
+        if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true' && runner.environment == 'github-hosted'
         shell: bash
         run: echo "os=${ImageOS:?ImageOS is not set on this runner}" >> "$GITHUB_OUTPUT"
 
@@ -142,7 +156,7 @@ jobs:
           echo "set=${engines// /-}" >> "$GITHUB_OUTPUT"
 
       - name: Cache the Playwright browsers
-        if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'
+        if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true' && runner.environment == 'github-hosted'
         uses: actions/cache@v4
         with:
           path: ${{ runner.os == 'macOS' && '~/Library/Caches/ms-playwright' || '~/.cache/ms-playwright' }}
@@ -161,7 +175,8 @@ jobs:
           # install no browser.
           engines="${{ steps.engines.outputs.engines }}"
           deps=""
-          if [ "$RUNNER_OS" = "Linux" ] && command -v sudo >/dev/null; then deps="--with-deps"; fi
+          # Only on a GitHub-hosted runner: the other is a shared machine whose packages are not this job's to install.
+          if [ "$RUNNER_OS" = "Linux" ] && [ "$RUNNER_ENVIRONMENT" = "github-hosted" ] && command -v sudo >/dev/null; then deps="--with-deps"; fi
           # apt's mirror is sometimes slow (45 minutes for 125 MB, run 44765451025): each try is cut at 10 minutes and the next
           # one goes on from the packages apt already holds. macOS has no `timeout` and no apt, so it installs unbounded.
           bounded=""
@@ -201,11 +216,12 @@ jobs:
         run: uv run --no-sync python tools/wheel_smoke.py
 
       # These two install a real user service on the runner. They refuse to run anywhere else. The service
-      # is the same in every slice, so the first slice alone checks it (about 70 s a job).
+      # is the same in every slice, so the first slice alone checks it (about 70 s a job). Never on those runners: it is a
+      # machine of the organisation's with other people's sessions on it, not a container thrown away after the job.
       - name: User service, systemd
-        if: runner.os == 'Linux' && matrix.slice == 1
+        if: runner.os == 'Linux' && runner.environment == 'github-hosted' && (matrix.slice == '' || startsWith(matrix.slice, '1/'))
         run: PATH="$PWD/.venv/bin:$PATH" .venv/bin/python tools/ci/service_linux.py
 
       - name: User service, launchd
-        if: runner.os == 'macOS' && matrix.slice == 1
+        if: runner.os == 'macOS' && (matrix.slice == '' || startsWith(matrix.slice, '1/'))
         run: PATH="$PWD/.venv/bin:$PATH" .venv/bin/python tools/ci/service_macos.py

@@ -2,7 +2,7 @@
 
 **Claimed by:** Naya 2026-11-20 20:05
 
-**Status:** done (#510 merged as 967da586)
+**Status:** done (#510 merged as 967da586; the `_lines_as_items` follow-up in #523, merged as b13b0e06)
 
 **Blocked by:** 144 (same code, edit.py and page.js, task-line Enter)
 
@@ -20,3 +20,8 @@
 - Kept draft: the entry now carries `lead` (the paragraph's first 40 characters). `tests/page/test_page_writing.py::test_a_kept_comment_goes_to_the_paragraph_whose_opening_it_has_not_to_another_that_ends_like_it_did` failed on main (the paragraph that ends like the refused one got the comment) and passed after; all 30 `kept_comment` page tests passed on t-compute, the takeover test among them. Entries without `lead` behave as before. SPEC 10.4 and 10.8 updated.
 - Leading anchor: decided to skip leading comment tokens in `_typed_tasks` (`src/sheafmd/edit.py`), not to state a limit. `tests/test_edit_followups.py` gained two tests (the line becomes a task item and keeps its comment; a box with no words keeps its characters); that file and `tests/test_edit_markers.py` passed locally, 343 tests. SPEC 7.2 updated.
 - Not done: `_lines_as_items` (a task item whose first text is an anchor) still does not skip a leading anchor; the ticket did not ask for it.
+
+**Done 2026-11-22 (#523, merged as b13b0e06, head 9bca399d; review round 8 GO, CI green):**
+- `_lines_as_items` now skips leading comment tokens before it looks for a typed box (`src/sheafmd/edit.py`), so a task item whose first text is an anchor becomes a task item and keeps its comment. A typed box followed by nothing but a comment's token has no words, and its characters stay words (`src/sheafmd/edit.py:341`).
+- Tests on main: `tests/test_edit_followups.py::test_a_typed_task_line_after_enter_in_a_task_item_that_starts_with_a_comment_anchor_becomes_a_task_item_and_keeps_the_comment` and `::test_a_typed_box_followed_only_by_a_comment_anchor_has_no_words_and_stays_words_itself` (with and without a second anchor in front); `pytest tests/test_edit_followups.py -k comment_anchor` on main b13b0e06: 6 passed.
+- Nothing of this ticket is left open: both items are done, and item 2's product decision (skip a leading anchor, not a limit) was taken in #510 and recorded in SPEC 7.2.

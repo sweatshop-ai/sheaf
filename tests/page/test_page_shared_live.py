@@ -196,29 +196,28 @@ def test_a_join_refused_for_another_owner_reopens_the_shared_stream(shared, site
 def test_a_join_refused_again_at_once_is_not_retried_in_a_loop(shared, site):
     """A hub that refuses every join (404 whatever the stream) gets the leader's connection opened again at most once
     in RETRY (2 s). Two tabs, so a refused batch holds two joins: a leader that set a reopen for each refusal would
-    open two connections back to back. The page's own clock times the opens: a slow leader only spreads them, so the
-    shortest gap tells a loop from a slow page, which a count of connections in a fixed time does not."""
+    open two connections back to back. The stream journal times the opens on the page's clock: a slow leader only
+    spreads them, so the shortest gap tells a loop from a slow page, which a count of connections in a fixed time
+    does not."""
     sids = set()
 
     def refuse(route):
         sids.add(route.request.post_data_json["stream"])
         route.fulfill(status=404, content_type="application/json", body='{"ok": false, "error": "no such stream"}')
     shared.route("**/_/live/join", refuse)
-    shared.add_init_script("""(() => { const E = window.EventSource; if (!E) return; window.__opens = [];
-      window.EventSource = function (u, o) {
-        if (String(u).includes('shared=')) window.__opens.push(Date.now());
-        return new E(u, o);
-      };
-      window.EventSource.prototype = E.prototype;
-      ['CONNECTING', 'OPEN', 'CLOSED'].forEach(k => { window.EventSource[k] = E[k]; }); })()""")
     pages = [opened(shared, site) for _ in range(2)]
     pages[0][0].wait_for_timeout(9000)   # not time.sleep: Playwright answers a routed request only while the test waits
-    opens = sorted(t for p, _ in pages for t in p.evaluate("window.__opens"))
+    # The stream journal (pagehelp.STREAM_JOURNAL_JS, in every context) notes each EventSource made, on the page's
+    # clock; only the leader's tab makes a `shared=` one.
+    made = "window.__sseJournal.filter(e => e[1] === 'new' && e[2].includes('shared=')).map(e => e[0])"
+    opens = sorted(t for p, _ in pages for t in p.evaluate(made))
     # The first connection is opened again at the first refusal, at once; the reopens after it wait for RETRY.
     reopens = opens[1:]
     assert len(reopens) >= 3, opens      # nothing timed otherwise
     gaps = [b - a for a, b in zip(reopens, reopens[1:])]
-    assert min(gaps) >= 1500, gaps       # RETRY is 2000; the page's timers never fire early, a loop opens at once
+    # RETRY is 2000 ms and the page's timers never fire early: 100 ms is for the journal's clock against the
+    # leader's Date.now. A loop opens at once.
+    assert min(gaps) >= 1900, gaps
     assert len(sids) >= 3, sids          # the opens were the leader's, and each was refused
 
 

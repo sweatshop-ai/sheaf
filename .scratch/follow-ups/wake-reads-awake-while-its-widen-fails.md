@@ -46,6 +46,26 @@ return woken
 The `finally` also covers `provider.token()` raising. A `sleep_moved()` that sees the flag back at True after a failed
 widen marks the clone moved on the fast path, which is right: its folders are out.
 
+## Why this fix was dropped too (PR 532, review round 5)
+
+The fix above was on PR 532 at d4b89517. Round 5 found a second race, this time with `report()`:
+
+- `report()` (`repos.py`, about line 732) calls `_use()` under `_records` only, without the clone lock. It sets
+  `sleeping=False` and queues the item, and the clone's thread later runs `_wake()`.
+- A write's `wake()` holds the clone lock while its widen fails. A report that lands meanwhile sets `sleeping=False`.
+  Then `_asleep_again()` writes `sleeping=True` over it, with no check that the row was used since.
+- The queued `_wake()` takes the clone lock and runs `_restore()`. When the widen succeeds there, it removes `restore` but
+  never touches `sleeping`. The clone is fully restored and reads asleep until its next use.
+
+So a fix has to cover both paths:
+
+- `sleep_moved()`'s fast path must not mark a clone being woken as moved. This is why `_use()` comes before the widen.
+- A failed widen must not overwrite a newer use. Options: `_asleep_again()` checks that `last_used` is still the stamp
+  this `wake()` wrote, or `_restore()` clears `sleeping` whenever it removes `restore`. The second option also covers
+  the queued `_wake()` path on its own.
+
+PR 532 was closed and its other findings were refiled as PR 569, with `wake()` as on main.
+
 Before it lands, check:
 
 - [ ] `_use()` also refreshes `last_used` on a failed widen; decide whether a failed widen counts as a use.

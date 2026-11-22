@@ -29,6 +29,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 from urllib.parse import quote
 
 from .. import __version__, config, paths, signals
@@ -132,6 +133,13 @@ class JobsRunning(Exception):
 
 class StopRefused(Exception):
     """The hub answered a stop with a refusal: its own error, or the status when it gave none."""
+
+
+class SignInLink(NamedTuple):
+    """A one-time sign-in link and whether the hub that made it judges who follows it (`peer_check`
+    of its answer): False when it said it does not, None when it said nothing (an older hub)."""
+    url: str
+    peer_check: bool | None
 
 
 class SignInRefused(Exception):
@@ -292,7 +300,7 @@ class HubClient:
         to open on another machine (SPEC 9.3, D13)."""
         return f"http://127.0.0.1:{self.port}/_/open?key={self.key}&next={quote(next_path, safe='/')}"
 
-    def one_time_sign_in_url(self, next_path: str) -> str:
+    def one_time_sign_in_url(self, next_path: str) -> SignInLink:
         """The URL `sheaf open` gives the browser: it carries a nonce the hub minted for this
         call, good once and for about 30 seconds, never the key. The call that asks for the nonce
         proves the hub first (`call`): an Impostor, a HubSilent or a HubLost from it (the hub went
@@ -302,7 +310,9 @@ class HubClient:
         nonce = res.get("nonce")
         if status != 200 or not res.get("ok") or not isinstance(nonce, str):
             raise SignInRefused(res.get("error") or f"the hub answered {status}")
-        return f"http://127.0.0.1:{self.port}/_/open?nonce={nonce}&next={quote(next_path, safe='/')}"
+        checked = res.get("peer_check")
+        return SignInLink(f"http://127.0.0.1:{self.port}/_/open?nonce={nonce}&next={quote(next_path, safe='/')}",
+                          checked if isinstance(checked, bool) else None)
 
 
 def client() -> HubClient:

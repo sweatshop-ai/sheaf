@@ -80,6 +80,32 @@ def test_where_the_hub_cannot_check_the_user_every_open_warns_once_on_stderr(she
         assert "cannot check" not in r.out and r.out.splitlines()[-1] == f"  ~ http://127.0.0.1:{port}/work/plan.md"
 
 
+def test_a_linux_hub_whose_peer_self_test_failed_makes_every_open_warn_once_on_stderr(
+        sheaf, opened_browser, doc, port, monkeypatch, tmp_path):
+    """A Linux hub that turned the check off at start-up (its self-test read its own connection wrong)
+    redeems a link by the nonce alone, as on a platform with no check: `sheaf open` hears that from
+    the hub and says so, not only the page of a link that failed (ticket 99)."""
+    fails = tmp_path / "selftest-fails"
+    fails.mkdir()
+    (fails / "sitecustomize.py").write_text(
+        "from sheafmd.hub import peer\n"
+        "peer.selftest = lambda: 'the test made the self-test fail'\n", encoding="utf-8")
+    monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(fails), os.environ.get("PYTHONPATH", "")]))
+    monkeypatch.setattr(peer, "PLATFORM", "linux")
+    hub = run_hub("--started-by", "cli")
+    try:
+        wait_alive(port)
+        assert any(r.get("error") == "the test made the self-test fail" for r in hub_rows("peer-check-off"))
+        for argv in (("open", doc), ("open", "--no-browser", doc), ("open", f"http://127.0.0.1:{port}/")):
+            r = sheaf(*argv)
+            assert r.code == 0, r.err
+            assert r.err.count("cannot check which user of this machine follows a link") == 1, (argv, r.err)
+            assert "cannot check" not in r.out
+    finally:
+        hub.terminate()
+        hub.wait(timeout=30)
+
+
 def test_where_the_hub_checks_the_user_open_gives_no_such_warning(sheaf, opened_browser, doc, port, monkeypatch):
     monkeypatch.setattr(peer, "PLATFORM", "linux")
     r = sheaf("open", doc)

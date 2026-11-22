@@ -798,6 +798,13 @@ class Handler:
             return conn.refusal
         return self.peer_check(conn)
 
+    def _checks_peer(self) -> bool:
+        """Whether this hub judges a sign-in link, a cookie and the key by the user of the connection:
+        not on a platform that gives it no way, nor where its start-up self-test turned the check off.
+        Told to `sheaf open` in the answers of `/_/render` and `/_/signin` as `peer_check`, so that the
+        command can say so (ticket 99); never in `/_/health`, which another user may read."""
+        return peer.supported() and not self.peer_off
+
     def _gate(self, req: Req):
         """A key or a cookie is good only from the hub's own user (9.3): a caller whose connection the hub
         looked at when it accepted it, and found owned by another user or by no one it could name, is
@@ -845,7 +852,7 @@ class Handler:
             # that was read from a command line is good for the user who runs the hub, not for another (9.1).
             if not req.auth.redeem_signin(req.query["nonce"]):
                 raise Refuse(401, "that sign-in link was used already, has expired or is not this hub's",
-                             page=LINK_USED if peer.supported() and not self.peer_off
+                             page=LINK_USED if self._checks_peer()
                              else f"{LINK_USED} {LINK_ROTATE} {LINK_LIMIT}")
             no = self._owner(req)
             if no is not None:
@@ -861,7 +868,7 @@ class Handler:
 
     def _signin(self, req: Req) -> Response:
         """A one-time sign-in nonce for the caller that holds the key (`sheaf open`, 9.3)."""
-        return _ok(nonce=req.auth.mint_signin(), expires=auth.SIGNIN_TTL)
+        return _ok(nonce=req.auth.mint_signin(), expires=auth.SIGNIN_TTL, peer_check=self._checks_peer())
 
     # ── the page and its streams ─────────────────────────────────────────────
     def _page(self, req: Req) -> Response:
@@ -2655,7 +2662,7 @@ class Handler:
         elif target is not None:
             target = {"agent": "none"}
         try:
-            return _ok(**self.hub.render(md, settings, target))
+            return _ok(**self.hub.render(md, settings, target), peer_check=self._checks_peer())
         except (RenderError, ConfigError) as ex:
             raise Refuse(422, str(ex)) from None
 

@@ -825,11 +825,23 @@ _EMOJI_TOKEN = re.compile("\uF8FE([0-9]+)\uF8FF")
 
 
 @lru_cache(maxsize=256)
-def _emoji_drawn(name: str):
-    """The emoji pandoc draws for `:name:`, or None."""
+def _emoji_looked_at(name: str):
     r = _pandoc.run(["-f", "gfm", "-t", "html5"], f":{name}:")
-    m = _EMOJI_SPAN.search(r.stdout) if r.returncode == 0 else None
+    if r.returncode != 0:
+        raise _Unread                   # an exception is not cached: a failed run must not make the name no emoji
+    m = _EMOJI_SPAN.search(r.stdout)
     return m.group(2) if m else None
+
+
+def _emoji_drawn(name: str):
+    """The emoji pandoc draws for `:name:`, or None (also when pandoc failed, which is not remembered)."""
+    try:
+        return _emoji_looked_at(name)
+    except _Unread:
+        return None
+
+
+_emoji_drawn.cache_clear = _emoji_looked_at.cache_clear
 
 
 def _emoji_as_tokens(fragment: str, source):
@@ -849,6 +861,31 @@ def _emoji_as_tokens(fragment: str, source):
     return _EMOJI_SPAN.sub(token, fragment), names
 
 
+_SHORTCODE_TEXT = re.compile(r":([a-z0-9_+-]+):")
+_LITERAL_COLON = "\uF8FD"
+
+
+def _literal_shortcodes(fragment: str, source):
+    """(the fragment with a mark before each `:name:` of its text that the source wrote as `\\:name:`, whether it
+    marked any). The page shows such a shortcode as the words it is; written bare, the next render would draw its
+    emoji. A shortcode the reader typed on the page has no `\\:` in the source and stays as typed."""
+    from bs4 import BeautifulSoup
+
+    if not source or "\\:" not in source or _LITERAL_COLON in fragment or ":" not in fragment:
+        return fragment, False
+    soup, found = BeautifulSoup(fragment, "html.parser"), False
+    for t in _texts(soup):
+        if ":" not in t or any(u.name in ("code", "pre", "script", "style") or "math" in (u.get("class") or [])
+                               for u in t.parents):
+            continue
+        new = _SHORTCODE_TEXT.sub(lambda m: _LITERAL_COLON + m.group(0)
+                                  if f"\\:{m.group(1)}:" in source and _emoji_drawn(m.group(1)) else m.group(0), str(t))
+        if new != str(t):
+            t.replace_with(new)
+            found = True
+    return (str(soup), True) if found else (fragment, False)
+
+
 def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     """Convert one edited HTML block back to GitHub-flavoured markdown. With `source`, the block's markdown,
     markup the source did not have is unwrapped (`_unwrap_strays`) and named in `strays`."""
@@ -864,6 +901,7 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     if not clean.strip():
         return ""
     clean, urls = _bare_urls_as_words(clean)
+    clean, literal = _literal_shortcodes(clean, source)
     clean, slash = _text_backslashes(clean)
     clean, pipe = _cell_code_pipes(clean)
     cells, token = _cell_breaks(clean)
@@ -875,15 +913,22 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     if r.returncode != 0:
         raise EditError(f"pandoc: {r.stderr.strip()[:200]}")
     out = r.stdout if token is None else r.stdout.replace(token, "<br>")
-    if pipe is not None or slash is not None:
+    if pipe is not None or slash is not None or emoji or literal:
         # A table pandoc writes as raw HTML has no cell for a bare pipe to end, and `\\|` would show; nor does
-        # HTML read a backslash as an escape.
+        # HTML read a backslash as an escape, nor a shortcode as its emoji.
         parts, depth = re.split(r"(</?table\b)", out), 0
         for k, part in enumerate(parts):
             depth = depth + 1 if part == "<table" else max(0, depth - 1) if part == "</table" else depth
             if pipe is not None:
                 part = part.replace(pipe, "|" if depth else "\\|")
-            parts[k] = part if slash is None else part.replace(slash, "\\" if depth else "\\\\")
+            if slash is not None:
+                part = part.replace(slash, "\\" if depth else "\\\\")
+            if literal:
+                part = part.replace(_LITERAL_COLON, "" if depth else "\\")
+            if emoji:
+                part = _EMOJI_TOKEN.sub(lambda m: (_emoji_drawn(emoji[int(m.group(1))]) or f":{emoji[int(m.group(1))]}:")
+                                        if depth else f":{emoji[int(m.group(1))]}:", part)
+            parts[k] = part
         out = "".join(parts)
     # Pandoc's gfm writer wraps every bare URL as <https://...>. GFM autolinks a bare
     # URL anyway, so the two render identically - but the angle brackets show up as
@@ -892,8 +937,6 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     out = re.sub(r"<(https?://[^>\s]+)>", r"\1", out)
     for word, url in urls.items():
         out = out.replace(word, url)
-    if emoji:
-        out = _EMOJI_TOKEN.sub(lambda m: f":{emoji[int(m.group(1))]}:", out)
     return copyblock.restore(out).strip("\n")
 
 
@@ -2400,8 +2443,9 @@ def _own_rows(own, file_blocks, j: int, free):
     # The blocks the file added before the first of them or after the last are not among them.
     rows = [r for r in rows if r.other is None or ends[0] <= r.other <= ends[-1]]
     how = {r.other: r.how for r in rows if r.other is not None}
+    deleted = any(r.other is None and r.own is not None for r in rows)
     if (how.get(j) not in ("same", "changed") or "same" not in how.values()
-            or not {"changed", "added"} & set(how.values())):
+            or not ({"changed", "added"} & set(how.values()) or deleted)):
         return None
     if any(r.how == "same" and not _alike(own[r.own], file_blocks[r.other])
            or r.how == "changed" and not file_blocks[r.other].editable for r in rows):
@@ -2479,7 +2523,8 @@ def _own_merge(region, first: int, rows, own, j: int, html: str, held):
             edit_block(y)
         file_row, edit_row = in_file[k], in_edit[k]
         if file_row.how != "changed" or file_row.other != j:
-            if edit_row.how != "gone":
+            # A line the file deleted and the edit leaves as the page saved it stays deleted.
+            if edit_row.how != "gone" and not (file_row.how == "gone" and edit_row.how == "same"):
                 edit_block(edit_row.other)
             if file_row.how == "changed":
                 beside.append(file_row.other)
@@ -2500,6 +2545,8 @@ def _own_merge(region, first: int, rows, own, j: int, html: str, held):
             return None
         notes.append((said[-1], owed))
 
+    if not pieces:      # the file deleted what the edit leaves and the edit takes out the rest
+        return None
     text = "".join((b.content if b.content.endswith("\n") else b.content + "\n") + (b.gap or "\n")
                    for b in pieces[:-1])
     text += pieces[-1].content if pieces[-1].content.endswith("\n") else pieces[-1].content + "\n"
@@ -2534,6 +2581,11 @@ def _splice(text: str, blocks, j: int, n: int, region: str):
 
 
 BOTH_NOTE = "Edited on this page and in the file at the same time. The page's version was saved. The file had:"
+
+
+def _both_note(words: str) -> str:
+    """The note on a block edited on the page and in the file: `BOTH_NOTE`, a blank line, the file's words."""
+    return BOTH_NOTE + "\n\n" + words
 
 
 class _Step(NamedTuple):
@@ -2665,7 +2717,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
                     if k in by_i:
                         put_back.append((plan[k][0], k))
                     if k in in_todo:
-                        todo[in_todo[k]] = _Step(first, "gone", k, by_i[k]["html"])
+                        todo[in_todo[k]] = _Step(at=first, mode="gone", i=k, html=by_i[k]["html"])
                 paired[x] = i
             for g, gi in among:
                 plan[gi] = (first + n, "gone")
@@ -2673,7 +2725,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
             taken |= set(range(first, first + n))
             j, mode, span = first, "same", n
         in_todo[i] = len(todo)
-        todo.append(_Step(j, mode, i, e["html"], span, merged, back))
+        todo.append(_Step(at=j, mode=mode, i=i, html=e["html"], span=span, merged=merged, back=back))
     # From the end backwards, so every target index still points where it did.
     # At a shared index the block that is there goes first and the re-inserted
     # ones after it, later base blocks first, so each lands before it and they
@@ -2698,7 +2750,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
                     changed.append(i)
                 text = done
                 for k, words in reversed(notes):
-                    text = _note(text, j + k, BOTH_NOTE + "\n\n" + words, at, base_text, cur_text)
+                    text = _note(text, j + k, _both_note(words), at, base_text, cur_text)
                 if notes:
                     conflicts.append({"i": i, "kind": "both"})
                 continue
@@ -2759,7 +2811,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
                 conflicts.append({"i": i, "kind": "both"})
                 note = rdc.Comment(
                     id=_next_id(text, base_text, cur_text), by=MERGE_BY, at=at, status="open",
-                    quote=theirs_quote, body=BOTH_NOTE + "\n\n" + theirs.strip())
+                    quote=theirs_quote, body=_both_note(theirs.strip()))
                 text = _put_orphans(text, j, [note])
             continue
         if rep["changed"]:
@@ -2769,7 +2821,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
             text = _insert_comment(text, k, raw, quote, nth)
         if mode == "both" and rep["changed"]:
             conflicts.append({"i": i, "kind": "both"})
-            text = _note(text, j, BOTH_NOTE + "\n\n" + theirs.strip(), at, base_text, cur_text)
+            text = _note(text, j, _both_note(theirs.strip()), at, base_text, cur_text)
     if tomb in text:
         text = _drop_tombstones(text, tomb)
     return text, {"changed": changed, "skipped": skipped, "remap": True,

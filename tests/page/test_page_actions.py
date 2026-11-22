@@ -120,6 +120,14 @@ def test_two_lines_of_the_same_word_are_two_buttons_and_each_presses_its_own_box
     settled(p)
 
 
+def test_a_line_that_still_says_move_to_has_its_word_under_the_belongs_to_button(tab):
+    rewrite(tab.site.file, "# Plan\n\n- [ ] Move to klium-website (ref 18f3a9c2)\n")
+    tab.open()
+    p = tab.page
+    p.wait_for_selector("button.rd-act")
+    assert p.locator("main li").first.evaluate("li => li.innerText.replace(/\\s+/g, ' ').trim()").count("klium-website") == 1
+
+
 def test_a_selection_on_a_buttons_line_does_not_press_it_and_the_button_is_not_part_of_the_text(tab):
     f = tab.site.file
     rewrite(f, "# Plan\n\n- [ ] Belongs to klium-website (ref 18f3a9c2)\n")

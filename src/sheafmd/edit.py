@@ -338,8 +338,8 @@ def _lines_as_items(soup) -> None:
                     if t.find_parent(["ul", "ol", "blockquote", "pre", "table", "div", "p"]):
                         break
                     own += t
-                if m and not (_shows(own[m.end():]) or item.find("img")):
-                    # a typed box with no words after it is words itself, as in a paragraph: an item without a box
+                if m and not (_shows(_COMMENT_TOKEN.sub("", own[m.end():])) or item.find("img")):
+                    # a typed box with no words after it (a comment's token is none) is words itself, as in a paragraph: an item without a box
                     last.insert_after(item)
                     last = item
                     continue

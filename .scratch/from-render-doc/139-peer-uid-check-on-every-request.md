@@ -19,7 +19,7 @@ Today only `/_/open?nonce=` checks who owns the connection. `SPEC.md:877` says t
   - (b) an accept()-time variant: look up the owner before reading the request, and answer a client that already closed with `503 try again` and the write not applied, never 403.
 
 - [x] **Probe 1, run 2026-11-20: passes.** With an `ssh -L` tunnel to a remote hub and a browser through it, `ss -tne state established '( dport = :<hub port> )'` must show the hub's own uid for the forwarded connection. If it shows another uid (for example root), every tunnelled browser would be refused and the check must not be built as designed.
-  Result: a listener on t-compute, an `ssh -L` tunnel from the laptop and a curl through it; on t-compute `ss -tne state established '( dport = :38461 )'` showed the forwarded connection as `uid:1000` (the login user, `session-4740.scope`), not root. The uid is the login user's: a tunnel logged in as another user than the hub's is refused. Probed with a Python listener, not a real hub or browser.
+  Result: a listener on the CI runner host, an `ssh -L` tunnel from the laptop and a curl through it; on the CI runner host `ss -tne state established '( dport = :38461 )'` showed the forwarded connection as `uid:1000` (the login user, `session-4740.scope`), not root. The uid is the login user's: a tunnel logged in as another user than the hub's is refused. Probed with a Python listener, not a real hub or browser.
 
 - [x] **If built (option b):** built in #509 (merged 39e0f70a).
   - one lookup per connection, kept on `server._Http`, asked in `Handler._route` after the credential is accepted and before the body is read;

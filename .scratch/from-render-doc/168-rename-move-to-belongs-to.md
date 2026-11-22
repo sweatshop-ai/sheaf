@@ -29,7 +29,7 @@ A page line that still reads `- [ ] Move to <slug> (ref <thread>)` shows its own
 
 ## Done
 
-- [x] Sheaf side written and tested: hub list and place tests passed (354 first run; 32 on the refusal-text subset), `test_page_assets` 21 passed; on t-compute all of `tests/page` passed (1076, with `-n 6`). PR #480, review round 1 GO on b775d08f.
+- [x] Sheaf side written and tested: hub list and place tests passed (354 first run; 32 on the refusal-text subset), `test_page_assets` 21 passed; on the CI runner host all of `tests/page` passed (1076, with `-n 6`). PR #480, review round 1 GO on b775d08f.
 - [x] #480 CI green and merged: merged 2026-11-20 16:53Z, merge commit 4068c4e8 on today's main (`git log origin/main --grep='#480'`); sheafmd v1.3.0 carries it (`git show v1.3.0:src/sheafmd/hub/the_list.py | grep -c 'Belongs to'` gives 9).
-- [x] Mail-replies side: written and reviewed (full suite on t-compute 6819 passed, same as main's 6818 plus the new test; no failure that main lacks), held unmerged for the condition above. Merged in the mail-replies repo (private), 2026-11-22.
+- [x] Mail-replies side: written and reviewed (full suite on the CI runner host 6819 passed, same as main's 6818 plus the new test; no failure that main lacks), held unmerged for the condition above. Merged in the mail-replies repo (private), 2026-11-22.
 - [ ] Before the mail module with Belongs to is installed on a box, that box's hub must run sheafmd >= 1.3.0.

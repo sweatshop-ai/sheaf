@@ -18,5 +18,5 @@ The bound of 7 stream ids in 9 s is what the page reaches when it reopens once p
 
 ## Evidence (PR #578, head 2f008488)
 
-- Item 1: the test times every `/_/live?shared=` EventSource from the stream journal and asserts the reopens after the first are at least 1900 ms apart (RETRY 2000). Run on t-compute with `if (!self.deferred) {` replaced by `if (true) {`: FAILED, gaps `[1999.6, 0.7, 2000.6, 0.6, 2000.2, 0.6, ...]`; the old test from main PASSED on that same code. Unchanged code: 5 of 5 passed, whole file 10 passed.
-- Item 2: `assert [e for _, e in pages[1:]] == [[]] * 2`; passed on t-compute and in CI run 45065643984 (`test_a_comment_written_while_the_leader_hands_over_reaches_the_tabs PASSED`).
+- Item 1: the test times every `/_/live?shared=` EventSource from the stream journal and asserts the reopens after the first are at least 1900 ms apart (RETRY 2000). Run on the CI runner host with `if (!self.deferred) {` replaced by `if (true) {`: FAILED, gaps `[1999.6, 0.7, 2000.6, 0.6, 2000.2, 0.6, ...]`; the old test from main PASSED on that same code. Unchanged code: 5 of 5 passed, whole file 10 passed.
+- Item 2: `assert [e for _, e in pages[1:]] == [[]] * 2`; passed on the CI runner host and in CI run 45065643984 (`test_a_comment_written_while_the_leader_hands_over_reaches_the_tabs PASSED`).

@@ -3616,6 +3616,48 @@ var create = function (ROOT, CFG, opts) {
     }, 100);
   });
 
+  // ---- Enter inside a heading's words -----------------------------------------
+  // The heading is the element being edited, so the browser writes the line after Enter as a <div> inside it, the
+  // same <div> for Enter after a word as for Enter at the end with words typed after it. Only the page knows which:
+  // a line split off inside the heading's words (words after the caret) is marked `data-rd-split`, and the hub writes
+  // it as a heading of the same level, as common editors do (SPEC 7.2). Enter at the end, or in a line under the
+  // heading that is not such a half, leaves the line unmarked: a paragraph.
+  var SPLIT_HOSTS = 'h1, h2, h3, h4, h5, h6', splitIn = null;
+  main.addEventListener('beforeinput', function (e) {
+    splitIn = null;
+    if (e.inputType !== 'insertParagraph' || e.defaultPrevented || !editing) return;
+    var sel = getSel();
+    if (!sel.rangeCount) return;
+    var range = sel.getRangeAt(0);
+    var at = range.endContainer.nodeType === 1 ? range.endContainer : range.endContainer.parentNode;
+    var h = at && at.closest ? at.closest(SPLIT_HOSTS) : null;
+    if (!h || !main.contains(h)) return;
+    var line = at.closest('div');
+    if (!line || line === h || !h.contains(line)) line = h;
+    if (line !== h && !line.hasAttribute('data-rd-split')) return;    // a paragraph's line under the heading
+    var rest = document.createRange();
+    rest.setStart(range.endContainer, range.endOffset);
+    rest.setEnd(line, line.childNodes.length);
+    var words = rest.cloneContents();
+    Array.prototype.forEach.call(words.querySelectorAll('div'), function (d) { d.parentNode.removeChild(d); });
+    if (words.textContent.replace(/[\s\u200b-\u200d\u2060\ufeff]/g, '')) splitIn = h;   // the other lines are not its words
+  });
+  // The mark is set, or taken off, on every Enter in a heading: the browser copies a marked line's attributes to the line
+  // it splits off from it, so Enter at the end of a half would otherwise make the line under it a heading too.
+  main.addEventListener('input', function (e) {
+    var h = splitIn;
+    splitIn = null;
+    if (e.inputType !== 'insertParagraph') return;
+    var sel = getSel();
+    if (!sel.rangeCount) return;
+    var n = sel.getRangeAt(0).startContainer, at = n.nodeType === 1 ? n : n.parentNode;
+    var line = at && at.closest ? at.closest('div') : null;
+    var host = line && line.parentNode && line.parentNode.closest ? line.parentNode.closest(SPLIT_HOSTS) : null;
+    if (!host || !main.contains(host)) return;
+    if (h === host) line.setAttribute('data-rd-split', '');
+    else line.removeAttribute('data-rd-split');
+  });
+
   // ---- Enter in a task item ---------------------------------------------------
   // The browser's own Enter in an <li> makes an <li> with no box, which the .md would hold as a plain item.
   // The convention (GitHub, Obsidian) is a task item of its own with an unticked box, and on an item with

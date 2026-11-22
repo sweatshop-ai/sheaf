@@ -368,6 +368,18 @@ def test_the_first_connection_read_as_the_hubs_own_ends_the_leniency_a_raised_se
         sock.close()
 
 
+@pytest.mark.skipif(not peer.supported(), reason="the lookup is Linux")
+def test_any_connection_read_as_the_hubs_own_ends_the_leniency_health_included(live):
+    """The leniency ends with the first connection the server reads as the hub's own user, whatever it asks:
+    `/_/health` carries no credential and is never gated, and still shows that lookups work (9.1)."""
+    hub, srv, connect = live
+    shared = srv.httpd.RequestHandlerClass.handler
+    shared.peer_selftest_raised = "the test says the self-test raised"
+    c = connect()
+    c.request("GET", "/_/health")
+    assert c.getresponse().read() and shared.peer_selftest_raised is None
+
+
 def test_a_platform_with_no_way_to_read_owners_has_the_check_off(monkeypatch):
     monkeypatch.setattr(peer, "PLATFORM", "darwin")
     assert "darwin" in peer.startup().off

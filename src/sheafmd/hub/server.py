@@ -95,6 +95,10 @@ class _Http(BaseHTTPRequestHandler):
         self._looked = None
         if self.via == "port" and peer.supported() and not self.handler.peer_off:
             self._looked = peer.look(self.client_address[:2], self.connection.getsockname()[:2], self.connection)
+            if self._looked.refusal is None and self.handler.peer_selftest_raised:
+                # A connection read as the hub's own user, whatever it asks, shows that lookups work: a
+                # self-test that raised at start met a passing failure, and its leniency ends (9.1).
+                self.handler.peer_selftest_raised = None
 
     def _serve(self):
         again, self.served = self.served, True

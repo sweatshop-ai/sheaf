@@ -2,7 +2,7 @@
 
 **Claimed by:** Zeynep (track sheaf-backlog), 2026-11-22
 
-**Status:** done in branch zeynep/176-frozen-tab (PR #589)
+**Status:** done (PR #589, merge eedcdbf9)
 
 **Blocked by:** none
 

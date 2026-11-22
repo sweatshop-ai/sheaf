@@ -46,6 +46,16 @@ def in_beneath_walk() -> bool:
     return False
 
 
+# The hub checks who owns a connection only on Linux (SPEC 9.1, `peer.supported`). Elsewhere it turns the check off
+# when it starts, on purpose: it writes a `peer-check-off` row before its `hub-start` and prints this line on stderr.
+PEER_CHECK_ON = sys.platform.startswith("linux")
+PEER_OFF_ROWS = [] if PEER_CHECK_ON else ["peer-check-off"]
+PEER_OFF_LINE = "" if PEER_CHECK_ON else (
+    f"sheaf: the hub does not check which user of this machine is at the other end of a connection (this system "
+    f"({sys.platform}) gives the hub no way to see who owns a connection); anyone who can read a sign-in link, the key "
+    f"or a cookie can use it.\n")
+
+
 def hub_rows(*kinds):
     """The rows the hub wrote to the diagnostics log, of these kinds (all of them when none is named)."""
     return [r for r in diagnostics.read() if r["source"] == "hub" and (not kinds or r["kind"] in kinds)]

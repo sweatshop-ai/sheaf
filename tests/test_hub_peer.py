@@ -424,6 +424,13 @@ def sign_in_over(c, hub):
     return r, r.read()
 
 
+# The hub decides at start whether it checks who owns a connection (`peer.startup`, SPEC 9.1), and `live` starts it
+# before `proc` makes the machine look like Linux. On another system the check is off from that moment and every
+# link signs in (303): these two tests need the check on, so they run only where the hub turns it on.
+CHECK_ON_AT_START = pytest.mark.skipif(not sys.platform.startswith("linux"),
+                                       reason="the hub turns the peer check off at start on this system (SPEC 9.1)")
+
+
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="v1 reads /proc/net, which is Linux")
 def test_the_user_that_runs_the_hub_signs_in_over_a_real_socket_by_the_real_proc_net(live):
     hub, port, connect = live
@@ -432,6 +439,7 @@ def test_the_user_that_runs_the_hub_signs_in_over_a_real_socket_by_the_real_proc
     assert r.getheader("Set-Cookie").startswith(f"sheaf_{port}=")
 
 
+@CHECK_ON_AT_START
 def test_the_server_hands_the_handler_the_address_of_the_connection_it_came_in_on(live, proc):
     hub, port, connect = live
     src = free_port()    # the hub looks at a connection when it accepts it: the rows are there before it does
@@ -440,6 +448,7 @@ def test_the_server_hands_the_handler_the_address_of_the_connection_it_came_in_o
     assert r.status == 303
 
 
+@CHECK_ON_AT_START
 def test_over_a_real_socket_a_row_with_another_uid_refuses_and_a_row_of_the_hubs_end_does_not_help(live, proc):
     hub, port, connect = live
     mine, theirs = ("127.0.0.1", free_port()), ("127.0.0.1", port)

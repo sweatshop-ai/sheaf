@@ -13,7 +13,7 @@ import urllib.request
 
 import pytest
 
-from helpers import gone, hub_rows, key, run_hub, stranger, wait_alive
+from helpers import PEER_OFF_ROWS, gone, hub_rows, key, run_hub, stranger, wait_alive
 from sheafmd import diagnostics, signals
 from sheafmd.hub import sender, server
 from sheafmd.hub.jobs import Job, Jobs
@@ -96,7 +96,7 @@ def test_the_loser_of_a_start_race_writes_neither_hub_start_nor_unclean_exit_nor
         second = run_hub("--started-by", "cli")
         _, err = second.communicate(timeout=30)
         assert second.returncode == 1 and "already in use" in err
-        assert [r["kind"] for r in hub_rows()] == ["hub-start", "port-taken"]
+        assert [r["kind"] for r in hub_rows()] == [*PEER_OFF_ROWS, "hub-start", "port-taken"]   # the winner's off row, if any
         assert hub_rows("port-taken")[0]["pid"] == second.pid
         assert server.read_pid_file()["pid"] == first.pid       # the winner's pid file is untouched
     finally:

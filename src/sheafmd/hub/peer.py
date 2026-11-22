@@ -208,12 +208,11 @@ def owners(conn) -> list[int]:
     return [s.uid for s in sockets(conn)]
 
 
-def selftest() -> str | None:
-    """None when the hub can read the owner of a connection it holds itself (a loopback pair, opened
-    here) and gets its own uid; on a platform that is not checked, None too. Otherwise why not, for
-    the row and the notice of a hub that has to switch the check off."""
+def _selftest() -> tuple[str | None, bool]:
+    """Why the hub cannot read the owner of a connection it holds itself (a loopback pair, opened here)
+    as its own uid, or None; and whether that is because the reading raised, not because it answered."""
     if not supported():
-        return None
+        return None, False
     try:
         with socket.socket() as srv, socket.socket() as cli:
             srv.bind(("127.0.0.1", 0))
@@ -223,10 +222,16 @@ def selftest() -> str | None:
             with acc:
                 found = owners(Conn(cli.getsockname()[:2], cli.getpeername()[:2]))
     except (OSError, ValueError, TypeError) as e:
-        return f"the owner of a loopback connection could not be read ({getattr(e, 'strerror', None) or e})"
+        return f"the owner of a loopback connection could not be read ({getattr(e, 'strerror', None) or e})", True
     if found != [os.geteuid()]:
-        return f"the owner of a loopback connection read as {found}, not the hub's own uid {os.geteuid()}"
-    return None
+        return f"the owner of a loopback connection read as {found}, not the hub's own uid {os.geteuid()}", False
+    return None, False
+
+
+def selftest() -> str | None:
+    """None when the hub can read the owner of a connection it holds itself (a loopback pair, opened
+    here) and gets its own uid; on a platform that is not checked, None too. Otherwise why not."""
+    return _selftest()[0]
 
 
 def check(conn) -> Refusal | None:
@@ -282,10 +287,18 @@ def look(client, hub, sock) -> Conn:
     return Conn(client, hub, True, check(conn), lambda: closed(sock))
 
 
-def startup() -> str | None:
-    """None when the hub can tell who owns a connection and turns the check on. Otherwise why it
-    cannot (this system gives it no way, or it read its own connection wrong): the check is off,
-    and the sign-in link goes by the nonce alone, as it did before 9.1."""
+class Startup(NamedTuple):
+    """What the hub learns at start about reading who owns a connection (9.1)."""
+    off: str | None = None       # why the check is off: no way on this system, or its own connection read wrong
+    unsure: str | None = None    # why the self-test could not run (it raised): the check stays on, fails closed
+
+
+def startup() -> Startup:
+    """`off` when the hub cannot tell who owns a connection: this system gives it no way, or it read its
+    own connection as another uid; the check is off and the sign-in link goes by the nonce alone, as it
+    did before 9.1. `unsure` when the self-test raised instead of answering, which another local user can
+    cause (ticket 178): the check stays on, so a link whose owner cannot be read is refused."""
     if not supported():
-        return f"this system ({PLATFORM}) gives the hub no way to see who owns a connection"
-    return selftest()
+        return Startup(off=f"this system ({PLATFORM}) gives the hub no way to see who owns a connection")
+    why, raised = _selftest()
+    return Startup(unsure=why) if raised else Startup(off=why)

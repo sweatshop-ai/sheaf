@@ -292,6 +292,7 @@ class Handler:
         self.hub = hub
         self.peer_check = peer_check
         self.peer_off: str | None = None    # why the hub does not check who owns a connection (`peer.startup`), once it knows
+        self.peer_unsure: str | None = None  # why the start-up self-test raised: the check stays on (ticket 178)
         self._peer_row_times = {}           # when `peer-refused` was last written, for each kind of refusal
         self._peer_row_lock = threading.Lock()
         self.door = Door(hub)
@@ -812,6 +813,10 @@ class Handler:
         could say is told to try again, never that it was refused: its write is not applied."""
         conn = req.conn
         if self.peer_off or not getattr(conn, "looked", False) or conn.refusal is None:
+            return
+        if self.peer_unsure and conn.refusal.kind != peer.OTHER_USER:
+            # The self-test raised, so a lookup that fails may fail every time: the key and the cookie, which
+            # no other user can read, are let through then; only the nonce, on a command line, fails closed.
             return
         # A closed caller reads as no one's (uid 0), so only an answer that could be that is a "try again";
         # another user's uid stays a refusal, with its row, whether or not the caller has closed since.

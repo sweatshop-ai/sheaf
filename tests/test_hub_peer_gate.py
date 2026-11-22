@@ -272,7 +272,7 @@ def test_a_socket_whose_caller_closed_reads_as_closed():
 # ── the start-up self-test ───────────────────────────────────────────────────
 
 def test_a_hub_that_cannot_read_its_own_connection_starts_with_the_check_off_and_says_so(hub, monkeypatch, capsys):
-    monkeypatch.setattr(peer, "startup", lambda: "the owner of a loopback connection read as [], not the hub's own uid")
+    monkeypatch.setattr(peer, "startup", lambda: peer.Startup(off="the owner of a loopback connection read as [], not the hub's own uid"))
     sock = server.bind(0)
     try:
         srv = server.HubServer(Hub(port=sock.getsockname()[1], key=paths.ensure_key(), started_by="test"), sock)
@@ -283,12 +283,63 @@ def test_a_hub_that_cannot_read_its_own_connection_starts_with_the_check_off_and
         sock.close()
 
 
+def started_while_the_self_test_raises(monkeypatch, work):
+    """A real HubServer on Linux whose self-test raised (another user can make it raise, by holding every
+    ephemeral port of 127.0.0.1 while the hub starts: ticket 178), and the handler it wired."""
+    monkeypatch.setattr(peer, "PLATFORM", "linux")
+
+    def broken(conn):
+        raise OSError(98, "Address already in use")
+    monkeypatch.setattr(peer, "owners", broken)
+    sock = server.bind(0)
+    srv = server.HubServer(Hub(port=sock.getsockname()[1], key=paths.ensure_key(), started_by="test"), sock)
+    handler = srv.httpd.RequestHandlerClass.handler
+    f = work / "plan.md"
+    f.write_text(PLAN, encoding="utf-8")
+    handler.hub.roots.for_document(f)
+    return sock, handler
+
+
+def test_a_self_test_that_raises_leaves_the_check_on_so_another_users_nonce_signs_no_one_in(monkeypatch, work, capsys):
+    sock, handler = started_while_the_self_test_raises(monkeypatch, work)
+    try:
+        hub = handler.hub
+        assert not handler.peer_off and not hub_rows("peer-check-off")
+        assert "Address already in use" in hub_rows("peer-selftest-failed")[-1]["error"]
+        assert "could not test" in capsys.readouterr().err
+        for conn in (seen(), seen(kind=peer.UNKNOWN)):
+            r = ask(handler, hub, "GET", f"/_/open?nonce={hub.auth.mint_signin()}&next=/work/plan.md", conn, how=None)
+            assert r.status == 401 and "Set-Cookie" not in r.headers
+        r = ask(handler, hub, "GET", f"/_/open?nonce={hub.auth.mint_signin()}&next=/work/plan.md", seen(ME), how=None)
+        assert r.status == 303 and "Set-Cookie" in r.headers
+        assert ask(handler, hub, "POST", "/_/signin", seen(ME)).json()["peer_check"] is True
+    finally:
+        sock.close()
+
+
+def test_a_self_test_that_raises_still_lets_the_key_in_where_no_owner_can_be_read_but_never_another_user(
+        monkeypatch, work):
+    """The key and the cookie are not on a command line, so where every lookup fails the person still gets in
+    with `sheaf signin-url`; a lookup that names another user is still refused."""
+    sock, handler = started_while_the_self_test_raises(monkeypatch, work)
+    try:
+        hub = handler.hub
+        assert ask(handler, hub, "GET", "/_/index.json", seen(kind=peer.UNKNOWN), "key").status == 200
+        r = ask(handler, hub, "GET", f"/_/open?key={hub.auth.key}&next=/work/plan.md", seen(kind=peer.UNKNOWN), how=None)
+        assert r.status == 303 and "Set-Cookie" in r.headers
+        assert ask(handler, hub, "GET", "/_/index.json", seen(kind=peer.UNKNOWN), "cookie").status == 200
+        assert ask(handler, hub, "GET", "/_/index.json", seen(), "key").status == 403
+        assert ask(handler, hub, "GET", "/_/index.json", seen(), "cookie").status == 403
+    finally:
+        sock.close()
+
+
 def test_a_platform_with_no_way_to_read_owners_has_the_check_off(monkeypatch):
     monkeypatch.setattr(peer, "PLATFORM", "darwin")
-    assert "darwin" in peer.startup()
+    assert "darwin" in peer.startup().off
 
 
 def test_where_the_hub_can_read_its_own_connection_the_check_is_on():
     if not peer.supported():
         pytest.skip("Linux only")
-    assert peer.startup() is None
+    assert peer.startup() == peer.Startup()

@@ -1212,7 +1212,7 @@ class Hub:
         try:
             top, rel = self.where(address)
             with beneath.open_beneath(top, rel, meta=True) as op:
-                self.member_opened.mark(member.id, address, int(os.fstat(op.fd).st_mtime * 1e9))
+                self.member_opened.mark(member.id, address, int(op.stat().st_mtime * 1e9))
         except (OSError, roots_mod.NotFound):
             pass
 
@@ -1329,7 +1329,7 @@ class Hub:
         try:
             top, rel = self.where(address)
             with beneath.open_beneath(top, rel, meta=True) as op:
-                same = os.fstat(op.fd).st_ino == hit[0][0]
+                same = op.stat().st_ino == hit[0][0]
         except (OSError, roots_mod.NotFound):
             return None
         return hit[1:] if same else None

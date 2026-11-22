@@ -91,12 +91,19 @@ class Opened:
     """A file opened below a root. `dirs` are the identities of the root's folder, of its parents and of every folder the
     walk went into (the walk of our own sees them all, `openat2` the root's and the file's); `file` is the file's."""
 
-    def __init__(self, fd, file, dirs, parent, name, how, top, rel):
+    def __init__(self, fd, file, dirs, parent, name, how, top, rel, st=None):
         self.fd, self.file, self.dirs, self._parent, self.name, self.how = fd, file, dirs, parent, name, how
-        self.top, self.rel = top, rel
+        self.top, self.rel, self._st = top, rel, st
 
     def idents(self) -> list:
         return [*self.dirs, self.file]
+
+    def stat(self):
+        """The file's status: of its descriptor, or, for a file opened by `meta` that cannot be read (no descriptor), the
+        one the walk took of it, never asked of its name again: that could be of another file put in its place since."""
+        if self.fd is not None:
+            return os.fstat(self.fd)
+        return self._st
 
     def bytes(self) -> bytes:
         with os.fdopen(os.dup(self.fd), "rb") as f:
@@ -246,8 +253,14 @@ def _walk(top, rel: str, meta: bool = False):
                     except PermissionError:
                         if not (meta and last):
                             raise
-                        # a file that cannot be read still has an identity: a descriptor that reads nothing
-                        fd = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=stack[-1])
+                        # a file that cannot be read still has an identity, asked of its folder: no descriptor of it
+                        # (macOS refuses even `O_EVTONLY` there, CI run 44829164316)
+                        st = os.stat(name, dir_fd=stack[-1], follow_symlinks=False)
+                        if not stat.S_ISREG(st.st_mode):
+                            raise
+                        if st.st_nlink > 1:
+                            raise Linked(rel)
+                        return None, (st.st_dev, st.st_ino), seen, os.dup(stack[-1]), name, st
                 except OSError as e:
                     if e.errno not in (errno.ELOOP, errno.ENOTDIR):
                         raise
@@ -275,7 +288,7 @@ def _walk(top, rel: str, meta: bool = False):
                         os.close(fd)
                         raise Linked(rel)
                     parent = os.dup(stack[-1])
-                    return fd, (st.st_dev, st.st_ino), seen, parent, name
+                    return fd, (st.st_dev, st.st_ino), seen, parent, name, None
                 stack.append(fd)
                 seen.append(ident(fd))
                 break
@@ -287,7 +300,8 @@ def _walk(top, rel: str, meta: bool = False):
 
 def open_beneath(top, rel: str, meta: bool = False) -> Opened:
     """`rel` (`/` separators) below the folder `top`, opened for reading. `meta`: a file that cannot be read is opened
-    all the same, by a descriptor that reads nothing (`O_PATH`), for what only its identity is asked. OSError when it is not a file below it:
+    all the same, for what only its identity is asked: by a descriptor that reads nothing (`O_PATH`) where `openat2`
+    opens it, by its name in its folder and no descriptor (`fd` None, `Opened.stat`) on the walk. OSError when it is not a file below it:
     missing, a link that leaves the root, a loop, a folder. The folder `top` itself is opened by its name once, and
     every judgement after that is of descriptors."""
     top = os.fspath(top)
@@ -325,5 +339,5 @@ def open_beneath(top, rel: str, meta: bool = False) -> Opened:
                 return Opened(fd, (st.st_dev, st.st_ino), dirs, None, None, "openat2", top, rel)
         finally:
             os.close(rootfd)
-    fd, file, dirs, parent, name = _walk(top, rel, meta)
-    return Opened(fd, file, dirs, parent, name, "walk", top, rel)
+    fd, file, dirs, parent, name, st = _walk(top, rel, meta)
+    return Opened(fd, file, dirs, parent, name, "walk", top, rel, st)

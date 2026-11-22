@@ -952,3 +952,22 @@ def pair_peers(a: Side, b: Side, keyring) -> None:
         with there.active():
             token = Tokens().add_peer(f"from-{here.origin.split('//')[1].split('.')[0]}", here.origin)
         connect.use_peer(there.origin, str(token), store=keyring)
+
+
+def swap_the_sibling_at(monkeypatch, name, sibling, put, swap=True):
+    """Replace os.<name> (`fsync`, called while the sibling is open, or `replace`, called with it)
+    by one that first removes the sibling and lets `put(sibling)` make something else at its name,
+    as a user who can write the folder can at any moment, then does the real call. With swap False
+    nothing is made: the control."""
+    real = getattr(os, name)
+    swapped = []
+
+    def hook(*a, **k):
+        if swap and not swapped and os.path.lexists(sibling):
+            swapped.append(sibling)
+            os.unlink(sibling)
+            put(sibling)
+        return real(*a, **k)
+
+    monkeypatch.setattr(os, name, hook)
+    return swapped

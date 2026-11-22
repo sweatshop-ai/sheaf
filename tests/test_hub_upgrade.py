@@ -14,7 +14,7 @@ import time
 
 import pytest
 
-from helpers import gone, hub_rows, start_late_hub
+from helpers import PEER_OFF_LINE, gone, hub_rows, start_late_hub
 from sheafmd import __version__, cli, paths
 from sheafmd.hub import client as hubclient
 from sheafmd.hub import jobs, server, service, state
@@ -597,4 +597,4 @@ def test_sheaf_stop_waits_as_long_as_every_other_stop_does(port, thread_hub, qui
     began = time.monotonic()
     assert cli.cmd_stop([]) == 1
     assert time.monotonic() - began < 3                  # it waited STOP_WAIT, 0.3 s here, not a number of its own
-    assert capsys.readouterr().err == "sheaf: the hub is still running after 0.3 s\n"
+    assert capsys.readouterr().err == PEER_OFF_LINE + "sheaf: the hub is still running after 0.3 s\n"

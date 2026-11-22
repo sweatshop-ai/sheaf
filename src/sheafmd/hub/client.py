@@ -479,7 +479,7 @@ def _meet_version(met: Met, warn) -> tuple[Met, bool]:
         return met, False
     if left:
         raise HubDidNotStart(f"the hub did not stop for the upgrade ({left}; see `sheaf diag`)")
-    if not met.got.get("service"):                          # under the service, exit 75 starts the new code
+    if not met.got.get("service"):                      # under the service, exit 75 starts the new code
         spawn_hub("upgrade")
     now = wait_for_start(met.client, UPGRADE_WAIT, lambda now: now.get("version") == __version__)
     if now is None:

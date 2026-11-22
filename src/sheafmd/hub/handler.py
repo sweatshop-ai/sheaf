@@ -2203,6 +2203,7 @@ class Handler:
         else:
             address, fm, _ = self._sheaf(req, b.get("doc"))
         self._writable(address)
+        self._text_writable(req, address, "/_/sessions")    # a rebuild would drop the session line (SPEC 7.2)
         sid, machine = b.get("id"), b.get("machine")
         _shape(isinstance(sid, str) and work.UUID_RE.fullmatch(sid), "id must be a session id (a lowercase UUID)")
         _shape(isinstance(machine, str) and work.MACHINE_RE.fullmatch(machine),

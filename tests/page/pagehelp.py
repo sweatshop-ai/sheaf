@@ -278,6 +278,27 @@ def reloaded(page, timeout=8.0):
 RELOADING = ("Cannot read properties of null (reading 'textContent')", "Execution context was destroyed")
 
 
+def opened(context, site):
+    """A new tab of `context` on the site's document, loaded, with the list its page errors go to."""
+    p = context.new_page()
+    errors = []
+    p.on("pageerror", lambda e: errors.append(str(e)))
+    p.goto(site.url)
+    p.wait_for_selector("#rd-menu-btn", state="attached")
+    return p, errors
+
+
+def shows(p, text):
+    """Whether the page shows `text`. A change from outside reloads the page, so a read can fall on the reload:
+    that is not yet."""
+    try:
+        return text in p.evaluate("document.body.textContent")
+    except Exception as e:
+        if any(said in str(e) for said in RELOADING):
+            return False
+        raise
+
+
 def toast(page):
     """The text of the toast; "" while the page reloads and has none yet."""
     try:
@@ -490,17 +511,18 @@ def launch_chromium(chromium, error, in_ci):
         unavailable(f"Chromium did not start:\n{e}\n{died_report(launched_binary(chromium.executable_path))}", in_ci)
 
 
-def launch_engine(browser_type, name, error=None, in_ci=None):
+def launch_engine(browser_type, name, error=None, in_ci=None, **options):
     """A browser a test launches for itself (`pw.<engine>.launch()`): the browser, a skip off CI when the engine is not
     here, or a failure on CI that carries the whole error (Playwright puts the browser's log after the first line)
     and, for Chromium, how a second run of the binary ends. A skip on CI only turns the job red with one line
-    (ticket 138: four runs, 12-15 November)."""
+    (ticket 138: four runs, 12-15 November). `options` go to `launch()`: `channel="chromium"` is the full Chromium.
+    """
     if error is None:
         from playwright.sync_api import Error as error
     if in_ci is None:
         in_ci = os.environ.get("CI", "").lower() in ("1", "true")
     try:
-        return browser_type.launch()
+        return browser_type.launch(**options)
     except error as e:
         if not in_ci:
             pytest.skip(f"{name} cannot start here: {str(e).splitlines()[0]}")

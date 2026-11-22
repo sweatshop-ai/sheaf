@@ -29,8 +29,15 @@
   var chan = new BroadcastChannel('sheaf-live');
   var mine = {};             // key -> this tab's source
   var n = 0;
-  // Held for the life of the tab: the leader asks the lock manager which tabs still hold theirs.
-  navigator.locks.request('sheaf-tab-' + TAB, function () { return new Promise(function () {}); });
+  // Held for the life of the tab: the leader asks the lock manager which tabs still hold theirs. `tabLockHeld` settles once
+  // the lock is granted, and the tab says nothing to the leader before (`ask`): a leader that hears a join must find
+  // the tab's lock held. Full Chromium delivers a join on the BroadcastChannel before the lock manager has the tab's
+  // request, and the leader's watch then took the free lock and dropped the tab (ticket 180).
+  var granted = false;
+  var hidden = false;        // between `pagehide` and a `pageshow` that brings the page back: nothing more is asked
+  var tabLockHeld = new Promise(function (resolve) {
+    navigator.locks.request('sheaf-tab-' + TAB, function () { granted = true; resolve(); return new Promise(function () {}); });
+  });
 
   function Source(doc) {
     this.key = TAB + ':' + (++n);
@@ -109,10 +116,14 @@
     hear(m);
     if (lead) lead.take(m);
   };
-  // A message for the leader: posted to the others, and taken here too when this tab is it.
+  // A message for the leader: posted to the others, and taken here too when this tab is it. Each waits for the tab's
+  // lock (`tabLockHeld`), in the order asked, so a leave never overtakes its join.
   function ask(m) {
-    chan.postMessage(m);
-    if (lead) lead.take(m);
+    tabLockHeld.then(function () {
+      if (hidden) return;
+      chan.postMessage(m);
+      if (lead) lead.take(m);
+    });
   }
   // Said to every tab, this one included.
   function tell(m) {
@@ -127,12 +138,15 @@
       ask({ t: 'join', key: k, doc: mine[k].doc, tab: TAB });
     });
   }
+  // The leaves go at once: an unloading page runs no later callback. Before the lock is granted no join went out, so
+  // there is nothing to leave, and the joins still queued are dropped (`hidden`).
   window.addEventListener('pagehide', function () {
-    Object.keys(mine).forEach(function (k) { chan.postMessage({ t: 'leave', key: k }); });
+    hidden = true;
+    if (granted) Object.keys(mine).forEach(function (k) { chan.postMessage({ t: 'leave', key: k }); });
   });
   // A page the browser kept (the back/forward cache) and shows again sent its leaves on `pagehide`: the leader
   // dropped its streams. Chrome keeps no page that holds a Web Lock; others were not checked.
-  window.addEventListener('pageshow', function (ev) { if (ev.persisted) rejoin(); });
+  window.addEventListener('pageshow', function (ev) { if (ev.persisted) { hidden = false; rejoin(); } });
 
   // ---- the leader: the one tab that holds the connection ---------------------------
   var lead = null;
@@ -264,8 +278,8 @@
     navigator.locks.request('sheaf-tab-' + tab, { signal: ctl.signal }, function () {
       if (self.watch[tab] === ctl) delete self.watch[tab];
     }).then(function () {
-      // Granted and let go. A tab that is alive takes its lock back at once (this request can only beat the tab's own
-      // if the two reached the lock manager out of order), so the lock must still be free to drop the tab.
+      // Granted and let go. A tab that is alive holds its lock before it joins (`ask` waits for it), so a lock this
+      // request was granted is a tab that went; it must still be free to drop the tab.
       return navigator.locks.query().then(function (st) {
         var held = (st.held || []).concat(st.pending || []).some(function (l) { return l.name === 'sheaf-tab-' + tab; });
         if (!held) Object.keys(self.joined).forEach(function (k) {

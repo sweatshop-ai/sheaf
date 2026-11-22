@@ -496,8 +496,9 @@ def _lines_as_paragraphs(soup):
         kids = list(host.children)
         if host.name != "p" and all(is_line(c) or blank(c) for c in kids):
             # The heading's own words were all deleted: the half split off from them is the heading now.
+            # Lines before it were typed above the heading, and stay above it.
             half = next((c for c in kids if is_line(c) and c.has_attr(_SPLIT) and c.get_text(strip=True)), None)
-            if half is not None and all(blank(c) or not c.get_text(strip=True) for c in kids[:kids.index(half)]):
+            if half is not None:
                 half.unwrap()
                 kids = list(host.children)
         # Where the host's own words start: the first child that is neither a line nor white space (0, none
@@ -533,6 +534,10 @@ def _lines_as_paragraphs(soup):
             # lines typed in a paragraph the page made are the page's too: empty, they are dropped like it
             for m in made:
                 m["data-rd-fresh"] = ""
+    # A mark the loop did not reach (a split line pasted into a list item) is the page's, and no part of the .md: the
+    # line is then a <div> the browser wrote, as if unmarked.
+    for el in soup.find_all(attrs={_SPLIT: True}):
+        del el[_SPLIT]
 
 
 def _reject_irreversible(fragment: str):

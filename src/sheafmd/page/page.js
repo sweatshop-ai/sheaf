@@ -3642,15 +3642,20 @@ var create = function (ROOT, CFG, opts) {
     Array.prototype.forEach.call(words.querySelectorAll('div'), function (d) { d.parentNode.removeChild(d); });
     if (words.textContent.replace(/[\s\u200b-\u200d\u2060\ufeff]/g, '')) splitIn = h;   // the other lines are not its words
   });
+  // The mark is set, or taken off, on every Enter in a heading: the browser copies a marked line's attributes to the line
+  // it splits off from it, so Enter at the end of a half would otherwise make the line under it a heading too.
   main.addEventListener('input', function (e) {
     var h = splitIn;
     splitIn = null;
-    if (!h || e.inputType !== 'insertParagraph') return;
+    if (e.inputType !== 'insertParagraph') return;
     var sel = getSel();
     if (!sel.rangeCount) return;
     var n = sel.getRangeAt(0).startContainer, at = n.nodeType === 1 ? n : n.parentNode;
     var line = at && at.closest ? at.closest('div') : null;
-    if (line && line !== h && h.contains(line)) line.setAttribute('data-rd-split', '');
+    var host = line && line.parentNode && line.parentNode.closest ? line.parentNode.closest(SPLIT_HOSTS) : null;
+    if (!host || !main.contains(host)) return;
+    if (h === host) line.setAttribute('data-rd-split', '');
+    else line.removeAttribute('data-rd-split');
   });
 
   // ---- Enter in a task item ---------------------------------------------------

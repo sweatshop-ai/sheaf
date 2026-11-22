@@ -2441,8 +2441,9 @@ def _own_rows(own, file_blocks, j: int, free):
     # The blocks the file added before the first of them or after the last are not among them.
     rows = [r for r in rows if r.other is None or ends[0] <= r.other <= ends[-1]]
     how = {r.other: r.how for r in rows if r.other is not None}
+    deleted = any(r.other is None and r.own is not None for r in rows)
     if (how.get(j) not in ("same", "changed") or "same" not in how.values()
-            or not {"changed", "added"} & set(how.values())):
+            or not ({"changed", "added"} & set(how.values()) or deleted)):
         return None
     if any(r.how == "same" and not _alike(own[r.own], file_blocks[r.other])
            or r.how == "changed" and not file_blocks[r.other].editable for r in rows):
@@ -2520,7 +2521,8 @@ def _own_merge(region, first: int, rows, own, j: int, html: str, held):
             edit_block(y)
         file_row, edit_row = in_file[k], in_edit[k]
         if file_row.how != "changed" or file_row.other != j:
-            if edit_row.how != "gone":
+            # A line the file deleted and the edit leaves as the page saved it stays deleted.
+            if edit_row.how != "gone" and not (file_row.how == "gone" and edit_row.how == "same"):
                 edit_block(edit_row.other)
             if file_row.how == "changed":
                 beside.append(file_row.other)
@@ -2541,6 +2543,8 @@ def _own_merge(region, first: int, rows, own, j: int, html: str, held):
             return None
         notes.append((said[-1], owed))
 
+    if not pieces:      # the file deleted what the edit leaves and the edit takes out the rest
+        return None
     text = "".join((b.content if b.content.endswith("\n") else b.content + "\n") + (b.gap or "\n")
                    for b in pieces[:-1])
     text += pieces[-1].content if pieces[-1].content.endswith("\n") else pieces[-1].content + "\n"

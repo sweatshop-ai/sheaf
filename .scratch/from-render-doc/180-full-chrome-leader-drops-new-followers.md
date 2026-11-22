@@ -1,8 +1,8 @@
 # 180: In full Chromium the leader drops every new tab right after its join
 
-**Claimed by:** nobody
+**Claimed by:** Rumi (branch rumi/180-join-after-tab-lock)
 
-**Status:** open
+**Status:** in-progress
 
 **Priority:** high: it hits real users. In a real Chrome, only the leader tab gets live updates; every other tab of the browser gets none.
 

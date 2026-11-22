@@ -239,3 +239,33 @@ def test_a_folder_widened_after_a_failed_wake_is_kept_by_the_next_sleep(napping)
     sh(clone, "sparse-checkout", "add", "--", "extra")          # what a report's widen adds while `restore` is still out
     repos._sleep_one(REPO, clone, [], None)
     assert sorted(repos._usage()[REPO]["restore"]) == ["docs", "extra", "notes"]
+
+
+def test_a_write_widening_a_sleeping_clone_does_not_leave_it_asleep_meanwhile(napping, monkeypatch):
+    # `sleep_moved` marks a clone that reads as asleep as moved at once, without its lock: a widen under way must not
+    # read so, or the moved clone would keep its folders.
+    repos = napping.hub.repos
+    napping.now[0] += 31 * DAY
+    repos.sleep_idle()
+    assert repos.sleeping(REPO)
+    real, seen = repos._restore, []
+
+    def restore(*a, **kw):
+        seen.append(repos.sleeping(REPO))
+        return real(*a, **kw)
+    monkeypatch.setattr(repos, "_restore", restore)
+    assert repos.wake(REPO) is True
+    assert seen == [False] and not repos.sleeping(REPO)
+
+
+def test_a_write_whose_token_cannot_be_had_leaves_the_clone_asleep(napping, monkeypatch):
+    repos = napping.hub.repos
+    napping.now[0] += 31 * DAY
+    repos.sleep_idle()
+
+    def no_token(repo):
+        raise RuntimeError("no token")
+    monkeypatch.setattr(repos.provider, "token", no_token)
+    with pytest.raises(RuntimeError):
+        repos.wake(REPO)
+    assert repos.sleeping(REPO)

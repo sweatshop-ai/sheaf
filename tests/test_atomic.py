@@ -1,6 +1,7 @@
 """sheafmd.atomic: a file that is either the old one or the whole new one."""
 import os
 import stat
+from pathlib import Path
 
 import pytest
 
@@ -134,3 +135,20 @@ def test_two_writes_at_once_each_use_a_temp_file_of_their_own(tmp_path, monkeypa
     monkeypatch.setattr(os, "fsync", hook)
     write_text_atomic(target, "first")
     assert target.read_text() == "first" and sorted(p.name for p in tmp_path.iterdir()) == ["f"]
+
+
+def test_a_write_another_process_replaces_right_after_still_returns(tmp_path, monkeypatch):
+    """These callers hold no file lock, so another sheaf command can replace the file just after this write's
+    replace: the last writer wins, as before, and the first is not told its text is missing."""
+    target = tmp_path / "f"
+    target.write_text("old")
+    real = os.replace
+
+    def then_theirs(src, dst, *a, **k):
+        real(src, dst, *a, **k)
+        if Path(dst) == target:
+            Path(dst).write_text("theirs")
+
+    monkeypatch.setattr(os, "replace", then_theirs)
+    write_text_atomic(target, "mine")
+    assert target.read_text() == "theirs"

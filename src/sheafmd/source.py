@@ -12,6 +12,7 @@ import secrets
 import stat
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from . import paths
@@ -151,10 +152,11 @@ def _holds_bytes(name: Path, data: bytes) -> bool:
         return f.read(len(data) + 1) == data
 
 
-def _replace_if_ours(tmp: Path, target: Path, data: bytes):
+def _replace_if_ours(tmp: Path, target: Path, data: bytes, look_after: bool = True):
     """os.replace(tmp, target), where tmp was written with `data` and closed: refused when tmp's
     name no longer holds those bytes in a regular file, not a link, and failed when target's does
-    not just after.
+    not just after (unless `look_after` is False: a writer without the flock cannot tell a swap from
+    another writer's replace).
 
     By the bytes, not by the inode: the file is closed before the rename, so that an error only the
     close reports (an upload that failed, on an rclone mount) comes before the document is touched;
@@ -164,18 +166,19 @@ def _replace_if_ours(tmp: Path, target: Path, data: bytes):
     try:
         ours = _holds_bytes(tmp, data)
     except PermissionError:
-        raise OSError(f"{tmp} cannot be read back to check it, because the document's mode leaves its owner "
+        raise OSError(f"{tmp} cannot be read back to check it, because the file's mode leaves its owner "
                       f"no read, so {target} is left as it was") from None
     if not ours:
         raise OSError(f"{tmp} was replaced while the new text was written to it, "
                       f"so {target} is left as it was")
     os.replace(tmp, target)
-    if not _holds_bytes(target, data):
+    if look_after and not _holds_bytes(target, data):
         raise OSError(f"{target} is not the file just written (its folder changed "
                       f"during the write), so the new text is not in it")
 
 
-def _write_atomic(p: Path, text: str, mode: int | None = None, check=None, locked: bool = True):
+def _write_atomic(p: Path, text: str, mode: int | None = None, check: Callable[[], None] | None = None,
+                  locked: bool = True):
     """Write text to p through a hidden sibling, `.<name>.sheaf-tmp`, then os.replace. The one writer
     for every file sheaf replaces whole; `atomic.write_text_atomic` is it for files that are not
     documents (`locked` False).
@@ -201,7 +204,11 @@ def _write_atomic(p: Path, text: str, mode: int | None = None, check=None, locke
     file is whole, just before it takes the old one's place, and refuses by raising. With `locked`
     False the caller holds no flock, so the path is written as given (a link there is replaced, not
     followed, and the file need not exist yet) and the sibling is a fresh `.<name>.<random>.sheaf-tmp`
-    of its own, made with O_EXCL by mkstemp, so that two writes at once never share it."""
+    of its own, made with O_EXCL by mkstemp, so that two writes at once never share it, and the target is
+    not looked at after the replace: another process can write it then, and the last writer wins, as before.
+
+    Where os.fchmod is missing (Windows before Python 3.13) the mode is set by name once the file is closed."""
+    fchmod = getattr(os, "fchmod", None)
     if locked:
         target = p.resolve()
         tmp = target.with_name("." + target.name + ".sheaf-tmp")
@@ -221,17 +228,17 @@ def _write_atomic(p: Path, text: str, mode: int | None = None, check=None, locke
             tmp = Path(name)
         data = text.encode("utf-8")
         with os.fdopen(fd, "wb") as f:
-            if hasattr(os, "fchmod"):
-                os.fchmod(f.fileno(), mode)    # open() applies the umask, mkstemp gives 0o600
+            if fchmod:
+                fchmod(f.fileno(), mode)       # open() applies the umask, mkstemp gives 0o600
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
-        if not hasattr(os, "fchmod"):
+        if not fchmod:
             os.chmod(tmp, mode)
         if check is not None:
             check()
         if CHECKS_THE_NAMES:
-            _replace_if_ours(tmp, target, data)
+            _replace_if_ours(tmp, target, data, look_after=locked)
         else:
             os.replace(tmp, target)
     except BaseException:

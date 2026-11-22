@@ -514,3 +514,71 @@ def _conversions(monkeypatch, blocks: int) -> int:
 
 def test_conversions_of_one_merged_save_do_not_grow_with_the_blocks_scanned(monkeypatch):
     assert _conversions(monkeypatch, 32) <= _conversions(monkeypatch, 4)
+
+
+# The file deletes one of the lines the page's first save split a block into (typed above, split off below, the
+# middle of three), and the page saves the block again. The deletion alone is a change of the page's own blocks, so the
+# edit takes their place and the lines left stay once, as they were.
+def lines_html(lines):
+    return "<p>" + lines[0] + "".join(f"<div>{x}</div>" for x in lines[1:]) + "</p>"
+
+
+DELETED_SPLIT_LINE = {
+    "typed above, deleted": (["Typed above.", "Second paragraph here.", "Split off."], 0, 2),
+    "split off, deleted": (["Typed above.", "Second paragraph here.", "Split off."], 2, 0),
+    "the middle of three, deleted": (["Second paragraph here.", "Middle.", "Last."], 1, 2),
+    "the last of three, deleted": (["Second paragraph here.", "Middle.", "Last."], 2, 1),
+}
+
+
+@pytest.mark.parametrize("scene", DELETED_SPLIT_LINE)
+def test_a_line_the_file_deleted_from_the_pages_split_save_does_not_bring_another_line_back_twice(scene):
+    lines, gone, typed_on = DELETED_SPLIT_LINE[scene]
+    saved = lines_html(lines)
+    once, rep = rde.apply_edits(FOUR, [{"i": 2, "html": saved}])
+    assert rep["remap"]
+    cur = once.replace(lines[gone] + "\n\n", "")
+    second = [x + " More." if k == typed_on else x for k, x in enumerate(lines)]
+    new, rep = rde.merge_edits(FOUR, cur, second_save(2, lines_html(second), saved), at="2026-10-18T10:00")
+    kept = [x for k, x in enumerate(second) if k != gone]
+    assert rde._prose(new) == "# Title\n\nFirst paragraph here.\n\n" + "\n\n".join(kept) + REST, new
+    assert rep["conflicts"] == []
+
+
+# The grid: each shape of the split save, each of its lines deleted by the file, and each second save (nothing
+# changed, a line typed on, a line dropped). No line of the page's own is written twice, and the deleted line stays
+# deleted.
+SPLIT_SHAPES = {
+    "typed above": ["Typed above.", "Second paragraph here."],
+    "split off": ["Second paragraph here.", "Split off."],
+    "typed above and split off": ["Typed above.", "Second paragraph here.", "Split off."],
+    "three lines": ["Second paragraph here.", "Middle.", "Last."],
+}
+
+
+def second_saves(lines):
+    yield "unchanged", lines
+    for k, x in enumerate(lines):
+        yield f"line {k} typed on", lines[:k] + [x + " More."] + lines[k + 1:]
+        yield f"line {k} dropped", lines[:k] + lines[k + 1:]
+
+
+GRID = [(shape, gone, name) for shape, lines in SPLIT_SHAPES.items() for gone, x in enumerate(lines)
+        if x != "Second paragraph here." for name, _ in second_saves(lines)]
+
+
+@pytest.mark.parametrize("shape, gone, second", GRID, ids=[f"{s} / line {g} deleted / {n}" for s, g, n in GRID])
+def test_no_line_of_the_pages_split_save_is_written_twice_where_the_file_deleted_one(shape, gone, second):
+    lines = SPLIT_SHAPES[shape]
+    saved = lines_html(lines)
+    once, _ = rde.apply_edits(FOUR, [{"i": 2, "html": saved}])
+    cur = once.replace(lines[gone] + "\n\n", "")
+    after = dict(second_saves(lines))[second]
+    html = lines_html(after)
+    new, rep = rde.merge_edits(FOUR, cur, second_save(2, html, saved), at="2026-10-18T10:00")
+    paragraphs = rde._prose(new).split("\n\n")
+    assert len(paragraphs) == len(set(paragraphs)), new
+    assert rep["conflicts"] == []
+    # Where the page's save leaves only the deleted line, the block comes back as it did (nothing is left to keep).
+    if [x for x in after if x != lines[gone]]:
+        assert lines[gone] not in paragraphs, new

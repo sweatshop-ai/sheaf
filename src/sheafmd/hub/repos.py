@@ -285,9 +285,7 @@ class Repos:
             if repo in self._queues:
                 return False                    # a report is being settled: the caller asks again
             self._queues[repo] = []
-            t = threading.Thread(target=self._sleep_one, args=(repo, dest, [], to), name=f"repos-{repo}", daemon=True)
-            self._threads.add(t)
-            t.start()                           # under the guard: a settle() that sees the thread in `_threads` finds it started
+            t = self._start(repo, self._sleep_one, repo, dest, [], to)   # under the guard: a settle() that sees the thread in `_threads` finds it started
         t.join(self.SLEEP_WAIT)
         if t.is_alive():
             diagnostics.record("hub", "clone-sleep-slow", repo=repo)
@@ -326,9 +324,7 @@ class Repos:
                 if repo in self._queues:
                     continue                    # a report is being settled: not asleep under it
                 self._queues[repo] = []         # this repo's thread is the one below; a report that comes waits in its queue
-                t = threading.Thread(target=self._sleep_one, args=(repo, dest, slept), name=f"repos-{repo}", daemon=True)
-                self._threads.add(t)
-                t.start()                       # under the guard, as in sleep()
+                t = self._start(repo, self._sleep_one, repo, dest, slept)   # under the guard, as in sleep()
             claimed.append((repo, t))
         end = time.monotonic() + self.SLEEP_WAIT
         for repo, t in claimed:
@@ -743,9 +739,21 @@ class Repos:
                     queue.append(item)
                 return
             self._queues[repo] = [item]
-            t = threading.Thread(target=self._drain, args=(repo,), name=f"repos-{repo}", daemon=True)
-            self._threads.add(t)
-            t.start()                           # under the guard, as in sleep()
+            self._start(repo, self._drain, repo)           # under the guard, as in sleep()
+
+    def _start(self, repo: str, target, *args) -> threading.Thread:
+        """The thread of `repo`, started with its queue (`_queues[repo]`) already made, under the guard. A start that fails
+        leaves neither the thread in `_threads` nor the queue, which no thread would ever empty: every report of the repo
+        would wait on it."""
+        t = threading.Thread(target=target, args=args, name=f"repos-{repo}", daemon=True)
+        self._threads.add(t)
+        try:
+            t.start()
+        except BaseException:
+            self._threads.discard(t)
+            self._queues.pop(repo, None)
+            raise
+        return t
 
     def settle(self, seconds: float = 120.0) -> bool:
         """Wait until no repo's thread is left working; whether that came before `seconds` ran out."""

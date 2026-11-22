@@ -300,7 +300,8 @@ def _walk(top, rel: str, meta: bool = False):
 
 def open_beneath(top, rel: str, meta: bool = False) -> Opened:
     """`rel` (`/` separators) below the folder `top`, opened for reading. `meta`: a file that cannot be read is opened
-    all the same, by a descriptor that reads nothing (`O_PATH`), for what only its identity is asked. OSError when it is not a file below it:
+    all the same, for what only its identity is asked: by a descriptor that reads nothing (`O_PATH`) where `openat2`
+    opens it, by its name in its folder and no descriptor (`fd` None, `Opened.stat`) on the walk. OSError when it is not a file below it:
     missing, a link that leaves the root, a loop, a folder. The folder `top` itself is opened by its name once, and
     every judgement after that is of descriptors."""
     top = os.fspath(top)

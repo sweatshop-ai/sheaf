@@ -41,6 +41,7 @@ def test_a_file_that_cannot_be_read_still_has_an_identity_by_the_walk(tmp_path, 
     try:
         with beneath.open_beneath(tmp_path, "a.md", meta=True) as op:
             st = f.stat()
+            assert op.fd is None
             assert op.file == (st.st_dev, st.st_ino)
             assert op.stat().st_ino == st.st_ino
     finally:

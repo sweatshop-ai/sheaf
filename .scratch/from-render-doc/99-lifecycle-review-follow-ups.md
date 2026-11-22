@@ -1,6 +1,6 @@
 # 99: Lifecycle review follow-ups: peer check, restart announcements, stop races, refactors, lint
 
-**Claimed by:** Bashir 2026-11-22
+**Claimed by:** Ciro 2026-11-22
 
 **Status:** in-progress. Part 1 merged (PR 574, 192b3c7d); part 2 merged (PR 575, b3209c2e; PR 577, 458ef26c). Open: the peer-check items with ticket 139 (lines 17, 18), the `peer_off` self-test case (line 21), the optional security read, the macOS box (the override has not run on macOS; it runs only through ticket 101's worker), names (ticket 155).
 

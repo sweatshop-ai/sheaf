@@ -376,3 +376,14 @@ def test_a_store_whose_write_fails_does_not_keep_the_change_in_memory(monkeypatc
     with pytest.raises(OSError):
         seen.mark("a/two.md", "c2", 2)
     assert seen._data == before
+
+
+def test_a_rename_from_an_address_with_nothing_drops_what_the_new_address_held():
+    new = "work/new.md"
+    v, docs = state.Versions(), state.Docs()
+    v.put(new, "# Old text of the name\n")
+    docs.put(new, {"target": "x"})
+    v.rename("work/never-opened.md", new)
+    docs.rename("work/never-opened.md", new)
+    assert v.get(new, md_hash("# Old text of the name\n")) is None
+    assert docs.get(new) == {}

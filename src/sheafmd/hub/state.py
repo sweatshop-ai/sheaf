@@ -37,7 +37,7 @@ PINS_KEPT = 16                  # per document: the versions pages keep (`pin`)
 PINS_MAX_AGE = 7 * 86400        # seconds since a page last pinned it
 _HASH_RE = re.compile(r"[0-9a-f]{16}")
 _ADDRESS_FILE = "address"       # in each versions folder: the address it is the key of
-_PINS = "pins"                  # in each versions folder: the versions pages keep
+_PINS_DIR = "pins"              # in each versions folder: the versions pages keep
 INSIDE = Path(".sheaf") / "versions"    # a root's own versions store, inside it (7.4)
 
 
@@ -225,7 +225,7 @@ class Versions:
     def pin(self, address: str, text: str) -> str:
         """Keep `text` as a version a page keeps, apart from the newest 60, which writes from
         outside push out."""
-        return self._keep(self._dir(self._make_folder(address) / _PINS), text, PINS_KEPT)
+        return self._keep(self._dir(self._make_folder(address) / _PINS_DIR), text, PINS_KEPT)
 
     def get(self, address: str, h) -> str | None:
         """The text with hash `h`, among the newest or the pinned, or None. `h` comes from a
@@ -234,7 +234,7 @@ class Versions:
         if not isinstance(h, str) or not _HASH_RE.fullmatch(h):
             return None
         folder = self._folder(address)
-        for f in (folder / f"{h}.md", folder / _PINS / f"{h}.md"):
+        for f in (folder / f"{h}.md", folder / _PINS_DIR / f"{h}.md"):
             try:
                 text = f.read_text(encoding="utf-8")
             except (OSError, ValueError):
@@ -278,7 +278,7 @@ class Versions:
         if self._root is None or inside:
             folder = self._folder(address)
             for h in hashes:
-                for f in (folder / f"{h}.md", folder / _PINS / f"{h}.md"):
+                for f in (folder / f"{h}.md", folder / _PINS_DIR / f"{h}.md"):
                     try:
                         f.unlink()
                     except OSError:
@@ -289,9 +289,10 @@ class Versions:
         pinned alike. Nothing at `old`, nothing to carry; whatever `new` held before is replaced (its page is the one that
         moved there)."""
         src = self._folder(old)
-        if not src.is_dir():
-            return
         dst = self._dir(self.dir) / doc_key(self._key(new))
+        if not src.is_dir():
+            shutil.rmtree(dst, ignore_errors=True)      # nothing moved there, so what `new` held is the history of a page that is gone
+            return
         if dst != src:
             shutil.rmtree(dst, ignore_errors=True)
             os.replace(src, dst)
@@ -317,7 +318,7 @@ class Versions:
         for folder in self.dir.iterdir():
             if not folder.is_dir():
                 continue
-            for files, max_age in ((folder, VERSIONS_MAX_AGE), (folder / _PINS, PINS_MAX_AGE)):
+            for files, max_age in ((folder, VERSIONS_MAX_AGE), (folder / _PINS_DIR, PINS_MAX_AGE)):
                 cutoff = now - max_age
                 for f in files.glob("*.md"):
                     try:
@@ -326,7 +327,7 @@ class Versions:
                     except OSError:
                         pass
             try:
-                if not any(folder.glob("*.md")) and not any((folder / _PINS).glob("*.md")):
+                if not any(folder.glob("*.md")) and not any((folder / _PINS_DIR).glob("*.md")):
                     shutil.rmtree(folder, ignore_errors=True)
             except OSError:
                 pass
@@ -362,7 +363,7 @@ class _Store:
         """The entry of the address `old` becomes that of `new`, for a page that moved (9.11); `new`'s own is replaced."""
         def change(data):
             if old not in data:
-                return None, False
+                return None, data.pop(new, None) is not None     # nothing moved there: what `new` held is of a page that is gone
             data[new] = data.pop(old)
             return None, True
         self._change(change)

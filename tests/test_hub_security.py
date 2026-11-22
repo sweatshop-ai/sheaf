@@ -446,8 +446,8 @@ def test_a_link_that_does_not_work_shows_a_browser_the_sign_in_page_not_json(bro
     assert "Set-Cookie" not in r.headers and "Location" not in r.headers
     assert "Content-Security-Policy" in r.headers
     assert not r.text.lstrip().startswith("{")
-    # the way back in, and the rotate for a link that someone else used
-    assert "sheaf open" in r.text and "sheaf rotate" in r.text
+    # the way back in (the rotate advice is only where the hub cannot check the user: test_hub_peer)
+    assert "sheaf open" in r.text
     assert nonce not in r.text and browser.hub.auth.key not in r.text   # nothing of the query comes back
 
 

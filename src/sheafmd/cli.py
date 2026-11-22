@@ -32,9 +32,11 @@ from .agents.detect import detect
 from .agents.registry import detect_target
 from .atomic import write_text_atomic
 from .hub import client as hubclient
+from .hub import peer
 from .hub import roots as hubroots
 from .hub import server as hubserver
 from .hub.auth import agent_name, clean_display, name_key
+from .hub.handler import LINK_LIMIT
 from .hub.state import PEER_SCOPES, TokenError, Tokens
 from .render import RenderError, UnclosedComment, render_file
 from .source import StaleError, Source, now, update_file
@@ -360,6 +362,10 @@ def _open(args) -> int:
             shown = f"http://127.0.0.1:{c.port}{next_path}"
     except (hubclient.Impostor, hubclient.HubDidNotStart) as e:
         return _hub_failure(e)
+    if not peer.supported():
+        # The link goes by the nonce alone here: said on every run, not only on the page of a
+        # link that failed (ticket 99).
+        _err(f"  ! {LINK_LIMIT}")
     if tabs:
         _out(f"  (already open in {tabs} tab{'s' if tabs != 1 else ''})")
     # A browser here would not reach the hub, and none is there; an open tab already does.

@@ -20,7 +20,7 @@ from agent_fakes import PID, FakeClaude, write_record
 from helpers import PLAN, Impostor, Silent, gone, http_get, hub_alive, hub_rows, key, silent_message
 from sheafmd import config, diagnostics, paths, seat, signals
 from sheafmd.hub import client as hubclient
-from sheafmd.hub import server
+from sheafmd.hub import peer, server
 
 TIP = "tip: sheaf service install keeps the hub running across reboots"
 NONCE_URL = re.compile(r"http://127\.0\.0\.1:PORT/_/open\?nonce=[A-Za-z0-9_-]{43}&next=/work/plan\.md")
@@ -68,6 +68,23 @@ def test_open_starts_a_hub_signs_the_browser_in_and_prints_only_the_clean_url(sh
     assert resp.status == 200 and b"about apples" in body and key().encode() not in body
     again, _ = http_get(port, path)                                  # one use: the link is spent
     assert again.status == 401 and again.getheader("Set-Cookie") is None
+
+
+def test_where_the_hub_cannot_check_the_user_every_open_warns_once_on_stderr(sheaf, opened_browser, doc, port, monkeypatch):
+    """On a platform with no peer check the link goes by the nonce alone: `sheaf open` says so on
+    every run, not only on the page of a link that failed (ticket 99)."""
+    monkeypatch.setattr(peer, "PLATFORM", "darwin")
+    for argv in (("open", doc), ("open", doc), ("open", "--no-browser", doc)):
+        r = sheaf(*argv)
+        assert r.code == 0, r.err
+        assert r.err.count("cannot check which user of this machine follows a link") == 1, r.err
+        assert "cannot check" not in r.out and r.out.splitlines()[-1] == f"  ~ http://127.0.0.1:{port}/work/plan.md"
+
+
+def test_where_the_hub_checks_the_user_open_gives_no_such_warning(sheaf, opened_browser, doc, port, monkeypatch):
+    monkeypatch.setattr(peer, "PLATFORM", "linux")
+    r = sheaf("open", doc)
+    assert r.code == 0 and "cannot check" not in r.err + r.out
 
 
 def test_the_hub_keeps_running_after_the_command_ends(sheaf, opened_browser, doc, port):

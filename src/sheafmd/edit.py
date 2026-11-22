@@ -402,6 +402,7 @@ def _drop_empty_task_items(soup) -> None:
 
 
 _LINE_HOSTS = re.compile(r"^(?:p|h[1-6])$")
+_SPLIT = "data-rd-split"     # the page's mark on a line Enter split off inside a heading's words (SPEC 7.2)
 # The shape of a shortcode that GFM's emoji extension reads as its emoji (`:b:`, `:+1:`); a lone colon is none.
 SHORTCODE_RE = re.compile(r":[a-z0-9_+-]+:")
 # A start tag, whose quoted values may hold a `>`; text never holds a `<` (it is `&lt;`), so no text is taken for one.
@@ -432,11 +433,20 @@ def _lines_as_paragraphs(soup):
     attributes inside it; pandoc would keep those as raw <div> lines in the .md. A render never puts a
     <div> in a <p> or a heading. Words after such a line, outside any, go into a paragraph of their own.
     Enter at the start of a heading writes the new lines before its words: they are paragraphs above it,
-    and the words stay the heading."""
+    and the words stay the heading. A line the page marks `data-rd-split` (Enter inside the heading's words,
+    not at their end) is the heading's second half: a heading of the same level, unless it has no words."""
     from bs4 import NavigableString
 
     def is_line(el):
-        return getattr(el, "name", None) == "div" and not _page_own(el)
+        if getattr(el, "name", None) != "div":
+            return False
+        if not el.has_attr(_SPLIT):
+            return not _page_own(el)
+        mark = el.attrs.pop(_SPLIT)          # the page's own mark on a line the browser wrote
+        try:
+            return not _page_own(el)
+        finally:
+            el[_SPLIT] = mark
 
     def blank(el):
         return isinstance(el, NavigableString) and not el.strip()
@@ -452,10 +462,15 @@ def _lines_as_paragraphs(soup):
         # Enter or Shift+Enter inside a line that is already a <div> nests the next one in it. The line's own
         # words are a line, each nested line follows it, and words after a nested line are another.
         out, run = [], []
+        split = line.has_attr(_SPLIT)          # the line's own words carry its mark; a nested line has its own
 
         def close():
+            nonlocal split
             if any(not blank(c) for c in run):
                 d = soup.new_tag("div")
+                if split:
+                    d[_SPLIT] = ""
+                split = False
                 for c in run:
                     d.append(c)
                 out.append(d)
@@ -487,11 +502,14 @@ def _lines_as_paragraphs(soup):
         above = [c for c in kids[:words] if is_line(c)] if host.name != "p" else []
         for c in above:
             c.extract().name = "p"
+            del c[_SPLIT]
             host.insert_before(c)
         last, loose, made = host, None, above + [host]
         for c in list(host.children):
             if is_line(c):
-                c.extract().name = "p"
+                half = host.name != "p" and c.has_attr(_SPLIT) and c.get_text(strip=True)
+                c.extract().name = host.name if half else "p"
+                del c[_SPLIT]
                 last.insert_after(c)
                 last, loose = c, None
                 made.append(c)

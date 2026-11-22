@@ -2054,10 +2054,14 @@ HEADED = ("# Plan\n\nFirst paragraph, about apples.\n\n## A heading here\n\n"
     ("main h2", ["Home", "Enter"], "New ", "about apples.\n\n## New A heading here\n\n|"),
     ("main h2", ["Home", "Enter", "ArrowUp"], "Above it.", "about apples.\n\nAbove it.\n\n## A heading here\n\n|"),
     ("main h2", ["End", "Enter"], "Under it.", "## A heading here\n\nUnder it.\n\n|"),
+    ("main h2", ["Home"] + ["ArrowRight"] * 2 + ["Enter"], "", "about apples.\n\n## A\n\n## heading here\n\n|"),
+    ("main h2", ["Home"] + ["ArrowRight"] * 2 + ["Enter", "End", "Enter"], "Under it.",
+     "about apples.\n\n## A\n\n## heading here\n\nUnder it.\n\n|"),
     ("main td:nth-of-type(2)", ["End", "Enter"], "more", "red ones<br>more |"),
     ("main td:nth-of-type(2)", ["End"], ", more", "red ones, more |")],
     ids=["a heading, Enter at the start", "a heading, Enter at the start and words", "a heading, a line typed above",
-         "a heading, Enter at the end", "a table cell, Enter", "a table cell, no Enter"])
+         "a heading, Enter at the end", "a heading, Enter after a word", "a heading, split then a line under it",
+         "a table cell, Enter", "a table cell, no Enter"])
 def test_enter_at_the_start_of_a_heading_or_in_a_table_cell_keeps_the_block_what_it_was(frozen, where, keys, typed, md):
     p, f = frozen.page, frozen.site.file
     mark(p)

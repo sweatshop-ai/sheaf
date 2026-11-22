@@ -2659,7 +2659,7 @@ var create = function (ROOT, CFG, opts) {
       // Not answered within WAIT, the cancel may have arrived all the same, and the hub says nothing of one
       // that found nothing running: the job comes off as on an answer. A Tell still waiting shows again with
       // the hub's next snapshot (applyComments).
-      if (e.late) off();
+      if (e.late || e.status === 409) off();      // a 409 is the folder that changed: this thread's Tell is not this page's to stop or to wait on
       say(notSent(e, 'Cancel'), true);
     }
   }
@@ -3093,7 +3093,7 @@ var create = function (ROOT, CFG, opts) {
       sent.status = c.status === 'resolved' ? 'open' : 'resolved';
     } else if (act === 'send') {
       var ta = item.querySelector('textarea'), text = ta ? ta.value.trim() : '';
-      if (!text) return;
+      if (!text) { say('Write something first.'); return; }
       if (!teamForms[id]) return;
       sent.op = teamForms[id].kind; sent.body = text;
     } else return;
@@ -4041,7 +4041,11 @@ var create = function (ROOT, CFG, opts) {
       // Share is a tick box where its line is, with its own label; its button is kept off the page, as the one the box
       // presses. A Share whose box the page does not find stays a button in the row.
       if (a.toggle && box) toggleOf.set(box, { btn: btn, a: a });
-      else if (box) inlineButton(btn, box, [a.label.replace(/ @\S+$/, ''), a.word], kept); else bar.appendChild(btn);
+      else if (box) {
+        var said = a.label.replace(/ @\S+$/, '');
+        // A line that still says Move to (its old name, read while an open page carries it) hides under the button as Belongs to does.
+        inlineButton(btn, box, a.word === 'Belongs to' ? [said, a.word, said.replace(/^Belongs to/, 'Move to'), 'Move to'] : [said, a.word], kept);
+      } else bar.appendChild(btn);
       return { btn: btn, a: a };
     });
     all.forEach(function (x) { if (!x.btn.disabled) pressable(x.btn, x.a, all, !!(x.a.toggle && boxOfAct(x.a))); });

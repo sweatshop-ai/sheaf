@@ -40,6 +40,7 @@ from .agents.detect import detect, session_id
 from .atomic import write_text_atomic
 from .hub import repos as repos_mod
 from .hub.roots import url_path
+from .hub.state import file_locked
 from .hub.writelog import declared_link
 from .source import md_hash
 
@@ -359,9 +360,10 @@ def row_of(md: Path, origin: str | None = None) -> dict | None:
 
 
 def keep_row(md: Path, row: dict):
-    data = read_state()
-    data[str(md.resolve())] = row
-    write_state(data)
+    with file_locked("sends.lock"):              # a read, a change and a write: two sheaf commands at once keep both rows
+        data = read_state()
+        data[str(md.resolve())] = row
+        write_state(data)
 
 
 # ── which tiroir, and with which credential ──────────────────────────────────
@@ -638,6 +640,8 @@ def cmd_pull(argv: list[str], out=None, err=None) -> int:
         if now["hash"] == row["hash"]:
             out(f"{md} is the shared Sheaf's latest text already.")
             return EXIT_OK
+        if md_hash(_read_local(md)) != md_hash(local):      # an edit landed while the door was asked: it is the file's, not the pull's
+            raise _leave_theirs(md, row, now, sending=False)
         write_text_atomic(md, now["text"])
         keep_row(md, {**row, "hash": now["hash"], "local": md_hash(now["text"])})
         out(f"{md} now holds the shared Sheaf's latest text of {row['doc']}.")

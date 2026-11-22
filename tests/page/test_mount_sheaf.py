@@ -491,7 +491,7 @@ def connect_named(m, name):
 
 def line_made(m):
     """Wait for the line "Connect a laptop" draws. A wait that runs out says what the page and the hub did instead: this wait
-    failed in CI (first laptop-connect test of a page process, three runs of one day) and passed alone and on the CI runner host, so a
+    failed in CI (first laptop-connect test of a page process, three runs of one day) and passed alone and on the organisation's runners, so a
     red must name its cause, not only "timed out"."""
     try:
         until(lambda: m.js("return !root.querySelector('.sheaf-laptop-made').hidden;"), what="the line")

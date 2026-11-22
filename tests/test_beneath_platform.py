@@ -46,3 +46,24 @@ def test_a_file_that_cannot_be_read_still_has_an_identity_by_the_walk(tmp_path, 
             assert op.stat().st_ino == st.st_ino
     finally:
         f.chmod(0o644)
+
+
+def test_the_status_of_a_file_that_cannot_be_read_is_the_one_the_walk_saw(tmp_path, monkeypatch):
+    """No descriptor holds it: a file put in its place after the walk is not the one `op.stat()` describes (review of
+    PR 563: a status asked of the name again could be of another file than `op.file`)."""
+    import os
+    if os.geteuid() == 0:
+        pytest.skip("root reads a file of mode 000")
+    f = tmp_path / "a.md"
+    f.write_text("x")
+    f.chmod(0)
+    other = tmp_path / "b.md"
+    other.write_text("a longer other file")
+    monkeypatch.setattr(beneath, "FALLBACK", True)
+    try:
+        with beneath.open_beneath(tmp_path, "a.md", meta=True) as op:
+            os.replace(other, f)
+            assert op.stat().st_ino == op.file[1]
+            assert op.stat().st_size == 1
+    finally:
+        f.chmod(0o644)

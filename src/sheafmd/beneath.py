@@ -91,19 +91,19 @@ class Opened:
     """A file opened below a root. `dirs` are the identities of the root's folder, of its parents and of every folder the
     walk went into (the walk of our own sees them all, `openat2` the root's and the file's); `file` is the file's."""
 
-    def __init__(self, fd, file, dirs, parent, name, how, top, rel):
+    def __init__(self, fd, file, dirs, parent, name, how, top, rel, st=None):
         self.fd, self.file, self.dirs, self._parent, self.name, self.how = fd, file, dirs, parent, name, how
-        self.top, self.rel = top, rel
+        self.top, self.rel, self._st = top, rel, st
 
     def idents(self) -> list:
         return [*self.dirs, self.file]
 
     def stat(self):
-        """The file's status: of its descriptor, or, for a file opened by `meta` that cannot be read (no descriptor), of its
-        name in the folder it was found in."""
+        """The file's status: of its descriptor, or, for a file opened by `meta` that cannot be read (no descriptor), the
+        one the walk took of it, never asked of its name again: that could be of another file put in its place since."""
         if self.fd is not None:
             return os.fstat(self.fd)
-        return os.stat(self.name, dir_fd=self._parent, follow_symlinks=False)
+        return self._st
 
     def bytes(self) -> bytes:
         with os.fdopen(os.dup(self.fd), "rb") as f:
@@ -260,7 +260,7 @@ def _walk(top, rel: str, meta: bool = False):
                             raise
                         if st.st_nlink > 1:
                             raise Linked(rel)
-                        return None, (st.st_dev, st.st_ino), seen, os.dup(stack[-1]), name
+                        return None, (st.st_dev, st.st_ino), seen, os.dup(stack[-1]), name, st
                 except OSError as e:
                     if e.errno not in (errno.ELOOP, errno.ENOTDIR):
                         raise
@@ -288,7 +288,7 @@ def _walk(top, rel: str, meta: bool = False):
                         os.close(fd)
                         raise Linked(rel)
                     parent = os.dup(stack[-1])
-                    return fd, (st.st_dev, st.st_ino), seen, parent, name
+                    return fd, (st.st_dev, st.st_ino), seen, parent, name, None
                 stack.append(fd)
                 seen.append(ident(fd))
                 break
@@ -339,5 +339,5 @@ def open_beneath(top, rel: str, meta: bool = False) -> Opened:
                 return Opened(fd, (st.st_dev, st.st_ino), dirs, None, None, "openat2", top, rel)
         finally:
             os.close(rootfd)
-    fd, file, dirs, parent, name = _walk(top, rel, meta)
-    return Opened(fd, file, dirs, parent, name, "walk", top, rel)
+    fd, file, dirs, parent, name, st = _walk(top, rel, meta)
+    return Opened(fd, file, dirs, parent, name, "walk", top, rel, st)

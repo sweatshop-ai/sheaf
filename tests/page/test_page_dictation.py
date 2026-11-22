@@ -1,7 +1,7 @@
 """The microphone button of the chat box (ticket 06, SPEC 10.4): shown only when the hub says it can transcribe, records with
 MediaRecorder, sends the sound to the hub's POST /_/transcribe, and puts the text in the field, where it stays editable.
 
-No real microphone and no real t-compute: an init script replaces getUserMedia and MediaRecorder, and the hub's two routes
+No real microphone and no real speech-to-text server: an init script replaces getUserMedia and MediaRecorder, and the hub's two routes
 are answered by the browser context (`route`), so these tests check the page's wiring (bytes, headers, the field), not
 decoding."""
 import json

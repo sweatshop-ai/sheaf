@@ -178,8 +178,9 @@ def test_an_ubuntu_job_of_this_repository_runs_on_the_organisations_runners_and_
     line = re.search(r"^\s*runs-on: (.*)$", text, flags=re.M).group(1)
     assert line == (f"${{{{ matrix.os == 'ubuntu-24.04' && {TRUSTED} && {ORG_RUNNERS} || matrix.os }}}}")
     assert "pull_request_target" not in text
-    # No host name, address or runner name of the organisation in this public file.
-    assert not re.search(r"t-compute|\b\d{1,3}(\.\d{1,3}){3}\b|tailscale|\.ts\.net", text, flags=re.I)
+    # No address or tailnet name of the organisation in this public file. Its host names are not spelled here:
+    # tests/public_tree.py checks every tracked file against the private terms of SHEAF_PUBLIC_TREE_TERMS.
+    assert not re.search(r"\b\d{1,3}(\.\d{1,3}){3}\b|tailscale|\.ts\.net", text, flags=re.I)
 
 
 def test_the_organisations_runners_run_sixteen_workers_that_steal_work_and_github_four(text):

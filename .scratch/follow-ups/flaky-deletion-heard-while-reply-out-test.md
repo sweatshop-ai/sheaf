@@ -20,4 +20,4 @@ After a deletion is heard while a reply is still being sent, the test fulfils th
 
 ## DONE WHEN
 
-The test passes 20 of 20 runs on t-compute under load (a loaded host: several other pytest runs at the same time, run with `-n 4` at most), and the cause is named in the commit message, whether a wait that is too short or a real race in the page.
+The test passes 20 of 20 runs on the CI runner host under load (a loaded host: several other pytest runs at the same time, run with `-n 4` at most), and the cause is named in the commit message, whether a wait that is too short or a real race in the page.

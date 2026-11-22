@@ -9,8 +9,8 @@
 **Status:** done
 
 - [x] The waits of this test no longer pass a string to `wait_for_function`
-- [x] The test no longer fails when the runner is slow (run it 20 times on t-compute under load)
+- [x] The test no longer fails when the runner is slow (run it 20 times on the CI runner host under load)
 
-  Evidence 2026-11-20: already on main in b184c39f (function predicates; tests/test_page_predicates.py guards it); both tests run 20 times in a row on t-compute at origin/main 3f5271bd (load 64-83 on 32 cores): 20 of 20 runs passed (3 tests each, the writing one in two parametrized cases), none failed.
+  Evidence 2026-11-20: already on main in b184c39f (function predicates; tests/test_page_predicates.py guards it); both tests run 20 times in a row on the CI runner host at origin/main 3f5271bd (load 64-83 on 32 cores): 20 of 20 runs passed (3 tests each, the writing one in two parametrized cases), none failed.
 
-  Evidence 2026-11-20: already on main in b184c39f (no string `wait_for_function` is left under tests/); the whole of test_page_dictation.py run 30 times (10 parallel loops sharing 4 cores on t-compute, main e5f10c6f): 30 of 30 passed, 0 failed.
+  Evidence 2026-11-20: already on main in b184c39f (no string `wait_for_function` is left under tests/); the whole of test_page_dictation.py run 30 times (10 parallel loops sharing 4 cores on the CI runner host, main e5f10c6f): 30 of 30 passed, 0 failed.

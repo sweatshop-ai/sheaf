@@ -2,7 +2,7 @@
 comments like any quote, and the button is never part of what a save writes."""
 import pytest
 
-from pagehelp import at, comment_on, until, rewrite
+from pagehelp import at, comment_on, key, until, rewrite
 from sheafmd import comments as rdc
 
 pytestmark = pytest.mark.page
@@ -48,7 +48,7 @@ def test_copy_takes_the_text_typed_in_edit_mode_before_it_is_saved(doc):
     p = doc.page
     p.click(TOGGLE)
     p.click(f"{QUOTE} p >> nth=1")
-    p.keyboard.press("Control+End")
+    p.keyboard.press(key("Control+End"))
     p.keyboard.type(" Really.")
     press_copy(p)
     until(lambda: "Really." in clipboard(p), what="the edit on the clipboard")
@@ -60,7 +60,7 @@ def test_an_edit_is_saved_with_the_marker_and_without_the_button(doc, site):
     p = doc.page
     p.click(TOGGLE)
     p.click(f"{QUOTE} p >> nth=1")
-    p.keyboard.press("Control+End")
+    p.keyboard.press(key("Control+End"))
     p.keyboard.type(" Really.")
     press_copy(p)
     p.click(TOGGLE)

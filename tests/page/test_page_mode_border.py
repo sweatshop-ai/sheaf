@@ -3,7 +3,7 @@ Alice's trial 2026-11-09): grey when idle, green in Edit mode, red-orange when a
 border read the same variable, so they cannot disagree. The ball's colours do not change with the theme; both themes are checked."""
 import pytest
 
-from pagehelp import P1, until, rewrite
+from pagehelp import P1, key, until, rewrite
 
 pytestmark = pytest.mark.page
 
@@ -43,7 +43,7 @@ def test_the_border_follows_the_ball_grey_green_red(doc, scheme):
     until(lambda: ball(p) == GREEN, what="the green ball")
     agree(p, GREEN)
     p.focus(P1)
-    p.keyboard.press("Control+End")
+    p.keyboard.press(key("Control+End"))
     p.keyboard.type(" and plums")
     until(lambda: ball(p) == RED, what="the red ball")
     agree(p, RED)

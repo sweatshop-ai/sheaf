@@ -3,7 +3,7 @@ same size for both. A click on Save saves and returns to Comment mode; a save th
 with what they typed."""
 import pytest
 
-from pagehelp import P1, toast, until, rewrite
+from pagehelp import P1, key, toast, until, rewrite
 
 pytestmark = pytest.mark.page
 
@@ -26,7 +26,7 @@ def size(page):
 
 def type_into_first_paragraph(page):
     page.focus(P1)
-    page.keyboard.press("Control+End")
+    page.keyboard.press(key("Control+End"))
     page.keyboard.type(" and plums")
 
 
@@ -64,7 +64,7 @@ def test_the_e_key_enters_edit_and_inside_an_editable_area_it_is_a_letter(doc):
     until(lambda: editing(p), what="edit mode by the E key")
     assert label(p) == "Save (Ctrl+S)"
     p.focus(P1)
-    p.keyboard.press("Control+End")
+    p.keyboard.press(key("Control+End"))
     p.keyboard.press("e")
     assert editing(p) and p.inner_text(P1).endswith("e"), "E typed in an editable area was taken for the key"
 

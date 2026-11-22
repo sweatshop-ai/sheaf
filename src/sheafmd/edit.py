@@ -13,6 +13,7 @@ front matter and hand-aligned tables intact when you edit one paragraph elsewher
 """
 
 import contextvars
+import difflib
 import os
 import re
 from collections import Counter
@@ -862,18 +863,20 @@ def _emoji_looked_at(name: str):
 
 
 def _emoji_drawn(name: str):
-    """The emoji pandoc draws for `:name:`, or None (also when pandoc failed, which is not remembered)."""
+    """The emoji pandoc draws for `:name:`, or None when it draws none. A failed run is not remembered, and refuses
+    the save (EditError), as any pandoc failure of an edit does: a guess would write a shortcode the page shows as
+    text bare, or one it shows as its emoji as the character."""
     try:
         return _emoji_looked_at(name)
     except _Unread:
-        return None
+        raise EditError(f"pandoc: the emoji of :{name}: could not be looked up") from None
 
 
 _emoji_drawn.cache_clear = _emoji_looked_at.cache_clear
 
 
 def _emoji_as_tokens(fragment: str, source):
-    """(the fragment with each emoji span the source wrote as `:name:` as a token, the names). A token, not the
+    """(the fragment with each emoji span the source wrote as `:name:` as a token, the (name, emoji) of each). A token, not the
     shortcode: `_cell_breaks` sends a table holding a shortcode to raw HTML, which shows it as text. A span the
     reader typed in the source has no `:name:` there, and a span whose text is no longer its emoji, have their words kept."""
     names = []
@@ -881,7 +884,7 @@ def _emoji_as_tokens(fragment: str, source):
     def token(m):
         if (source is not None and f":{m.group(1)}:" not in source) or m.group(2) != _emoji_drawn(m.group(1)):
             return m.group(0)
-        names.append(m.group(1))
+        names.append((m.group(1), m.group(2)))
         return f"\uF8FE{len(names) - 1}\uF8FF"
 
     if "\uF8FE" in fragment or "\uF8FF" in fragment:
@@ -893,23 +896,76 @@ _SHORTCODE_TEXT = re.compile(r":([a-z0-9_+-]+):")
 _LITERAL_COLON = "\uF8FD"
 
 
-def _literal_shortcodes(fragment: str, source):
-    """(the fragment with a mark before each `:name:` of its text that the source wrote as `\\:name:`, whether it
-    marked any). The page shows such a shortcode as the words it is; written bare, the next render would draw its
-    emoji. A shortcode the reader typed on the page has no `\\:` in the source and stays as typed."""
+def _shortcode_texts(soup) -> list:
+    """The text nodes of soup in which GFM would draw a shortcode: not code, not math."""
+    return [t for t in _texts(soup) if ":" in t and not any(
+        u.name in ("code", "pre", "script", "style") or "math" in (u.get("class") or []) for u in t.parents)]
+
+
+def _source_literals(source: str, new: str) -> set:
+    """The places in `new`, the page's shortcode text, of each `:name:` that the source wrote as `\\:name:`: its
+    render shows that one as text, and a diff of the render's text against the page's carries it over. By place,
+    not by name: a `:name:` the reader typed beside one the source escapes is the emoji. A render that fails
+    refuses the save (EditError), rather than guess."""
     from bs4 import BeautifulSoup
 
-    if not source or "\\:" not in source or _LITERAL_COLON in fragment or ":" not in fragment:
+    html = _render_source(source)
+    if html is None:
+        raise EditError("pandoc: the block's source could not be rendered to place its shortcodes")
+    old = "".join(_shortcode_texts(BeautifulSoup(html, "html.parser")))
+    olds = [m for m in _SHORTCODE_TEXT.finditer(old) if f"\\:{m.group(1)}:" in source]
+    places = set()
+    for a, b, size in difflib.SequenceMatcher(None, old, new, autojunk=False).get_matching_blocks():
+        places.update(b + m.start() - a for m in olds if a <= m.start() and m.end() <= a + size)
+    return places
+
+
+def _literal_shortcodes(fragment: str, source, slash):
+    """(the fragment with a mark before each `:name:` of its text that must stay text, whether it marked any). The
+    page shows such a shortcode as the words it is; written bare, the next render would draw its emoji. That is one
+    the source wrote as `\\:name:` (`_source_literals`), and one right after a backslash the reader typed, which
+    `_text_backslashes` has made the token `slash`: the page shows that backslash, so the .md escapes it and the
+    colon both. A shortcode the reader typed bare stays bare. Runs after `_text_backslashes`."""
+    from bs4 import BeautifulSoup
+
+    after_slash = slash is not None and slash + ":" in fragment
+    if ":" not in fragment or _LITERAL_COLON in fragment or not (after_slash or (source and "\\:" in source)):
+        return fragment, False
+    soup = BeautifulSoup(fragment, "html.parser")
+    texts = _shortcode_texts(soup)
+    places = _source_literals(source, "".join(texts)) if source and "\\:" in source else set()
+    found, at = False, 0
+    for t in texts:
+        def mark(m, at=at):
+            typed = slash is not None and m.string.endswith(slash, 0, m.start())
+            if (typed or at + m.start() in places) and _emoji_drawn(m.group(1)):
+                return _LITERAL_COLON + m.group(0)
+            return m.group(0)
+
+        at, new = at + len(t), _SHORTCODE_TEXT.sub(mark, str(t))
+        if new != str(t):
+            t.replace_with(new)
+            found = True
+    return (str(soup), True) if found else (fragment, False)
+
+
+_CODE_LT = "\uF8FB"
+_TABLE_TAG = re.compile(r"<(?=/?table\b)")
+
+
+def _code_table_tags(fragment: str):
+    """(the fragment with the `<` of each `<table` or `</table` in its code and math as a token, whether it took
+    any). Pandoc writes code and math as they are, so such a `<table` would count as a table in `html_block_to_md`;
+    one in other text it writes as `\\<table`, which does not count."""
+    from bs4 import BeautifulSoup
+
+    if "table" not in fragment or _CODE_LT in fragment:
         return fragment, False
     soup, found = BeautifulSoup(fragment, "html.parser"), False
     for t in _texts(soup):
-        if ":" not in t or any(u.name in ("code", "pre", "script", "style") or "math" in (u.get("class") or [])
-                               for u in t.parents):
-            continue
-        new = _SHORTCODE_TEXT.sub(lambda m: _LITERAL_COLON + m.group(0)
-                                  if f"\\:{m.group(1)}:" in source and _emoji_drawn(m.group(1)) else m.group(0), str(t))
-        if new != str(t):
-            t.replace_with(new)
+        if _TABLE_TAG.search(t) and any(u.name in ("code", "pre") or "math" in (u.get("class") or [])
+                                        for u in t.parents):
+            t.replace_with(_TABLE_TAG.sub(_CODE_LT, str(t)))
             found = True
     return (str(soup), True) if found else (fragment, False)
 
@@ -930,12 +986,15 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     # one `_cell_breaks` takes, by a backslash in the fragment, and must see the same one. A bare URL is taken before
     # them, so that its backslashes stay the URL's.
     clean, urls = _bare_urls_as_words(clean)
-    clean, literal = _literal_shortcodes(clean, source)
     clean, slash = _text_backslashes(clean)
+    clean, literal = _literal_shortcodes(clean, source, slash)
     clean = _without_placeholder_breaks(clean)
     if not clean.strip():
         return ""
     clean, pipe = _cell_code_pipes(clean)
+    code_lt = False
+    if pipe is not None or slash is not None or emoji or literal:
+        clean, code_lt = _code_table_tags(clean)
     cells, token = _cell_breaks(clean)
     r = _pandoc.run(["-f", "html", "-t", "gfm", "--wrap=none"], cells)
     if token is not None and r.returncode == 0 and r.stdout.count(token) != cells.count(token):
@@ -948,18 +1007,21 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     if pipe is not None or slash is not None or emoji or literal:
         # A table pandoc writes as raw HTML has no cell for a bare pipe to end, and `\\|` would show; nor does
         # HTML read a backslash as an escape, nor a shortcode as its emoji.
-        parts, depth = re.split(r"(</?table\b)", out), 0
+        # Only a tag counts: a `<table` in text pandoc writes as `\\<table`, and one in code or math is a token.
+        parts, depth = re.split(r"(?<!\\)(</?table\b)", out), 0
         for k, part in enumerate(parts):
             depth = depth + 1 if part == "<table" else max(0, depth - 1) if part == "</table" else depth
             if pipe is not None:
                 part = part.replace(pipe, "|" if depth else "\\|")
             if slash is not None:
                 part = part.replace(slash, "\\" if depth else "\\\\")
+            if code_lt:
+                part = part.replace(_CODE_LT, "&lt;" if depth else "<")
             if literal:
                 part = part.replace(_LITERAL_COLON, "" if depth else "\\")
             if emoji:
-                part = _EMOJI_TOKEN.sub(lambda m: (_emoji_drawn(emoji[int(m.group(1))]) or f":{emoji[int(m.group(1))]}:")
-                                        if depth else f":{emoji[int(m.group(1))]}:", part)
+                part = _EMOJI_TOKEN.sub(lambda m: emoji[int(m.group(1))][1] if depth
+                                        else f":{emoji[int(m.group(1))][0]}:", part)
             parts[k] = part
         out = "".join(parts)
     # Pandoc's gfm writer wraps every bare URL as <https://...>. GFM autolinks a bare

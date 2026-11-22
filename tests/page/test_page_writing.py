@@ -5045,7 +5045,7 @@ def test_the_mark_lands_on_the_block_typed_in_and_clears_with_the_save(tab):
     p.keyboard.press("Control+s")
     until(lambda: held or p.wait_for_timeout(20), what="the save, held")
     p.click(P2)                                              # moving to another block is not typing: not refused
-    p.keyboard.press("End")
+    p.keyboard.press(key("End"))
     p.keyboard.type("lost")
     toasted(p, "Saving")
     marked = lambda: p.evaluate("[...document.querySelectorAll('.rd-saving')].map(e => e.textContent)")

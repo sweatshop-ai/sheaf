@@ -12,7 +12,7 @@ import re
 import pytest
 from helpers import PLAN
 from pagehelp import (BLUE, DOC, HOST, PAGE_TIMEOUT_MS, RED, assert_readable, close_context, drop_host, launch_engine, new_context,
-                      pasted, until, wear_host, rewrite)
+                      key, pasted, until, wear_host, rewrite)
 
 from sheafmd import comments as rdc
 
@@ -298,7 +298,7 @@ def test_an_edit_makes_the_page_dirty_for_the_loader_and_is_stored_under_a_key_o
     front.page.keyboard.press("e")
     until(lambda: front.has(".rd-root.rd-editing main [contenteditable=true]"), what="edit mode")
     front.click("main p:not(.doc-by)")
-    front.page.keyboard.press("End")
+    front.page.keyboard.press(key("End"))
     front.page.keyboard.type(" more")
     until(lambda: front.page.evaluate("window.__page.dirty()") is True, what="dirty")
     # The unsaved edit is stored as the page's draft, under a key of the mounted page: the origin is the front's.

@@ -555,9 +555,12 @@ class LiveDocument:
             text = self._known(h)
             if text is None:
                 return False
-            pins = self._pins.setdefault(member, {})
+            # Filled before it is put back: `_expire_pins`, also run by `_known` without the lock, drops a member whose
+            # dict it finds empty, and a dict it dropped must not be the one this pin goes into.
+            pins = dict(self._pins.get(member, {}))
             pins.pop(h, None)
             pins[h] = (text, self._clock())
+            self._pins[member] = pins
             self._expire_pins()                         # leaves `pins`: it holds one pinned now
             while len(pins) > PINS:
                 pins.pop(next(iter(pins)))

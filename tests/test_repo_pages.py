@@ -1176,6 +1176,20 @@ def test_a_failed_read_of_the_git_version_is_tried_again_after_a_pause_and_only_
         repos_mod._git_version.cache_clear()
 
 
+def test_a_read_that_fails_at_the_hubs_start_and_works_later_says_so_when_it_recovers(tmp_path, monkeypatch, capsys):
+    clock = [1000.0]
+    monkeypatch.setattr(repos_mod.time, "monotonic", lambda: clock[0])
+    try:
+        fake_git(monkeypatch, [subprocess.TimeoutExpired("git", 10), "git version 2.53.0\n"])
+        repos_mod.Repos(tmp_path, provider=None)            # the real read, not the replaced `_git_version`: it fails at the start
+        assert capsys.readouterr().err.strip().splitlines() == ["sheaf hub: git version unreadable: commit look off"]
+        clock[0] += repos_mod.RETRY_READ_EVERY
+        assert repos_mod._git_version() == (2, 53)
+        assert capsys.readouterr().err.strip().splitlines() == ["sheaf hub: git 2.53 read: commit look on"]
+    finally:
+        repos_mod._git_version.cache_clear()
+
+
 @pytest.mark.parametrize("version, said", [((2, 43), "git below 2.44: commit look off"),
                                            (None, "git version unreadable: commit look off")])
 def test_the_hub_says_once_at_start_when_the_commit_look_is_off(tmp_path, monkeypatch, capsys, version, said):

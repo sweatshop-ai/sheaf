@@ -1285,7 +1285,10 @@ class Door:
             if r.status == 404:
                 raise _absent(args["doc"]) from None
             raise ToolError(r.message, "owner" if r.status == 403 else "move") from None
-        text = self.hub.file(new).read_text(encoding="utf-8", errors="replace")
+        try:
+            text = self.hub.file(new).read_text(encoding="utf-8", errors="replace")
+        except (OSError, NotFound):
+            raise ToolError(f"{address} was moved to {new}, and the page could not be read there.", "move") from None
         return {"doc": new, "url": self.hub.url(new), "hash": md_hash(text), "moved_from": address}
 
     def _updated(self, address: str, args: dict, text: str, expected: str, caller: Caller, moved: list):

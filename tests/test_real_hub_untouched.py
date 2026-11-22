@@ -35,6 +35,10 @@ def sent_by_the_guard(spawned):
     class Log(list):
         real = spawned.kill
 
+        def sent(self):
+            """What was sent: a probe (signal 0, which `proc_state` makes where there is no /proc) sends nothing."""
+            return [e for e in self if e[1] != 0]
+
         def send_again(self):
             spawned.kill = self.real            # a test that left a process of its own stops it for real
 
@@ -47,7 +51,7 @@ def test_a_live_process_the_test_did_not_start_is_not_signalled(sent_by_the_guar
     """The parent of the run is another process of this user, alive, and none of the test's."""
     with pytest.raises(AssertionError, match="a process it did not start"):
         os.kill(os.getppid(), signal.SIGTERM)
-    assert sent_by_the_guard == []
+    assert sent_by_the_guard.sent() == []
 
 
 def test_the_pid_in_a_hub_file_is_not_a_reason_to_signal_it(sent_by_the_guard, monkeypatch):
@@ -58,7 +62,7 @@ def test_the_pid_in_a_hub_file_is_not_a_reason_to_signal_it(sent_by_the_guard, m
     monkeypatch.undo()
     with pytest.raises(AssertionError, match="did not start"):
         os.kill(server.read_pid_file()["pid"], signal.SIGKILL)
-    assert sent_by_the_guard == []
+    assert sent_by_the_guard.sent() == []
     server.pid_file().unlink()                # nothing for the teardown to stop
 
 

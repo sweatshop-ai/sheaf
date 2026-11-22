@@ -16,6 +16,7 @@ ends what it finds, and the session fixture at the bottom fails the run when any
 end of it. It needs /proc: where there is none (macOS) nothing is found and nothing is asserted."""
 import os
 import signal
+import subprocess
 import threading
 import time
 import uuid
@@ -125,8 +126,11 @@ def left_running(run: str, test: str | None = None) -> list[Left]:
 def carries_this_run(pid: int) -> bool:
     """The process carries the id of the running suite: a process a test started, a detached one too."""
     run = os.environ.get(RUN_VAR)
-    if not run or not _has_proc():
+    if not run:
         return False
+    if not _has_proc():                                  # macOS: `ps -E` prints the environment of a process of the user's
+        ps = subprocess.run(["ps", "-E", "-ww", "-o", "command=", "-p", str(pid)], capture_output=True, text=True)
+        return f"{RUN_VAR}={run}" in ps.stdout.split()
     # A known limit, accepted: the wait for an exec to finish is only EXEC_WINDOW from the process's start.
     env = _environment(str(pid))
     if env == [b""]:                                     # in the middle of its exec, as when it was found: wait for it

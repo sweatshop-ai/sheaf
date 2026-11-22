@@ -1,6 +1,6 @@
 # 139: Check the connection's OS user on every cookie and key request
 
-**Claimed by:** Sigrid 2026-11-20 17:44
+**Claimed by:** Rhea 2026-11-22
 
 **Status:** in-progress (item 1: PR #488; item 2 merged as #509 (39e0f70a); item 3 on branch `sigrid/139-spec`, PR not yet opened; the by-hand check is open)
 

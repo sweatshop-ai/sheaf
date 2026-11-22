@@ -402,6 +402,7 @@ def _drop_empty_task_items(soup) -> None:
 
 
 _LINE_HOSTS = re.compile(r"^(?:p|h[1-6])$")
+_SPLIT = "data-rd-split"     # the page's mark on a line Enter split off inside a heading's words (SPEC 7.2)
 # The shape of a shortcode that GFM's emoji extension reads as its emoji (`:b:`, `:+1:`); a lone colon is none.
 SHORTCODE_RE = re.compile(r":[a-z0-9_+-]+:")
 # A start tag, whose quoted values may hold a `>`; text never holds a `<` (it is `&lt;`), so no text is taken for one.
@@ -432,11 +433,20 @@ def _lines_as_paragraphs(soup):
     attributes inside it; pandoc would keep those as raw <div> lines in the .md. A render never puts a
     <div> in a <p> or a heading. Words after such a line, outside any, go into a paragraph of their own.
     Enter at the start of a heading writes the new lines before its words: they are paragraphs above it,
-    and the words stay the heading."""
+    and the words stay the heading. A line the page marks `data-rd-split` (Enter inside the heading's words,
+    not at their end) is the heading's second half: a heading of the same level, unless it has no words."""
     from bs4 import NavigableString
 
     def is_line(el):
-        return getattr(el, "name", None) == "div" and not _page_own(el)
+        if getattr(el, "name", None) != "div":
+            return False
+        if not el.has_attr(_SPLIT):
+            return not _page_own(el)
+        mark = el.attrs.pop(_SPLIT)          # the page's own mark on a line the browser wrote
+        try:
+            return not _page_own(el)
+        finally:
+            el[_SPLIT] = mark
 
     def blank(el):
         return isinstance(el, NavigableString) and not el.strip()
@@ -452,10 +462,15 @@ def _lines_as_paragraphs(soup):
         # Enter or Shift+Enter inside a line that is already a <div> nests the next one in it. The line's own
         # words are a line, each nested line follows it, and words after a nested line are another.
         out, run = [], []
+        split = line.has_attr(_SPLIT)          # the line's own words carry its mark; a nested line has its own
 
         def close():
+            nonlocal split
             if any(not blank(c) for c in run):
                 d = soup.new_tag("div")
+                if split:
+                    d[_SPLIT] = ""
+                split = False
                 for c in run:
                     d.append(c)
                 out.append(d)
@@ -479,6 +494,13 @@ def _lines_as_paragraphs(soup):
         if not any(is_line(c) for c in host.children):
             continue
         kids = list(host.children)
+        if host.name != "p" and all(is_line(c) or blank(c) for c in kids):
+            # The heading's own words were all deleted: the half split off from them is the heading now.
+            # Lines before it were typed above the heading, and stay above it.
+            half = next((c for c in kids if is_line(c) and c.has_attr(_SPLIT) and c.get_text(strip=True)), None)
+            if half is not None:
+                half.unwrap()
+                kids = list(host.children)
         # Where the host's own words start: the first child that is neither a line nor white space (0, none
         # moves, when there is no such child). The lines before them in a heading go above it. A paragraph
         # needs no such care: emptied by its lines going after it, it says nothing and drops out of the .md,
@@ -487,11 +509,14 @@ def _lines_as_paragraphs(soup):
         above = [c for c in kids[:words] if is_line(c)] if host.name != "p" else []
         for c in above:
             c.extract().name = "p"
+            del c[_SPLIT]
             host.insert_before(c)
         last, loose, made = host, None, above + [host]
         for c in list(host.children):
             if is_line(c):
-                c.extract().name = "p"
+                half = bool(host.name != "p" and c.has_attr(_SPLIT) and c.get_text(strip=True))
+                c.extract().name = host.name if half else "p"
+                del c[_SPLIT]
                 last.insert_after(c)
                 last, loose = c, None
                 made.append(c)
@@ -509,6 +534,10 @@ def _lines_as_paragraphs(soup):
             # lines typed in a paragraph the page made are the page's too: empty, they are dropped like it
             for m in made:
                 m["data-rd-fresh"] = ""
+    # A mark the loop did not reach (a split line pasted into a list item) is the page's, and no part of the .md: the
+    # line is then a <div> the browser wrote, as if unmarked.
+    for el in soup.find_all(attrs={_SPLIT: True}):
+        del el[_SPLIT]
 
 
 def _reject_irreversible(fragment: str):
@@ -770,7 +799,8 @@ def _cell_code_pipes(fragment: str):
 
 
 # A backslash before the placeholder of a comment or a citation (`_convert_with_comments`) escapes what takes its place.
-# A raw tag's placeholder (`_tags_as_text`) opens with a bracket that is punctuation, so it is matched above.
+# A raw tag's placeholder (`_tags_as_text`) opens with `⟦`, which is not in the ASCII class here: a backslash before a tag
+# keeps pandoc's own handling (pinned by the controls in tests/test_edit_backslash_placeholder.py).
 _BACKSLASH_ESCAPES = re.compile(r"\\(?=[!-/:-@\[-`{-~\n]|\Z|RDCMT[0-9A-F]{10})")
 
 
@@ -895,12 +925,16 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     # that can run, and the .md never holds active markup a tool without a sanitiser
     # of its own would show. Task boxes and comments survive it; a paragraph typed as
     # `- [ ] words` becomes a task item (`_typed_tasks`).
-    clean = _without_placeholder_breaks(_boxes_as_text(_typed_tasks(sanitize(_sanitize(fragment, source, strays)))))
-    if not clean.strip():
-        return ""
+    clean = _boxes_as_text(_typed_tasks(sanitize(_sanitize(fragment, source, strays))))
+    # The backslashes go first: `_without_placeholder_breaks` and `_cell_breaks` each decide whether the table is
+    # one `_cell_breaks` takes, by a backslash in the fragment, and must see the same one. A bare URL is taken before
+    # them, so that its backslashes stay the URL's.
     clean, urls = _bare_urls_as_words(clean)
     clean, literal = _literal_shortcodes(clean, source)
     clean, slash = _text_backslashes(clean)
+    clean = _without_placeholder_breaks(clean)
+    if not clean.strip():
+        return ""
     clean, pipe = _cell_code_pipes(clean)
     cells, token = _cell_breaks(clean)
     r = _pandoc.run(["-f", "html", "-t", "gfm", "--wrap=none"], cells)

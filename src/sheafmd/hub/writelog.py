@@ -18,7 +18,7 @@ from .. import paths
 KEEP = 200                  # lines kept in memory per address
 MAX_BYTES = 10 * 1024 * 1024
 RENAMED = "renamed"        # the marker line of `WriteLog.rename`: `writer` is the address the lines went to
-RETRACTED = "retracted"    # the marker line of `WriteLog.restore` and `drop`: the lines the file holds for `address` before it are taken back
+RETRACTED = "retracted"    # the marker line of `WriteLog.restore`: the lines the file holds for `address` before it are taken back
 NAME, ROTATED = "write-log.jsonl", "write-log.1.jsonl"
 MAX_SESSION = 100
 MAX_DECLARED = 200
@@ -273,13 +273,6 @@ class WriteLog:
                 self._lines[address] = deque(relabelled, maxlen=self._keep)
             else:
                 self._lines.pop(address, None)
-            self._own.pop(address, None)
-
-    def drop(self, address: str):
-        """Forget the lines of `address`: a page that was moved here and taken back. A `retracted` line tells a restart."""
-        with self._lock:
-            self._append(Line(address=address, time=self._now(), writer="", place="", via=RETRACTED))
-            self._lines.pop(address, None)
             self._own.pop(address, None)
 
     def told(self, address: str):

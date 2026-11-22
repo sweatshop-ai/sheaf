@@ -209,3 +209,40 @@ def test_a_clone_that_does_not_finish_going_to_sleep_is_left_for_the_next_round_
     assert repos.settle()
     assert repos.sleeping(REPO)                             # it finished behind the round, and the next one leaves it alone
     assert repos.sleep_idle() == []
+
+
+def test_a_clone_put_to_sleep_twice_keeps_the_folders_it_is_to_get_back(napping):
+    repos = napping.hub.repos
+    napping.now[0] += 31 * DAY
+    repos.sleep_idle()
+    assert repos.sleeping(REPO)
+    repos._sleep_one(REPO, the_clone(napping), [], None)        # a second round finds the set already shrunk
+    assert not report(napping, path="docs/plan.md")[0]
+    assert sh(the_clone(napping), "sparse-checkout", "list").split() == ["docs", "notes"]
+
+
+def test_a_folder_widened_after_a_failed_wake_is_kept_by_the_next_sleep(napping):
+    repos, clone = napping.hub.repos, the_clone(napping)
+    napping.now[0] += 31 * DAY
+    repos.sleep_idle()
+    assert repos.sleeping(REPO)
+    sh(clone, "sparse-checkout", "add", "--", "extra")          # what a report's widen adds while `restore` is still out
+    repos._sleep_one(REPO, clone, [], None)
+    assert sorted(repos._usage()[REPO]["restore"]) == ["docs", "extra", "notes"]
+
+
+def test_a_write_widening_a_sleeping_clone_does_not_leave_it_asleep_meanwhile(napping, monkeypatch):
+    # `sleep_moved` marks a clone that reads as asleep as moved at once, without its lock: a widen under way must not
+    # read so, or the moved clone would keep its folders.
+    repos = napping.hub.repos
+    napping.now[0] += 31 * DAY
+    repos.sleep_idle()
+    assert repos.sleeping(REPO)
+    real, seen = repos._restore, []
+
+    def restore(*a, **kw):
+        seen.append(repos.sleeping(REPO))
+        return real(*a, **kw)
+    monkeypatch.setattr(repos, "_restore", restore)
+    assert repos.wake(REPO) is True
+    assert seen == [False] and not repos.sleeping(REPO)

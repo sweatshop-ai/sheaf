@@ -1,8 +1,8 @@
 # 178: A Linux hub whose peer self-test fails redeems sign-in nonces from any user
 
-**Claimed by:**
+**Claimed by:** Ciro 2026-11-22
 
-**Status:** open
+**Status:** in-progress
 
 **From:** ticket 99 line 22, the second-opinion security read of the nonce peer check (Codex, 2026-11-22), finding [P1]
 

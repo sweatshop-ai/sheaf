@@ -88,7 +88,7 @@ OPENS_FOREIGN_CONTENT = ("<math", "<!--", "<![if", "<svg></p>", "<noscript>", "<
 @pytest.fixture(scope="session")
 def pw(chromium):
     """The session's one Playwright driver (conftest.py): a second `sync_playwright()` in this thread fails with "Sync API inside the
-    asyncio loop" once the driver of an earlier test is up, which is what 33 errors of the t-compute run at 9aed290 were."""
+    asyncio loop" once the driver of an earlier test is up, which is what 33 errors of the CI runner host run at 9aed290 were."""
     return chromium.pw
 
 

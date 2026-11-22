@@ -12,7 +12,7 @@
 - [ ] src/sheafmd/hub/core.py:853 render() of an already-open document now calls live.refresh() (via _refreshed) outside any try; before this PR the render path did not refresh, so a file that fails to render now raises out of render() where it used to return OK, and when settings also changed the tabs get two `changed` events (refresh, then rebuild).
 - [ ] src/sheafmd/hub/writelog.py:497 `_pulling` is a set, not a count, and Commits._pull calls pulling() before taking the guard/repo lock (commits.py:633): two pulls of the same repo that overlap share one flag, so the first to end clears it while the second is still moving the file, and a disk write that lands while a pull waits for the lock is not logged.
 - [ ] src/sheafmd/hub/core.py:227 Hub.pulled loops over files and calls _page_of per file; if _page_of raises for one file, Commits._tell catches it and the remaining addresses never get end_pull, so they stay in `_pulling` and every later disk write to them goes unlogged until the hub restarts.
-- [ ] src/sheafmd/mcp.py:911 expect_own is set before the file write; when the write then fails (the move or the commit raises), the stale hash stays until the next refresh, and a later disk write of exactly that text would be taken for the door's own. Also core.py:185 short-circuits: when is_pull is true, is_own is not evaluated, so a pending _own entry is left in place.
+- [x] src/sheafmd/mcp.py:911 expect_own is set before the file write; when the write then fails (the move or the commit raises), the stale hash stays until the next refresh, and a later disk write of exactly that text would be taken for the door's own. Also core.py:185 short-circuits: when is_pull is true, is_own is not evaluated, so a pending _own entry is left in place. **[fixed on main: #550, b0fcd9a4]**
 
 ## PR #386
 
@@ -81,10 +81,10 @@
 ## PR #397
 
 - [ ] src/sheafmd/send.py:210 tiroir_of reads .sheaf.toml from the file's own folder, not from its root: a loose page in a subfolder of a registered non-git root (SPEC 8.2 rule 2, Roots._find "deepest") ignores the root's `tiroir` and goes to the laptop default (or, when the root names a tiroir with no credential, is sent instead of rendering locally). SPEC 13 row says "its root's .sheaf.toml"; tests only cover the file's own folder (test_send.py:162,170 write to scratch.parent).
-- [ ] src/sheafmd/send.py:195 keep_row is an unlocked read-modify-write of sends.json; two parallel sends of different files can drop one row, and the next send of the dropped file then tries `create` and is refused with "exists already ... Rename" (no data lost, page stuck until renamed).
+- [x] src/sheafmd/send.py:195 keep_row is an unlocked read-modify-write of sends.json; two parallel sends of different files can drop one row, and the next send of the dropped file then tries `create` and is refused with "exists already ... Rename" (no data lost, page stuck until renamed). **[fixed on main: #548, e5a58156]**
 - [x] src/sheafmd/send.py:150,268,279 a malformed door answer (content[0] not a dict, create/read result without doc/hash/text) raises KeyError/AttributeError past the SendError handler and ends in a traceback instead of a one-line message. **[fixed on main: #525, 65da1f24, test first, red on main]**
 - [ ] src/sheafmd/send.py:231 _leave_theirs overwrites an existing FILE.tiroir.md without a check, so a merge in progress in that file is replaced.
-- [ ] src/sheafmd/send.py:335 pull checks the local hash, then contacts the door, then writes the file: an edit saved in that window is overwritten.
+- [x] src/sheafmd/send.py:335 pull checks the local hash, then contacts the door, then writes the file: an edit saved in that window is overwritten. **[fixed on main: #548, e5a58156]**
 
 ## PR #398
 
@@ -131,7 +131,7 @@
 ## PR #405
 
 - [ ] src/sheafmd/hub/moves.py:98 a page can never be moved to the top of its loose root: `loose.folder_path` refuses an empty folder (400), so a top-level page moved into a folder has no way back, and the Move form prefills "" for a top-level page (src/sheafmd/page/sheaf.js:345), which the hub then refuses.
-- [ ] src/sheafmd/hub/state.py:324 `_Store.rename` (and Versions.rename, state.py:254) returns without touching `new` when `old` has no entry, so a stale entry already at `new` stays; the docstring says new's own is replaced.
+- [x] src/sheafmd/hub/state.py:324 `_Store.rename` (and Versions.rename, state.py:254) returns without touching `new` when `old` has no entry, so a stale entry already at `new` stays; the docstring says new's own is replaced. **[fixed on main: #550, b0fcd9a4]**
 - [ ] src/sheafmd/mcp.py:1187 door `move` reads `self.hub.file(new)` after the moves' lock is released; a Delete or another Move of the page in that window raises an unhandled FileNotFoundError instead of a ToolError.
 - [ ] src/sheafmd/hub/archive.py:263 `before = os.lstat(src)` sits outside the try: a trash entry purged between the earlier check and this lstat gives a FileNotFoundError that the route does not map to 404/409.
 - [ ] src/sheafmd/hub/moves.py:228 `_undo` writes back the whole forwards.json snapshot; `Hub.forget_root` (core.py:894, `forwards.forget_prefix`) does not take the moves' lock, so a root forgotten during a failing folder move gets its Forwards back.
@@ -197,7 +197,7 @@
 - [ ] src/sheafmd/hub/incoming.py:201 check_root marks a takeable page {"ready": True}, while send_root (src/sheafmd/hub/outgoing.py:83) only counts a page as confirmed on {"ok": True}; wired directly together every page would be held as "failed". Part 2's land_root must answer "ok", or the two must be aligned. Neither function has a caller in src at d1bf68ef, so nothing runs this today.
 - [x] src/sheafmd/hub/outgoing.py:78 send_root calls answer.get(...) without checking that the peer's body is a dict; a peer answering a JSON list or string raises AttributeError instead of holding the batch as "failed". send_root has no caller yet. **[fixed on main: #528, b55b2d17]**
 - [ ] src/sheafmd/hub/root_moves.py:95 Moves.sent and Moves.hold index row["sent"] / row["held"] directly; a root_moves.json row missing those keys (hand-edited or from an older shape) raises KeyError, although _read treats an unreadable file as empty.
-- [ ] src/sheafmd/hub/incoming.py:143 _root_shape accepts an empty owner_email and duplicate page paths; owner_for turns the empty one into no_email and a duplicate is judged twice under one key, so no wrong result follows, but the shape check is looser than its message says.
+- [x] src/sheafmd/hub/incoming.py:143 _root_shape accepts an empty owner_email and duplicate page paths; owner_for turns the empty one into no_email and a duplicate is judged twice under one key, so no wrong result follows, but the shape check is looser than its message says. **[fixed on main: #550, b0fcd9a4]** (duplicate-path half; the empty owner_email is not a defect: judged per page as no_email, pinned by test_each_page_is_judged_alone_none_ambiguous_and_made_up_refused in tests/test_land_root.py)
 - [x] src/sheafmd/send.py:498 moved_to from the hub is printed to the terminal unfiltered (no control-character stripping); the hub is the member's own tiroir, so this is hardening only. **[fixed on main: #556, b6aa9afe]**
 
 ## PR #417
@@ -275,7 +275,7 @@
 
 ## PR #439
 
-- [ ] src/sheafmd/hub/writelog.py:225 WriteLog.drop now appends a `retracted` line, but nothing in src/ or tests/ calls WriteLog.drop at b562023d (git grep), so the new file behaviour is untested and unused.
+- [x] src/sheafmd/hub/writelog.py:225 WriteLog.drop now appends a `retracted` line, but nothing in src/ or tests/ calls WriteLog.drop at b562023d (git grep), so the new file behaviour is untested and unused. **[fixed on main: #550, b0fcd9a4]**
 - [ ] src/sheafmd/hub/writelog.py:218 restore rewrites the file under `address` (replace) but leaves the in-memory deque with the original Line objects, so lines carried by a rename carry their old `address` in memory and the new one after a restart; nothing compares Line.address across that boundary today (carry's `held` Counter only gains matches from it).
 - [ ] src/sheafmd/hub/writelog.py:218 each failed landing at a known address re-appends up to KEEP (200) kept lines plus a marker; repeated failed landings grow the file toward MAX_BYTES rotation faster (bounded, no loss beyond the existing rotation behaviour).
 
@@ -318,14 +318,14 @@
 
 ## PR #448
 
-- [ ] src/sheafmd/hub/repos.py:289 if t.start() raises (e.g. "can't start new thread"), the unstarted thread stays in `_threads` and the repo in `_queues`, so a later settle() still hits "cannot join thread before it is started" and the repo is blocked; pre-existing, not introduced by this PR (same at :330 and :742)
+- [x] src/sheafmd/hub/repos.py:289 if t.start() raises (e.g. "can't start new thread"), the unstarted thread stays in `_threads` and the repo in `_queues`, so a later settle() still hits "cannot join thread before it is started" and the repo is blocked; pre-existing, not introduced by this PR (same at :330 and :742) **[fixed on main: #550, b0fcd9a4]**
 - [ ] tests/test_clone_sleep.py:136 the red/green signal rests on a 0.5 s join timeout; on a loaded runner the helper's settle() may not reach join() inside 0.5 s on the old code, so the test can pass without exercising the gap (no false failure on the fixed code)
 
 ## PR #449
 
 - [x] src/sheafmd/page/page.js:3061 a refused delete (403/410) leaves teamAsk set, so the button still reads "Confirm delete" and the next single click sends the delete again without the two-click ask **[fixed on main: #527, fbde84aa]**
 - [ ] src/sheafmd/page/page.js:3033 teamBusy drops every Team-tab click (Reply, Edit, Cancel) while one write is out, not only a second send; the click does nothing and says nothing
-- [ ] src/sheafmd/page/page.js:3054 Send with an empty or whitespace-only textarea returns silently, with no message to the member
+- [x] src/sheafmd/page/page.js:3054 Send with an empty or whitespace-only textarea returns silently, with no message to the member **[fixed on main: #552, 604175f7]**
 
 ## PR #450
 
@@ -371,7 +371,7 @@
 
 - [x] src/sheafmd/hub/handler.py:271 the SHARED_MAX check (keys() then join) is not atomic: concurrent joins of new keys can pass 200 by a few **[fixed on main: #521, ee67ff2a]**
 - [ ] src/sheafmd/hub/handler.py:273 a join that lands after its shared stream closed answers 200 while Shared.join drops the Subscription silently; the tab waits for an `open` that never comes (the leader's EventSource error recovers it)
-- [ ] src/sheafmd/hub/server.py:200 a Shared replaced under the same sid (old.close()) keeps its server loop and thread alive, idle, until the peer closes: the loop never checks `sub.closed`
+- [x] src/sheafmd/hub/server.py:200 a Shared replaced under the same sid (old.close()) keeps its server loop and thread alive, idle, until the peer closes: the loop never checks `sub.closed` **[fixed on main: #550, b0fcd9a4]**
 - [x] src/sheafmd/hub/handler.py:298 `/_/live/leave` with a non-string key answers 200 without checking the stream or its owner (inconsistent with the 404 the SPEC row documents) **[fixed on main: #528, b55b2d17]**
 - [ ] src/sheafmd/page/live.js:487 every tab that wins the `sheaf-live` lock opens `/_/live?shared=` even when no page in the browser asked for a stream (a read-through page, a page whose document is gone): one idle connection
 - [x] PR #474 description (GitHub, not the repo) names a client ("Chien Vert placement sheet"); the merged files add no private names (checked every added line) **[does not hold on main 4a34dd8c, GitHub PR #474 text: About the PR description on GitHub, not a repo file; the finding itself says the merged files add no private names.]**
@@ -396,7 +396,7 @@
 
 ## PR #480
 
-- [ ] src/sheafmd/page/page.js:3980 on a legacy `- [ ] Move to <slug> (ref …)` line the hub's label is `Belongs to <slug>`, so hideWord (words `Belongs to <slug>`, `Belongs to`) finds no match and the line shows the button `Belongs to <slug>` followed by the visible text `Move to <slug> (ref …)`: the slug is said twice; cosmetic, legacy pages only. Passing the `Move to` form as a third word would hide it.
+- [x] src/sheafmd/page/page.js:3980 on a legacy `- [ ] Move to <slug> (ref …)` line the hub's label is `Belongs to <slug>`, so hideWord (words `Belongs to <slug>`, `Belongs to`) finds no match and the line shows the button `Belongs to <slug>` followed by the visible text `Move to <slug> (ref …)`: the slug is said twice; cosmetic, legacy pages only. Passing the `Move to` form as a third word would hide it. **[fixed on main: #552, 604175f7]**
 - [x] src/sheafmd/hub/the_list.py:446 a page or list loaded before the deploy sends word `Move to` with its press; tick_edit compares against `Belongs to` and returns None, so that one press is refused until the page reloads; transient across the restart only. **[does not hold on main 4a34dd8c, src/sheafmd/hub/the_list.py:443-449: Transient across the ticket 168 restart only (a page loaded before the deploy); the window has passed, no code to change.]**
 - [x] GLOSSARY.md:180 still says "the code still says Move to until ticket 168", and GLOSSARY.md:194 "a Move to is a one-off too": stale now that 168 is merged (GLOSSARY not touched by this PR). **[fixed on main: #521, ee67ff2a]**
 
@@ -440,7 +440,7 @@
 
 ## PR #487
 
-- [ ] src/sheafmd/page/page.js:2607 on the new 409 the catch path does not call off(), so the thread keeps its Tell shown as running until reload; harmless because forget_root (core.py:1008-1024) already ended every Tell and job under the forgotten root, but the page shows a stale state next to the "reload the page" error
+- [x] src/sheafmd/page/page.js:2607 on the new 409 the catch path does not call off(), so the thread keeps its Tell shown as running until reload; harmless because forget_root (core.py:1008-1024) already ended every Tell and job under the forgotten root, but the page shows a stale state next to the "reload the page" error **[fixed on main: #552, 604175f7]**
 - [x] src/sheafmd/hub/handler.py:2378 a root forgotten and re-added for the same folder gets a new id, so its old page's cancel is now refused with 409 where it was an ok before; nothing of that page is left running (forget cancelled it), so only the message changes **[does not hold on main 4a34dd8c, src/sheafmd/hub/handler.py:2386: Describes accepted behaviour (only the message changes, nothing left running); no defect to fix.]**
 
 ## PR #498

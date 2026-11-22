@@ -3,7 +3,7 @@
 12	385	c	src/sheafmd/hub/core.py:995	_render_entry calls self._refreshed(e) outside any try (live.refresh can raise on a render failure); whether render() should swallow it like the tick paths (core.py:1593,1664 via _rebuild_failed) is a behaviour decision, and the double `changed` with a settings rebuild is still there.	
 13	385	FIXED	src/sheafmd/hub/writelog.py:204	_pulling is still a set (expect_pull add, end_pull discard) and Commits._pull calls self._pulling at commits.py:674 before _repo_lock; make it a per-address count (increment/decrement) so an overlapping pull does not clear the other's window.	3
 14	385	b	src/sheafmd/hub/core.py:1718	Hub.pulled has no per-file guard, so a raise from _page_of leaves later files in _pulling; wrap each file in try/finally (or try/except calling end_pull(address, None)) and do the same in pulling().	2
-15	385	b	src/sheafmd/hub/core.py:1680	First half is FIXED (create clears expectation at mcp.py:1174, update at mcp.py:1254); second half holds: `not is_pull and not is_own` short-circuits so a pending _own entry survives a pull; evaluate is_own first, then is_pull.	4
+15	385	FIXED	src/sheafmd/hub/core.py:1680	First half is FIXED (create clears expectation at mcp.py:1174, update at mcp.py:1254); second half holds: `not is_pull and not is_own` short-circuits so a pending _own entry survives a pull; evaluate is_own first, then is_pull.	4
 19	386	FIXED	src/sheafmd/hub/loose.py:304	drop() now compares os.path.realpath(folder) with os.path.realpath(root.path).	
 20	386	b	src/sheafmd/hub/loose.py:306	drop() still runs forget_root then os.rmdir/write_json unguarded, and mcp.py:1038 calls it inside `except BaseException` so an OSError replaces the refusal; catch OSError around the drop call (or inside drop) and rmdir before forget_root.	2
 21	386	FIXED	src/sheafmd/mcp.py:987	_loose reads raw args["doc"] and tests bare before _named strips it; use doc = _named(args["doc"]) at the top of _loose.	1
@@ -39,10 +39,10 @@
 75	395	c	src/sheafmd/hub/handler.py:2414	_retarget still calls targets.restore outside _reading after start_member_tell is refused; moving it under the lock touches the lock order, so it needs a decision.	
 79	396	c	src/sheafmd/connect.py:188	entry_name still maps https://[::1]:8443 to sheaf---1-8443; renaming changes the key of existing MCP entries in users' ~/.claude.json, so it needs a decision.	
 83	397	c	src/sheafmd/send.py:359	tiroir_of still reads .sheaf.toml of the file own folder only (load_root_config documents "never from a subfolder"); using the registered root needs a decision on how a laptop finds the root.	
-84	397	b	src/sheafmd/send.py:351	keep_row is still read_state, set, write_state with no lock; take a file lock around the read-modify-write.	4
+84	397	FIXED	src/sheafmd/send.py:351	keep_row is still read_state, set, write_state with no lock; take a file lock around the read-modify-write.	4
 85	397	FIXED	src/sheafmd/send.py:423	Door.tool now checks content[0] and text, but got["doc"], got["hash"] (send.py:423,434,594) are still read unchecked from the parsed JSON; validate the result shape in tool() and raise SendError.	1
 86	397	c	src/sheafmd/send.py:386	_leave_theirs still write_text_atomic over FILE.tiroir.md with no check; whether to refuse, number it or overwrite is a decision.	
-87	397	b	src/sheafmd/send.py:631	cmd_pull hashes the local text before the door call and writes at line 631 without re-reading; re-read and compare md_hash just before write_text_atomic.	4
+87	397	FIXED	src/sheafmd/send.py:631	cmd_pull hashes the local text before the door call and writes at line 631 without re-reading; re-read and compare md_hash just before write_text_atomic.	4
 91	398	FIXED	docs/design/2026-11-07-agents-and-waiting-tells.md:16	"library-door#241" is still there (SPEC.md:969 says acme/library-door#241); replace with a resolvable reference or plain wording.	
 95	399	FIXED	src/sheafmd/send.py:103	The branch tests isinstance(reason, ssl.SSLError), so SSLEOFError and resets count as untrusted; narrow to ssl.SSLCertVerificationError and apply it to a bare SSLError from read() too.	3
 96	399	a	src/sheafmd/send.py:228	Recovery text still promises "exists already, and it is this one" but _create (send.py:418-420) answers "was not sent from this file. Rename"; reword the guidance to what the rerun prints.	
@@ -65,7 +65,7 @@
 128	404	FIXED	src/sheafmd/hub/proxy.py:475	The agency-short check accepts a short starting with . or - that visibility._BOX_RE/_NAMES_RE cannot parse; require a short matching [A-Za-z0-9_][A-Za-z0-9_.-]* in that check.	3
 129	404	a	src/sheafmd/hub/proxy.py:392	The OPTIONAL_TABLE_KEYS filtered dict is still built twice (lines 393 and 395); add a small helper.	
 133	405	c	src/sheafmd/hub/moves.py:56	_folder still refuses "" through loose.folder_path, so a page cannot move to the root top; allowing it is a product decision.	
-134	405	b	src/sheafmd/hub/state.py:275	Versions.rename (line 275) and _Store.rename (line 345) still return without touching new when old is absent; drop the stale new entry first.	4
+134	405	FIXED	src/sheafmd/hub/state.py:275	Versions.rename (line 275) and _Store.rename (line 345) still return without touching new when old is absent; drop the stale new entry first.	4
 135	405	FIXED	src/sheafmd/mcp.py:1215	self.hub.file(new).read_text is still outside any try; catch OSError/NotFound and raise a ToolError.	3
 136	405	b	src/sheafmd/hub/archive.py:263	before = os.lstat(src) is still outside the try and a FileNotFoundError is not mapped by handler.py:1574; move it inside or catch it and raise KeyError.	2
 137	405	c	src/sheafmd/hub/core.py:1018	forget_root still takes only self._lock, not moves._LOCK, so _undo can restore forgotten Forwards; lock-order change is risky.	
@@ -104,7 +104,7 @@
 197	416	c	src/sheafmd/hub/incoming.py:283	check_root still answers {"ready": True} while send_root (outgoing.py:271) counts only {"ok": True}; no caller exists for either yet, so which side changes is a decision for part 2.	
 198	416	FIXED	src/sheafmd/hub/outgoing.py:268	send_root still calls answer.get on whatever post returned (None for an empty body, or a list); guard with isinstance(answer, dict) and hold the batch as "failed".	2
 199	416	b	src/sheafmd/hub/root_moves.py:103	Moves.sent indexes row["sent"] and row["held"] (and hold row["held"] at :154) directly; use row.get(..., default) to survive an old or hand-edited row.	3
-200	416	b	src/sheafmd/hub/incoming.py:233	_root_shape still accepts an empty owner_email and duplicate paths; require a non-empty owner_email and a set of unique paths.	4
+200	416	FIXED	src/sheafmd/hub/incoming.py:233	_root_shape still accepts an empty owner_email and duplicate paths; require a non-empty owner_email and a set of unique paths.	4
 201	416	FIXED	src/sheafmd/send.py:541	report.moved_to is still printed unfiltered; require .isprintable() on moved_to in the report check at send.py:310.	5
 205	417	STALE	tests/conftest.py:325	signals.send_group (src/sheafmd/signals.py:92) takes only a Popen child that leads its own group and refuses anything else, so a group signal to a process the test did not start cannot be sent; no killpg guard is needed.	
 206	417	FIXED	tests/test_real_hub_untouched.py:86	The spin loop is replaced by wait_until_ended(done.pid), which has a deadline.	
@@ -137,7 +137,7 @@
 272	438	c	src/sheafmd/hub/repos.py:413	Every wake() takes the repo's commit lock and _use rewrites clones.json even for an awake clone; throttling last_used changes the sleep clock's accuracy, a decision.	
 273	438	c	src/sheafmd/hub/repos.py:278	sleep_moved updates an already-sleeping row under _records only, not holding(dest), as wake does (:408); taking the repo lock there changes the lock order with the sleep threads.	
 274	438	STALE	src/sheafmd/hub/core.py:380	roots.lookup matches only on realpath (roots.py:408, _find compares r.path to a realpath'd folder) and roots are stored realpath'd (roots.py:321), so root.path is already resolved when relative_to runs at core.py:383.	
-278	439	b	src/sheafmd/hub/writelog.py:277	WriteLog.drop has no caller in src/ or tests/ (git grep `drop(` finds only unrelated drops); delete it, or add a test, and fix the RETRACTED comment at :21.	4
+278	439	FIXED	src/sheafmd/hub/writelog.py:277	WriteLog.drop has no caller in src/ or tests/ (git grep `drop(` finds only unrelated drops); delete it, or add a test, and fix the RETRACTED comment at :21.	4
 279	439	b	src/sheafmd/hub/writelog.py:270	restore writes `replace(line, address=address)` to the file but keeps `deque(kept, ...)` with the old addresses in memory; build the deque from the replaced lines, as undo does at :256.	2
 280	439	c	src/sheafmd/hub/writelog.py:263	restore re-appends up to KEEP lines plus a marker per failed landing; bounded by rotation and lossless, so any change (diffing the lines) is a design decision.	
 284	440	FIXED	src/sheafmd/connect.py:134-153	use_peer_file now wraps mkdir/os.open/replace in `except OSError` and raises ConnectError("cannot keep the token in ... nothing was written").	
@@ -156,11 +156,11 @@
 312	445	c	tests/public_tree.py:128	The guard's own files skip every address of every ALLOW entry (`key in {k for _, k in allow}`), documented as intended; narrowing it to one entry per file is a policy change.	
 316	446	c	src/sheafmd/page/mount.js:452	For a list/Sheaf page, create() runs before the stylesheet wait and `page` stays assigned when stale() returns at :454; unmounting it there changes the mount lifecycle shared by the overtaking draw, needs a decision.	
 317	446	FIXED	tests/page/test_mount_sheaf.py:418	Comment cites a specific test by name (test_rename_folder_onto_a_taken_name...) and `9 of 240 runs`; reword without the test name so a rename cannot stale it.	
-321	448	b	src/sheafmd/hub/repos.py:288-289 (also 329-330, 741-742)	Still unguarded on main: wrap t.start() so a failure discards the thread from _threads and the repo from _queues, then re-raises.	4
+321	448	FIXED	src/sheafmd/hub/repos.py:288-289 (also 329-330, 741-742)	Still unguarded on main: wrap t.start() so a failure discards the thread from _threads and the repo from _queues, then re-raises.	4
 322	448	c	tests/test_clone_sleep.py:137	Still rests on helper[0].join(0.5); making the red/green signal deterministic needs a different test design (e.g. an event the patched start waits on).	
 326	449	FIXED	src/sheafmd/page/page.js:3108	catch path in teamAct never sets teamAsk = null (only the success path at 3105 does); reset it in the catch.	2
 327	449	c	src/sheafmd/page/page.js:3082	`if (teamBusy) return;` still drops every Team-tab click silently; whether to say something or queue is a UX decision.	
-328	449	b	src/sheafmd/page/page.js:3096	`if (!text) return;` still silent; add a say(...) line (wording is the only choice).	4
+328	449	FIXED	src/sheafmd/page/page.js:3096	`if (!text) return;` still silent; add a say(...) line (wording is the only choice).	4
 332	450	c	tests/page/pagehelp.py:557-562	LEAVING_JS still clears __leaving when defaultPrevented/returnValue is set, and page.js:4190 does set both on unload with unsaved edits; fix needs a browser run to settle.	
 333	450	c	tests/page/conftest.py:183	tab fixture still ends in landed() -> settled() which waits for #rd-menu-btn; no current test leaves for a non-sheaf page, so a hypothetical; changing it needs browser tests.	
 334	450	c	tests/page/pagehelp.py:597-602	landed()/settled() still see only a reload that has begun; acknowledged follow-up needing a browser-side design.	
@@ -182,7 +182,7 @@
 368	473	FIXED	src/sheafmd/edit.py:362	EMOJI_ATTR_RE still matches any <span>; narrow the comment (and the one at 825) to say it strips data-emoji from any span.	
 372	474	FIXED	src/sheafmd/hub/handler.py:914	keys() then join still not atomic; the cap is soft by a few: say so in a comment next to SHARED_MAX (line 882).	
 373	474	c	src/sheafmd/hub/handler.py:915 and src/sheafmd/hub/events.py:143-146	Shared.join still drops a sub silently when closed and _live_join answers 200; telling the page needs a protocol choice.	
-374	474	b	src/sheafmd/hub/server.py:200-236	The _stream loop still never checks sub.closed, so a replaced Shared (old.close()) idles until the peer closes; return when the subscription is closed.	4
+374	474	FIXED	src/sheafmd/hub/server.py:200-236	The _stream loop still never checks sub.closed, so a replaced Shared (old.close()) idles until the peer closes; return when the subscription is closed.	4
 375	474	FIXED	src/sheafmd/hub/handler.py:940-943	_live_leave still calls _shared_of only when key is a string, so a non-string key answers 200; call _shared_of first.	2
 376	474	c	src/sheafmd/page/live.js:221	Every lock winner still opens the shared stream (lock() at 219-229) regardless of any page asking; lazy-open is a design change.	
 377	474	STALE	GitHub PR #474 text	About the PR description on GitHub, not a repo file; the finding itself says the merged files add no private names.	
@@ -192,7 +192,7 @@
 390	477	c	src/sheafmd/hub/the_list.py:368-373	check still requires _render_source of the block but box_number None (flipped render fails) drops the action; falling back to line reading changes what counts as an action and the save guard, so it needs a decision.	
 391	477	STALE	src/sheafmd/hub/the_list.py:368	Describes a one-time render cost per new text (cached by (content, at)); an observation, no defect to fix.	
 395	479	b	src/sheafmd/edit.py:781	→ 137 item 4. _EMOJI_TOKEN is still replaced by `:name:` regardless of table depth, so a raw-HTML table saves <th>:+1:</th>; inside <table depth substitute the emoji glyph (as the pipe/slash loop at 768-776 does).	-
-399	480	b	src/sheafmd/page/page.js:4038	inlineButton words are still [label, a.word] where _word (the_list.py:397) maps legacy "Move to" to "Belongs to"; pass "Move to" as a third word.	4
+399	480	FIXED	src/sheafmd/page/page.js:4038	inlineButton words are still [label, a.word] where _word (the_list.py:397) maps legacy "Move to" to "Belongs to"; pass "Move to" as a third word.	4
 400	480	STALE	src/sheafmd/hub/the_list.py:443-449	Transient across the ticket 168 restart only (a page loaded before the deploy); the window has passed, no code to change.	
 401	480	FIXED	GLOSSARY.md:180,194	Code now says Belongs to (the_list.py:65, MOVE_OLD only a legacy read at :66), so drop 'until ticket 168' and reword 'a Move to is a one-off too' to Belongs to.	
 405	481	FIXED	src/sheafmd/edit.py:161	_styled_marks has no heading check (parents test only em/strong); skip when span has an h1-h6 parent.	3
@@ -215,7 +215,7 @@
 437	486	c	SPEC.md:945,1678	Spec still silent on generated.by/id for a key caller (feature is spec-only, no code in src/); needs a rule chosen.	
 438	486	FIXED	SPEC.md:945	One sentence still missing that the local stdio door holds the key (SPEC.md:51, :851), so any local agent can act as setter.	
 439	486	c	SPEC.md:684	POST /_/share row still silent for a generated page and handler.py:1429 has no generated check; whether Share is refused is a decision.	
-443	487	b	src/sheafmd/page/page.js:2643	cancel() catch (:2656-2663) calls off() only for e.late, so a 409 leaves the Tell shown running; also call off() when the refusal is the root-changed 409.	4
+443	487	FIXED	src/sheafmd/page/page.js:2643	cancel() catch (:2656-2663) calls off() only for e.late, so a 409 leaves the Tell shown running; also call off() when the refusal is the root-changed 409.	4
 444	487	STALE	src/sheafmd/hub/handler.py:2386	Describes accepted behaviour (only the message changes, nothing left running); no defect to fix.	
 448	498	FIXED	tests/page/pagehelp.py:32	rewrite() still calls write_text_atomic with mode None (atomic.py:23-26); add a docstring line that the file takes the umask default mode.	
 449	498	FIXED	tests/page/pagehelp.py:32	write_text_atomic still mkdirs the parent (atomic.py:16); add a docstring line that a missing folder is created.	

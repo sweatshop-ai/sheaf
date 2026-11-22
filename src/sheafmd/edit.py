@@ -856,14 +856,15 @@ def _bare_urls_as_words(fragment: str):
     return (str(soup), put) if put else (fragment, {})
 
 
-# An address pandoc writes as `<address>` when it is also the link's text: a scheme it knows. A relative address, and
-# `mailto:` or a scheme it does not know, it writes as `[text](address)`, where a lone `)` ends the address.
+# An address pandoc writes as `<address>` when it is also the link's text (probed with pandoc 3.7). A relative address
+# and `mailto:` it writes as `[text](address)`, where a lone `)` ends the address. The list is the probed schemes, not
+# pandoc's whole one: an address outside it goes as a word, which is right whichever way pandoc would write it.
 _PANDOC_AUTOLINK = re.compile(r"(?:https?|ftp|file)://", re.I)
 
 
-def _dropped_hrefs(fragment: str, source) -> str:
-    """The fragment with the address back on each link of the source the sanitiser took it from (an `ftp:` one, a
-    scheme outside SPEC 9.5's list). The page shows such a link as its text, and sends it as an `<a>` with no address;
+def _restore_dropped_hrefs(fragment: str, source) -> str:
+    """The fragment with the address back on each link of the source the sanitiser took it from: any scheme outside
+    SPEC 9.5's list (`ftp:`, also `javascript:`), so only an address the source already held, never a new one. The page shows such a link as its text, and sends it as an `<a>` with no address;
     the .md keeps the address the source wrote, as it keeps a raw tag. The k-th `<a>` of a text with no address is
     the k-th such link of the source with that text; one the source did not have gets none."""
     from bs4 import BeautifulSoup
@@ -923,7 +924,8 @@ _BARE_URL_PAREN = re.compile(r"https?://[^|\s<>]*\)")
 
 def _gfm_domain(url: str) -> bool:
     """Whether GFM takes the domain of the bare `url` for one: at least one period, and no underscore in its last two
-    labels. GFM's domain ends at the first character other than a letter, a digit, `_`, `-` or `.`."""
+    labels. GFM's domain ends at the first character other than a letter, a digit, `_`, `-` or `.`. `url` holds
+    `://`, as every match of `_BARE_URL` does."""
     labels = re.match(r"[^:]*://([A-Za-z0-9_.-]*)", url).group(1).split(".")
     return len(labels) > 1 and "_" not in "".join(labels[-2:])
 
@@ -1077,7 +1079,7 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     # of its own would show. Task boxes and comments survive it; a paragraph typed as
     # `- [ ] words` becomes a task item (`_typed_tasks`).
     clean = _boxes_as_text(_typed_tasks(sanitize(_sanitize(fragment, source, strays))))
-    clean = _dropped_hrefs(clean, source)
+    clean = _restore_dropped_hrefs(clean, source)
     # The backslashes go first: `_without_placeholder_breaks` and `_cell_breaks` each decide whether the table is
     # one `_cell_breaks` takes, by a backslash in the fragment, and must see the same one. A bare URL is taken before
     # them, so that its backslashes stay the URL's.
@@ -1090,6 +1092,8 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     clean, pipe = _cell_code_pipes(clean)
     cells, token = _cell_breaks(clean)
     cells, hrefs = _hrefs_as_words(cells)
+    # After the words: a URL or href word is one more reason for the raw-table depth count below, which a title's
+    # `<table` must not move.
     code_lt = False
     if pipe is not None or slash is not None or emoji or literal or urls or hrefs:
         cells, code_lt = _code_table_tags(cells)

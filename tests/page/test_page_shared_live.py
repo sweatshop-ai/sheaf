@@ -118,11 +118,12 @@ def test_a_join_refused_for_another_owner_reopens_the_shared_stream(shared, site
     the hub answers 404 `no such stream` to the second's joins until the connection ends (up to 300 s). The leader
     opens its connection again, which belongs to whoever asks now. Stood in for here: three tabs are open on the
     first connection, which then answers every join 404 as the hub does for another owner, and all three join at once."""
-    seen, stale = [], []
+    seen, stale, at = [], [], []
 
     def refuse(route):
         sid = route.request.post_data_json["stream"]
         seen.append(sid)
+        at.append(time.monotonic())
         if sid in stale:
             route.fulfill(status=404, content_type="application/json",
                           body='{"ok": false, "error": "no such stream"}')
@@ -135,8 +136,10 @@ def test_a_join_refused_for_another_owner_reopens_the_shared_stream(shared, site
     for p, _ in pages:
         p.evaluate("window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}))")
     until(lambda: seen[-1] not in stale and site.hub.tabs(DOC) == 3, what="the three tabs counted on the reopened stream")
-    time.sleep(3.5)              # a tab told its join was refused asks again after 2 s: each joins once, not twice
-    assert len([sid for sid in seen if sid not in stale]) == 3
+    time.sleep(3.5)              # a tab told its join was refused asks again after 2 s: no join comes that late
+    # A tab whose pageshow join reaches the leader after the new connection opened joins twice at once; harmless.
+    fresh = [t for sid, t in zip(seen, at) if sid not in stale]
+    assert len(fresh) >= 3 and fresh[-1] - fresh[0] < 1.5, "a refused tab joined again after the retry"
     f = site.file
     rewrite(f, f.read_text(encoding="utf-8") + "\nOn the new stream.\n")
     for n, (p, errors) in enumerate(pages, 1):
@@ -170,3 +173,36 @@ def test_a_page_restored_from_the_back_forward_cache_joins_the_stream_again(shar
     f = site.file
     rewrite(f, f.read_text(encoding="utf-8") + "\nAfter the restore.\n")
     until(lambda: shows(second, "After the restore."), what="the change in the restored tab")
+
+
+def test_a_join_refused_again_just_after_a_reopen_opens_once_more_and_closes_no_stream(shared, site):
+    """A reopened connection whose joins are refused too (a second rollover or member switch within 2 s) must not
+    close the tab's streams for good: the leader opens once more when its 2 s are up, and the streams join that."""
+    order, refuse = [], set()
+
+    def route(r):
+        sid = r.request.post_data_json["stream"]
+        if sid not in order:
+            order.append(sid)
+            if refuse and len(refuse) < 2:
+                refuse.add(sid)          # the first connection opened after the trigger is refused too
+        if sid in refuse:
+            r.fulfill(status=404, content_type="application/json", body='{"ok": false, "error": "no such stream"}')
+        else:
+            r.continue_()
+    shared.route("**/_/live/join", route)
+    p, errors = opened(shared, site)
+    until(lambda: site.hub.tabs(DOC) == 1, what="one tab counted")
+    p.evaluate("""() => { window.__st = []; var s = window.__probe = SheafLive.source(%r);
+                          s.onerror = function () { window.__st.push(s.readyState); }; }""" % DOC)
+    until(lambda: p.evaluate("window.__probe.readyState") == 1, what="the probe stream open")
+    refuse.add(order[-1])
+    p.evaluate("window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}))")
+    until(lambda: len(order) >= 3, timeout=10, what="a third connection, opened once the 2 s were up")
+    until(lambda: p.evaluate("window.__probe.readyState") == 1, timeout=10, what="the probe stream open again")
+    assert 2 not in p.evaluate("window.__st"), "a stream was closed for good"
+    assert len(refuse) == 2
+    f = site.file
+    rewrite(f, f.read_text(encoding="utf-8") + "\nOn the third connection.\n")
+    until(lambda: shows(p, "On the third connection."), what="the change on the page")
+    assert errors == []

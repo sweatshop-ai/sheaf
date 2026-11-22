@@ -141,6 +141,7 @@
     this.sid = rnd();
     this.sent = {};            // key -> the last post for it, which the next one waits for
     this.reopened = 0;         // when the connection was last opened again for a join the hub refused
+    this.again = null;         // the reopen waiting for RETRY after a join refused just after the last one
     this.watch = {};           // tab -> the abort of its queued request for its lock, which is granted when the tab dies
     this.es = null;
     this.open = false;
@@ -151,6 +152,8 @@
   // This tab stops being the leader: its stream and its sweep end, and the tabs' joins on it go with them.
   Leader.prototype.stop = function () {
     clearInterval(this.timer);
+    clearTimeout(this.again);
+    this.again = null;
     if (this.es) { this.es.onerror = null; this.es.close(); this.es = null; }
     this.open = false;
     this.joined = {};          // a join still on the way must not refuse a stream on the next leader
@@ -199,7 +202,12 @@
             // The others of the same refused batch come back after the first reopened: their keys joined the new
             // connection already, so a refusal of the old one is no news.
             if (sid !== self.sid) return;
-            if (Date.now() - self.reopened > RETRY) { self.reopen(); return; }
+            var since = Date.now() - self.reopened;
+            if (since > RETRY) { self.reopen(); return; }
+            // Refused again just after a reopen (another rollover or member switch): open once more when RETRY is up.
+            // No loop and no stream closed for good: the tabs' streams wait for that connection.
+            if (!self.again) self.again = setTimeout(function () { self.again = null; if (self.es) self.reopen(); }, RETRY - since);
+            return;
           }
           // A join the hub would not take (signed out, the connection gone, no answer) is that tab's stream refused.
           if (what === 'join' && (status < 200 || status > 299) && self.joined[key] === j) {
@@ -213,6 +221,8 @@
     p.then(function () { if (self.sent[key] === p) delete self.sent[key]; });
   };
   Leader.prototype.reopen = function () {
+    clearTimeout(this.again);
+    this.again = null;
     this.reopened = Date.now();
     this.es.onerror = null;
     this.es.close();

@@ -414,11 +414,27 @@ class Repos:
                 return False
             with self._records:
                 row = self._usage().get(repo)
-            self._use(repo)
             if not (isinstance(row, dict) and (row.get("sleeping") is True or row.get("restore"))):
+                self._use(repo)
                 return True                         # nothing is out: no token is asked for
-            token = self.provider.token(repo)
-            return self._restore(repo, dest, token)
+            # Awake before the widen: `sleep_moved` marks a clone that reads as asleep as moved without its lock, and would
+            # leave the folders this widen brings back. A failed widen puts the flag back: the folders are still out.
+            self._use(repo)
+            woken = False
+            try:
+                woken = self._restore(repo, dest, self.provider.token(repo))
+            finally:
+                if not woken:
+                    self._asleep_again(repo)
+            return woken
+
+    def _asleep_again(self, repo: str):
+        """A widen that did not happen: the row reads asleep again, as its folders are still out."""
+        with self._records:
+            data = self._usage()
+            if isinstance(data.get(repo), dict):
+                data[repo] = {**data[repo], "sleeping": True}
+                write_text_atomic(self._usage_file, json.dumps(data, indent=1, sort_keys=True) + "\n")
 
     def page_text(self, repo: str, path: str, commit: str) -> str | None:
         """The text of the page `path` at `commit`, read from git and not from the work tree, so a sleeping clone's pages open

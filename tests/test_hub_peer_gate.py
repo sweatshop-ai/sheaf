@@ -124,29 +124,46 @@ def test_a_used_link_carries_the_limit_notice_when_the_check_is_off_at_start_up(
 
 def test_a_caller_that_closed_before_the_hub_could_say_is_told_to_try_again_and_nothing_is_applied(handler, hub):
     before = len(hub.auth.signins) if hasattr(hub.auth, "signins") else None
-    r = ask(handler, hub, "POST", "/_/signin", seen(0 if ME else THEM, closed=True), "key", body=b"{}")
+    # A suite run as root cannot make a uid-0 caller that is not its own: there the hub could not tell.
+    closed_caller = seen(0, closed=True) if ME else seen(kind=peer.UNKNOWN, closed=True)
+    r = ask(handler, hub, "POST", "/_/signin", closed_caller, "key", body=b"{}")
     assert r.status == 503 and r.headers["Retry-After"] == "1" and "Set-Cookie" not in r.headers
     assert not hub_rows("peer-refused")
     if before is not None:
         assert len(hub.auth.signins) == before
 
 
-def test_a_caller_already_closed_when_the_hub_looks_is_never_let_through_where_the_hub_runs_as_root(monkeypatch):
-    # A closed caller's socket reads as uid 0; where the hub is root too, that reads as the hub's own user.
-    monkeypatch.setattr(os, "geteuid", lambda: 0)
-    monkeypatch.setattr(peer, "check", lambda conn: None)
+@pytest.mark.parametrize("hub_uid", [0, 1000])
+def test_a_caller_already_closed_when_the_hub_looks_is_never_let_through(monkeypatch, hub_uid):
+    # A closed caller's socket is held by no process (inode 0) and reads as uid 0 over sock_diag; where
+    # the hub is root, that uid is the hub's own, so the inode decides, not the uid.
+    monkeypatch.setattr(os, "geteuid", lambda: hub_uid)
+    monkeypatch.setattr(peer, "PLATFORM", "linux")
+    monkeypatch.setattr(peer, "sockets", lambda conn: [peer.Socket(0, 0)])
     monkeypatch.setattr(peer, "closed", lambda sock: True)
     conn = peer.look(CLIENT, AT_HUB, object())
-    assert conn.refusal is not None and conn.closed()
+    assert conn.refusal is not None and conn.refusal.kind == peer.UNKNOWN and conn.closed()
 
 
-def test_a_caller_of_the_hubs_own_user_that_half_closes_is_not_turned_away(monkeypatch):
+@pytest.mark.parametrize("hub_uid", [0, 1000])
+def test_a_caller_of_the_hubs_own_user_that_half_closes_is_not_turned_away(monkeypatch, hub_uid):
     # `nc -N` and some HTTP clients close their sending end after the request: the hub's socket leaves
-    # ESTABLISHED, and the caller's own socket still reads as its owner.
-    monkeypatch.setattr(os, "geteuid", lambda: 1000)
-    monkeypatch.setattr(peer, "check", lambda conn: None)
+    # ESTABLISHED, and the caller's own socket is still held by its owner, root included.
+    monkeypatch.setattr(os, "geteuid", lambda: hub_uid)
+    monkeypatch.setattr(peer, "PLATFORM", "linux")
+    monkeypatch.setattr(peer, "sockets", lambda conn: [peer.Socket(hub_uid, 4242)])
     monkeypatch.setattr(peer, "closed", lambda sock: True)
     assert peer.look(CLIENT, AT_HUB, object()).refusal is None
+
+
+def test_a_refusal_of_one_kind_does_not_hold_back_the_row_of_the_other(handler, hub):
+    # The rows are throttled to one a minute for each kind: an unknown caller first does not hide,
+    # for a minute, the row that names another user's uid.
+    assert ask(handler, hub, "GET", "/_/index.json", seen(kind=peer.UNKNOWN), "key").status == 403
+    assert ask(handler, hub, "GET", "/_/index.json", seen(THEM), "key").status == 403
+    assert ask(handler, hub, "GET", "/_/index.json", seen(THEM + 1), "key").status == 403
+    rows = hub_rows("peer-refused")
+    assert len(rows) == 2 and [r.get("peer_uid") for r in rows] == [None, THEM]
 
 
 def test_another_user_that_sends_and_closes_is_still_refused_and_leaves_its_row(handler, hub):

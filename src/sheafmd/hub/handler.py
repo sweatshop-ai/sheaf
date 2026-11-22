@@ -290,7 +290,7 @@ class Handler:
         self.hub = hub
         self.peer_check = peer_check
         self.peer_off: str | None = None    # why the hub does not check who owns a connection (`peer.startup`), once it knows
-        self._peer_row_at = float("-inf")   # when `peer-refused` was last written
+        self._peer_row_times = {}           # when `peer-refused` was last written, for each kind of refusal
         self._peer_row_lock = threading.Lock()
         self.door = Door(hub)
         self._titles = sheaf_view.Titles()
@@ -814,10 +814,11 @@ class Handler:
         other = no.kind == peer.OTHER_USER
         row = "peer-refused"
         with self._peer_row_lock:        # threads refused together write one row, not one each
-            if time.monotonic() - self._peer_row_at < PEER_ROW_SECONDS:
+            # One row a minute for each kind, so an unknown caller hides no other user's uid.
+            if time.monotonic() - self._peer_row_times.get(no.kind, float("-inf")) < PEER_ROW_SECONDS:
                 row = False              # not written: a loop of refused requests is one row a minute
             else:
-                self._peer_row_at = time.monotonic()
+                self._peer_row_times[no.kind] = time.monotonic()
         detail = no.detail
         if other:
             detail = f"a request from another user of this machine (uid {no.uid}); the hub runs as uid {mine}"

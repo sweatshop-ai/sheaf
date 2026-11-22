@@ -8,6 +8,7 @@ import os
 import socket
 import struct
 import sys
+import time
 
 import pytest
 
@@ -108,10 +109,42 @@ def test_a_kernel_that_finds_nothing_over_netlink_is_asked_again_in_proc(ends, m
     assert peer.owners(conn_of(cli)) == [ME]
 
 
+def wait_closed(acc):
+    for _ in range(200):
+        if peer.closed(acc):
+            return
+        time.sleep(0.01)
+
+
+@linux
+@pytest.mark.parametrize("netlink", [True, False])
+def test_a_caller_that_closed_its_socket_is_held_by_no_one_and_is_not_let_through(ends, monkeypatch, netlink):
+    monkeypatch.setattr(peer, "NETLINK", netlink)
+    cli, acc = pair()
+    ends.append(acc)
+    c = conn_of(cli)
+    cli.close()
+    wait_closed(acc)
+    found = peer.sockets(c)
+    assert found and all(inode == 0 for _, inode in found)
+    no = peer.check(c)
+    assert no is not None and no.kind == peer.UNKNOWN
+
+
+@linux
+def test_a_caller_that_only_half_closed_is_still_its_owners(ends):
+    cli, acc = pair()
+    ends += [cli, acc]
+    cli.shutdown(socket.SHUT_WR)
+    wait_closed(acc)
+    assert [uid for uid, inode in peer.sockets(conn_of(cli)) if inode] == [ME]
+    assert peer.check(conn_of(cli)) is None
+
+
 @pytest.mark.skipif(ME == 0, reason="root is the hub's own user here")
 def test_root_is_not_the_hubs_own_user(monkeypatch):
     monkeypatch.setattr(peer, "PLATFORM", "linux")
-    monkeypatch.setattr(peer, "owners", lambda conn: [0])
+    monkeypatch.setattr(peer, "sockets", lambda conn: [peer.Socket(0, 4242)])
     no = peer.check(peer.Conn(("127.0.0.1", 50000), ("127.0.0.1", 27419)))
     assert no is not None and no.kind == peer.OTHER_USER
 

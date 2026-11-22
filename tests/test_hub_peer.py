@@ -34,9 +34,10 @@ def hex_addr(ip, port):
     return "".join(f"{w:08X}" for w in words) + f":{port:04X}"
 
 
-def row(local, remote, uid, state="01"):
+def row(local, remote, uid, state="01", inode=12345):
+    """A row of /proc/net/tcp*. Inode 0: no process holds the socket any more (its owner closed it)."""
     return (f"   0: {hex_addr(*local)} {hex_addr(*remote)} {state} 00000000:00000000 00:00000000 "
-            f"00000000 {uid:5d}        0 12345 1 0000000000000000 20 4 30 10 -1")
+            f"00000000 {uid:5d}        0 {inode} 1 0000000000000000 20 4 30 10 -1")
 
 
 class FakeProcNet:
@@ -310,6 +311,35 @@ def test_a_connection_the_server_did_not_look_at_is_not_judged_by_a_key_or_a_coo
     r = handler.handle("GET", f"/_/open?key={hub.auth.key}&next=/work/plan.md",
                        {"Host": f"127.0.0.1:{hub.port}"}, conn=conn())
     assert r.status == 303 and "Set-Cookie" in r.headers
+
+
+# ── a caller that closed before the hub looked ───────────────────────────────
+
+def test_a_caller_of_the_hubs_own_user_that_closed_is_not_taken_for_the_hubs_user(proc):
+    # A socket no process holds (inode 0) is not the caller's any more: who sent the request is not known.
+    proc.write(v4=[row(CLIENT, HUB, ME, state="04", inode=0)])
+    no = peer.check(conn())
+    assert no is not None and no.kind == peer.UNKNOWN and no.uid is None
+
+
+def test_another_user_that_closed_is_refused_by_the_uid_the_kernel_kept(proc):
+    proc.write(v4=[row(CLIENT, HUB, THEM, state="04", inode=0)])
+    no = peer.check(conn())
+    assert no is not None and no.kind == peer.OTHER_USER and no.uid == THEM
+
+
+def test_a_root_hub_lets_a_root_caller_that_only_half_closed_in(proc, monkeypatch):
+    # `nc -N` as root: the caller's socket is still held, by root, the hub's own user.
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    proc.write(v4=[row(CLIENT, HUB, 0, state="04")])
+    assert peer.check(conn()) is None
+
+
+def test_a_root_hub_does_not_take_a_socket_no_one_holds_for_its_own(proc, monkeypatch):
+    monkeypatch.setattr(os, "geteuid", lambda: 0)
+    proc.write(v4=[row(CLIENT, HUB, 0, state="04", inode=0)])
+    no = peer.check(conn())
+    assert no is not None and no.kind == peer.UNKNOWN
 
 
 # ── a platform with no /proc/net ─────────────────────────────────────────────

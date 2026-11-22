@@ -2,7 +2,7 @@
 
 **Claimed by:** Bashir 2026-11-22
 
-**Status:** in-progress. Part 1 merged (PR 574, 192b3c7d); part 2 (refactors, macOS test override) in progress; open: peer-check items with 139, the self-test case, the optional security read, refactors, macOS tests, names (155).
+**Status:** in-progress. Part 1 merged (PR 574, 192b3c7d); part 2a merged (PR 575, b3209c2e); part 2b (service per-platform object, verb enum) is PR 577; open: peer-check items with 139, the self-test case, the optional security read, the service box, macOS tests (not run on macOS), names (155).
 
 **Blocked by:** none
 
@@ -36,15 +36,15 @@
 
 ## Refactors left on purpose
 
-- [ ] `cli.cmd_stop` (`src/sheafmd/cli.py:383-420`) duplicates `hubclient.stop_and_wait` (`src/sheafmd/hub/client.py:381`): add characterization tests for its two messages, switch it over, delete `cli._ended` (`cli.py:378`).
-- [ ] `src/sheafmd/lifecycle.py:23-41` copies `EXIT_*`, `_out`, `_err`, `_parser`, `_hub_failure` from `cli.py`.
+- [x] `cli.cmd_stop` (`src/sheafmd/cli.py:383-420`) duplicates `hubclient.stop_and_wait` (`src/sheafmd/hub/client.py:381`): add characterization tests for its two messages, switch it over, delete `cli._ended` (`cli.py:378`). *(PR 575, merged as b3209c2e: `sheaf stop` goes through `hubclient.ask_stop` + `wait_stopped`, `_ended` deleted. Characterization tests `test_a_stop_the_hub_refuses_says_so_with_the_hubs_reason_and_leaves_it_running` and `test_a_hub_still_running_when_the_stop_wait_runs_out_is_an_error_that_says_how_long` passed on the old code and after. Declared difference, a race only: a hub process gone while another hub answers counts as stopped, the rule `stop_and_explain` used.)*
+- [x] `src/sheafmd/lifecycle.py:23-41` copies `EXIT_*`, `_out`, `_err`, `_parser`, `_hub_failure` from `cli.py`. *(PR 575, merged as b3209c2e: defined once in `src/sheafmd/cmdline.py`, imported by both.)*
 - [ ] `service.kind() == "systemd"` is decided five times in `src/sheafmd/hub/service.py` (`:194`, `:202`, `:231`, `:301`, `:315`) and the "user service is for Linux and macOS" sentence is written twice (`:244`, `:295`): a per-platform object.
-- [ ] `(c, got)` travel together through `stop_and_wait`, `_meet_version`, `via_service`, `cmd_restart`, `cmd_rotate`; `via_service` and `service.control` take bare verb strings.
-- [ ] `run_hub`/`wait_alive` exist twice: `tests/test_cli_hub.py:437-442` and `tests/test_hub_lifecycle.py:22-35`.
+- [x] `(c, got)` travel together through `stop_and_wait`, `_meet_version`, `via_service`, `cmd_restart`, `cmd_rotate`; `via_service` and `service.control` take bare verb strings. *(PR 575, merged as b3209c2e: `hubclient.Met(client, got)`, whose `call` pins the boot, through `stop_and_wait`, `_meet_version`, `via_service`, `cmd_restart`, `cmd_rotate`, `_make_room`. Verb strings: PR 577 (`service.Verb`), open.)*
+- [x] `run_hub`/`wait_alive` exist twice: `tests/test_cli_hub.py:437-442` and `tests/test_hub_lifecycle.py:22-35`. *(PR 575, merged as b3209c2e: once, in `tests/helpers.py`, the stricter `wait_alive`.)*
 
 ## macOS tests
 
-- [ ] Hub tests that set `XDG_RUNTIME_DIR` share the real `/tmp/sheaf-<uid>` on macOS, because `paths.runtime_dir` (`src/sheafmd/paths.py:71-77`) ignores it on darwin by design; add a test-only short-path override. The restart tests of `tests/test_service.py` with the fake `systemctl` have never passed on macOS (no green macOS run on main, see tickets 96 and 101).
+- [ ] Hub tests that set `XDG_RUNTIME_DIR` share the real `/tmp/sheaf-<uid>` on macOS, because `paths.runtime_dir` (`src/sheafmd/paths.py:71-77`) ignores it on darwin by design; add a test-only short-path override. The restart tests of `tests/test_service.py` with the fake `systemctl` have never passed on macOS (no green macOS run on main, see tickets 96 and 101). *(PR 575, merged as b3209c2e adds `SHEAF_TEST_RUNTIME_DIR`, set by `tests/conftest.py`, which wins on every platform; red first: `test_a_test_runtime_folder_wins_on_every_platform_so_tests_on_macos_share_no_socket` failed on linux and darwin. Left open: the override has not run on macOS; it runs only through ticket 101's worker.)*
 
 ## Lint and names
 

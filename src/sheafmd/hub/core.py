@@ -1735,7 +1735,9 @@ class Hub:
             except Exception:       # one file the hub cannot name leaves the others' pull as it is
                 self.record_exception("pull-page-failed")
                 continue
-            if address in self.entries:
+            # Every page the pull names, open or not: `pulled` ends one for each, and an end with no start of its own
+            # would close the window of another pull of the same page, one that began after the page opened.
+            if address is not None:
                 self.writes.expect_pull(address)
 
     def pulled(self, folder: Path, files: list[tuple[Path, str]], ok: bool, left: dict | None = None):

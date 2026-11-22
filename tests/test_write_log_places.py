@@ -140,3 +140,16 @@ def test_a_file_the_hub_cannot_name_does_not_keep_the_pull_of_the_files_after_it
     world.hub.pulled(path.parent, files, True)
     assert not world.hub.writes.is_pull(world.address, "any")
     assert [l.via for l in world.hub.writes.lines(world.address)] == ["pull"]
+
+
+def test_a_pull_that_began_before_the_page_opened_does_not_close_the_window_of_a_later_pull(world):
+    world.put(OPEN)
+    path = world.two.private_repo / NAME
+    files = [(path, "Ada")]
+    world.hub.pulling(path.parent, files)           # the page is not open yet
+    world.hub.entry(world.address)
+    world.hub.pulling(path.parent, files)           # a second pull, with the page open
+    world.hub.pulled(path.parent, files, True)      # the first ends
+    assert world.hub.writes.is_pull(world.address, "any")      # the second is still under way
+    world.hub.pulled(path.parent, files, True)
+    assert not world.hub.writes.is_pull(world.address, "any")

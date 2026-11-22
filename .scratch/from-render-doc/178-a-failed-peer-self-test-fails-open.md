@@ -4,6 +4,8 @@
 
 **Status:** done (PR #585, merge 1f9d9ef6 on main, head 1e86c1e9; CI ubuntu-24.04 py3.13 success; Codex GO round 2)
 
+**Blocked by:** none
+
 **From:** ticket 99 line 22, the second-opinion security read of the nonce peer check (Codex, 2026-11-22), finding [P1]
 
 **Where:** `src/sheafmd/hub/peer.py` `selftest` (the `except (OSError, ValueError, TypeError)` around the loopback pair) and `startup`; `src/sheafmd/hub/server.py` (`off = peer.startup()` sets `peer_off`; `peer.look` is skipped while it is set); `src/sheafmd/hub/handler.py` `_owner` (`if self.peer_off: return None`)

@@ -4,6 +4,8 @@
 
 **Status:** in-progress: boxes 1 to 3 in PRs #586 and #587, not merged yet; box 4 is the owner's
 
+**Blocked by:** none
+
 **From:** ticket 99 line 52 and the three Codex rounds of PR #580 (closed unmerged), 2026-11-22
 
 **Where:** 57 tracked files under `.scratch/` (38 in `chat-box/`, 11 in `from-render-doc/`, 8 in `follow-ups/`); 5 comments or docstrings in `tests/page/` (`pagehelp.py`, `test_mount_allowlist.py`, `test_mount_selection.py`, `test_mount_sheaf.py`, `test_page_dictation.py`); 3 sentences of `SPEC.md` (the `[transcribe]` paragraph and the key paragraph of 8.5); the guard regex of `tests/test_ci_workflow.py` (`test_an_ubuntu_job_of_this_repository_runs_on_…`); the `SHEAF_PUBLIC_TREE_TERMS` secret, which does not hold the name.

@@ -132,6 +132,18 @@ def test_a_used_link_carries_the_limit_notice_when_the_check_is_off_at_start_up(
     assert r.status == 401 and LINK_LIMIT in r.body.decode()
 
 
+@pytest.mark.parametrize("off", [None, "the owner of a loopback connection read as [], not the hub's own uid"])
+def test_sheaf_open_hears_whether_the_hub_checks_and_health_says_it_to_no_one(handler, hub, work, monkeypatch, off):
+    """`peer_check` rides on the answers only the key gets (`/_/render`, `/_/signin`), so `sheaf open` can
+    warn when the check is off (ticket 99); `/_/health`, which another user may read, does not say it."""
+    monkeypatch.setattr(peer, "PLATFORM", "linux")
+    handler.peer_off = off
+    body = ('{"path": "%s"}' % (work / "plan.md")).encode()
+    assert ask(handler, hub, "POST", "/_/render", seen(ME), body=body).json()["peer_check"] is (off is None)
+    assert ask(handler, hub, "POST", "/_/signin", seen(ME)).json()["peer_check"] is (off is None)
+    assert "peer_check" not in ask(handler, hub, "GET", "/_/health", seen(), how=None).json()
+
+
 # ── a caller that closed first ───────────────────────────────────────────────
 
 def test_a_caller_that_closed_before_the_hub_could_say_is_told_to_try_again_and_nothing_is_applied(handler, hub):

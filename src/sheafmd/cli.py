@@ -332,6 +332,7 @@ def _open(args) -> int:
     try:
         c, _ = hubclient.ensure_hub("render", _out, _err)
         tabs = 0
+        unchecked = not peer.supported()        # the hub cannot judge who follows a link (9.1)
         if md is not None:
             body = {"path": str(md.resolve()),
                     "settings": {"title": args.title, "toc": args.toc,
@@ -346,12 +347,13 @@ def _open(args) -> int:
             for w in res.get("warnings", []):
                 _err(w)
             next_path, tabs = hubroots.url_path(res["doc"]), res.get("tabs", 0)
+            unchecked = unchecked or res.get("peer_check") is False     # its self-test turned the check off
             shown = res["url"]
         else:
             shown = f"http://127.0.0.1:{c.port}{next_path}"
     except (hubclient.Impostor, hubclient.HubDidNotStart) as e:
         return _hub_failure(e)
-    if not peer.supported():
+    if unchecked:
         # The link goes by the nonce alone here: said on every run, not only on the page of a
         # link that failed (ticket 99).
         _err(f"  ! {LINK_LIMIT}")
@@ -368,14 +370,16 @@ def _open(args) -> int:
     _out(f"  ~ {shown}")                    # the URL is the last line (SPEC 13)
     if remote_seat is None and not tabs and not args.no_browser and config.browser_enabled(_err):
         try:
-            link = c.one_time_sign_in_url(next_path)
+            link = c.one_time_sign_in(next_path)
         except hubclient.SignInRefused as e:
             _err(f"  ! the browser was not opened: the hub gave no sign-in link ({e}). "
                  "Run sheaf signin-url and open what it prints yourself")
             return EXIT_OK
         except hubclient.Impostor as e:                  # replaced since the render, or silent: no key went to it
             return _hub_failure(e)
-        if not webbrowser.open(link):
+        if link.peer_check is False and not unchecked:     # no render to say it: the index
+            _err(f"  ! {LINK_LIMIT}")
+        if not webbrowser.open(link.url):
             _err("  ! no browser could be opened; open the URL above in a browser")
     return EXIT_OK
 

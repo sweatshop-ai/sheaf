@@ -876,9 +876,10 @@ _emoji_drawn.cache_clear = _emoji_looked_at.cache_clear
 
 
 def _emoji_as_tokens(fragment: str, source):
-    """(the fragment with each emoji span the source wrote as `:name:` as a token, the (name, emoji) of each). A token, not the
-    shortcode: `_cell_breaks` sends a table holding a shortcode to raw HTML, which shows it as text. A span the
-    reader typed in the source has no `:name:` there, and a span whose text is no longer its emoji, have their words kept."""
+    """(the fragment with each emoji span the source wrote as `:name:` as a token, a (name, emoji) pair for each).
+    A token, not the shortcode: `_cell_breaks` sends a table holding a shortcode to raw HTML, which shows it as text.
+    A span the reader typed in the source has no `:name:` there, and a span whose text is no longer its emoji, have
+    their words kept."""
     names = []
 
     def token(m):
@@ -1020,8 +1021,10 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
             if literal:
                 part = part.replace(_LITERAL_COLON, "" if depth else "\\")
             if emoji:
-                part = _EMOJI_TOKEN.sub(lambda m: emoji[int(m.group(1))][1] if depth
-                                        else f":{emoji[int(m.group(1))][0]}:", part)
+                def shown(m, depth=depth):
+                    name, drawn = emoji[int(m.group(1))]
+                    return drawn if depth else f":{name}:"
+                part = _EMOJI_TOKEN.sub(shown, part)
             parts[k] = part
         out = "".join(parts)
     # Pandoc's gfm writer wraps every bare URL as <https://...>. GFM autolinks a bare

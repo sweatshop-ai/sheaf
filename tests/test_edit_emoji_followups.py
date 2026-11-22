@@ -5,6 +5,14 @@ from sheafmd import edit as rde
 from test_edit_emoji import page_fragment, saved
 
 
+@pytest.fixture(autouse=True)
+def _fresh_emoji_cache():
+    """A test that makes a look-up fail leaves no name of it cached for the next, even when it fails itself."""
+    rde._emoji_drawn.cache_clear()
+    yield
+    rde._emoji_drawn.cache_clear()
+
+
 def test_a_shortcode_in_a_table_pandoc_writes_as_raw_html_keeps_its_emoji():
     src = "| :+1: | here |\n|---|---|\n| a | b |"
     doc = "# Title\n\n" + src + "\n"
@@ -25,7 +33,6 @@ def test_a_shortcode_that_is_no_emoji_is_not_escaped():
 
 
 def test_a_failed_look_at_an_emoji_is_not_kept(monkeypatch):
-    rde._emoji_drawn.cache_clear()
     real = rde._pandoc.run
     calls = []
 
@@ -40,7 +47,6 @@ def test_a_failed_look_at_an_emoji_is_not_kept(monkeypatch):
     with pytest.raises(rde.EditError):
         rde._emoji_drawn("tada")
     assert rde._emoji_drawn("tada") == "\U0001F389"
-    rde._emoji_drawn.cache_clear()
 
 
 def test_a_backslash_shortcode_typed_on_the_page_reads_back_as_typed():
@@ -93,7 +99,6 @@ def test_a_table_tag_that_is_text_does_not_count_as_a_table(src):
 
 def _emoji_look_fails(monkeypatch):
     """Pandoc fails on the look-up of a shortcode, and only there."""
-    rde._emoji_drawn.cache_clear()
     real = rde._pandoc.run
 
     def failing(args, text, *a, **k):
@@ -115,7 +120,6 @@ def test_a_failed_emoji_look_refuses_the_save_and_writes_no_guess(monkeypatch, s
     doc = "# Title\n\n" + src + "\n"
     out, rep = rde.apply_edits(doc, [{"i": 1, "html": page}])
     assert out == doc and [i for i, _ in rep["skipped"]] == [1]
-    rde._emoji_drawn.cache_clear()
 
 
 def test_a_backslash_shortcode_typed_on_the_page_is_refused_when_the_look_fails(monkeypatch):
@@ -123,4 +127,3 @@ def test_a_backslash_shortcode_typed_on_the_page_is_refused_when_the_look_fails(
     _emoji_look_fails(monkeypatch)
     out, rep = rde.apply_edits("# Title\n\na b here\n", [{"i": 1, "html": page}])
     assert out == "# Title\n\na b here\n" and [i for i, _ in rep["skipped"]] == [1]
-    rde._emoji_drawn.cache_clear()

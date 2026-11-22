@@ -494,6 +494,12 @@ def _lines_as_paragraphs(soup):
         if not any(is_line(c) for c in host.children):
             continue
         kids = list(host.children)
+        if host.name != "p" and all(is_line(c) or blank(c) for c in kids):
+            # The heading's own words were all deleted: the half split off from them is the heading now.
+            half = next((c for c in kids if is_line(c) and c.has_attr(_SPLIT) and c.get_text(strip=True)), None)
+            if half is not None and all(blank(c) or not c.get_text(strip=True) for c in kids[:kids.index(half)]):
+                half.unwrap()
+                kids = list(host.children)
         # Where the host's own words start: the first child that is neither a line nor white space (0, none
         # moves, when there is no such child). The lines before them in a heading go above it. A paragraph
         # needs no such care: emptied by its lines going after it, it says nothing and drops out of the .md,
@@ -507,7 +513,7 @@ def _lines_as_paragraphs(soup):
         last, loose, made = host, None, above + [host]
         for c in list(host.children):
             if is_line(c):
-                half = host.name != "p" and c.has_attr(_SPLIT) and c.get_text(strip=True)
+                half = bool(host.name != "p" and c.has_attr(_SPLIT) and c.get_text(strip=True))
                 c.extract().name = host.name if half else "p"
                 del c[_SPLIT]
                 last.insert_after(c)

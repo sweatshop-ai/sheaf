@@ -139,7 +139,7 @@ def test_a_caller_already_closed_when_the_hub_looks_is_never_let_through(monkeyp
     # the hub is root, that uid is the hub's own, so the inode decides, not the uid.
     monkeypatch.setattr(os, "geteuid", lambda: hub_uid)
     monkeypatch.setattr(peer, "PLATFORM", "linux")
-    monkeypatch.setattr(peer, "sockets", lambda conn: [(0, 0)])
+    monkeypatch.setattr(peer, "sockets", lambda conn: [peer.Socket(0, 0)])
     monkeypatch.setattr(peer, "closed", lambda sock: True)
     conn = peer.look(CLIENT, AT_HUB, object())
     assert conn.refusal is not None and conn.refusal.kind == peer.UNKNOWN and conn.closed()
@@ -151,7 +151,7 @@ def test_a_caller_of_the_hubs_own_user_that_half_closes_is_not_turned_away(monke
     # ESTABLISHED, and the caller's own socket is still held by its owner, root included.
     monkeypatch.setattr(os, "geteuid", lambda: hub_uid)
     monkeypatch.setattr(peer, "PLATFORM", "linux")
-    monkeypatch.setattr(peer, "sockets", lambda conn: [(hub_uid, 4242)])
+    monkeypatch.setattr(peer, "sockets", lambda conn: [peer.Socket(hub_uid, 4242)])
     monkeypatch.setattr(peer, "closed", lambda sock: True)
     assert peer.look(CLIENT, AT_HUB, object()).refusal is None
 

@@ -8,6 +8,7 @@ import os
 import socket
 import struct
 import sys
+import time
 
 import pytest
 
@@ -109,7 +110,6 @@ def test_a_kernel_that_finds_nothing_over_netlink_is_asked_again_in_proc(ends, m
 
 
 def wait_closed(acc):
-    import time
     for _ in range(200):
         if peer.closed(acc):
             return
@@ -144,7 +144,7 @@ def test_a_caller_that_only_half_closed_is_still_its_owners(ends):
 @pytest.mark.skipif(ME == 0, reason="root is the hub's own user here")
 def test_root_is_not_the_hubs_own_user(monkeypatch):
     monkeypatch.setattr(peer, "PLATFORM", "linux")
-    monkeypatch.setattr(peer, "sockets", lambda conn: [(0, 4242)])
+    monkeypatch.setattr(peer, "sockets", lambda conn: [peer.Socket(0, 4242)])
     no = peer.check(peer.Conn(("127.0.0.1", 50000), ("127.0.0.1", 27419)))
     assert no is not None and no.kind == peer.OTHER_USER
 

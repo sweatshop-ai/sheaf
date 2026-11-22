@@ -1,8 +1,8 @@
 # 180: In full Chromium the leader drops every new tab right after its join
 
-**Claimed by:** Rumi (branch rumi/180-join-after-tab-lock)
+**Claimed by:** Rumi
 
-**Status:** in-progress
+**Status:** done in #588 (merge 2983834c, head 60513fd8), CI green, review GO (round 1, provisional: Opus fallback, Codex at its usage limit)
 
 **Priority:** high: it hits real users. In a real Chrome, only the leader tab gets live updates; every other tab of the browser gets none.
 
@@ -47,5 +47,5 @@ A tab sends its first join only once its own `sheaf-tab-<TAB>` lock is granted: 
 
 ## Acceptance
 
-- [ ] A page test that runs in full Chromium (`channel="chromium"`, new headless) in CI: three tabs of one shared context, the hub counts 3 of 3, and a change on disk reaches a follower tab.
-- [ ] The existing shared-live tests still pass in the headless shell.
+- [x] A page test that runs in full Chromium (`channel="chromium"`, new headless) in CI: three tabs of one shared context, the hub counts 3 of 3, and a change on disk reaches a follower tab. `tests/page/test_page_shared_live_full_chromium.py`; red on the old `live.js` on t-compute ("timed out waiting for three tabs counted by the hub"), PASSED in CI on 60513fd8 (job 137379785797).
+- [x] The existing shared-live tests still pass in the headless shell. All 10 of `tests/page/test_page_shared_live.py` PASSED in the same CI job.

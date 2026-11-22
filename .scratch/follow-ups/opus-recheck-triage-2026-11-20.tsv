@@ -23,7 +23,7 @@
 44	389	b	src/sheafmd/hub/loose.py:306	Same drop() as item 20: forget_root runs before os.rmdir(folder), so a folder that is a symlink raises NotADirectoryError after the root is forgotten; fix together with item 20 (rmdir first, catch OSError).	2
 45	389	FIXED	src/sheafmd/mcp.py:253	_check enforces schema type boolean for every call (`keep must be true or false`), so keep="false" is refused for a bare doc too.	
 46	389	STALE	n/a	About the PR #389 description text, not code on main; nothing to change in the repo.	
-50	390	b	src/sheafmd/hub/sheaf_view.py:85	way_back returns None for a non-plain session id before the ownership check, dropping another member's valid Remote Control link; fall through to the remote branch instead (and fix the docstring clause "an id that is not a plain id" to match SPEC 8.6).	3
+50	390	FIXED	src/sheafmd/hub/sheaf_view.py:85	way_back returns None for a non-plain session id before the ownership check, dropping another member's valid Remote Control link; fall through to the remote branch instead (and fix the docstring clause "an id that is not a plain id" to match SPEC 8.6).	3
 51	390	c	src/sheafmd/page/sheaf.js:83	window.open still runs in the fetch rejection handler (after the async ask); a hang-proof fix needs an AbortController timeout on ask(), whose length is a decision.	
 55	391	FIXED	tests/test_proxy_start.py:224	Members are now "Alice Example", "Carol Example", "Bob Example", "Dave Example"; no real surnames remain in the config text.	
 56	391	FIXED	tests/test_proxy_start.py:210	Docstring still names "agency-tiroir's stage sheaf-agents-hub-2026-11-07" and "read off the box's tokens.json"; rewrite without them.	
@@ -44,7 +44,7 @@
 86	397	c	src/sheafmd/send.py:386	_leave_theirs still write_text_atomic over FILE.tiroir.md with no check; whether to refuse, number it or overwrite is a decision.	
 87	397	b	src/sheafmd/send.py:631	cmd_pull hashes the local text before the door call and writes at line 631 without re-reading; re-read and compare md_hash just before write_text_atomic.	4
 91	398	FIXED	docs/design/2026-11-07-agents-and-waiting-tells.md:16	"library-door#241" is still there (SPEC.md:969 says acme/library-door#241); replace with a resolvable reference or plain wording.	
-95	399	b	src/sheafmd/send.py:103	The branch tests isinstance(reason, ssl.SSLError), so SSLEOFError and resets count as untrusted; narrow to ssl.SSLCertVerificationError and apply it to a bare SSLError from read() too.	3
+95	399	FIXED	src/sheafmd/send.py:103	The branch tests isinstance(reason, ssl.SSLError), so SSLEOFError and resets count as untrusted; narrow to ssl.SSLCertVerificationError and apply it to a bare SSLError from read() too.	3
 96	399	a	src/sheafmd/send.py:228	Recovery text still promises "exists already, and it is this one" but _create (send.py:418-420) answers "was not sent from this file. Rename"; reword the guidance to what the rerun prints.	
 97	399	STALE	src/sheafmd/send.py:49	Concerns the PR description only; SPEC.md:1709 says "5 s each" and the code comment says the messages before a call, so nothing in the repo is wrong.	
 101	400	c	src/sheafmd/hub/repos.py:224	_read still returns {} on an unparseable reports.json and the next _write replaces it; refuse versus quarantine-and-reset is a decision.	
@@ -62,11 +62,11 @@
 122	403	c	src/sheafmd/hub/core.py:1338	visible() still re-reads and parses via opened_by_line for each refused page with no _front cache; needs a caching design.	
 123	403	c	src/sheafmd/hub/core.py:1177	shared_with still uses audience() with no private-source check unlike opened_by_line (core.py:1398); access rule change in security code.	
 127	404	a	src/sheafmd/mcp.py:1296	Unticking a Share line is refused by the Counter difference while the message says "add or change"; reword the message to include unticking.	
-128	404	b	src/sheafmd/hub/proxy.py:475	The agency-short check accepts a short starting with . or - that visibility._BOX_RE/_NAMES_RE cannot parse; require a short matching [A-Za-z0-9_][A-Za-z0-9_.-]* in that check.	3
+128	404	FIXED	src/sheafmd/hub/proxy.py:475	The agency-short check accepts a short starting with . or - that visibility._BOX_RE/_NAMES_RE cannot parse; require a short matching [A-Za-z0-9_][A-Za-z0-9_.-]* in that check.	3
 129	404	a	src/sheafmd/hub/proxy.py:392	The OPTIONAL_TABLE_KEYS filtered dict is still built twice (lines 393 and 395); add a small helper.	
 133	405	c	src/sheafmd/hub/moves.py:56	_folder still refuses "" through loose.folder_path, so a page cannot move to the root top; allowing it is a product decision.	
 134	405	b	src/sheafmd/hub/state.py:275	Versions.rename (line 275) and _Store.rename (line 345) still return without touching new when old is absent; drop the stale new entry first.	4
-135	405	b	src/sheafmd/mcp.py:1215	self.hub.file(new).read_text is still outside any try; catch OSError/NotFound and raise a ToolError.	3
+135	405	FIXED	src/sheafmd/mcp.py:1215	self.hub.file(new).read_text is still outside any try; catch OSError/NotFound and raise a ToolError.	3
 136	405	b	src/sheafmd/hub/archive.py:263	before = os.lstat(src) is still outside the try and a FileNotFoundError is not mapped by handler.py:1574; move it inside or catch it and raise KeyError.	2
 137	405	c	src/sheafmd/hub/core.py:1018	forget_root still takes only self._lock, not moves._LOCK, so _undo can restore forgotten Forwards; lock-order change is risky.	
 141	406	FIXED	src/sheafmd/hub/repos.py:80	_cache_good (introduced for _git_version) caches only a non-None read and retries after RETRY_READ_EVERY=60 s.	

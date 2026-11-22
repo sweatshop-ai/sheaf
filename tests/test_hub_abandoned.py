@@ -75,6 +75,8 @@ def test_a_stream_the_hub_closed_ends_its_connection_and_does_not_idle_until_the
     held = Held()
 
     class Streams:
+        peer_off = "a stand-in handler: nobody looks at who owns the connection"
+
         def handle(self, method, target, headers, body=b"", conn=None, via="port", gone=None):
             return Response(200, {"Content-Type": "text/event-stream"}, stream=held)
     wired = {"handler": Streams(), "stopping": threading.Event(), "closing": threading.Event()}

@@ -12,6 +12,7 @@ import pytest
 
 import public_tree
 from public_tree import ALLOW, Hit, scan_text, scan_tree, terms_from
+from helpers import undecodable_names_or_skip
 
 TERMS = ("leakguardcanary", "leak pair")
 # Built, not written: this file is scanned too, and only the addresses public_tree names may stand in it.
@@ -87,6 +88,7 @@ def test_an_untracked_file_is_not_read(repo):
 
 
 def test_a_file_whose_name_is_not_utf8_is_read_under_its_real_name(repo):
+    undecodable_names_or_skip(repo)                     # APFS refuses the name (EILSEQ): there is nothing to read
     name = b"caf\xe9.txt"
     (repo / os.fsdecode(name)).write_text("one\nleakguardcanary\n", encoding="utf-8")
     git(repo, "add", "-A")

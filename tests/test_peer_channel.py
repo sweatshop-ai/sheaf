@@ -306,6 +306,35 @@ def test_a_failed_close_does_not_hide_the_write_that_failed_first(tmp_path, monk
     assert not list((tmp_path / "creds").iterdir())
 
 
+def test_a_failed_cleanup_does_not_hide_the_write_that_failed_first(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    def no_sync(fd):
+        raise OSError(errno.EIO, "the disk said no")
+
+    def no_unlink(self, missing_ok=False):
+        raise OSError(errno.EROFS, "read-only now")
+    monkeypatch.setattr(os, "fsync", no_sync)
+    monkeypatch.setattr(Path, "unlink", no_unlink)
+    with pytest.raises(connect.ConnectError) as e:
+        connect.use_peer_file(PEER, FAKE, tmp_path / "creds")
+    assert "the disk said no" in str(e.value) and "read-only now" not in str(e.value)
+
+
+def test_a_failed_cleanup_does_not_hide_an_interrupt(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    def interrupted(fd):
+        raise KeyboardInterrupt
+
+    def no_unlink(self, missing_ok=False):
+        raise OSError(errno.EROFS, "read-only now")
+    monkeypatch.setattr(os, "fsync", interrupted)
+    monkeypatch.setattr(Path, "unlink", no_unlink)
+    with pytest.raises(KeyboardInterrupt):
+        connect.use_peer_file(PEER, FAKE, tmp_path / "creds")
+
+
 def test_the_file_store_replaces_a_token_and_leaves_other_peers_alone(sheaf, stdin, tmp_path):
     tmp_path = tmp_path / "creds"
     other = "sheaf_mcp_" + "c" * 43

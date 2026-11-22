@@ -149,13 +149,21 @@ def use_peer_file(url: str, token: str, folder: Path) -> Path:
         os.replace(tmp, target)
     except OSError as e:
         if made:
-            tmp.unlink(missing_ok=True)
+            _drop(tmp)
         raise ConnectError(f"cannot keep the token in {folder}: {e.strerror or e}; nothing was written") from None
     except BaseException:
         if made:
-            tmp.unlink(missing_ok=True)
+            _drop(tmp)
         raise
     return target
+
+
+def _drop(tmp: Path) -> None:
+    """Remove a temp left by a failed write; a cleanup that fails too is not told: what failed first is."""
+    try:
+        tmp.unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _check_peer_token(token: str) -> None:

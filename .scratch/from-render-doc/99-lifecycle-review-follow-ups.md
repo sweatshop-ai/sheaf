@@ -1,8 +1,8 @@
 # 99: Lifecycle review follow-ups: peer check, restart announcements, stop races, refactors, lint
 
-**Claimed by:** Emil 2026-11-22
+**Claimed by:** Bashir 2026-11-22
 
-**Status:** in-progress. Part 1 merged (PR 574, 192b3c7d); open: peer-check items with 139, the self-test case, the optional security read, refactors, macOS tests, names (155).
+**Status:** in-progress. Part 1 merged (PR 574, 192b3c7d); part 2 (refactors, macOS test override) in progress; open: peer-check items with 139, the self-test case, the optional security read, refactors, macOS tests, names (155).
 
 **Blocked by:** none
 

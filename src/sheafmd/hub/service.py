@@ -14,6 +14,7 @@ restarted. launchd has no per-code rule, so the plist keeps `KeepAlive.Successfu
 nothing, and a stop there exits 0: sheaf has to exit with a failure code when it crashes (1) or is
 stopped for an upgrade (75, 14.4).
 """
+import enum
 import getpass
 import os
 import plistlib
@@ -47,8 +48,18 @@ STOP_WAIT = 60
 BOOTOUT_WAIT = STOP_WAIT + 10
 
 
+UNSUPPORTED = "the user service is for Linux (systemd) and macOS (launchd)"
+
+
 class ServiceError(Exception):
     """A message for a person: what could not be done, and what the tool said."""
+
+
+class Verb(enum.StrEnum):
+    """What `control` asks the service manager to do."""
+    START = "start"
+    RESTART = "restart"
+    STOP = "stop"
 
 
 def kind() -> str | None:
@@ -168,7 +179,8 @@ def plist_path() -> Path:
 
 
 def definition_path() -> Path | None:
-    return {"systemd": unit_path, "launchd": plist_path}.get(kind() or "", lambda: None)()
+    p = _pick()
+    return p.definition_path() if p else None
 
 
 def installed() -> bool:
@@ -191,19 +203,19 @@ def _domain() -> str:
 
 def status_command() -> str:
     """The command that shows what the service manager makes of the service, for a message."""
-    if kind() == "systemd":
-        return f"systemctl --user status {UNIT}"
-    return f"launchctl print {_domain()}/{LABEL}"
+    return (_pick() or _LAUNCHD).status_command()
 
 
 # ── running the service manager ──────────────────────────────────────────────
 
 def _tool() -> str:
-    name = "systemctl" if kind() == "systemd" else "launchctl"
-    if shutil.which(name) is None:
-        why = "the user service needs systemd" if name == "systemctl" else "the user service needs launchd"
-        raise ServiceError(f"{name} was not found on PATH; {why}")
-    return name
+    return _need(_pick() or _LAUNCHD)
+
+
+def _need(p) -> str:
+    if shutil.which(p.tool) is None:
+        raise ServiceError(f"{p.tool} was not found on PATH; {p.needs}")
+    return p.tool
 
 
 def _run(argv: list[str], *, check: bool = True) -> subprocess.CompletedProcess:
@@ -227,30 +239,18 @@ def _write(f: Path, data: bytes):
     os.replace(tmp, f)
 
 
-def _environment() -> tuple[str, dict]:
-    carried = CARRIED + CARRIED_XDG if kind() == "systemd" else CARRIED
-    extra = {k: os.environ[k] for k in carried if os.environ.get(k)}
-    return os.environ.get("PATH") or DEFAULT_PATH, extra
+class _Systemd:
+    tool = "systemctl"
+    needs = "the user service needs systemd"
+    carried = CARRIED + CARRIED_XDG
 
+    def status_command(self) -> str:
+        return f"systemctl --user status {UNIT}"
 
-def install(say, make_room=lambda: None, *, install_line):
-    """Write the definition and start the service. `make_room` runs just before the service is
-    started: it stops a hub that a command started, which holds the port the service needs. A sheaf
-    that runs from a temporary copy (`uvx`, `pipx run`) installs nothing: the service would run a
-    path that goes. `install_line()` is the command that installs this sheaf for good, for that
-    refusal, with the note that follows it when the source URL had a query or a fragment."""
-    k = kind()
-    if k is None:
-        raise ServiceError("the user service is for Linux (systemd) and macOS (launchd)")
-    tool = _tool()                    # before anything is written, and before the advice to install sheaf
-    path_env, extra = _environment()
-    command = sheaf_command()
-    cache = runs_from_a_cache(command)
-    if cache:                                         # before anything is written or asked
-        raise ServiceError(f"{cache_refusal(cache, command[0])} A service started from that path "
-                           f"would fail then, so none is installed. Install sheaf, then install the "
-                           f"service again:\n  {install_line()}\n  sheaf service install")
-    if k == "systemd":
+    def definition_path(self) -> Path:
+        return unit_path()
+
+    def install(self, tool, command, path_env, extra, say, make_room):
         f = unit_path()
         unit = systemd_unit(command, path_env, extra).encode("utf-8")
         before = f.read_bytes() if f.is_file() else None
@@ -266,13 +266,81 @@ def install(say, make_room=lambda: None, *, install_line):
                 "run `sheaf restart`")
         say(f"  On a remote box, ask the admin for `loginctl enable-linger {getpass.getuser()}` "
             "so the hub keeps running after you log out.")
-    else:
+
+    def uninstall(self, tool, f):
+        _run([tool, "--user", "disable", "--now", UNIT], check=False)
+        f.unlink()
+        _run([tool, "--user", "daemon-reload"])
+
+    def control(self, tool, verb):
+        _run([tool, "--user", verb, UNIT])
+
+
+class _Launchd:
+    tool = "launchctl"
+    needs = "the user service needs launchd"
+    carried = CARRIED
+
+    def status_command(self) -> str:
+        return f"launchctl print {_domain()}/{LABEL}"
+
+    def definition_path(self) -> Path:
+        return plist_path()
+
+    def install(self, tool, command, path_env, extra, say, make_room):
         f = plist_path()
         _write(f, launchd_plist(command, path_env, extra))
         make_room()
         _bootout(tool)                                                    # a loaded agent is replaced
         _run([tool, "bootstrap", _domain(), str(f)])
         say(f"  service installed: {f}")
+
+    def uninstall(self, tool, f):
+        _bootout(tool)
+        f.unlink()
+
+    def control(self, tool, verb):
+        if verb == Verb.STOP:
+            raise ServiceError(f"sheaf does not stop the launchd agent; use `launchctl bootout {_domain()}/{LABEL}`")
+        _run([tool, "kickstart", *(["-k"] if verb == Verb.RESTART else []), f"{_domain()}/{LABEL}"])
+
+
+_SYSTEMD, _LAUNCHD = _Systemd(), _Launchd()
+
+
+def _pick():
+    """The platform's object, deciding `kind()` once; None where there is no service."""
+    return {"systemd": _SYSTEMD, "launchd": _LAUNCHD}.get(kind() or "")
+
+
+def _platform():
+    p = _pick()
+    if p is None:
+        raise ServiceError(UNSUPPORTED)
+    return p
+
+
+def _environment() -> tuple[str, dict]:
+    extra = {k: os.environ[k] for k in (_pick() or _LAUNCHD).carried if os.environ.get(k)}
+    return os.environ.get("PATH") or DEFAULT_PATH, extra
+
+
+def install(say, make_room=lambda: None, *, install_line):
+    """Write the definition and start the service. `make_room` runs just before the service is
+    started: it stops a hub that a command started, which holds the port the service needs. A sheaf
+    that runs from a temporary copy (`uvx`, `pipx run`) installs nothing: the service would run a
+    path that goes. `install_line()` is the command that installs this sheaf for good, for that
+    refusal, with the note that follows it when the source URL had a query or a fragment."""
+    p = _platform()
+    tool = _need(p)                   # before anything is written, and before the advice to install sheaf
+    path_env, extra = _environment()
+    command = sheaf_command()
+    cache = runs_from_a_cache(command)
+    if cache:                                         # before anything is written or asked
+        raise ServiceError(f"{cache_refusal(cache, command[0])} A service started from that path "
+                           f"would fail then, so none is installed. Install sheaf, then install the "
+                           f"service again:\n  {install_line()}\n  sheaf service install")
+    p.install(tool, command, path_env, extra, say, make_room)
 
 
 def _bootout(tool: str):
@@ -291,30 +359,17 @@ def _bootout(tool: str):
 
 def uninstall(say):
     """Disable and stop the service, remove its definition, and reload."""
-    if kind() is None:
-        raise ServiceError("the user service is for Linux (systemd) and macOS (launchd)")
+    p = _platform()
     if not installed():
         say("  the service is not installed")
         return
     f = definition_path()
-    tool = _tool()
-    if kind() == "systemd":
-        _run([tool, "--user", "disable", "--now", UNIT], check=False)
-        f.unlink()
-        _run([tool, "--user", "daemon-reload"])
-    else:
-        _bootout(tool)
-        f.unlink()
+    p.uninstall(_need(p), f)
     say("  service removed")
 
 
-def control(verb: str):
+def control(verb: Verb):
     """`start`, `restart` or `stop` through the service manager. `stop` is for a hub that does not
     answer (SPEC 8.4), which is only recovered on Linux."""
-    tool = _tool()
-    if kind() == "systemd":
-        _run([tool, "--user", verb, UNIT])
-    elif verb == "stop":
-        raise ServiceError(f"sheaf does not stop the launchd agent; use `launchctl bootout {_domain()}/{LABEL}`")
-    else:
-        _run([tool, "kickstart", *(["-k"] if verb == "restart" else []), f"{_domain()}/{LABEL}"])
+    p = _pick() or _LAUNCHD
+    p.control(_need(p), verb)

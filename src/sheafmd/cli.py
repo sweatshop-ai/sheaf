@@ -40,6 +40,7 @@ from .hub import client as hubclient
 from .hub import peer
 from .hub import roots as hubroots
 from .hub import server as hubserver
+from .hub import service
 from .hub.auth import agent_name, clean_display, name_key
 from .hub.handler import LINK_LIMIT
 from .hub.state import PEER_SCOPES, TokenError, Tokens
@@ -381,7 +382,7 @@ def _open(args) -> int:
 
 def cmd_start(argv: list[str]) -> int:
     _parser("start", "start", "Start the hub if it is not running.").parse_args(argv)
-    through = lifecycle.via_service("start")        # with the service installed, it starts the hub
+    through = lifecycle.via_service(service.Verb.START)        # with the service installed, it starts the hub
     if through is not None:
         return through
     try:
@@ -416,7 +417,7 @@ def cmd_stop(argv: list[str]) -> int:
         except hubclient.HubSilent as silent:
             # Stopped here, or asked of the service manager: either way what is left is the port.
             # (It raises a HubSilent that says why when it may not, and HubDidNotStart when nothing ended.)
-            lifecycle.recover_silent_hub(c, silent, "stop")
+            lifecycle.recover_silent_hub(c, silent, service.Verb.STOP)
             if not _port_freed(c):
                 _err(f"sheaf: 127.0.0.1:{c.port} is still held after {hubclient.STOP_WAIT:g} s; see `sheaf diag`")
                 return EXIT_FAILED

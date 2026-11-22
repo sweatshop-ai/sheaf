@@ -1,6 +1,6 @@
 # 173: macOS is red on main: xdist workers die and the run ends early
 
-**Claimed by:** Wanda 2026-11-20
+**Claimed by:** Halima 2026-11-22
 
 **Status:** open
 

@@ -2,7 +2,7 @@
 
 **Claimed by:** Bashir 2026-11-22
 
-**Status:** in-progress. Part 1 merged (PR 574, 192b3c7d); part 2a merged (PR 575, b3209c2e); part 2b (service per-platform object, verb enum) is PR 577; open: peer-check items with 139, the self-test case, the optional security read, the service box, macOS tests (not run on macOS), names (155).
+**Status:** in-progress. Part 1 merged (PR 574, 192b3c7d); part 2 merged (PR 575, b3209c2e; PR 577, 458ef26c). Open: the peer-check items with ticket 139 (lines 17, 18), the `peer_off` self-test case (line 21), the optional security read, the macOS box (the override has not run on macOS; it runs only through ticket 101's worker), names (ticket 155).
 
 **Blocked by:** none
 
@@ -38,8 +38,8 @@
 
 - [x] `cli.cmd_stop` (`src/sheafmd/cli.py:383-420`) duplicates `hubclient.stop_and_wait` (`src/sheafmd/hub/client.py:381`): add characterization tests for its two messages, switch it over, delete `cli._ended` (`cli.py:378`). *(PR 575, merged as b3209c2e: `sheaf stop` goes through `hubclient.ask_stop` + `wait_stopped`, `_ended` deleted. Characterization tests `test_a_stop_the_hub_refuses_says_so_with_the_hubs_reason_and_leaves_it_running` and `test_a_hub_still_running_when_the_stop_wait_runs_out_is_an_error_that_says_how_long` passed on the old code and after. Declared difference, a race only: a hub process gone while another hub answers counts as stopped, the rule `stop_and_explain` used.)*
 - [x] `src/sheafmd/lifecycle.py:23-41` copies `EXIT_*`, `_out`, `_err`, `_parser`, `_hub_failure` from `cli.py`. *(PR 575, merged as b3209c2e: defined once in `src/sheafmd/cmdline.py`, imported by both.)*
-- [ ] `service.kind() == "systemd"` is decided five times in `src/sheafmd/hub/service.py` (`:194`, `:202`, `:231`, `:301`, `:315`) and the "user service is for Linux and macOS" sentence is written twice (`:244`, `:295`): a per-platform object.
-- [x] `(c, got)` travel together through `stop_and_wait`, `_meet_version`, `via_service`, `cmd_restart`, `cmd_rotate`; `via_service` and `service.control` take bare verb strings. *(PR 575, merged as b3209c2e: `hubclient.Met(client, got)`, whose `call` pins the boot, through `stop_and_wait`, `_meet_version`, `via_service`, `cmd_restart`, `cmd_rotate`, `_make_room`. Verb strings: PR 577 (`service.Verb`), open.)*
+- [x] `service.kind() == "systemd"` is decided five times in `src/sheafmd/hub/service.py` (`:194`, `:202`, `:231`, `:301`, `:315`) and the "user service is for Linux and macOS" sentence is written twice (`:244`, `:295`): a per-platform object. *(PR 577, merged as 458ef26c: `_Systemd`/`_Launchd` objects picked once by `_pick()`, the refusal one constant `UNSUPPORTED` raised by `_platform()`; messages and the order of checks unchanged; `test_both_refusals_on_an_unsupported_system_say_the_same_sentence` pins the sentence.)*
+- [x] `(c, got)` travel together through `stop_and_wait`, `_meet_version`, `via_service`, `cmd_restart`, `cmd_rotate`; `via_service` and `service.control` take bare verb strings. *(PR 575, merged as b3209c2e: `hubclient.Met(client, got)`, whose `call` pins the boot, through `stop_and_wait`, `_meet_version`, `via_service`, `cmd_restart`, `cmd_rotate`, `_make_room`. Verb strings: PR 577, merged as 458ef26c (`service.Verb`, a `StrEnum`; red first `test_the_verb_prints_as_its_bare_word`).)*
 - [x] `run_hub`/`wait_alive` exist twice: `tests/test_cli_hub.py:437-442` and `tests/test_hub_lifecycle.py:22-35`. *(PR 575, merged as b3209c2e: once, in `tests/helpers.py`, the stricter `wait_alive`.)*
 
 ## macOS tests

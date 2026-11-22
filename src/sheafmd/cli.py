@@ -31,6 +31,11 @@ from . import __version__, agent_setup, comments, config, deliver, diagnostics, 
 from .agents.detect import detect
 from .agents.registry import detect_target
 from .atomic import write_text_atomic
+from .cmdline import EXIT_FAILED, EXIT_OK, EXIT_USAGE
+from .cmdline import err as _err
+from .cmdline import hub_failure as _hub_failure
+from .cmdline import out as _out
+from .cmdline import parser as _parser
 from .hub import client as hubclient
 from .hub import peer
 from .hub import roots as hubroots
@@ -41,7 +46,6 @@ from .hub.state import PEER_SCOPES, TokenError, Tokens
 from .render import RenderError, UnclosedComment, render_file
 from .source import StaleError, Source, now, update_file
 
-EXIT_OK, EXIT_FAILED, EXIT_USAGE = 0, 1, 2
 
 # name -> function(argv) -> exit code, and name -> (usage line, what it does) for --help.
 COMMANDS: dict = {}
@@ -86,14 +90,6 @@ def top_help() -> str:
         for usage, what in COMMAND_HELP.values():
             out += [f"  sheaf {usage}", f"      {what}"]
     return "\n".join(out)
-
-
-def _out(line: str = ""):
-    print(line)
-
-
-def _err(line: str = ""):
-    print(line, file=sys.stderr)
 
 
 def print_log(log: list[str]):
@@ -311,14 +307,6 @@ def cmd_open(argv: list[str]) -> int:
     return _open(open_parser().parse_args(argv))
 
 
-def _hub_failure(e: Exception) -> int:
-    if isinstance(e, hubclient.Impostor):
-        _err(f"  ! {e}")
-    else:
-        _err(f"sheaf: {e}")
-    return EXIT_FAILED
-
-
 def _open(args) -> int:
     """`sheaf open`: register the document with the hub (starting it if needed), record the
     settings, print the clean URL, and sign the browser in. The URL printed never holds the
@@ -405,49 +393,45 @@ def cmd_start(argv: list[str]) -> int:
     return EXIT_OK
 
 
-def _ended(pid: int) -> bool:
-    """Whether the process `pid` has ended (see `hubclient.ended`)."""
-    return hubclient.ended(pid)
+def _port_freed(c) -> bool:
+    """After a recovery nothing was asked of the hub: wait up to STOP_WAIT for nothing to listen on
+    the port. Something that holds it and says nothing is still the port held."""
+    deadline = time.time() + hubclient.STOP_WAIT
+    while time.time() < deadline:
+        try:
+            if c.challenge() is None:
+                return True
+        except hubclient.Impostor:
+            pass
+        time.sleep(0.05)
+    return False
 
 
 def cmd_stop(argv: list[str]) -> int:
     _parser("stop", "stop", "Stop the hub. Documents are plain files; nothing is lost.").parse_args(argv)
     try:
         c = hubclient.client()
-        recovered = False
         try:
-            got = c.challenge()
+            met = c.meet()
         except hubclient.HubSilent as silent:
             # Stopped here, or asked of the service manager: either way what is left is the port.
             # (It raises a HubSilent that says why when it may not, and HubDidNotStart when nothing ended.)
             lifecycle.recover_silent_hub(c, silent, "stop")
-            pid, recovered = None, True
+            if not _port_freed(c):
+                _err(f"sheaf: 127.0.0.1:{c.port} is still held after {hubclient.STOP_WAIT:g} s; see `sheaf diag`")
+                return EXIT_FAILED
         else:
-            if got is None:
+            if met is None:
                 _out("  no hub is running")
                 return EXIT_OK
-            info = hubserver.read_pid_file() or {}
-            pid = info.get("pid") if info.get("boot") == got.get("boot") else None
-            status, res = c.call("POST", "/_/stop", {"reason": "stop"}, boot=got.get("boot") or "")
-            if status != 200 or not res.get("ok"):
-                _err(f"sheaf: the hub refused to stop: {res.get('error') or status}")
-                return EXIT_FAILED
-        deadline = time.time() + hubclient.STOP_WAIT
-        while time.time() < deadline:
             try:
-                closed = c.challenge() is None
-            except hubclient.Impostor:
-                # After a stop the hub asked for, whatever answers is another process and the hub is
-                # gone. After a recovery nothing was asked of the hub, so something that holds the
-                # port and says nothing is still the port held: not closed.
-                closed = not recovered
-            if closed and (pid is None or _ended(pid)):
-                break
-            time.sleep(0.05)
-        else:
-            _err(f"sheaf: 127.0.0.1:{c.port} is still held after {hubclient.STOP_WAIT:g} s; see `sheaf diag`"
-                 if recovered else f"sheaf: the hub is still running after {hubclient.STOP_WAIT:g} s")
-            return EXIT_FAILED
+                left = hubclient.wait_stopped(met, hubclient.ask_stop(met, "stop"))
+            except hubclient.StopRefused as e:
+                _err(f"sheaf: the hub refused to stop: {e}")
+                return EXIT_FAILED
+            if left:
+                _err(f"sheaf: the hub is still running after {hubclient.STOP_WAIT:g} s")
+                return EXIT_FAILED
     except (hubclient.Impostor, hubclient.HubDidNotStart) as e:
         return _hub_failure(e)
     _out("  hub stopped")
@@ -613,10 +597,6 @@ def cmd_hub(argv: list[str]) -> int:
 
 
 # ── comments, diag, version: commands that work on a file alone ─────────────
-
-def _parser(name: str, usage: str, what: str) -> argparse.ArgumentParser:
-    return argparse.ArgumentParser(prog=f"sheaf {name}", usage=f"sheaf {usage}", description=what)
-
 
 def _one_line(text: str) -> str:
     """An id or a root name as one line of single-spaced words: a newline in the head of a

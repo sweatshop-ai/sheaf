@@ -223,6 +223,7 @@ def test_the_wheel_smoke_says_what_it_cannot_isolate_on_macos(monkeypatch):
     from sheafmd import paths
     monkeypatch.setattr(sys, "platform", "darwin")
     monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/1000")
+    monkeypatch.delenv("SHEAF_TEST_RUNTIME_DIR", raising=False)        # the smoke's own runs do not set it
     assert f"{paths.runtime_dir()}" in smoke.runtime_note("darwin"), "the note names what paths says"
     note = smoke.runtime_note("darwin")
     assert note and f"/tmp/sheaf-{os.getuid()}" in note and "shared" in note

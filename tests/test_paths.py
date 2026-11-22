@@ -22,6 +22,7 @@ def test_sheaf_home_replaces_state_config_and_cache_and_never_the_runtime_folder
 def test_on_macos_sheaf_home_replaces_state_config_and_cache_and_never_the_runtime_folder(
         tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.delenv("SHEAF_TEST_RUNTIME_DIR", raising=False)
     h = tmp_path / "sheaf-home"
     assert paths.state_dir() == h / "state"
     assert paths.config_file() == h / "config.toml"
@@ -55,6 +56,7 @@ def test_a_relative_xdg_value_is_ignored(monkeypatch):
 
 def test_macos_uses_library_folders_and_a_short_runtime_path(monkeypatch):
     monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.delenv("SHEAF_TEST_RUNTIME_DIR", raising=False)
     monkeypatch.delenv("SHEAF_HOME")
     lib = Path.home() / "Library"
     assert paths.state_dir() == lib / "Application Support" / "sheaf" / "state"
@@ -66,6 +68,7 @@ def test_macos_uses_library_folders_and_a_short_runtime_path(monkeypatch):
 
 def test_without_xdg_runtime_dir_the_runtime_folder_is_in_tmp(monkeypatch):
     monkeypatch.delenv("XDG_RUNTIME_DIR")
+    monkeypatch.delenv("SHEAF_TEST_RUNTIME_DIR", raising=False)
     assert paths.runtime_dir() == Path(f"/tmp/sheaf-{os.getuid()}")
 
 
@@ -92,3 +95,18 @@ def test_the_locks_folder_is_private_under_the_runtime_folder():
     d = paths.locks_dir()
     assert d == paths.runtime_dir() / "locks"
     assert stat.S_IMODE(d.stat().st_mode) == 0o700 and stat.S_IMODE(d.parent.stat().st_mode) == 0o700
+
+
+@pytest.mark.parametrize("platform", ["linux", "darwin"])
+def test_a_test_runtime_folder_wins_on_every_platform_so_tests_on_macos_share_no_socket(
+        platform, tmp_path, monkeypatch):
+    # macOS ignores XDG_RUNTIME_DIR by design; without this every hub test there shared /tmp/sheaf-<uid>
+    monkeypatch.setattr(sys, "platform", platform)
+    monkeypatch.setenv("SHEAF_TEST_RUNTIME_DIR", "/tmp/sh-own")
+    assert paths.runtime_dir() == Path("/tmp/sh-own/sheaf")
+
+
+def test_a_relative_test_runtime_folder_is_ignored(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.setenv("SHEAF_TEST_RUNTIME_DIR", "relative/run")
+    assert paths.runtime_dir() == Path(f"/tmp/sheaf-{os.getuid()}")

@@ -27,6 +27,7 @@ import socket
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import quote
 
@@ -129,6 +130,10 @@ class JobsRunning(Exception):
     """The hub would not stop for an upgrade: a Tell started after the command looked."""
 
 
+class StopRefused(Exception):
+    """The hub answered a stop with a refusal: its own error, or the status when it gave none."""
+
+
 class SignInRefused(Exception):
     """The hub would not make a one-time sign-in link (an older hub that has no such route, or one
     that will not); the message says what it answered."""
@@ -192,6 +197,12 @@ class HubClient:
             return r.status, r.read(answer_max)
         finally:
             c.close()
+
+    def meet(self) -> "Met | None":
+        """`challenge`, kept with this client: the hub a command goes on talking to. None when
+        nothing listens on the port; raises what `challenge` raises."""
+        got = self.challenge()
+        return None if got is None else Met(self, got)
 
     def challenge(self) -> dict | None:
         """The hub's health answer once it has proved it holds this key; None when nothing
@@ -344,45 +355,74 @@ def ended(pid: int) -> bool:
     return not signals.exists(pid)
 
 
-def stop_and_explain(c: HubClient, got: dict, reason: str, force: bool = False,
-                     yield_to_stop: bool = False) -> str:
-    """Ask the hub `got` to stop and wait for it to end, its exit row written. "" when it ended (its
-    process is gone and nothing answers, or another hub answers, which the service may start at once);
-    otherwise a few plain words on what was there when STOP_WAIT ran out: that it refused, that a
-    hub still answers (this one or another), that the process it waited for still runs. Never the
-    hub's own text. An upgrade stop that is not `force`d (`sheaf restart` forces its own) is
-    refused while a Tell runs, which raises JobsRunning. With `yield_to_stop`, an upgrade stop that meets a stop
-    or a signal already under way (the hub answers the reason in force) is not waited for: HubBeingStopped."""
+@dataclass(frozen=True)
+class Met:
+    """A hub as one challenge proved it: the client that asked and the hub's answer. A request
+    through it goes only to that boot (`HubChanged` for another, 9.4)."""
+    client: HubClient
+    got: dict
+
+    @property
+    def boot(self) -> str:
+        return self.got.get("boot") or ""            # an answer without one never matches
+
+    def call(self, method: str, path: str, body=None) -> tuple[int, dict]:
+        return self.client.call(method, path, body, boot=self.boot)
+
+
+def ask_stop(met: Met, reason: str, force: bool = False, yield_to_stop: bool = False) -> int | None:
+    """Ask the hub `met` to stop; the pid its pid file names for that boot, to wait for, or None.
+    Raises StopRefused when it refuses, with its own error. An upgrade stop that is not `force`d
+    (`sheaf restart` forces its own) is refused while a Tell runs, which raises JobsRunning. With
+    `yield_to_stop`, an upgrade stop that meets a stop or a signal already under way (the hub
+    answers the reason in force) raises HubBeingStopped."""
     from . import server
     info = server.read_pid_file() or {}
-    pid = info.get("pid") if info.get("boot") == got.get("boot") and info.get("pid") != os.getpid() else None
-    status, res = c.call("POST", "/_/stop", {"reason": reason, **({"force": True} if force else {})},
-                         boot=got.get("boot") or "")
+    pid = info.get("pid") if info.get("boot") == met.got.get("boot") and info.get("pid") != os.getpid() else None
+    status, res = met.call("POST", "/_/stop", {"reason": reason, **({"force": True} if force else {})})
     if status == 409 and reason == "upgrade" and not force:
         raise JobsRunning(res.get("error") or "a Tell is running")
     if status != 200 or not res.get("ok"):
-        return "it refused the stop"
+        raise StopRefused(res.get("error") or status)
     if yield_to_stop and reason == "upgrade" and res.get("reason") in ("stop", "signal"):
         raise HubBeingStopped(f"the hub is being stopped; this is {__version__}. "
                               "Run the command again when it has stopped")
+    return pid
+
+
+def wait_stopped(met: Met, pid: int | None) -> str:
+    """Wait for the hub `met`, asked to stop, to end, its exit row written. "" when it ended (its
+    process `pid` is gone and nothing answers, or another hub answers, which the service may start
+    at once); otherwise a few plain words on what was there when STOP_WAIT ran out: that a hub still
+    answers (this one or another), that the process it waited for still runs."""
     deadline = time.time() + STOP_WAIT
     while True:
         try:
-            now = c.challenge()
+            now = met.client.challenge()
         except Impostor:
             now = None
         alive = pid is not None and not ended(pid)
         # another hub answering once this one's process is gone is the one the service started in its
         # place (exit 75, 14.4), which can answer before any silence comes between them
-        if not alive and (now is None or pid is not None and now.get("boot") != got.get("boot")):
+        if not alive and (now is None or pid is not None and now.get("boot") != met.got.get("boot")):
             return ""
-        seen = [] if now is None else ["still answering" if now.get("boot") == got.get("boot")
+        seen = [] if now is None else ["still answering" if now.get("boot") == met.got.get("boot")
                                        else "another hub answers"]
         if alive:
             seen.append(f"process {pid} is still running")
         if time.time() >= deadline:
             return " and ".join(seen)
         time.sleep(0.05)
+
+
+def stop_and_explain(met: Met, reason: str, force: bool = False, yield_to_stop: bool = False) -> str:
+    """`ask_stop`, then `wait_stopped`: "" when the hub ended, else what was there, and a refusal
+    in plain words. Never the hub's own text."""
+    try:
+        pid = ask_stop(met, reason, force, yield_to_stop)
+    except StopRefused:
+        return "it refused the stop"
+    return wait_stopped(met, pid)
 
 
 def wait_for_start(c: HubClient, wait: float, wanted=lambda got: True) -> dict | None:
@@ -406,45 +446,45 @@ def wait_for_start(c: HubClient, wait: float, wanted=lambda got: True) -> dict |
         time.sleep(0.05)
 
 
-def stop_and_wait(c: HubClient, got: dict, reason: str, force: bool = False) -> bool:
+def stop_and_wait(met: Met, reason: str, force: bool = False) -> bool:
     """`stop_and_explain` for a caller that needs only whether the hub ended."""
-    return not stop_and_explain(c, got, reason, force)
+    return not stop_and_explain(met, reason, force)
 
 
-def _meet_version(c: HubClient, got: dict, warn) -> tuple[dict, bool]:
+def _meet_version(met: Met, warn) -> tuple[Met, bool]:
     """A hub of another version (8.4): a newer command restarts an idle hub (14.4), says so when
     a job runs, and an older command only says so. Returns the hub to use and whether this call
     started one."""
-    theirs = got.get("version")
+    theirs = met.got.get("version")
     order = compare_versions(__version__, theirs)
     if order == 0:
-        return got, False
+        return met, False
     mismatch = f"  ! the hub runs {theirs}, this is {__version__}"
     if order != 1:                                      # older command, or a version nobody can read
         warn(mismatch)
-        return got, False
-    status, jobs = c.call("GET", "/_/jobs", boot=got.get("boot") or "")
+        return met, False
+    status, jobs = met.call("GET", "/_/jobs")
     if status != 200:                                   # cannot tell whether a job runs: leave it
         warn(mismatch)
-        return got, False
+        return met, False
     if jobs.get("telling"):
         warn(f"  ! the hub runs {theirs} and a Tell is running; this is {__version__}. "
              "Run sheaf restart when it is done.")
-        return got, False
+        return met, False
     try:
-        left = stop_and_explain(c, got, "upgrade", yield_to_stop=True)
+        left = stop_and_explain(met, "upgrade", yield_to_stop=True)
     except JobsRunning:                                 # a job started after the look at /_/jobs
         warn(f"  ! the hub runs {theirs} and a Tell is running; this is {__version__}. "
              "Run sheaf restart when it is done.")
-        return got, False
+        return met, False
     if left:
         raise HubDidNotStart(f"the hub did not stop for the upgrade ({left}; see `sheaf diag`)")
-    if not got.get("service"):                          # under the service, exit 75 starts the new code
+    if not met.got.get("service"):                          # under the service, exit 75 starts the new code
         spawn_hub("upgrade")
-    now = wait_for_start(c, UPGRADE_WAIT, lambda now: now.get("version") == __version__)
+    now = wait_for_start(met.client, UPGRADE_WAIT, lambda now: now.get("version") == __version__)
     if now is None:
         raise HubDidNotStart("the hub did not come back on the new version; see `sheaf diag`")
-    return now, True
+    return Met(met.client, now), True
 
 
 def ensure_hub(started_by: str, say=print, warn=None) -> tuple[HubClient, bool]:
@@ -470,7 +510,7 @@ def ensure_hub(started_by: str, say=print, warn=None) -> tuple[HubClient, bool]:
                 marker.touch(mode=0o600)
             except OSError:
                 pass
-    got, restarted = _meet_version(c, got, warn)
+    _, restarted = _meet_version(Met(c, got), warn)
     return c, started or restarted
 
 

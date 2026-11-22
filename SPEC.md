@@ -203,7 +203,7 @@ No web framework. The hub uses `http.server.ThreadingHTTPServer`. The MCP door i
 
 The user service carries `SHEAF_PORT`, `SHEAF_HOME` and, on Linux, the XDG folders of the shell that installed it (14.3), so the hub it runs and that shell's commands read the same `hub.key`.
 
-The runtime folder ignores `SHEAF_HOME`, so a development hub and the daily CLI lock the same `.md` through the same file. On macOS it is not under `Application Support`, because a Unix socket path there holds a space and can pass the 104-byte limit.
+The runtime folder ignores `SHEAF_HOME`, so a development hub and the daily CLI lock the same `.md` through the same file. On macOS it is not under `Application Support`, because a Unix socket path there holds a space and can pass the 104-byte limit. A test suite gives each test a runtime folder of its own with `SHEAF_TEST_RUNTIME_DIR` (an absolute path; it wins on every platform, macOS included); nothing else sets it.
 
 The state and runtime folders are mode 0700; every file in them is 0600.
 

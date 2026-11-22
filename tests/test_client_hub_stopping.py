@@ -64,7 +64,7 @@ def test_the_version_check_of_a_command_meets_the_stopping_hub_as_a_lost_request
     c = client.HubClient(key, port)
     monkeypatch.setattr(client, "__version__", "9.9.9")        # newer than the hub: it asks GET /_/jobs
     with pytest.raises(client.HubLost) as e:
-        client._meet_version(c, {**c.challenge(), "version": "0.0.1"}, warn=lambda *a: None)
+        client._meet_version(client.Met(c, {**c.challenge(), "version": "0.0.1"}), warn=lambda *a: None)
     assert "nothing was sent" in str(e.value)
 
 

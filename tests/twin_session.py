@@ -13,6 +13,7 @@ from pathlib import Path
 work = Path(sys.argv[1]).resolve()
 DATE = "2026-01-02T03:04:05+00:00"
 NOW = 1_767_323_045                                    # the same instant
+os.environ.pop("SHEAF_TEST_RUNTIME_DIR", None)        # its own runtime folder is the XDG one below
 for var, value in {"SHEAF_HOME": work / "home", "HOME": work / "home", "XDG_RUNTIME_DIR": work / "run",
                    "XDG_STATE_HOME": work / "state", "XDG_CONFIG_HOME": work / "conf", "TMPDIR": work / "tmp"}.items():
     Path(value).mkdir(parents=True, exist_ok=True)

@@ -219,6 +219,7 @@ def sheaf_env(tmp_path, own_patches, request):
     tmp.mkdir()
     own_patches.setenv("SHEAF_HOME", str(tmp_path / "sheaf-home"))
     own_patches.setenv("XDG_RUNTIME_DIR", str(run))
+    own_patches.setenv("SHEAF_TEST_RUNTIME_DIR", str(run))     # macOS ignores XDG_RUNTIME_DIR (paths.runtime_dir)
     own_patches.setenv("HOME", str(tmp_path / "home"))
     own_patches.setenv("TMPDIR", str(tmp))
     # The byline and the comment author: never the login name of whoever runs the suite.

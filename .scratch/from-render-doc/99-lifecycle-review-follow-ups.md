@@ -2,7 +2,7 @@
 
 **Claimed by:** Emil 2026-11-22
 
-**Status:** in-progress
+**Status:** in review. PR 574 (lines 19, 20, 34): review round 1 GO on 3ca0f215, CI green; waits on the merge order.
 
 **Blocked by:** none
 
@@ -47,5 +47,5 @@
 
 ## Lint and names
 
-- [ ] `ruff check` flags `src/sheafmd/cli.py:37` (unused import `url_path`) and `tests/test_hub_rotate.py:135` (unused `hub`).
+- [x] `ruff check` flags `src/sheafmd/cli.py:37` (unused import `url_path`) and `tests/test_hub_rotate.py:135` (unused `hub`). *(Gone on main 115878ec before PR 574: `uv run ruff check src/sheafmd/cli.py tests/test_hub_rotate.py` prints `All checks passed!`; no change needed.)*
 - [ ] The ticket's last box (no real first names and no private host names in `src`, `tests`, `tools`) fails on main: a real first name appears in 18 test files and a private host name in 7. Carried in full by ticket 155.

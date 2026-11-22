@@ -16,7 +16,7 @@ Seen with `Hub.__init__`: `lock_order` (tests/lockorder.py, through `monkeypatch
 
 The calls of `monkeypatch.undo()` in the tests (`grep -n "monkeypatch.undo()" tests/*.py`):
 
-- `tests/test_hub_place.py:1035`, the test above; the only one of these in `LOCK_ORDER_SUITES`, fixed by PR 545
+- `tests/test_hub_place.py:1035`, the test above; the only one of these in `LOCK_ORDER_SUITES`, fixed by PR 545 (merged 2026-11-22, merge a20013c9)
 - `tests/test_hub_index_live.py:677`
 - `tests/test_private_root_visible.py:1202`, `:1229`, `:1278`
 - `tests/test_write_log.py:315`

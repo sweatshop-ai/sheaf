@@ -2,7 +2,7 @@
 
 **What to build:** Clear the minor findings of review rounds 3 and 4 of PR 545, none of which changes what CI runs today.
 
-**Blocked by:** PR 545 merged.
+**Blocked by:** none (PR 545 merged 2026-11-22, merge a20013c9, head 5847840c).
 
 **Status:** open
 

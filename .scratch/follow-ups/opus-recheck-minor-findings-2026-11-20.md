@@ -25,7 +25,7 @@
 ## PR #387
 
 - [x] src/sheafmd/hub/sheaf_view.py:126-130 Titles is one dict shared by the ThreadingHTTPServer threads with no lock; when the cache reaches TITLES_KEPT (5000), another thread's clear() between `self._kept[key] = ...` and `return self._kept[key]` raises KeyError (not OSError), so that /_/mount?sheaf=1 request answers 500. Rare, recovers on retry; return the computed title from a local instead of re-reading the dict. **[fixed on main: #525, 65da1f24, test first, red on main]**
-- [ ] src/sheafmd/hub/sheaf_view.py:201 last() and last_session() take the Write log lock separately; a write landing between them can pair a newer session line with an older last line, so the row reads "X, before Y" for a moment. Cosmetic, next mount is right.
+- [x] src/sheafmd/hub/sheaf_view.py:201 last() and last_session() take the Write log lock separately; a write landing between them can pair a newer session line with an older last line, so the row reads "X, before Y" for a moment. Cosmetic, next mount is right. **[fixed on main: #554, 2a900098]**
 - [x] src/sheafmd/page/mount.js:437 the Sheaf wrapper carries the class `sheaf-list` as well as `sheaf-sheaf`, so every list.css rule scoped to .sheaf-list also applies to the Sheaf's tree and table; styling coupling only. **[fixed on main: #521, ee67ff2a]**
 - [x] src/sheafmd/hub/sheaf_view.py:194-200 each request reads the title of every listed .md (up to 2,000 per root) under its name's lock on first view; cost grows with roots, cached afterwards by (path, mtime, size). **[does not hold on main 4a34dd8c, src/sheafmd/hub/sheaf_view.py:194: Not a defect: a cost remark, and Titles caches by (path, mtime, size) (sheaf_view.py:36-44) as the finding itself says.]**
 
@@ -40,7 +40,7 @@
 
 ## PR #389
 
-- [ ] src/sheafmd/mcp.py:1020 reads WriteLog._own (private, outside WriteLog._lock) as a guard; told() is already an idempotent pop under the lock, so the guard is redundant and a call to told() alone would do. Harmless under place.held.
+- [x] src/sheafmd/mcp.py:1020 reads WriteLog._own (private, outside WriteLog._lock) as a guard; told() is already an idempotent pop under the lock, so the guard is redundant and a call to told() alone would do. Harmless under place.held. **[fixed on main: #554, 2a900098]**
 - [ ] src/sheafmd/hub/loose.py:192 drop() now compares realpaths; if the folder recorded in loose.json were itself a symlink to the root, os.rmdir(folder) raises NotADirectoryError after hub.forget_root() has already run, leaving loose.json and the member's roots unchanged. Sheaf makes that folder itself, so this needs a hand-placed link.
 - [x] src/sheafmd/mcp.py:798 a non-bool keep is refused only for a non-bare doc; a bare doc with keep="false" (string) is still truthy and marks the page, unless the tool schema (mcp.py:122, boolean) is enforced upstream. **[fixed on main 4a34dd8c, src/sheafmd/mcp.py:253: _check enforces schema type boolean for every call (`keep must be true or false`), so keep="false" is refused for a bare doc too.]**
 - [x] PR #389 description does not mention commit 5cde9cff (loose.keep removes the .sheaf folder it made, drop compares real paths, keep=false accepted on a non-bare doc, failed loose create clears its expectation). **[does not hold on main 4a34dd8c, n/a: About the PR #389 description text, not code on main; nothing to change in the repo.]**
@@ -65,7 +65,7 @@
 
 - [x] src/sheafmd/hub/handler.py:1019 `_share` builds the tick edit from `e.live.current()[1]` after releasing the name's lock, but passes `after` as the save's base hash; if another writer lands between the two lock regions, `LiveDocument.save` merges an edit whose block index `i` was computed on the newer text as if it were against `after` (live.py `merge_edits(base, text, edits)`), so it can tick or overwrite the wrong block. Compute the edit from the text whose hash is `after` (capture it in `change`). Window is the gap between two lock acquisitions in one request. **[fixed on main: #528, b55b2d17]**
 - [ ] src/sheafmd/hub/core.py:1090 `may_open` (the save guard's under-lock recheck) returns True for any member on a loose page with a plain Share later narrowed to names, because the loose page keeps `visibility: project` (names_only is skipped for loose roots) and `may_open` does not ask `shared_with`/`member_owns`; only the pre-lock gate `_owned` does. A save by a member dropped from the names in the gap between gate and lock is written.
-- [ ] src/sheafmd/mcp.py:454 `_told_text` uses `str.replace(real, told)` on the whole error text, so a real address that is a prefix of another address in the same text is rewritten inside it too (cosmetic).
+- [x] src/sheafmd/mcp.py:454 `_told_text` uses `str.replace(real, told)` on the whole error text, so a real address that is a prefix of another address in the same text is rewritten inside it too (cosmetic). **[fixed on main: #554, 2a900098]**
 - [x] src/sheafmd/hub/loose.py:182 `Loose.owner_of` re-reads loose.json and realpaths every folder on each call; it is now called several times per row and per stream event (`loose_owner`, `giver`, `shared_with`, `mine`). Performance only. **[fixed on main 4a34dd8c, src/sheafmd/hub/loose.py:289: owner_of reads through _registry(), which a listing holds once via remembered() (loose.py:~180), so loose.json is read once per listing; only the cheap realpath per folder remains.]**
 
 ## PR #395
@@ -99,7 +99,7 @@
 ## PR #400
 
 - [ ] src/sheafmd/hub/repos.py:113 _read returns {} for an unparseable reports.json, so the next _write in _settle replaces the file and drops every owner record of every repo; a corrupt file is silently reset instead of refused.
-- [ ] src/sheafmd/hub/repos.py:279 `repo not in self._queues` is read outside self._guard; a report racing the drain thread's pop can call provider.token a second time or skip the no-app check for one report. No wrong record follows (the thread re-checks the token).
+- [x] src/sheafmd/hub/repos.py:279 `repo not in self._queues` is read outside self._guard; a report racing the drain thread's pop can call provider.token a second time or skip the no-app check for one report. No wrong record follows (the thread re-checks the token). **[fixed on main: #554, 2a900098]**
 - [ ] src/sheafmd/hub/repos.py:195 the ssh -G cache self._hosts is written from request threads without a lock and never expires; a changed ~/.ssh/config alias is not seen until restart.
 - [x] src/sheafmd/send.py:517 with hub.repos unwired (PR known limit) every repo page on a connected laptop now costs an initialize + tools/call round trip (up to 5 s each when slow) and a revoked token turns a repo-page render into exit 1 where it used to render locally; intended per SPEC 13, but a visible behaviour change for all connected laptops. **[does not hold on main 4a34dd8c, src/sheafmd/hub/server.py:543: hub.repos is now wired (repos_mod.from_config); the remaining round trip is the intended SPEC behaviour, not a defect.]**
 
@@ -353,7 +353,7 @@
 
 ## PR #455
 
-- [ ] src/sheafmd/hub/boxwait.py:126 `d.state = state` runs before `_end`, so `_end`'s own `delivered` check misses and the clear is re-done by hand (`was == "delivered"`); correct as written, but setting state after `_end` (or not at all, since the drop is discarded) would remove the duplicated rule
+- [x] src/sheafmd/hub/boxwait.py:126 `d.state = state` runs before `_end`, so `_end`'s own `delivered` check misses and the clear is re-done by hand (`was == "delivered"`); correct as written, but setting state after `_end` (or not at all, since the drop is discarded) would remove the duplicated rule **[fixed on main: #554, 2a900098]**
 - [ ] src/sheafmd/hub/core.py:1465 the pass settles drops against the file before reading statuses, so when the Starter writes `answered` after its reply (the contract in SPEC 9.15), the reply usually ends the drop first and `answered` is never told to the page; harmless (the reply clears the line), but the new state is mostly unobserved in practice
 - [x] tests/test_hub_work.py:760 hub test not run locally (laptop load 10.5, above the limit of 8); the two page tests are Playwright, CI only **[does not hold on main 4a34dd8c, tests/test_hub_work.py:760: A note that the author did not run the test locally; not a defect in code.]**
 

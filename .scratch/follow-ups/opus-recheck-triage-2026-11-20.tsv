@@ -10,7 +10,7 @@
 22	386	FIXED	src/sheafmd/mcp.py:991	Non-bare doc refuses only a true keep (`if args.get("keep")`), keep=false passes.	
 23	386	FIXED	src/sheafmd/mcp.py:1174	The create path calls writes.told(address) in its except BaseException after expect_own (mcp.py:1165), so a refused create leaves no stale hash.	
 27	387	FIXED	src/sheafmd/hub/sheaf_view.py:44	Titles.read still does `self._kept[key] = ...` then `return self._kept[key]` after a possible clear() by another thread; compute value into a local, store it, return the local.	1
-28	387	b	src/sheafmd/hub/sheaf_view.py:223	hub.writes.last and last_way_back are still two separate lock takes; add one WriteLog method returning both under one lock (cosmetic).	5
+28	387	FIXED	src/sheafmd/hub/sheaf_view.py:223	hub.writes.last and last_way_back are still two separate lock takes; add one WriteLog method returning both under one lock (cosmetic).	5
 29	387	FIXED	src/sheafmd/page/mount.js:438	The Sheaf wrapper still gets class `sheaf-list sheaf-sheaf`; reuse of list.css looks deliberate, so add a comment saying so (no behaviour change).	
 30	387	STALE	src/sheafmd/hub/sheaf_view.py:194	Not a defect: a cost remark, and Titles caches by (path, mtime, size) (sheaf_view.py:36-44) as the finding itself says.	
 34	388	FIXED	src/sheafmd/connect.py:280	_with_default has an `empty` regex that fills an empty `tiroir = ""` line in place and then verifies with tomllib, so no second key is written.	
@@ -19,7 +19,7 @@
 37	388	c	src/sheafmd/connect.py:210	probe still does r.read(1 << 20) with a per-socket-operation timeout, so an event-stream answer kept open with keep-alives holds the command; a fix needs a decision on an overall deadline or reading only to the first data: line.	
 38	388	c	src/sheafmd/hub/laptops.py:34	of() still filters `not r.invalid`, so an invalid laptop row cannot be revoked through /_/laptops/revoke; whether invalid rows should be listed and revocable is a product decision.	
 39	388	FIXED	src/sheafmd/hub/proxy.py:607	signed_names skips a laptop row when cfg is None, so loopback mode no longer counts a laptop token as signed by Claude Code.	
-43	389	b	src/sheafmd/mcp.py:1254	The `if address in self.hub.writes._own:` guard reading a private attribute is still there before told(); drop the guard and call told(address) alone.	5
+43	389	FIXED	src/sheafmd/mcp.py:1254	The `if address in self.hub.writes._own:` guard reading a private attribute is still there before told(); drop the guard and call told(address) alone.	5
 44	389	b	src/sheafmd/hub/loose.py:306	Same drop() as item 20: forget_root runs before os.rmdir(folder), so a folder that is a symlink raises NotADirectoryError after the root is forgotten; fix together with item 20 (rmdir first, catch OSError).	2
 45	389	FIXED	src/sheafmd/mcp.py:253	_check enforces schema type boolean for every call (`keep must be true or false`), so keep="false" is refused for a bare doc too.	
 46	389	STALE	n/a	About the PR #389 description text, not code on main; nothing to change in the repo.	
@@ -32,7 +32,7 @@
 62	393	FIXED	SPEC.md:415	SPEC item 11 still does not state that a member page loaded without sheaf.js shows the session name as plain text (page.js comment at 137 says it); add one sentence.	
 66	394	FIXED	src/sheafmd/hub/handler.py:1474	_share still builds the edit from e.live.current()[1] after the place.held block ends and sends `after` as the hash; capture the text whose hash is `after` inside change (the with_share_line result, or text) and compute share_edit from it.	2
 67	394	c	src/sheafmd/hub/core.py:1347	may_open still does not ask shared_with/member_owns (only visible-style fm checks plus opened_by_line); the save guard's under-lock recheck on a loose page needs a decision on what it must judge, and it is trust-boundary code.	
-68	394	b	src/sheafmd/mcp.py:515	_told_text still uses text.replace(real, told) over the whole text; replace only whole-address occurrences (regex with a non-path-character boundary) (cosmetic).	5
+68	394	FIXED	src/sheafmd/mcp.py:515	_told_text still uses text.replace(real, told) over the whole text; replace only whole-address occurrences (regex with a non-path-character boundary) (cosmetic).	5
 69	394	FIXED	src/sheafmd/hub/loose.py:289	owner_of reads through _registry(), which a listing holds once via remembered() (loose.py:~180), so loose.json is read once per listing; only the cheap realpath per folder remains.	
 73	395	STALE	n/a	A deploy-ordering note (ship the mod and library door pass-through with this deploy), not a code defect on main.	
 74	395	c	src/sheafmd/page/page.js:2436	retargets() still drops agent:<token> equal to targetNow(); whether a laptop's own token should be offered as a Retarget target is a product decision.	
@@ -48,7 +48,7 @@
 96	399	a	src/sheafmd/send.py:228	Recovery text still promises "exists already, and it is this one" but _create (send.py:418-420) answers "was not sent from this file. Rename"; reword the guidance to what the rerun prints.	
 97	399	STALE	src/sheafmd/send.py:49	Concerns the PR description only; SPEC.md:1709 says "5 s each" and the code comment says the messages before a call, so nothing in the repo is wrong.	
 101	400	c	src/sheafmd/hub/repos.py:224	_read still returns {} on an unparseable reports.json and the next _write replaces it; refuse versus quarantine-and-reset is a decision.	
-102	400	b	src/sheafmd/hub/repos.py:700	"repo not in self._queues" is still read outside self._guard at lines 700 and 728; take the guard for the membership test only (not across provider.token).	5
+102	400	FIXED	src/sheafmd/hub/repos.py:700	"repo not in self._queues" is still read outside self._guard at lines 700 and 728; take the guard for the membership test only (not across provider.token).	5
 103	400	c	src/sheafmd/hub/repos.py:493	self._hosts is still written unlocked and never expires; the expiry policy is a decision.	
 104	400	STALE	src/sheafmd/hub/server.py:543	hub.repos is now wired (repos_mod.from_config); the remaining round trip is the intended SPEC behaviour, not a defect.	
 108	401	c	src/sheafmd/tells_poll.py:48	_origin_of_server still reads only top-level mcpServers of ~/.claude.json; supporting project scope changes which entries the mod trusts.	
@@ -173,7 +173,7 @@
 347	453	FIXED	tests/leakguard.py:131	carries_this_run still waits only within EXEC_WINDOW of process start; pre-existing, accepted limit: add a one-line comment saying so.	
 351	454	STALE	GitHub PR #454 text	The finding is about the PR description on GitHub, not a repo file; nothing to change on main.	
 352	454	FIXED	src/sheafmd/page/mount.js:453 and src/sheafmd/page/page.js:164-181,602	Coupling is real and uncommented at the src call sites (await link.onload before create; takeAgent before #rd-menu); add a comment at each.	
-356	455	b	src/sheafmd/hub/boxwait.py:126	d.state = state still runs before _end, so the delivered clear is duplicated (was == "delivered" at 129 and _end at 149); set the state after _end or drop it.	5
+356	455	FIXED	src/sheafmd/hub/boxwait.py:126	d.state = state still runs before _end, so the delivered clear is duplicated (was == "delivered" at 129 and _end at 149); set the state after _end or drop it.	5
 357	455	c	src/sheafmd/hub/core.py:1523-1529	_watch_drops still runs expire() before _read_drop_statuses(), so a reply ends the drop first; the finding itself says harmless, ordering change would be a design call.	
 358	455	STALE	tests/test_hub_work.py:760	A note that the author did not run the test locally; not a defect in code.	
 362	457	c	src/sheafmd/page/sheaf.js:435	Still `if (gone || lpanel.hidden) return;` on the POST success path, so the made line is dropped when the panel is closed meanwhile; what to show (token is shown once) is a decision.	

@@ -2,7 +2,7 @@
 
 **Claimed by:** Kenji 2026-11-22
 
-**Status:** done in PR #578 (GO round 1, CI run 45065643984 green), waiting on the merge
+**Status:** done: PR #578 merged as b8967bec (head 2f008488, GO round 1 provisional, CI run 45065643984 green)
 
 **Blocked by:** PR #539
 

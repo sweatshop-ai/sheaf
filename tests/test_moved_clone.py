@@ -2,6 +2,7 @@
 new origin and does not wake, and a landing from the new tiroir wakes it. `Repos` alone against a local bare repo and a fake
 App, and the CLI's two ends of the answer: no hub, no server."""
 import dataclasses
+import threading
 
 import pytest
 from test_repo_pages import REPO, FakeApp, origin, sh  # noqa: F401  (fixtures and helpers)
@@ -182,3 +183,15 @@ def test_a_root_coming_back_after_an_old_failed_clone_is_not_refused(repos):
     repos._failed[REPO] = "the clone failed"
     assert repos.refusal("bea", REPO) is None
     assert repos._failed[REPO] == "the clone failed"            # nothing popped: the report after the unmove settles it
+
+
+def test_a_thread_that_cannot_start_leaves_no_queue_and_no_thread_behind(repos, monkeypatch):
+    def no_thread(self):
+        raise RuntimeError("can't start new thread")
+    monkeypatch.setattr(threading.Thread, "start", no_thread)
+    with pytest.raises(RuntimeError):
+        repos._enqueue(REPO, ("bea", "docs/plan.md", "a" * 40))
+    (repos.clone_dir(REPO) / ".git").mkdir(parents=True)
+    with pytest.raises(RuntimeError):
+        repos.sleep_moved(REPO, THERE)
+    assert repos._queues == {} and not repos._threads

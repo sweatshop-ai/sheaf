@@ -227,8 +227,8 @@ class _Http(BaseHTTPRequestHandler):
                         self.wfile.flush()
                         return
                 self.wfile.flush()
-                if self.stopping.is_set() or (ends is not None and time.monotonic() >= ends):
-                    return
+                if self.stopping.is_set() or sub.closed or (ends is not None and time.monotonic() >= ends):
+                    return                      # `sub.closed`: replaced or dropped by the hub, so no event will come
                 if time.time() >= due:
                     self.wfile.write(KEEPALIVE)
                     self.wfile.flush()

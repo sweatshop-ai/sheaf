@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from helpers import swap_the_sibling_at
 from sheafmd import comments as rdc
 from sheafmd import paths
 from sheafmd import source as rds
@@ -254,25 +255,6 @@ def test_a_link_planted_between_the_unlink_and_the_open_is_refused(tmp_path, mon
     assert planted
     assert victim.read_text(encoding="utf-8") == "personal\n"
     assert p.read_text(encoding="utf-8") == "keep\n"
-
-
-def swap_the_sibling_at(monkeypatch, name, sibling, put, swap=True):
-    """Replace os.<name> (`fsync`, called while the sibling is open, or `replace`, called with it)
-    by one that first removes the sibling and lets `put(sibling)` make something else at its name,
-    as a user who can write the folder can at any moment, then does the real call. With swap False
-    nothing is made: the control."""
-    real = getattr(os, name)
-    swapped = []
-
-    def hook(*a, **k):
-        if swap and not swapped and os.path.lexists(sibling):
-            swapped.append(sibling)
-            os.unlink(sibling)
-            put(sibling)
-        return real(*a, **k)
-
-    monkeypatch.setattr(os, name, hook)
-    return swapped
 
 
 def outside_file(tmp_path):

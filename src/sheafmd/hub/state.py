@@ -289,9 +289,10 @@ class Versions:
         pinned alike. Nothing at `old`, nothing to carry; whatever `new` held before is replaced (its page is the one that
         moved there)."""
         src = self._folder(old)
-        if not src.is_dir():
-            return
         dst = self._dir(self.dir) / doc_key(self._key(new))
+        if not src.is_dir():
+            shutil.rmtree(dst, ignore_errors=True)      # nothing moved there, so what `new` held is the history of a page that is gone
+            return
         if dst != src:
             shutil.rmtree(dst, ignore_errors=True)
             os.replace(src, dst)
@@ -358,7 +359,7 @@ class _Store:
         """The entry of the address `old` becomes that of `new`, for a page that moved (9.11); `new`'s own is replaced."""
         def change(data):
             if old not in data:
-                return None, False
+                return None, data.pop(new, None) is not None     # nothing moved there: what `new` held is of a page that is gone
             data[new] = data.pop(old)
             return None, True
         self._change(change)

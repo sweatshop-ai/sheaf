@@ -409,3 +409,13 @@ def test_the_last_line_and_the_last_way_back_come_from_one_look_at_the_log():
     last, way_back = log.last_and_way_back("a.md")
     assert (last, way_back) == (log.last("a.md"), log.last_way_back("a.md")) and (last.writer, way_back.writer) == ("Bea", "Ada")
     assert log.last_and_way_back("none.md") == (None, None)
+
+
+def test_a_pull_that_ends_does_not_close_the_window_of_another_pull_of_the_same_page():
+    log = WriteLog()
+    log.expect_pull("a.md")
+    log.expect_pull("a.md")
+    log.end_pull("a.md", None)
+    assert log.is_pull("a.md", "h-any")             # the second pull is still under way
+    log.end_pull("a.md", None)
+    assert not log.is_pull("a.md", "h-any")

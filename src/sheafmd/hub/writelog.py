@@ -76,7 +76,7 @@ class WriteLog:
         self._now = now or (lambda: strftime(STAMP_FORMAT))
         self._lock = threading.Lock()
         self._lines: dict[str, deque] = {}
-        self._pulling: set[str] = set()
+        self._pulling: dict[str, int] = {}
         self._left: dict[str, str] = {}
         self._own: dict[str, str] = {}
         self._mine = threading.local()      # `own`: what the calling thread is adding under `own_lines`
@@ -206,11 +206,14 @@ class WriteLog:
     # A record no change ever matches is dropped by the next change that does not: nothing waits to swallow a later line.
     def expect_pull(self, address: str):
         with self._lock:
-            self._pulling.add(address)
+            self._pulling[address] = self._pulling.get(address, 0) + 1
 
     def end_pull(self, address: str, left: str | None):
         with self._lock:
-            self._pulling.discard(address)
+            if self._pulling.get(address, 0) > 1:
+                self._pulling[address] -= 1
+            else:
+                self._pulling.pop(address, None)
             if left:
                 self._left[address] = left
             else:

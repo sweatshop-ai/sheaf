@@ -48,6 +48,18 @@ class Conn(NamedTuple):
     closed: object = None
 
 
+class Socket(NamedTuple):
+    """The client's end of a connection as the kernel lists it. Inode 0: no process holds it any more
+    (its owner closed it)."""
+    uid: int
+    inode: int
+
+
+def _held(found) -> bool:
+    """Whether a process still holds every one of these sockets."""
+    return all(s.inode for s in found)
+
+
 class Refusal(NamedTuple):
     kind: str                        # OTHER_USER, or UNKNOWN: the hub could not tell
     message: str                     # what any caller is told: no uid, no path
@@ -82,15 +94,15 @@ def _address(pair):
     return _normal(ipaddress.ip_address(pair[0])), int(pair[1])
 
 
-def _owners(table: Path, local, remote) -> list[int]:
-    """The uid of every row of `table` whose local and remote ends are these. OSError when the
+def _owners(table: Path, local, remote) -> list[Socket]:
+    """(uid, inode) of every row of `table` whose local and remote ends are these. OSError when the
     file cannot be read; a line that is no row (the header, a damaged one) is skipped."""
     owners = []
     for line in table.read_bytes().decode("ascii", "replace").splitlines():
         f = line.split()
         try:
-            if len(f) >= 8 and _endpoint(f[1]) == local and _endpoint(f[2]) == remote:
-                owners.append(int(f[7]))
+            if len(f) >= 10 and _endpoint(f[1]) == local and _endpoint(f[2]) == remote:
+                owners.append(Socket(int(f[7]), int(f[9])))
         except ValueError:
             continue
     return owners
@@ -111,7 +123,7 @@ _NETLINK_TIMEOUT = 2.0
 _ESTABLISHED = 1                       # tcpi_state of a connection whose caller has not closed
 _HEADER = 16                           # struct nlmsghdr
 _UID_AT = _HEADER + 64                 # inet_diag_msg: 4 bytes, the 48-byte id, then expires, rqueue, wqueue
-_MSG_LEN = _HEADER + 72                # ... and uid, inode
+_MSG_LEN = _HEADER + 72                # ... and uid, inode (the inode right after the uid)
 
 
 def _netlink_request(family: int, local, remote) -> bytes:
@@ -127,8 +139,8 @@ def _netlink_request(family: int, local, remote) -> bytes:
     return struct.pack("=IHHII", 16 + len(body), _SOCK_DIAG_BY_FAMILY, _NLM_F_REQUEST, 1, 0) + body
 
 
-def _netlink_owners(local, remote) -> list[int]:
-    """The uid of the TCP socket whose local end is `local` and remote end `remote`, as the kernel
+def _netlink_owners(local, remote) -> list[Socket]:
+    """(uid, inode) of the TCP socket whose local end is `local` and remote end `remote`, as the kernel
     names it: a list of none or one. OSError when the kernel cannot be asked or answers with an
     error other than "no such socket"."""
     owners = []
@@ -148,12 +160,12 @@ def _netlink_owners(local, remote) -> list[int]:
                 continue
             if kind != _SOCK_DIAG_BY_FAMILY or len(data) < _MSG_LEN:
                 raise OSError(0, "the kernel's answer was not a socket")
-            owners.append(struct.unpack_from("=I", data, _UID_AT)[0])
+            owners.append(Socket(*struct.unpack_from("=II", data, _UID_AT)))
             break
     return owners
 
 
-def _proc_owners(local, remote) -> list[int]:
+def _proc_owners(local, remote) -> list[Socket]:
     """The same from /proc/net/tcp and /proc/net/tcp6. OSError when a file cannot be read."""
     owners = []
     for name in TABLES:
@@ -165,20 +177,35 @@ def _proc_owners(local, remote) -> list[int]:
     return owners
 
 
-def owners(conn) -> list[int]:
-    """The uid of every socket that is the client's end of `conn` (a `Conn`): asked of the kernel's
+def sockets(conn) -> list[Socket]:
+    """(uid, inode) of every socket that is the client's end of `conn` (a `Conn`): asked of the kernel's
     socket diagnostics, and of /proc/net/tcp* where the kernel cannot be asked or finds nothing (it
     answers "no such socket" also where no tcp_diag handler is loaded). An empty list is both saying
-    there is no such socket. OSError when neither can say."""
+    there is no such socket. OSError when neither can say.
+
+    Inode 0 is a socket no process holds any more: its owner closed it. The kernel's diagnostics then
+    name uid 0 for it, while /proc/net/tcp* keeps the uid of the user who closed it, so /proc is asked
+    too and its rows win when it has them."""
     local, remote = _address(conn.client), _address(conn.hub)
+    found = []
     if NETLINK:
         try:
             found = _netlink_owners(local, remote)
-            if found:
+            if found and _held(found):
                 return found
         except (OSError, struct.error, AttributeError):    # AttributeError: no AF_NETLINK on this platform
-            pass
-    return _proc_owners(local, remote)
+            found = []
+    try:
+        return _proc_owners(local, remote) or found
+    except OSError:
+        if found:
+            return found
+        raise
+
+
+def owners(conn) -> list[int]:
+    """The uid of every socket that is the client's end of `conn` (`sockets`), for the self-test."""
+    return [s.uid for s in sockets(conn)]
 
 
 def selftest() -> str | None:
@@ -214,18 +241,24 @@ def check(conn) -> Refusal | None:
     except (ValueError, TypeError, IndexError):
         return _unknown("the address of the connection is not one it can look up")
     try:
-        found = owners(conn)
+        found = sockets(conn)
     except OSError as e:
         return _unknown(f"the owner of the connection could not be read ({e.strerror or type(e).__name__})")
     if not found:
         return _unknown("the connection could not be found (asked the kernel, or /proc/net/tcp and /proc/net/tcp6 where it cannot answer)")
-    if len(set(found)) > 1:
+    if len({s.uid for s in found}) > 1:
         return _unknown("the connection has rows that name more than one user")
-    hub_uid = os.geteuid()
-    if found[0] != hub_uid:
+    uid, hub_uid = found[0].uid, os.geteuid()
+    if not _held(found) and uid in (0, hub_uid):
+        # No process holds the caller's end: it closed before the hub looked. Uid 0 is what the kernel
+        # says of such a socket, and the hub's own uid there is no proof either way that its user sent
+        # this, so it is not taken for the hub's user, also where the hub runs as root. Another user's
+        # uid that the kernel kept is a refusal like any other.
+        return _unknown("the connection closed before the hub could tell who sent this")
+    if uid != hub_uid:
         return Refusal(OTHER_USER, "that sign-in link was followed by another user of this machine",
                        f"that sign-in link was followed by another user of this machine "
-                       f"(uid {found[0]}); the hub runs as uid {hub_uid}", found[0])
+                       f"(uid {uid}); the hub runs as uid {hub_uid}", uid)
     return None
 
 
@@ -244,13 +277,9 @@ def look(client, hub, sock) -> Conn:
     """The connection `sock` came in on, with the answer to who is at its other end: asked once, as
     soon as it is accepted, before a byte of the request is read."""
     conn = Conn(client, hub)
-    no = check(conn)
-    if no is None and os.geteuid() == 0 and closed(sock):
-        # Asked after the caller closed, the lookup reads root, which is the hub's own user where the hub
-        # runs as root: a closed caller is never let through on that answer. Where the hub is not root, a
-        # caller that only half-closed still reads as its owner and is judged by that.
-        no = _unknown("the connection closed before the hub could tell who sent this")
-    return Conn(client, hub, True, no, lambda: closed(sock))
+    # A caller that closed before this is told apart by `check`: no process holds its socket (inode 0).
+    # One that only half-closed (`nc -N`) still holds it, and is judged by its owner, root included.
+    return Conn(client, hub, True, check(conn), lambda: closed(sock))
 
 
 def startup() -> str | None:

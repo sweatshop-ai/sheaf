@@ -1,7 +1,7 @@
 """`holds_number`: a number is found where it stands alone, not inside a random id."""
 import pytest
 
-from helpers import holds_number
+from helpers import count_number, holds_number
 
 
 @pytest.mark.parametrize("text, found", [
@@ -17,3 +17,8 @@ from helpers import holds_number
 ])
 def test_a_number_is_found_only_where_it_stands_alone(text, found):
     assert holds_number(text, 260) is found
+
+
+def test_the_count_is_of_the_places_where_it_stands_alone():
+    assert count_number('{"pid": 260} x=260; 2600 260px', 260) == 2
+    assert count_number("", 260) == 0

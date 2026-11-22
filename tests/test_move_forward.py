@@ -839,3 +839,17 @@ def test_a_move_of_a_page_with_no_archive_marks_writes_none(team):
     moved(team, ALICE, at("a"), "b")
     assert loose.times(root, archive.SEEN) == {} and loose.times(root, archive.ARCHIVED) == {}
     assert not (root / ".sheaf" / archive.SEEN).exists() and not (root / ".sheaf" / archive.ARCHIVED).exists()
+
+
+def test_the_door_answers_a_move_whose_page_cannot_be_read_after_it_with_a_tool_error(team, monkeypatch):
+    from sheafmd.hub import moves
+    old = made(team, "alice", PLAN)["doc"]
+    real = moves.move_page
+
+    def then_gone(hub, member, address, folder):
+        new = real(hub, member, address, folder)
+        hub.file(new).unlink()
+        return new
+    monkeypatch.setattr(moves, "move_page", then_gone)
+    bad, out = call(team, "alice", "move", doc=old, folder="b")
+    assert bad and "could not be read" in out

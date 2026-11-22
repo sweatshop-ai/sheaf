@@ -6,7 +6,7 @@ ten times, so the triggers and the matrix are decided and these tests hold them:
   schedule, 01:00       ubuntu x {3.11, 3.13, 3.14}, on main
   workflow_dispatch     ubuntu, and macOS too only when started with `macos` ticked; one Python or all
 
-and where it runs: every job on GitHub's own runners.
+and where it runs: an ubuntu job of this repository on the organisation's runners, the rest on GitHub's.
 """
 import os
 import subprocess
@@ -21,7 +21,16 @@ CI = WORKFLOWS / "ci.yml"
 
 MATRIX_OS = ("os: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.macos && "
              "'[\"ubuntu-24.04\",\"macos-26\"]' || '[\"ubuntu-24.04\"]') }}")
-RUNS_ON = "runs-on: ${{ matrix.os }}"
+# A pull request is trusted when its head is a branch of this repository and Dependabot did not open it: a Dependabot
+# branch lives in this repository and skips the approval of a fork's workflows, but runs code of an updated dependency.
+OURS = ("(github.event.pull_request.head.repo.full_name == github.repository && "
+        "github.event.pull_request.user.login != 'dependabot[bot]')")
+TRUSTED = f"(github.event_name != 'pull_request' || {OURS})"
+ORG_RUNNERS = "fromJSON('[\"self-hosted\",\"linux\",\"sheaf-ci\"]')"
+RUNS_ON = f"runs-on: ${{{{ matrix.os == 'ubuntu-24.04' && {TRUSTED} && {ORG_RUNNERS} || matrix.os }}}}"
+SLICED = (f"((github.event_name == 'pull_request' && !{OURS}) || "
+          "(github.event_name == 'workflow_dispatch' && inputs.macos))")
+SLICE = ("slice: ${{ fromJSON(" + SLICED + " && '[\"1/6\",\"2/6\",\"3/6\",\"4/6\",\"5/6\",\"6/6\"]' || '[\"\"]') }}")
 MATRIX_PYTHON = ("python: ${{ fromJSON(github.event_name == 'workflow_dispatch' && inputs.python != 'all' && "
                  "format('[\"{0}\"]', inputs.python) || (github.event_name == 'workflow_dispatch' || "
                  "github.event_name == 'schedule') && "
@@ -113,12 +122,13 @@ def test_the_matrix_is_ubuntu_on_every_trigger_and_macos_only_when_a_manual_run_
     assert keys(section(matrix, "matrix", 6), 8) == ["os", "python", "slice"]
 
 
-def test_each_python_runs_as_three_jobs_each_with_a_third_of_the_tests(text):
-    # The page tests wait on the browser one at a time; six jobs take a sixth each (tests/conftest.py).
+def test_a_job_runs_the_whole_suite_unless_it_is_on_githubs_runners_for_a_fork_or_for_macos(text):
+    # On the organisation's runners each Python is one job with the whole suite (an empty slice: tests/conftest.py then keeps every test).
+    # A fork's pull request and a manual run with macOS keep six jobs, each with a sixth of the tests.
     job = section(section(text, "jobs"), "test", 2)
-    assert re.search(r"^        slice: \[1, 2, 3, 4, 5, 6\]\s*$", job, flags=re.M)
-    assert re.search(r"^      SHEAF_TEST_SLICE: \$\{\{ matrix\.slice \}\}/6\s*$", section(job, "env", 4), flags=re.M)
-    assert "    name: ${{ matrix.os }} py${{ matrix.python }} slice ${{ matrix.slice }}/6" in text
+    assert "        " + SLICE in job.splitlines()
+    assert re.search(r"^      SHEAF_TEST_SLICE: \$\{\{ matrix\.slice \}\}\s*$", section(job, "env", 4), flags=re.M)
+    assert "    name: ${{ matrix.os }} py${{ matrix.python }}${{ matrix.slice != '' && format(' slice {0}', matrix.slice) || '' }}" in text
 
 
 def test_a_manual_run_picks_macos_and_the_python_version_and_macos_starts_off(text):
@@ -151,7 +161,7 @@ def test_macos_is_named_only_in_that_one_expression_and_the_manual_input(text):
     assert len(allowed) == 1
     assert all("runs-on" not in ln and "macos-" not in ln.lower() for ln in named if ln not in allowed)
     others = [ln for ln in named if ln not in allowed]
-    assert all(re.search(r"runner\.os == 'macOS'|service_macos\.py", ln) for ln in others), others
+    assert all(re.search(r"runner\.os == 'macOS'|service_macos\.py|inputs\.macos", ln) for ln in others), others
 
 
 def test_one_job_asks_for_a_runner_and_nothing_else_does(text):
@@ -159,10 +169,34 @@ def test_one_job_asks_for_a_runner_and_nothing_else_does(text):
     assert keys(section(text, "jobs"), 2) == ["test"]
 
 
-def test_every_job_runs_on_the_runner_its_matrix_value_names(text):
-    # GitHub's own runners: the matrix value is `ubuntu-24.04` or `macos-26`.
+def test_an_ubuntu_job_of_this_repository_runs_on_the_organisations_runners_and_a_fork_and_macos_run_on_githubs(text):
+    # The label is a function of the event and of the head of the pull request: a push, the nightly run, a manual run and
+    # a pull request whose head is a branch of this repository are trusted, unless Dependabot opened it; a fork's pull
+    # request is not, and macOS never
+    # leaves GitHub's runners. The fork's own copy of this file can name any label, so the repository setting that holds
+    # a fork's workflows for approval is the guard; this expression only keeps an honest fork run off those runners.
     line = re.search(r"^\s*runs-on: (.*)$", text, flags=re.M).group(1)
-    assert line == "${{ matrix.os }}"
+    assert line == (f"${{{{ matrix.os == 'ubuntu-24.04' && {TRUSTED} && {ORG_RUNNERS} || matrix.os }}}}")
+    assert "pull_request_target" not in text
+    # No host name, address or runner name of the organisation in this public file.
+    assert not re.search(r"t-compute|\b\d{1,3}(\.\d{1,3}){3}\b|tailscale|\.ts\.net", text, flags=re.I)
+
+
+def test_the_organisations_runners_run_sixteen_workers_that_steal_work_and_github_four(text):
+    runs = [ln for ln in text.splitlines() if "pytest -v" in ln and "-m page" not in ln]
+    assert len(runs) == 1
+    assert "${{ runner.environment == 'self-hosted' && '-n 16 --dist loadgroup' || '-n 4' }}" in runs[0]
+
+
+def test_a_self_hosted_job_installs_no_package_and_no_service_and_keeps_no_token(text):
+    # the organisation's machine is shared: the apt install of the browsers' libraries, the user service of tools/ci and the cache
+    # (which names an image it has not) are for a GitHub-hosted runner only, and the checkout leaves no token behind.
+    assert "          persist-credentials: false\n" in text
+    hosted = "runner.environment == 'github-hosted'"
+    for name in ("Name the runner image", "Cache the Playwright browsers", "User service, systemd"):
+        i = text.index(f"- name: {name}")
+        assert hosted in text[i:text.index("\n      - name:", i + 1) if "\n      - name:" in text[i + 1:] else len(text)], name
+    assert '[ "$RUNNER_ENVIRONMENT" = "github-hosted" ] && command -v sudo' in text
 
 
 def test_the_ubuntu_image_is_named_never_latest(text):
@@ -260,8 +294,10 @@ def test_the_page_tests_run_only_where_there_are_some_and_may_not_skip(text):
 def test_the_service_checks_run_per_system_through_the_ci_scripts(text):
     assert "tools/ci/service_linux.py" in text and "tools/ci/service_macos.py" in text
     # The service is the same in every slice, so the first slice alone checks it.
-    assert "        if: runner.os == 'Linux' && matrix.slice == 1\n" in text
-    assert "        if: runner.os == 'macOS' && matrix.slice == 1\n" in text
+    # (a job with no slice is the whole suite and checks it too)
+    first = "(matrix.slice == '' || startsWith(matrix.slice, '1/'))"
+    assert f"        if: runner.os == 'Linux' && runner.environment == 'github-hosted' && {first}\n" in text
+    assert f"        if: runner.os == 'macOS' && {first}\n" in text
 
 
 def test_the_wheel_is_built_and_installed_as_a_user_would(text):
@@ -271,7 +307,7 @@ def test_the_wheel_is_built_and_installed_as_a_user_would(text):
 def test_the_browsers_system_packages_are_installed_by_the_job_only_where_it_can_use_sudo(text):
     # `--with-deps` runs apt through sudo, so the job passes it only where sudo exists.
     block = text[text.index("Page tests (Playwright)"):]
-    assert re.search(r'if \[ "\$RUNNER_OS" = "Linux" \] && command -v sudo >/dev/null; then deps="--with-deps"; fi', block)
+    assert re.search(r'if \[ "\$RUNNER_OS" = "Linux" \] && \[ "\$RUNNER_ENVIRONMENT" = "github-hosted" \] && command -v sudo >/dev/null; then deps="--with-deps"; fi', block)
     assert 'playwright install $deps $engines' in block
 
 
@@ -350,7 +386,8 @@ def test_the_page_tests_are_decided_in_their_own_step_before_the_steps_that_use_
     step = text[i:text.index("\n      - name:", i)]
     assert "id: page" in step and "tools/ci/page_paths.py" in step
     ifs = re.findall(r"^        if: (.*)$", text[i:], flags=re.M)
-    assert ifs[:2] == ["hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'"] * 2
+    page = "hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'"
+    assert ifs[:2] == [page + " && runner.environment == 'github-hosted'", page]    # the image name: GitHub's runners only
     # checkout keeps the base: the merge commit's first parent
     assert re.search(r"actions/checkout@v4\n        with:\n(?:          #.*\n)?          fetch-depth: 2\n", text)
 

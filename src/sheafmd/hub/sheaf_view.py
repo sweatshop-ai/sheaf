@@ -76,18 +76,19 @@ def way_back(line, member) -> dict | None:
     """What a row's session name links to, from the Write log's own line and nothing the page says (SPEC 8.6): `laptop` is
     the provider and id the member's own laptop session declared (the page asks AgentView on their laptop to bring it back), with the
     session's Remote Control link when it declared one; `remote` the link alone; `chat` an Open WebUI chat of this origin.
-    A claude.ai or ChatGPT write, a session of another member's laptop without a link, an id that is not a plain id, and a
-    session with no link at all give None: the name is plain text. A member's laptop is asked only for their own sessions
+    A claude.ai or ChatGPT write, a session of another member's laptop without a link, an id of the member's own session that is
+    not a plain id, and a session with no link at all give None: the name is plain text. Another member's session is looked at for its
+    link alone, whatever its id. A member's laptop is asked only for their own sessions
     (their agents sign `<client> (<member>)`), never for one another member's."""
     if line is None:
         return None
     if line.place == "chat client":
         return {"kind": "chat", "href": f"/c/{line.chat}"} if CHAT_ID.fullmatch(line.chat) else None
     if line.place == "laptop" and line.session:
-        if not SESSION_ID.fullmatch(line.session):
-            return None
         client, _, own = line.writer.partition(" (")
         if own == f"{member.name})" and client in AGENTS:
+            if not SESSION_ID.fullmatch(line.session):
+                return None
             return {"kind": "laptop", "provider": AGENTS[client], "session": line.session, "remote": line.link}
     return {"kind": "remote", "href": line.link} if line.link else None
 

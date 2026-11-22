@@ -1212,7 +1212,7 @@ class Hub:
         try:
             top, rel = self.where(address)
             with beneath.open_beneath(top, rel, meta=True) as op:
-                self.member_opened.mark(member.id, address, int(os.fstat(op.fd).st_mtime * 1e9))
+                self.member_opened.mark(member.id, address, int(op.stat().st_mtime * 1e9))
         except (OSError, roots_mod.NotFound):
             pass
 
@@ -1329,7 +1329,7 @@ class Hub:
         try:
             top, rel = self.where(address)
             with beneath.open_beneath(top, rel, meta=True) as op:
-                same = os.fstat(op.fd).st_ino == hit[0][0]
+                same = op.stat().st_ino == hit[0][0]
         except (OSError, roots_mod.NotFound):
             return None
         return hit[1:] if same else None
@@ -1735,7 +1735,9 @@ class Hub:
             except Exception:       # one file the hub cannot name leaves the others' pull as it is
                 self.record_exception("pull-page-failed")
                 continue
-            if address in self.entries:
+            # Every page the pull names, open or not: `pulled` ends one for each, and an end with no start of its own
+            # would close the window of another pull of the same page, one that began after the page opened.
+            if address is not None:
                 self.writes.expect_pull(address)
 
     def pulled(self, folder: Path, files: list[tuple[Path, str]], ok: bool, left: dict | None = None):

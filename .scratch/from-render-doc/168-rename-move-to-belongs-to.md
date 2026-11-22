@@ -1,6 +1,6 @@
 # 168: Rename the List's "Move to <slug>" to "Belongs to <slug>"
 
-**Claimed by:** Karim 2026-11-20 15:56
+**Claimed by:** Emil 2026-11-22
 
 **Status:** in review. Sheaf PR #480 has review round 1 GO on b775d08f; its CI waits on a re-run of slices 2 and 4 (a hang, see below). The mail-replies PR is held.
 

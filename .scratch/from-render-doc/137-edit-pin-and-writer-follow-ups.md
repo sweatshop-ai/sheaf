@@ -1,6 +1,6 @@
 # 137: Follow-ups on page edits, version pins and the atomic writers
 
-**Claimed by:** Emil 2026-11-20 20:07
+**Claimed by:** Lucia 2026-11-22
 
 **Status:** in-progress
 

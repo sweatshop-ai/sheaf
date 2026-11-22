@@ -92,6 +92,18 @@ def test_refusals_in_a_loop_are_one_row_a_minute(handler, hub):
     assert len(hub_rows("peer-refused")) == 1
 
 
+@pytest.mark.parametrize("accept", ["TEXT/HTML", "Text/Html;Q=0.5", "application/json, text/html;q=0.1"])
+def test_the_refusal_page_goes_to_an_accept_that_names_html_in_any_case(handler, hub, accept):
+    r = ask(handler, hub, "GET", "/work/plan.md", seen(), "cookie", accept=accept)
+    assert r.status == 403 and r.headers["Content-Type"].startswith("text/html")
+
+
+@pytest.mark.parametrize("accept", ["text/html;q=0", "text/html; q=0.0, application/json", "xtext/html"])
+def test_an_accept_that_refuses_html_gets_the_json_refusal_not_the_page(handler, hub, accept):
+    r = ask(handler, hub, "GET", "/work/plan.md", seen(), "cookie", accept=accept)
+    assert r.status == 403 and r.headers["Content-Type"].startswith("application/json")
+
+
 # ── what the check leaves alone ──────────────────────────────────────────────
 
 def test_the_hubs_own_user_is_let_in(handler, hub):

@@ -57,9 +57,11 @@ SIGN_IN = ("This browser is not signed in to your sheaf hub. On the machine that
            "run <code>sheaf signin-url</code> there and open what it prints in this browser.")
 LINK_USED = (f"A sign-in link from <code>sheaf open</code> works once, for {auth.SIGNIN_TTL} seconds: "
              "this one was used already, has run out or is not from this hub. On the machine that runs the hub, run "
-             "<code>sheaf open &lt;the document&gt;</code> again. If you did not use the link twice "
-             "yourself, someone else on that machine may have used it first: run "
-             "<code>sheaf rotate</code> to sign every browser out, then <code>sheaf open</code> again.")
+             "<code>sheaf open &lt;the document&gt;</code> again.")
+# Only where the hub cannot check who follows a link: where it checks, another user could not have
+# used the link, so there is nothing to rotate for (ticket 99).
+LINK_ROTATE = ("If you did not use the link twice yourself, someone else on that machine may have used it "
+               "first: run <code>sheaf rotate</code> to sign every browser out, then <code>sheaf open</code> again.")
 LINK_LIMIT = ("This hub cannot check which user of this machine follows a link (this system gives it no way "
               "to see who owns a connection), so on a machine that other people use, someone who read the "
               "link while it lasted could have used it first.")
@@ -426,7 +428,7 @@ class Handler:
                 res.error = r.detail or r.message
                 return res
         elif req is not None and r.status == 403 and r.page and req.method == "GET" \
-                and "text/html" in req.headers.get("accept", ""):
+                and _asks_for_html(req.headers.get("accept", "")):
             res = _html(403, _sign_in_page("Not your hub", r.page), headers=r.headers)
             res.error = r.detail or r.message
             return res
@@ -843,7 +845,8 @@ class Handler:
             # that was read from a command line is good for the user who runs the hub, not for another (9.1).
             if not req.auth.redeem_signin(req.query["nonce"]):
                 raise Refuse(401, "that sign-in link was used already, has expired or is not this hub's",
-                             page=LINK_USED if peer.supported() and not self.peer_off else f"{LINK_USED} {LINK_LIMIT}")
+                             page=LINK_USED if peer.supported() and not self.peer_off
+                             else f"{LINK_USED} {LINK_ROTATE} {LINK_LIMIT}")
             no = self._owner(req)
             if no is not None:
                 raise Refuse(401, no.message, page=LINK_OTHER_USER if no.kind == peer.OTHER_USER else LINK_UNKNOWN,

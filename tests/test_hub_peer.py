@@ -342,6 +342,18 @@ def test_a_root_hub_does_not_take_a_socket_no_one_holds_for_its_own(proc, monkey
     assert no is not None and no.kind == peer.UNKNOWN
 
 
+def test_where_the_hub_checks_the_user_a_used_link_does_not_advise_a_rotate(handler, hub, proc):
+    """With the check on, another user could not have taken the cookie with the link, so the page
+    gives only the way back in (ticket 99)."""
+    proc.write(v4=[the_row(ME)])
+    r, nonce = follow(handler, hub, conn())
+    assert r.status == 303
+    again, _ = follow(handler, hub, conn(), nonce=nonce)
+    assert refused(again) and again.headers["Content-Type"].startswith("text/html")
+    assert "sheaf open" in again.text
+    assert "sheaf rotate" not in again.text and "someone else" not in again.text
+
+
 # ── a platform with no /proc/net ─────────────────────────────────────────────
 
 @pytest.fixture

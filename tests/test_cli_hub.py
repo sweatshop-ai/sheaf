@@ -89,6 +89,7 @@ def test_a_linux_hub_whose_peer_self_test_failed_makes_every_open_warn_once_on_s
     fails.mkdir()
     (fails / "sitecustomize.py").write_text(
         "from sheafmd.hub import peer\n"
+        "peer.PLATFORM = 'linux'\n"                     # the hub is a new interpreter: on macOS too it is a Linux hub
         "peer.selftest = lambda: 'the test made the self-test fail'\n", encoding="utf-8")
     monkeypatch.setenv("PYTHONPATH", os.pathsep.join([str(fails), os.environ.get("PYTHONPATH", "")]))
     monkeypatch.setattr(peer, "PLATFORM", "linux")

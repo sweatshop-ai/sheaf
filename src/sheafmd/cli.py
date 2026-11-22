@@ -370,7 +370,7 @@ def _open(args) -> int:
     _out(f"  ~ {shown}")                    # the URL is the last line (SPEC 13)
     if remote_seat is None and not tabs and not args.no_browser and config.browser_enabled(_err):
         try:
-            link = c.one_time_sign_in_url(next_path)
+            link = c.one_time_sign_in(next_path)
         except hubclient.SignInRefused as e:
             _err(f"  ! the browser was not opened: the hub gave no sign-in link ({e}). "
                  "Run sheaf signin-url and open what it prints yourself")

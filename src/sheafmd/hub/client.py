@@ -300,7 +300,7 @@ class HubClient:
         to open on another machine (SPEC 9.3, D13)."""
         return f"http://127.0.0.1:{self.port}/_/open?key={self.key}&next={quote(next_path, safe='/')}"
 
-    def one_time_sign_in_url(self, next_path: str) -> SignInLink:
+    def one_time_sign_in(self, next_path: str) -> SignInLink:
         """The URL `sheaf open` gives the browser: it carries a nonce the hub minted for this
         call, good once and for about 30 seconds, never the key. The call that asks for the nonce
         proves the hub first (`call`): an Impostor, a HubSilent or a HubLost from it (the hub went

@@ -1,6 +1,6 @@
 # 176: The frozen-tab page tests freeze nothing in headless Chromium
 
-**Claimed by:** nobody
+**Claimed by:** Zeynep (track sheaf-backlog), 2026-11-22
 
 **Status:** open
 

@@ -1,6 +1,6 @@
 # 156: A page a job generates is read-only for text edits in the hub
 
-**Claimed by:** Basil 2026-11-20 17:44
+**Claimed by:** Malin 2026-11-22
 
 **Status:** in-progress
 

@@ -57,3 +57,40 @@ def test_a_caller_that_closes_the_connection_ends_the_run_and_logs_no_broken_pip
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+class Held:
+    """A stream a Shared replaced: nothing to send, and `closed` once the hub closed it."""
+    closed = False
+
+    def drain(self):
+        return []
+
+    def get(self, timeout=0):
+        time.sleep(min(timeout or 0, 0.05))
+        return None
+
+
+def test_a_stream_the_hub_closed_ends_its_connection_and_does_not_idle_until_the_peer_does():
+    held = Held()
+
+    class Streams:
+        peer_off = "a stand-in handler: nobody looks at who owns the connection"
+
+        def handle(self, method, target, headers, body=b"", conn=None, via="port", gone=None):
+            return Response(200, {"Content-Type": "text/event-stream"}, stream=held)
+    wired = {"handler": Streams(), "stopping": threading.Event(), "closing": threading.Event()}
+    httpd = ThreadingHTTPServer(("127.0.0.1", 0), type("Http", (server._Http,), wired))
+    httpd.daemon_threads = True
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        c = socket.create_connection(httpd.server_address)
+        c.sendall(b"GET /_/live HTTP/1.1\r\nHost: x\r\n\r\n")
+        assert c.recv(4096)                                  # the answer's head: the stream is open
+        held.closed = True
+        c.settimeout(3)
+        while c.recv(4096):
+            pass                                             # the hub ends the connection: recv gives b""
+    finally:
+        httpd.shutdown()
+        httpd.server_close()

@@ -48,6 +48,21 @@ def test_a_refused_pull_leaves_no_line_and_no_window_behind(world):
     assert not world.hub.writes.is_pull(world.address, md_hash(OPEN))
 
 
+def test_a_pull_does_not_leave_a_door_writes_expectation_to_swallow_a_later_disk_write(world):
+    world.put(OPEN)
+    path = world.two.private_repo / NAME
+    e = world.hub.entry(world.address)
+    later = OPEN + "\nLater, by hand.\n"
+    world.hub.writes.expect_own(world.address, md_hash(later))      # a door write that failed after it was expected
+    world.hub.pulling(path.parent, [(path, "Ada")])
+    path.write_text(OPEN + "\nPulled.\n", encoding="utf-8")
+    world.hub._refreshed(e)                                         # the page sees the pull's change: that look settles the expectation
+    world.hub.pulled(path.parent, [(path, "Ada")], True)
+    path.write_text(later, encoding="utf-8")
+    world.hub._refreshed(e)
+    assert [l.via for l in world.hub.writes.lines(world.address)][-1] == "disk"
+
+
 def test_the_box_s_james_at_the_door_writes_from_tiroir_with_his_session(world):
     world.put(OPEN, repo=world.two.list_repo)
     text = world.two.list_repo.joinpath(NAME).read_text(encoding="utf-8")

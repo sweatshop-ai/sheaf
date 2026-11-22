@@ -175,8 +175,10 @@ def _replace_if_ours(tmp: Path, target: Path, data: bytes):
                       f"during the write), so the new text is not in it")
 
 
-def _write_atomic(p: Path, text: str):
-    """Write text to p through a hidden sibling, `.<name>.sheaf-tmp`, then os.replace.
+def _write_atomic(p: Path, text: str, mode: int | None = None, check=None, locked: bool = True):
+    """Write text to p through a hidden sibling, `.<name>.sheaf-tmp`, then os.replace. The one writer
+    for every file sheaf replaces whole; `atomic.write_text_atomic` is it for files that are not
+    documents (`locked` False).
 
     The sibling is made next to the path's TARGET, not next to the path: when the
     .md is a symlink, os.replace on the link would swap the link itself for a
@@ -193,31 +195,51 @@ def _write_atomic(p: Path, text: str):
     the sibling's name must still hold the text written just before the replace, and the
     target's just after; otherwise the write fails (an OSError) rather than answer as if the
     text were in the document. That narrows the window and cannot close it (SPEC 7.1, 9.1).
-    On Windows the replace is made as before."""
-    target = p.resolve()
-    tmp = target.with_name("." + target.name + ".sheaf-tmp")
-    mode = stat.S_IMODE(target.stat().st_mode)
+    On Windows the replace is made as before.
+
+    `mode` is the bits the file gets (default: the document's own). `check` is called once the new
+    file is whole, just before it takes the old one's place, and refuses by raising. With `locked`
+    False the caller holds no flock, so the path is written as given (a link there is replaced, not
+    followed, and the file need not exist yet) and the sibling is a fresh `.<name>.<random>.sheaf-tmp`
+    of its own, made with O_EXCL by mkstemp, so that two writes at once never share it."""
+    if locked:
+        target = p.resolve()
+        tmp = target.with_name("." + target.name + ".sheaf-tmp")
+        if mode is None:
+            mode = stat.S_IMODE(target.stat().st_mode)
+    else:
+        target, tmp = p, None
     try:
-        try:
-            os.unlink(tmp)
-        except FileNotFoundError:
-            pass
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), mode)
+        if locked:
+            try:
+                os.unlink(tmp)
+            except FileNotFoundError:
+                pass
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), mode)
+        else:
+            fd, name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".sheaf-tmp")
+            tmp = Path(name)
         data = text.encode("utf-8")
         with os.fdopen(fd, "wb") as f:
-            os.fchmod(f.fileno(), mode)        # open() applies the umask
+            if hasattr(os, "fchmod"):
+                os.fchmod(f.fileno(), mode)    # open() applies the umask, mkstemp gives 0o600
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
+        if not hasattr(os, "fchmod"):
+            os.chmod(tmp, mode)
+        if check is not None:
+            check()
         if CHECKS_THE_NAMES:
             _replace_if_ours(tmp, target, data)
         else:
             os.replace(tmp, target)
     except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
+        if tmp is not None:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
         raise
 
 

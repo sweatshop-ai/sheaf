@@ -49,3 +49,88 @@ def test_the_check_runs_once_the_new_file_is_whole(tmp_path):
         [(p.name, p.read_text()) for p in tmp_path.iterdir()]))
     assert ("f", "old") in seen[0] and any(t == "new" for _, t in seen[0])
     assert target.read_text() == "new"
+
+
+def _swap_our_temp_at_fsync(monkeypatch, folder, put, swap=True):
+    """While the new text is written, something else takes the temp file's name, as a user who can write the
+    folder can at any moment. With swap False nothing is made: the control."""
+    real, swapped = os.fsync, []
+
+    def hook(fd):
+        temps = [p for p in folder.iterdir() if p.name.endswith(".sheaf-tmp")]
+        if swap and temps and not swapped:
+            swapped.append(temps[0])
+            temps[0].unlink()
+            put(temps[0])
+        return real(fd)
+
+    monkeypatch.setattr(os, "fsync", hook)
+    return swapped
+
+
+@pytest.mark.parametrize("swap", [True, False], ids=["swapped", "control"])
+@pytest.mark.parametrize("planted", ["a link", "a file"])
+def test_a_temp_file_swapped_during_the_write_does_not_take_the_files_place(tmp_path, monkeypatch, swap, planted):
+    """One writer for every file sheaf replaces: the same look as a document's save (source._write_atomic)
+    before the temp file takes the old one's place."""
+    folder = tmp_path / "dir"
+    folder.mkdir()
+    target = folder / "f.json"
+    target.write_text("old\n")
+    victim = tmp_path / "note.txt"
+    victim.write_text("personal\n")
+    put = (lambda s: s.symlink_to(victim)) if planted == "a link" else (lambda s: s.write_text("theirs\n"))
+    swapped = _swap_our_temp_at_fsync(monkeypatch, folder, put, swap)
+    if swap:
+        with pytest.raises(OSError, match="was replaced while the new text was written"):
+            write_text_atomic(target, "new\n")
+        assert swapped and target.read_text() == "old\n"
+    else:
+        write_text_atomic(target, "new\n")
+        assert target.read_text() == "new\n"
+    assert not target.is_symlink() and victim.read_text() == "personal\n"
+    assert sorted(p.name for p in folder.iterdir()) == ["f.json"]
+
+
+def test_an_existing_file_with_no_mode_asked_gets_what_the_umask_leaves(tmp_path):
+    """Unlike a document's save, which keeps the document's mode, a file written here with no mode
+    gets the umask's, whatever mode the old one had."""
+    target = tmp_path / "f"
+    target.write_text("old")
+    os.chmod(target, 0o600)
+    old = os.umask(0o022)
+    try:
+        write_text_atomic(target, "new")
+    finally:
+        os.umask(old)
+    assert stat.S_IMODE(target.stat().st_mode) == 0o644 and target.read_text() == "new"
+
+
+def test_a_link_at_the_path_is_replaced_and_what_it_points_to_is_left(tmp_path):
+    """Kept as it was: the file is written at the path given, so a link there becomes a regular file."""
+    real = tmp_path / "real"
+    real.write_text("pointed to")
+    link = tmp_path / "link"
+    link.symlink_to(real)
+    write_text_atomic(link, "new")
+    assert not link.is_symlink() and link.read_text() == "new" and real.read_text() == "pointed to"
+
+
+def test_two_writes_at_once_each_use_a_temp_file_of_their_own(tmp_path, monkeypatch):
+    """The callers hold no file lock, so a second write started while the first is open must not take
+    its temp file: the first still lands whole."""
+    tmp_path = tmp_path / "dir"
+    tmp_path.mkdir()
+    target = tmp_path / "f"
+    target.write_text("old")
+    real, inner = os.fsync, []
+
+    def hook(fd):
+        if not inner:
+            inner.append(1)
+            write_text_atomic(target, "second")
+        return real(fd)
+
+    monkeypatch.setattr(os, "fsync", hook)
+    write_text_atomic(target, "first")
+    assert target.read_text() == "first" and sorted(p.name for p in tmp_path.iterdir()) == ["f"]

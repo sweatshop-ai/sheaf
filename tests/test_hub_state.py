@@ -363,3 +363,14 @@ def test_each_store_takes_the_lock_the_spec_names():
     state.Seen().mark("a/one.md", "c1", 1)
     state.MemberSeen().mark("m1", "a/one.md", "c1", 1)
     assert {p.name for p in paths.locks_dir().glob("*.lock")} >= {"docs.lock", "seen.lock", "seen-members.lock"}
+
+
+def test_a_rename_from_an_address_with_nothing_drops_what_the_new_address_held():
+    new = "work/new.md"
+    v, docs = state.Versions(), state.Docs()
+    v.put(new, "# Old text of the name\n")
+    docs.put(new, {"target": "x"})
+    v.rename("work/never-opened.md", new)
+    docs.rename("work/never-opened.md", new)
+    assert v.get(new, md_hash("# Old text of the name\n")) is None
+    assert docs.get(new) == {}

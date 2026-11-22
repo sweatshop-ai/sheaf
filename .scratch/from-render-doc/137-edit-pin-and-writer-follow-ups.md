@@ -60,7 +60,7 @@
 - [ ] **`\:smile:` typed on the page saves as `\\:smile:` and renders as an emoji** (same family as the emoji item).
 - [ ] **Emoji in a table pandoc writes as raw HTML shows as text** (`:+1:`, from #479): restore the emoji character there, as the backslash and pipe tokens do by depth (`edit.py` end of `html_block_to_md`).
 - [ ] **`_emoji_drawn` caches a failed pandoc run as None** (`lru_cache`, from #479): a name then stays an emoji for the process; do not cache a failure.
-- [ ] **`_without_placeholder_breaks` and `_cell_breaks` can disagree on a backslash** *(PR #541)* (from #482, `edit.py:555` against `:608`): the first checks the page's fragment before `_text_backslashes` runs, the second after it, so a table can be left to `_cell_breaks` which then does not take it; the old bug (`| x\xa0 |`, the break lost) can still happen. Fix: one shared test.
+- [x] **`_without_placeholder_breaks` and `_cell_breaks` can disagree on a backslash** *(PR #541)* (from #482, `edit.py:555` against `:608`): the first checks the page's fragment before `_text_backslashes` runs, the second after it, so a table can be left to `_cell_breaks` which then does not take it; the old bug (`| x\xa0 |`, the break lost) can still happen. Fix: one shared test. Done in PR #541 (merge e4085936, head 13715b57, review round 4 GO, CI 6/6; tests/test_edit_cell_breaks.py 11 passed on the merge head).
 - [ ] **The fallback in `html_block_to_md` keeps a break that used to go** (from #482, `edit.py:721-724`): when pandoc swallows a character of the token, the table is re-run from `clean`, the text from before `_cell_breaks`, which now still holds the end-of-cell `<br>` and no-break space that the first pass used to remove.
 
 ## Found while fixing the bare-URL and math items (PRs #517, #524)
@@ -77,7 +77,7 @@
 - [ ] **A failed emoji lookup writes the shortcode bare** (literal case) or as `:name:` (raw-HTML table): `_emoji_drawn` gives None on a pandoc failure, so the literal text can draw its emoji, or a raw table can show the name, until the next save.
 - [ ] **The table depth counts `<table` anywhere in the output**, also a literal `\<table` in a paragraph or code block, so a `\:name:` after it loses its backslash (same for the pipe and backslash tokens before it).
 
-- [ ] **A wrong comment at `edit.py:689`** *(PR #541)* (from #517): it says a raw tag's `⟦…⟧` placeholder is "matched above", but `⟦` is not in the ASCII class of `_BACKSLASH_ESCAPES`; tags keep their backslash because pandoc handles it (pinned by the controls in tests/test_edit_backslash_placeholder.py). Fix the comment whoever next touches edit.py there.
+- [x] **A wrong comment at `edit.py:689`** *(PR #541)* (from #517): it says a raw tag's `⟦…⟧` placeholder is "matched above", but `⟦` is not in the ASCII class of `_BACKSLASH_ESCAPES`; tags keep their backslash because pandoc handles it (pinned by the controls in tests/test_edit_backslash_placeholder.py). Fix the comment whoever next touches edit.py there. Done in PR #541 (merge e4085936, head 13715b57, review round 4 GO, CI 6/6; tests/test_edit_cell_breaks.py 11 passed on the merge head).
 
 ## Found while fixing the split-line merge edges (PR #549)
 

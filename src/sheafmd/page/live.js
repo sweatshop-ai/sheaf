@@ -142,6 +142,7 @@
     this.sent = {};            // key -> the last post for it, which the next one waits for
     this.reopened = 0;         // when the connection was last opened again for a join the hub refused
     this.again = null;         // the reopen waiting for RETRY after a join refused just after the last one
+    this.deferred = false;     // that reopen was used, and no join was taken since
     this.watch = {};           // tab -> the abort of its queued request for its lock, which is granted when the tab dies
     this.es = null;
     this.open = false;
@@ -204,11 +205,16 @@
             if (sid !== self.sid) return;
             var since = Date.now() - self.reopened;
             if (since > RETRY) { self.reopen(); return; }
-            // Refused again just after a reopen (another rollover or member switch): open once more when RETRY is up.
-            // No loop and no stream closed for good: the tabs' streams wait for that connection.
-            if (!self.again) self.again = setTimeout(function () { self.again = null; if (self.es) self.reopen(); }, RETRY - since);
-            return;
+            // Refused again just after a reopen (another rollover or member switch): open once more when RETRY is up,
+            // and the tabs' streams wait for that connection. Once only until a join is taken: a hub that refuses
+            // every join gets the refusal below, and each page asks again at its own pace.
+            if (!self.deferred) {
+              self.deferred = true;
+              self.again = setTimeout(function () { self.again = null; if (self.es) self.reopen(); }, RETRY - since);
+            }
+            if (self.again) return;
           }
+          if (what === 'join' && status >= 200 && status <= 299) self.deferred = false;
           // A join the hub would not take (signed out, the connection gone, no answer) is that tab's stream refused.
           if (what === 'join' && (status < 200 || status > 299) && self.joined[key] === j) {
             delete self.joined[key];

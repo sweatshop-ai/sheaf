@@ -136,7 +136,8 @@ def test_a_join_refused_for_another_owner_reopens_the_shared_stream(shared, site
     for p, _ in pages:
         p.evaluate("window.dispatchEvent(new PageTransitionEvent('pageshow', {persisted: true}))")
     until(lambda: seen[-1] not in stale and site.hub.tabs(DOC) == 3, what="the three tabs counted on the reopened stream")
-    time.sleep(3.5)              # a tab told its join was refused asks again after 2 s: no join comes that late
+    pages[0][0].wait_for_timeout(3500)   # a refused tab asks again after 2 s: no join comes that late (not time.sleep:
+                                         # Playwright answers a routed request only while the test waits on it)
     # A tab whose pageshow join reaches the leader after the new connection opened joins twice at once; harmless.
     fresh = [t for sid, t in zip(seen, at) if sid not in stale]
     assert len(fresh) >= 3 and fresh[-1] - fresh[0] < 1.5, "a refused tab joined again after the retry"
@@ -155,9 +156,11 @@ def test_a_join_refused_again_at_once_is_not_retried_in_a_loop(shared, site):
         sids.add(route.request.post_data_json["stream"])
         route.fulfill(status=404, content_type="application/json", body='{"ok": false, "error": "no such stream"}')
     shared.route("**/_/live/join", refuse)
-    opened(shared, site)
-    time.sleep(3)
-    assert len(sids) <= 3
+    p, _ = opened(shared, site)
+    p.wait_for_timeout(9000)     # not time.sleep: Playwright answers a routed request only while the test waits on it
+    # The page asks again after a refusal (streamClosed: 2 s, then it reads the document), and each ask opens one
+    # connection: six in 9 s, measured. A leader looping on its own as well would add more.
+    assert len(sids) <= 7, len(sids)
 
 
 def test_a_page_restored_from_the_back_forward_cache_joins_the_stream_again(shared, site):

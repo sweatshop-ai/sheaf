@@ -850,6 +850,47 @@ def _bare_urls_as_words(fragment: str):
     return (str(soup), put) if put else (fragment, {})
 
 
+def _hrefs_as_words(fragment: str):
+    """(the fragment with each link address pandoc would write wrong as a word, {word: the address}). Pandoc's
+    writer leaves an address as it is, so a backslash in it reads back as an escape and a `)` it does not balance
+    ends it. An address with white space or a bracket is left to pandoc, which writes it between `<` and `>`."""
+    from bs4 import BeautifulSoup
+
+    def unbalanced(href):
+        depth = 0
+        for c in href:
+            depth += (c == "(") - (c == ")")
+            if depth < 0:
+                return True
+        return depth != 0
+
+    if "\\" not in fragment and "(" not in fragment and ")" not in fragment:
+        return fragment, {}
+    soup, put = BeautifulSoup(fragment, "html.parser"), {}
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        if re.search(r"[\s<>]", href) or not ("\\" in href or unbalanced(href)) or a.find_parent(["code", "pre"]):
+            continue
+        if "\\" not in href and a.get_text() == href and not a.find(True):
+            continue                    # pandoc writes it as `<address>`, which takes no escape and holds the `)`
+        word = "RDHREF" + os.urandom(5).hex().upper()
+        while word in fragment or word in put:
+            word = "RDHREF" + os.urandom(5).hex().upper()
+        put[word] = href
+        a["href"] = word
+    return (str(soup), put) if put else (fragment, {})
+
+
+def _written_bare(out: str, start: int, end: int, url: str) -> bool:
+    """Whether `url`, written bare at out[start:end], is a link of that address in GFM: only at the start of a
+    line, after white space, `*`, `_`, `~` or `(`, and whole, up to white space or a tag after the marks GFM trims
+    off its end."""
+    if not _BARE_URL.fullmatch(url) or (start and out[start - 1] not in " \t\n*_~("):
+        return False
+    marks = ".,:!?*_~" if "(" in url else ".,:!?*_~)"
+    return re.match(rf"[{re.escape(marks)}]*(?:\s|<|$)", out[end:]) is not None
+
+
 # A shortcode drawn as its emoji: the name is in `data-emoji`, the emoji itself is the span's text.
 _EMOJI_SPAN = re.compile(r'<span\b(?=[^>]*\sclass="emoji")[^>]*?\sdata-emoji="([a-z0-9_+-]+)"[^>]*>([^<]*)</span>')
 _EMOJI_TOKEN = re.compile("\uF8FE([0-9]+)\uF8FF")
@@ -999,15 +1040,17 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     if pipe is not None or slash is not None or emoji or literal:
         clean, code_lt = _code_table_tags(clean)
     cells, token = _cell_breaks(clean)
+    cells, hrefs = _hrefs_as_words(cells)
     r = _pandoc.run(["-f", "html", "-t", "gfm", "--wrap=none"], cells)
     if token is not None and r.returncode == 0 and r.stdout.count(token) != cells.count(token):
         # Pandoc's writer takes a character after a backslash it escapes, here one of the token's: the table goes
-        # as it went before, as raw HTML, with every character of the cell.
-        r, token = _pandoc.run(["-f", "html", "-t", "gfm", "--wrap=none"], clean), None
+        # as it went before, as raw HTML, with every character of the cell. The cuts were sorted already: a break
+        # that ends its cell and Enter's no-break space stay gone.
+        r, token = _pandoc.run(["-f", "html", "-t", "gfm", "--wrap=none"], cells.replace(token, "<br>")), None
     if r.returncode != 0:
         raise EditError(f"pandoc: {r.stderr.strip()[:200]}")
     out = r.stdout if token is None else r.stdout.replace(token, "<br>")
-    if pipe is not None or slash is not None or emoji or literal:
+    if pipe is not None or slash is not None or emoji or literal or urls or hrefs:
         # A table pandoc writes as raw HTML has no cell for a bare pipe to end, and `\\|` would show; nor does
         # HTML read a backslash as an escape, nor a shortcode as its emoji.
         # Only a tag counts: a `<table` in text pandoc writes as `\\<table`, and one in code or math is a token.
@@ -1027,15 +1070,26 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
                     name, drawn = emoji[int(m.group(1))]
                     return drawn if depth else f":{name}:"
                 part = _EMOJI_TOKEN.sub(shown, part)
+            if depth:
+                # Raw HTML links no bare URL; a link's address there is an attribute, read without escapes.
+                for word, url in urls.items():
+                    part = part.replace(word, f'<a href="{html_escape(url)}">{html_escape(url, quote=False)}</a>')
+                for word, href in hrefs.items():
+                    part = part.replace(word, html_escape(href))
             parts[k] = part
         out = "".join(parts)
     # Pandoc's gfm writer wraps every bare URL as <https://...>. GFM autolinks a bare
     # URL anyway, so the two render identically - but the angle brackets show up as
     # noise on every line of a table the moment one cell is edited. Unwrap them. The
-    # scheme makes the match unambiguous against real tags.
-    out = re.sub(r"<(https?://[^>\s]+)>", r"\1", out)
+    # scheme makes the match unambiguous against real tags. Only where GFM links it as written (`_written_bare`).
+    out = re.sub(r"<(https?://[^>\s]+)>",
+                 lambda m: m.group(1) if _written_bare(m.string, m.start(), m.end(), m.group(1)) else m.group(0), out)
     for word, url in urls.items():
-        out = out.replace(word, url)
+        out = re.sub(word, lambda m, url=url: url if _written_bare(m.string, m.start(), m.end(), url) else f"<{url}>",
+                     out)
+    for word, href in hrefs.items():
+        # An address in a link: every backslash, parenthesis and pipe escaped, so that it reads back as it is.
+        out = out.replace(word, re.sub(r"([\\()|])", r"\\\1", href))
     return copyblock.restore(out).strip("\n")
 
 

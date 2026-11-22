@@ -1202,3 +1202,21 @@ def test_the_hub_says_nothing_at_start_when_git_is_new_enough(tmp_path, monkeypa
     monkeypatch.setattr(repos_mod, "_git_version", lambda: (2, 44))
     repos_mod.Repos(tmp_path, provider=None)
     assert capsys.readouterr().err == ""
+
+
+class _Guarded(dict):
+    """The repos' queues, which say so when they are asked about without the guard held."""
+    def __init__(self, guard):
+        super().__init__()
+        self.guard = guard
+
+    def __contains__(self, repo):
+        assert self.guard.locked(), "the queues were asked about without the guard"
+        return super().__contains__(repo)
+
+
+def test_whether_a_repo_has_a_queue_is_asked_under_the_guard(tmp_path, origin):
+    repos = Repos(tmp_path / "clones", FakeApp(installed=()), remote_url=lambda repo: str(origin))
+    repos._queues = _Guarded(repos._guard)
+    assert repos.refusal("bea", REPO) == repos_mod.NO_APP
+    assert repos.report("bea", REPO, "docs/plan.md", "a" * 40)["clone"] == repos_mod.NO_APP

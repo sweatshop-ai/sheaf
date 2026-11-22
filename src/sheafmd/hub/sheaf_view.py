@@ -223,7 +223,7 @@ def _data(hub, member, titles: Titles, view: str = "", gone=None) -> dict:
                 except roots_mod.NotFound:
                     continue
                 title, agent, unshared = titles.read(path, at.rel)
-            last, session = hub.writes.last(address), hub.writes.last_way_back(address)
+            last, session = hub.writes.last_and_way_back(address)
             folder = "/".join([at.root, *at.rel.split("/")[:-1]])
             given = {}
             if "shared_from" in root:       # another member's page, found under the owner's name and nowhere else

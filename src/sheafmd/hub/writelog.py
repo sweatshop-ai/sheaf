@@ -188,6 +188,11 @@ class WriteLog:
         got = self.lines(address)
         return got[-1] if got else None
 
+    def last_and_way_back(self, address: str) -> tuple[Line | None, Line | None]:
+        """`last` and `last_way_back` from one look at the lines, so a write between two looks cannot pair a newer one with an older."""
+        got = self.lines(address)
+        return (got[-1] if got else None), next((l for l in reversed(got) if l.session or l.chat), None)
+
     def last_session(self, address: str) -> Line | None:
         """The last line that named an agent session."""
         return next((l for l in reversed(self.lines(address)) if l.session), None)

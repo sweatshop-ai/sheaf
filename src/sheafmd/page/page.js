@@ -445,14 +445,17 @@ var create = function (ROOT, CFG, opts) {
     });
   }
 
-  if ((CFG.why_readonly || (CFG.generated && CFG.why)) && main) {
+  if (main) {
     // A page of a repo clone that may not be saved: the line says which .sheaf.toml line would change that (SPEC 14).
-    // A page a job generates says who generates it and to comment instead (SPEC 8.3, 10.1).
-    var why = document.createElement('p');
-    why.className = 'rd-readonly';
-    why.setAttribute('role', 'note');
-    why.textContent = CFG.why_readonly || CFG.why;
-    main.insertBefore(why, main.firstChild);
+    // A page a job generates says who generates it and to comment instead (SPEC 8.3, 10.1). A page that is both
+    // says both, the read-only line first.
+    [CFG.why_readonly, CFG.generated && CFG.why].filter(Boolean).reverse().forEach(function (line) {
+      var why = document.createElement('p');
+      why.className = 'rd-readonly';
+      why.setAttribute('role', 'note');
+      why.textContent = line;
+      main.insertBefore(why, main.firstChild);
+    });
   }
 
   if (!canSave && !COMMENTS.length && !(CFG.malformed || []).length) {

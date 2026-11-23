@@ -2,7 +2,7 @@
 
 **Claimed by:** Lior
 
-**Status:** done (2026-11-23, PR #637, merged as 73dd4130); one follow-up box from #637's review stays open
+**Status:** done (2026-11-23, PR #637, merged as 73dd4130; follow-up PR #642, merged as 505b328e)
 
 **Blocked by:** none
 
@@ -68,12 +68,14 @@ None.
   - **Fix direction:** when the leader's EventSource is refused (readyState 2), set `this.sid = rnd()` before the next `connect()`.
   Done in PR #637 (2026-11-23): on a refused connection (readyState 2) the leader draws a new `sid` and clears a pending RETRY reopen (`again`, `deferred`), which belonged to the connection that just ended. Page test `test_a_shared_stream_refused_409_is_opened_again_under_a_new_id` in `tests/page/test_page_shared_live.py`: red in CI (run 45242478345, attempt 2) before the fix, green after (run 45258544706). Merged as 73dd4130.
 
-- [ ] **Follow-up from #637's review (minor, not fixed; Opus fallback round 1 on f1164b71):** a start tag holding an unpaired quote keeps its `data-` attributes on the source side.
+- [x] **Follow-up from #637's review (minor; Opus fallback round 1 on f1164b71):** a start tag holding an unpaired quote keeps its `data-` attributes on the source side.
   - **Where:** `edit.py:528` (`_START_TAG_RE`), used by `strip_data_attrs`.
   - **Cause:** `_START_TAG_RE` reads a `'` or `"` as the opening of a quoted value, so a bare value holding a quote (`href=a'b`) leaves the tag unmatched and nothing in it is stripped. html.parser reads `a'b` as one bare value and `_sanitize` strips the tag's `data-` attributes, so the two sides differ and that block's boxes refuse the tick.
   - **Reproduction:** `strip_data_attrs('<a href=a\'b data-x="1" title="t">x</a>')` returns the input unchanged; `BeautifulSoup(that, "html.parser").a.attrs` is `{'href': "a'b", 'data-x': '1', 'title': 't'}`. `_START_TAG_RE.search(that)` is `None`.
   - **Not a regression of #637:** main before #637 left the same tag unchanged too (the start-tag pattern did not change). The review's claim that the old regex stripped it does not hold.
   - **Fix direction:** let `_START_TAG_RE` (and `_ATTR_RE`'s bare value) take a quote inside a bare value, as html.parser's `attrfind_tolerant` does (`(?!['"])[^>\s]*`), with a test on this input.
+  - **Correction on where it occurs:** not in a list row. Pandoc escapes an inline tag holding an unpaired quote (`<a href=a'b …>` in a row is text, `&lt;a`), so no row's boxes refuse the tick. Pandoc passes a raw HTML block through as written (`<div class=a'b data-x=1>blk</div>`): on main that block's `_unchanged` was False, so every save sent it through pandoc.
+  Done in PR #642 (2026-11-23): `_START_TAG_RE` reads the tag attribute by attribute, as html.parser's `locatestarttagend_tolerant` does: a quote opens a quoted value only straight after a name's `=`, so names and bare values may hold one, and an `=` inside a bare value (`<a href=a="x>y">`) opens nothing; the tag ends at its first `>`. `_ATTR_RE` takes the same names and bare values. The loops are possessive (a looser first version was exponential on a tag that never closes, 2.1 s at 22 quoted values). Red on main: `tests/test_edit_data_attr_values.py` (stripped output, parity with BeautifulSoup's attributes, `_unchanged` on a raw HTML block with a browser-serialised fragment, a linear-time guard). Review: boss_review round 1 provisional GO by the Opus fallback on a663d1fe, its two minors fixed in 11b72450, fix pass round 2 GO with no findings; CI green. Merged as 505b328e.
 
 ## Already filed or fixed on main
 

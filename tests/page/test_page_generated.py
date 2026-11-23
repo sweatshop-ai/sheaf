@@ -32,5 +32,6 @@ def test_a_read_only_page_that_is_generated_shows_both_notices(tab):
     hub.docs.put(DOC, {**hub.docs.get(DOC), "generated": {"by": "builder", "id": "tok1", "at": "2026-11-22T10:00:00+0100"}})
     line = "Read-only: this page is not saved here."
     hub.read_only_line = lambda address, waking=False: line
-    tab.open()
+    tab.page.goto(tab.site.url)             # a read-only page with no comment draws no menu to wait for
+    tab.page.wait_for_selector("main p.rd-readonly[role=note]")
     assert tab.page.locator("main p.rd-readonly[role=note]").all_inner_texts() == [line, WHY]

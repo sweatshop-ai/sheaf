@@ -2,7 +2,7 @@
 
 **Claimed by:** Malin 2026-11-22
 
-**Status:** done (follow-ups open below)
+**Status:** done (2026-11-23; the two unticked follow-ups below are closed with no fix, the reason under each)
 
 **Blocked by:** none
 
@@ -46,4 +46,5 @@
     No fix warranted (2026-11-23): `_save`, `_tick`, `_share` and `_sessions` all refuse 403 in `_text_writable` before their 400 shape checks (as #183 AV settled), and the 8.5 row lists codes, not an order (it lists 400 before 404, and 404 must come first).
   - [ ] The hub's own `_record_james` (`handler.py`, about line 2134) writes `sessions` into a generated rectoverso's front matter after a door write; the setter's next `update` drops it. Not a person's write, so not refused by #573.
     No fix warranted (2026-11-23): `_record_james` writes only under `[list]`, which needs `[proxy]` (SPEC 4), and in proxy mode the door's `_visible` refuses any write that changes `sessions` (ToolError "sessions"), so the setter cannot drop the line silently: it is refused. Pinned by `test_james_s_session_on_a_generated_rectoverso_is_never_dropped_by_the_setter_s_next_update` (passes on main), in PR #639.
-  - [ ] From #639's review (minor, Opus fallback round 1): a generated rectoverso's page still draws no buttons (`core.py` sets `meta["actions"] = []`), while its List row now draws the locked pressed one-offs. SPEC 9.10 says the page draws the same buttons as the row (10.11). The page should draw the locked pressed one-offs too, and SPEC 10.1 say so. Nothing is written either way.
+  - [x] From #639's review (minor, Opus fallback round 1): a generated rectoverso's page still draws no buttons (`core.py` sets `meta["actions"] = []`), while its List row now draws the locked pressed one-offs. SPEC 9.10 says the page draws the same buttons as the row (10.11). The page should draw the locked pressed one-offs too, and SPEC 10.1 say so. Nothing is written either way.
+    Done in PR #641 (Anouk): on a generated page `_fresh_meta` keeps only the pressed one-offs (`n` None, `may` false, so `page.js` draws them disabled and never pressable); SPEC 10.1 says so. Test `test_the_page_of_a_generated_rectoverso_draws_its_locked_pressed_one_offs_and_nothing_to_press` (red on main: `[] == [('Approve', ...)]`). Review round 1 provisional GO, no findings (Opus fallback, Codex at its limit until 2026-11-24 12:39 UTC; on the Codex recheck list); CI run 45260634085 green on 7d6e0f5b; merged as d5ff2558.

@@ -641,8 +641,7 @@ def test_an_older_hub_whose_answer_names_no_reason_is_not_restarted_over_the_sto
     assert upgrade_spawns == []
 
 
-@pytest.mark.parametrize("service", [False, True])
-@pytest.mark.parametrize("ended_by", ["stop", "signal"])
+@pytest.mark.parametrize("service, ended_by", [(False, "stop"), (False, "signal"), (True, "stop")])
 def test_a_stop_that_wins_after_the_upgrade_stop_was_taken_starts_no_hub_behind_it(
         port, thread_hub, quick_stop, monkeypatch, upgrade_spawns, ended_by, service):
     """182 N (#508): the hub took the upgrade stop, then a stop or a signal came and won (8.4: only an
@@ -654,6 +653,18 @@ def test_a_stop_that_wins_after_the_upgrade_stop_was_taken_starts_no_hub_behind_
     with pytest.raises(hubclient.HubBeingStopped):
         hubclient.ensure_hub("cli", lambda s: None, lambda s: None)
     assert upgrade_spawns == []
+
+
+def test_a_stray_signal_that_wins_under_the_service_waits_for_the_hub_the_unit_starts_again(
+        port, thread_hub, quick_stop, monkeypatch, upgrade_spawns):
+    """Under the service a signal the manager did not send is restarted by the unit (14.3), on the new
+    code: the command waits for it, as it did before 182, and starts none itself."""
+    hub = thread_hub(OLD)
+    hub.service = True
+    monkeypatch.setattr(hubclient, "wait_for_start", lambda *a, **k: {"boot": "new", "version": __version__})
+    patch_the_stop_to_end_with(monkeypatch, hub, {"ok": True, "reason": "upgrade"}, "signal")
+    c, started = hubclient.ensure_hub("cli", lambda s: None, lambda s: None)
+    assert started and upgrade_spawns == []
 
 
 def test_an_upgrade_stop_the_hub_ended_with_starts_the_new_hub(port, thread_hub, quick_stop, monkeypatch, upgrade_spawns):

@@ -513,7 +513,9 @@ def _meet_version(met: Met, warn) -> tuple[Met, bool]:
     # The answer to the stop does not say what ended the hub: a hub older than #508 answers no
     # reason, and a stop or a signal that comes after the upgrade stop wins over it (8.4). The
     # exit row says it. A hub that left none (killed) was stopped by no person: start the new one.
-    if exit_reason(met.boot) in PERSON_STOPS:
+    # Under the service a signal is restarted by the unit (14.3), on the new code: only a stop stays down.
+    ended_by = exit_reason(met.boot)
+    if ended_by == "stop" or (ended_by == "signal" and not met.got.get("service")):
         raise HubBeingStopped(BEING_STOPPED)
     if not met.got.get("service"):                      # under the service, exit 75 starts the new code
         spawn_hub("upgrade")

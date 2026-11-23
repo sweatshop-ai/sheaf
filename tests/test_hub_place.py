@@ -10,6 +10,7 @@ import os
 import pwd
 import subprocess
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -850,6 +851,26 @@ def test_a_write_to_a_sheaf_that_could_not_go_home_takes_it_to_quarantine_in_one
     assert git(repo, "status", "--porcelain") == ""
 
 
+def intruder_repo(tmp_path, files: dict, projects: Path | None = None) -> Path:
+    """Another folder named like the list's root (`rectoversos`), a git repo that commits, with `files` (path: text)
+    committed as "first" and, when given, the `projects.toml` of `projects`: the folder that takes the root's name
+    after a forget."""
+    intruder = tmp_path / "again" / "rectoversos"
+    intruder.mkdir(parents=True)
+    git(intruder, "init", "-q", "-b", "main")
+    git(intruder, "config", "user.name", "the box")
+    git(intruder, "config", "user.email", "box@example.com")
+    (intruder / ".sheaf.toml").write_text("commit = true\n", encoding="utf-8")
+    if projects is not None:
+        (intruder / "projects.toml").write_text((projects / "projects.toml").read_text(encoding="utf-8"), encoding="utf-8")
+    for rel, text in files.items():
+        (intruder / rel).parent.mkdir(parents=True, exist_ok=True)
+        (intruder / rel).write_text(text, encoding="utf-8")
+    git(intruder, "add", "-A")
+    git(intruder, "commit", "-q", "-m", "first")
+    return intruder
+
+
 def subjects(repo):
     return git(repo, "log", "--format=%s").splitlines()
 
@@ -1370,16 +1391,7 @@ def test_a_move_never_commits_into_a_root_that_took_the_name_of_the_one_it_moved
     """8.11 and 9.11: the move is made in the root `place` found first. Forgotten, and its name taken by another folder,
     before the move reads the root its commit goes to, the commit must not land in the other repo."""
     _, repo = committing(hub, browser, tmp_path)
-    intruder = tmp_path / "again" / "rectoversos"
-    intruder.mkdir(parents=True)
-    git(intruder, "init", "-q", "-b", "main")
-    git(intruder, "config", "user.name", "the box")
-    git(intruder, "config", "user.email", "box@example.com")
-    (intruder / ".sheaf.toml").write_text("commit = true\n", encoding="utf-8")
-    (intruder / SHARED).parent.mkdir(parents=True)
-    (intruder / SHARED).write_text("Not the contract.\n", encoding="utf-8")
-    git(intruder, "add", "-A")
-    git(intruder, "commit", "-q", "-m", "first")
+    intruder = intruder_repo(tmp_path, {SHARED: "Not the contract.\n"})
     (intruder / SHARED).write_text("Not the contract, changed by hand.\n", encoding="utf-8")   # a commit of the address would take it
     real = place._where
 
@@ -1415,16 +1427,7 @@ def test_a_door_update_never_moves_a_file_of_a_root_that_took_the_name_after_the
     link = tmp_path / "list"
     link.symlink_to(repo)
     the_list_on(hub, link, tmp_path)                    # the list's root, by a path that can lead elsewhere
-    intruder = tmp_path / "again" / "rectoversos"
-    (intruder / SHARED).parent.mkdir(parents=True)
-    git(intruder, "init", "-q", "-b", "main")
-    git(intruder, "config", "user.name", "the box")
-    git(intruder, "config", "user.email", "box@example.com")
-    (intruder / ".sheaf.toml").write_text("commit = true\n", encoding="utf-8")
-    (intruder / "projects.toml").write_text((repo / "projects.toml").read_text(encoding="utf-8"), encoding="utf-8")
-    (intruder / SHARED).write_text(first if moves == "ahead" else closed, encoding="utf-8")
-    git(intruder, "add", "-A")
-    git(intruder, "commit", "-q", "-m", "first")
+    intruder = intruder_repo(tmp_path, {SHARED: first if moves == "ahead" else closed}, projects=repo)
     owner = mcp_mod.Door if swap_at == "_agent_wrote" else mcp_mod
     real = getattr(owner, swap_at)
 
@@ -1453,3 +1456,70 @@ def test_a_door_update_never_moves_a_file_of_a_root_that_took_the_name_after_the
     assert subjects(intruder) == ["first"]
     if moves == "written":
         assert hub_rows("commit-refused")
+
+
+@pytest.mark.parametrize("moves", ["ahead", "after"])
+def test_a_page_save_never_moves_a_file_of_a_root_that_took_the_name_after_the_save_was_located(
+        hub, browser, tmp_path, monkeypatch, moves):
+    """8.11 and 9.11, the page's save as the door's update above: a save that ticks Share moves the file to the home of
+    the new text (`place.ahead`) or, when it is at that home already, to its home after the write (`place.place`). A
+    root forgotten, and its name taken by another folder that the list's path now leads to, after the save found its
+    file must not have its own file moved: that move would be left uncommitted in the other repo."""
+    from sheafmd import edit as edit_mod
+    # "ahead": the owner's page shares itself, so its file leaves the private folder before it is written. "after":
+    # the page is open at the project's path and stays there, and the other folder's copy is not at its home.
+    first, at = (PRIVATE, HOME) if moves == "ahead" else (OPEN, SHARED)
+    box, repo = committing(hub, browser, tmp_path, first=first, at=at)
+    link = tmp_path / "list"
+    link.symlink_to(repo)
+    the_list_on(hub, link, tmp_path)                    # the list's root, by a path that can lead elsewhere
+    intruder = intruder_repo(tmp_path, {at: PRIVATE}, projects=repo)    # its copy, which a move would take elsewhere
+    assert box.get(f"/rectoversos/{SHARED}", member=ALICE).status == 200
+    e = hub.entries[f"rectoversos/{SHARED}"]
+    owner, name = (edit_mod, "apply_edits") if moves == "ahead" else (hub.index, "touch")
+    real = getattr(owner, name)
+
+    forgetting = []                         # the thread of the forget, which ends after the save
+
+    def swapped(*a, **k):                   # "ahead": inside the save's change, under the page's lock; "after": once written
+        monkeypatch.setattr(owner, name, real)
+        # Another request's, which holds none of the save's locks. The root leaves the registry at once; the forget
+        # then waits for the page's lock, which the save holds, so the name is taken by another thread meanwhile.
+        forgetting.append(threading.Thread(target=hub.forget_root, args=("rectoversos",)))
+        forgetting[0].start()
+        for _ in range(1000):
+            if hub.roots.get("rectoversos") is None:
+                break
+            time.sleep(0.01)
+        else:
+            raise AssertionError("the forget never took the root out of the registry")
+
+        def take():
+            link.unlink()
+            link.symlink_to(intruder)
+            hub.roots.for_document(intruder / SHARED)
+            hub.proxy = members(intruder)   # the other folder is Alice's root now
+        t = threading.Thread(target=take)
+        t.start()
+        t.join(10)
+        assert not t.is_alive() and hub.the_list.serves("rectoversos")
+        assert hub.roots.get("rectoversos").id != e.root_id
+        return real(*a, **k)
+
+    monkeypatch.setattr(owner, name, swapped)
+    text = e.live.current()[1]
+    n = [a[0] for a in the_list.read_rectoverso(SHARED, text).actions].index("Share")
+    try:
+        got = box.post("/_/save", {"doc": f"rectoversos/{SHARED}", "hash": md_hash(text),
+                                   "edits": [the_list.tick_edit(text, n, "Share")]}, member=ALICE)
+    finally:
+        for t in forgetting:                # once the save let the page's lock go, even when a check in it failed
+            t.join(10)
+    # "ahead": nothing is written, the root it was found in is gone; "after": written, and its commit refused.
+    assert got.status == (409 if moves == "ahead" else 200), got.text      # a second name lock fails it with a 500
+    assert forgetting and not forgetting[0].is_alive()
+    assert hub.commits.settle()
+    assert (intruder / at).read_text(encoding="utf-8") == PRIVATE
+    assert not (intruder / (SHARED if at == HOME else HOME)).exists()
+    assert git(intruder, "status", "--porcelain") == ""
+    assert subjects(intruder) == ["first"]

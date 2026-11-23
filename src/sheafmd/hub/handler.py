@@ -52,6 +52,8 @@ MAX_BODY = 8 * 1024 * 1024
 MAX_AUDIO = 2 * 1024 * 1024
 DICTATION_FILE = re.compile(r"dictee\.(webm|mp4|ogg)")
 OPS = ("add", "reply", "status", "edit", "delete")
+# A page's save or tick whose root was forgotten, and its name maybe taken, before its file moved (8.2, 8.11).
+FOLDER_REPLACED = "This page's folder was forgotten or replaced while it was saved. Nothing was written."
 SIGN_IN = ("This browser is not signed in to your sheaf hub. On the machine that runs the hub, "
            "run <code>sheaf open &lt;this url&gt;</code>. If the hub runs on another machine, "
            "run <code>sheaf signin-url</code> there and open what it prints in this browser.")
@@ -1756,14 +1758,21 @@ class Handler:
             if not ({"Share", "Unshare"} & ticked):
                 return None
             try:
-                gone = place.ahead(self.hub, e.address, text, new)
+                # Only in the root the save found its file in (8.11): one that took its name since is never moved in.
+                gone = place.ahead(self.hub, e.address, text, new, root_id=e.root_id)
             except place.Refused as ex:
                 # The write would leave the rectoverso where it may not stay (9.11): nothing is written.
                 raise EditError(f"This rectoverso cannot go to its home: {ex.why}. Nothing was written.") from None
+            except NotFound:
+                raise EditError(FOLDER_REPLACED) from None
             if gone is None:
                 return None
             moved.append(gone)
-            return self.hub.file(e.address, placed=True, bound=e.file_root)
+            try:
+                return self.hub.file(e.address, placed=True, bound=e.file_root, root_id=e.root_id)
+            except NotFound:
+                # The root went once the file moved: the move stays in it, its commit refused (8.11), and nothing is written.
+                raise EditError(FOLDER_REPLACED) from None
         return move, moved
 
     @contextlib.contextmanager
@@ -1782,10 +1791,10 @@ class Handler:
         """After a write that shared the rectoverso or withdrew its Share, under the lock of its name, its file goes to
         its home (9.11) if the write did not take it there (a text that changed meanwhile): the path in the root
         it left, None when it stayed. The caller commits the write and the move as one; the rectoverso's address
-        stays."""
+        stays. Only in the root the save found its file in (8.11): None when another root took its name since."""
         if not ({"Share", "Unshare"} & ticked):
             return None
-        return place.place(self.hub, e.address, commit=False)
+        return place.place(self.hub, e.address, commit=False, root_id=e.root_id)
 
     def _ticks(self, req: Req, e):
         """The guard of a save (live.save) for the actions the hub judges: a one-off is never unticked and a rectoverso

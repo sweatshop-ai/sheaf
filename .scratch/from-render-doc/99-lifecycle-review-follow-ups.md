@@ -2,7 +2,7 @@
 
 **Claimed by:** Ciro 2026-11-22
 
-**Status:** in-progress. Part 1 merged (PR 574, 192b3c7d); part 2 merged (PR 575, b3209c2e; PR 577, 458ef26c). Part 3: lines 17, 18 and 22 done (22 filed ticket 178); line 21 merged (PR #579, 0c8ef2c5); line 52: first names clean, the host name is ticket 179 (PR #580 closed); line 47 (macOS) open.
+**Status:** in-progress. Part 1 merged (PR 574, 192b3c7d); part 2 merged (PR 575, b3209c2e; PR 577, 458ef26c). Part 3: lines 17, 18 and 22 done (22 filed ticket 178); line 21 merged (PR #579, 0c8ef2c5); line 52: first names clean, the host name is ticket 179 (PR #580 closed); line 47 (macOS) done: the override ran green on macOS, run 45103186031.
 
 **Blocked by:** none
 
@@ -44,7 +44,7 @@
 
 ## macOS tests
 
-- [ ] Hub tests that set `XDG_RUNTIME_DIR` share the real `/tmp/sheaf-<uid>` on macOS, because `paths.runtime_dir` (`src/sheafmd/paths.py:71-77`) ignores it on darwin by design; add a test-only short-path override. The restart tests of `tests/test_service.py` with the fake `systemctl` have never passed on macOS (no green macOS run on main, see tickets 96 and 101). *(PR 575, merged as b3209c2e adds `SHEAF_TEST_RUNTIME_DIR`, set by `tests/conftest.py`, which wins on every platform; red first: `test_a_test_runtime_folder_wins_on_every_platform_so_tests_on_macos_share_no_socket` failed on linux and darwin. Left open: the override has not run on macOS; it runs only through ticket 101's worker.)*
+- [x] Hub tests that set `XDG_RUNTIME_DIR` share the real `/tmp/sheaf-<uid>` on macOS, because `paths.runtime_dir` (`src/sheafmd/paths.py:71-77`) ignores it on darwin by design; add a test-only short-path override. The restart tests of `tests/test_service.py` with the fake `systemctl` have never passed on macOS (no green macOS run on main, see tickets 96 and 101). *(PR 575, merged as b3209c2e adds `SHEAF_TEST_RUNTIME_DIR`, set by `tests/conftest.py`, which wins on every platform; red first: `test_a_test_runtime_folder_wins_on_every_platform_so_tests_on_macos_share_no_socket` failed on linux and darwin. Left open: the override has not run on macOS; it runs only through ticket 101's worker. **Ran on macOS (2026-11-23, run 45103186031 on main bdd1d9ef):** `test_a_test_runtime_folder_wins_on_every_platform_so_tests_on_macos_share_no_socket` passed on py3.11, 3.13 and 3.14 (slices 5 and 6), and all 80 tests of `tests/test_service.py`, the five restart tests with the fake `systemctl` among them, passed on slice 6 of each Python (jobs 137458469527, 137458468743, 137458468790).)*
 
 ## Lint and names
 

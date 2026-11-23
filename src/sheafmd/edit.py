@@ -768,6 +768,25 @@ _EMPTY_SHELL = {"br", "p", "div", "span", "ul", "ol", "li", "blockquote", "b", "
 _BREAK_ENDS = (_EMPTY_SHELL - {"br", "span", "b", "strong", "i", "em", "u"}) | {"td", "th", "dt", "dd"}
 
 
+def _ends_its_cell(br, cell) -> bool:
+    """Whether a break shows nothing after it in its table cell: nothing but white space and breaks follow it there;
+    a comment node is something the cell holds. The page's white space is not Python's: a no-break space shows,
+    except the one Enter leaves at the cut, right after the break. Two are a typed one."""
+    from bs4 import NavigableString
+
+    first = br.next_sibling
+    for x in br.next_elements:
+        if cell not in x.parents:
+            return True
+        if type(x) is NavigableString:
+            text = x[1:] if x is first and x.startswith("\xa0") else str(x)
+            if text.strip(" \t\n\r\f"):
+                return False
+        elif x.name != "br":
+            return False
+    return True
+
+
 def _without_placeholder_breaks(fragment: str) -> str:
     """The fragment without the <br> a browser leaves at the end of a block, and "" when
     nothing else is left in it.
@@ -802,6 +821,11 @@ def _without_placeholder_breaks(fragment: str) -> str:
         if (block is not None and block.name in ("td", "th") and table_is_taken
                 and type(br.next_sibling) is NavigableString and br.next_sibling.startswith("\xa0")
                 and not br.find_parent(["code", "pre"])):
+            continue
+        # Where it does not, the table goes as raw HTML with its breaks: a typed no-break space after Enter's cut
+        # shows a line there too, so its break is the writer's.
+        if (block is not None and block.name in ("td", "th") and not br.find_parent(["code", "pre"])
+                and not _ends_its_cell(br, block)):
             continue
         if block is not None and not any(block is b for b in cleared):
             cleared.append(block)
@@ -845,22 +869,6 @@ def _cell_breaks(fragment: str):
     goes too. A break in code is the code's."""
     from bs4 import BeautifulSoup, NavigableString
 
-    def ends_its_cell(br, cell):
-        # Nothing but white space and breaks after it in its cell; a comment node is something the cell holds.
-        # The page's white space is not Python's: a no-break space shows, except the one Enter leaves at the
-        # cut, right after the break. Two are a typed one.
-        first = br.next_sibling
-        for x in br.next_elements:
-            if cell not in x.parents:
-                return True
-            if type(x) is NavigableString:
-                text = x[1:] if x is first and x.startswith("\xa0") else str(x)
-                if text.strip(" \t\n\r\f"):
-                    return False
-            elif x.name != "br":
-                return False
-        return True
-
     if "<br" not in fragment:
         return fragment, None
     soup = BeautifulSoup(fragment, "html.parser")
@@ -880,7 +888,7 @@ def _cell_breaks(fragment: str):
     if token is None:
         return fragment, None
     for br in breaks:
-        if ends_its_cell(br, br.find_parent(["td", "th"])):
+        if _ends_its_cell(br, br.find_parent(["td", "th"])):
             # The no-break space Enter leaves at the cut ends with the break.
             if type(br.next_sibling) is NavigableString:
                 _cut(br.next_sibling, False)

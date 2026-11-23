@@ -2,7 +2,7 @@
 
 **Claimed by:** Lior
 
-**Status:** in progress
+**Status:** done (2026-11-23, PR #637, merged as 73dd4130); one follow-up box from #637's review stays open
 
 **Blocked by:** none
 
@@ -28,7 +28,7 @@ None.
 
 ## Minor
 
-- [ ] **BZ** (from #473, regression in c4fddbd1): `strip_data_attrs` edits quoted attribute values.
+- [x] **BZ** (from #473, regression in c4fddbd1): `strip_data_attrs` edits quoted attribute values.
   - **Where:** `edit.py:530` (`_DATA_ATTR_RE`), used by `strip_data_attrs` (`edit.py:533`) and called from `_comparable`.
   - **Cause:** `_DATA_ATTR_RE` runs over the whole start tag. It also matches whitespace followed by `data-` inside another attribute's quoted value, and `[^\s=>/]+` swallows the closing quote.
   - **Effect:** the source side of the comparison becomes broken HTML. `_sanitize` keeps the page fragment's value intact, so the two never compare equal.
@@ -49,8 +49,9 @@ None.
     - #473's narrower regex ticked this input.
     - Any rendered attribute value holding whitespace then `data-` (for example raw `<abbr title="… data-driven">`) hits the same path.
   - **Fix direction:** strip whole attributes only. One way is to tokenise the tag's attributes (name, optional `=` value with quoted values matched as a unit) and drop those named `data-*` but not `data-rd-*`. The other is to parse with BeautifulSoup and delete the attributes the way `_sanitize` does. Pin it with the link-title case.
+  Done in PR #637 (2026-11-23): `strip_data_attrs` reads each start tag's attributes one by one (`_ATTR_RE`, a quoted value taken whole) and drops the ones named `data-`, `data-rd-` too, as `_sanitize` does (`edit.py:75-78`); a name straight after a quote or a `/` counts, as html.parser reads it. Red on main: `tests/test_edit_data_attr_values.py` (`test_a_row_ticks_when_a_link_title_holds_data` with "the data-sheet"; "the sheet" is the control). Merged as 73dd4130.
 
-- [ ] **CA** (from #474): after a 409 the leader reconnects with the same shared stream id, so every tab of the browser can go without live updates for up to 300 s.
+- [x] **CA** (from #474): after a 409 the leader reconnects with the same shared stream id, so every tab of the browser can go without live updates for up to 300 s.
   - **Where:**
     - `live.js:181-197`: `Leader.prototype.connect` always opens `/_/live?shared=` + `this.sid`, and its `onerror` with `readyState === 2` clears `joined` and `es` but keeps `sid`.
     - `live.js:258`: `take`, on a join while `!this.es`, calls `connect()` with that same `sid`.
@@ -65,6 +66,14 @@ None.
     - It heals by itself and loses no text.
   - **Red test:** a `tests/page/test_page_shared_live.py`-style test whose route answers `/_/live?shared=<first id>` with 409 every time. Assert that the next `/_/live?shared=` request carries a different id and that a document stream opens.
   - **Fix direction:** when the leader's EventSource is refused (readyState 2), set `this.sid = rnd()` before the next `connect()`.
+  Done in PR #637 (2026-11-23): on a refused connection (readyState 2) the leader draws a new `sid` and clears a pending RETRY reopen (`again`, `deferred`), which belonged to the connection that just ended. Page test `test_a_shared_stream_refused_409_is_opened_again_under_a_new_id` in `tests/page/test_page_shared_live.py`: red in CI (run 45242478345, attempt 2) before the fix, green after (run 45258544706). Merged as 73dd4130.
+
+- [ ] **Follow-up from #637's review (minor, not fixed; Opus fallback round 1 on f1164b71):** a start tag holding an unpaired quote keeps its `data-` attributes on the source side.
+  - **Where:** `edit.py:528` (`_START_TAG_RE`), used by `strip_data_attrs`.
+  - **Cause:** `_START_TAG_RE` reads a `'` or `"` as the opening of a quoted value, so a bare value holding a quote (`href=a'b`) leaves the tag unmatched and nothing in it is stripped. html.parser reads `a'b` as one bare value and `_sanitize` strips the tag's `data-` attributes, so the two sides differ and that block's boxes refuse the tick.
+  - **Reproduction:** `strip_data_attrs('<a href=a\'b data-x="1" title="t">x</a>')` returns the input unchanged; `BeautifulSoup(that, "html.parser").a.attrs` is `{'href': "a'b", 'data-x': '1', 'title': 't'}`. `_START_TAG_RE.search(that)` is `None`.
+  - **Not a regression of #637:** main before #637 left the same tag unchanged too (the start-tag pattern did not change). The review's claim that the old regex stripped it does not hold.
+  - **Fix direction:** let `_START_TAG_RE` (and `_ATTR_RE`'s bare value) take a quote inside a bare value, as html.parser's `attrfind_tolerant` does (`(?!['"])[^>\s]*`), with a test on this input.
 
 ## Already filed or fixed on main
 

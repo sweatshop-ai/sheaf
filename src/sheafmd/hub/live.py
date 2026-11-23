@@ -540,7 +540,9 @@ class LiveDocument:
 
     def reattach(self):
         """`detach` taken back: the root it was for stays (its forget failed before the name was let go). The watch
-        ends, nothing is deleted, and the texts it hands out reach the store again from now on."""
+        ends, nothing is deleted, and the texts it hands out reach the store again from now on. A text it handed out
+        while it was detached is in memory only: a page that holds it merges after a restart no more than a page whose
+        version aged out."""
         if not self._detached:
             return
         store, self._detached_store = self._detached_store, None

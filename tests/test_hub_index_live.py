@@ -1271,7 +1271,7 @@ def test_a_text_stored_while_the_registry_lets_the_root_go_is_not_taken_by_the_l
 
 
 def test_a_forget_whose_registry_write_fails_leaves_the_roots_documents_as_they_were(world, put, monkeypatch):
-    """The watches open before the registry lets go; when it cannot (its file is not written), the root stays, and so do
+    """Ticket 182, follow-up of #611 (the other half of the test above): the watches open before the registry lets go; when it cannot (its file is not written), the root stays, and so do
     its documents: their watch ends and their texts reach the store again."""
     put("a.md")
     e = world.hub.entry("work/a.md")
@@ -1285,6 +1285,22 @@ def test_a_forget_whose_registry_write_fails_leaves_the_roots_documents_as_they_
     text = "# Written after the failed forget\n"
     e.live._remember(text)
     assert world.hub.versions.get("work/a.md", md_hash(text)) == text
+
+
+def test_a_forget_that_fails_after_the_registry_let_go_goes_on_with_its_documents_detached(world, put, monkeypatch):
+    """Ticket 182, follow-up of #611: the registry let the name go and an entry store then failed. Another folder may take the
+    name now, so the documents are not reattached: the forget goes on, and the failure is a row in the diagnostics log."""
+    put("a.md")
+    e = world.hub.entry("work/a.md")
+
+    def failing(reg, *args, **kwargs):
+        reg.forget("work")
+        raise OSError("no space left on device")
+    monkeypatch.setattr(roots_mod, "forget", failing)
+    assert world.hub.forget_root("work").name == "work"
+    assert world.hub.roots.get("work") is None and "work/a.md" not in world.hub.entries
+    assert e.live._stored() is None and not state.Versions._claims
+    assert any(r.get("kind") == "forget-failed" for r in diagnostics.read())
 
 
 def test_one_documents_forget_that_raises_does_not_keep_the_others_of_the_root_from_theirs(world, put, monkeypatch):

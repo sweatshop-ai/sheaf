@@ -675,6 +675,7 @@ def _late(doc, text):
 
 
 def _live(tmp_path, name, text=DOC, versions=None):
+    """A document of `ADDR` whose file is `name` in `tmp_path`, holding `text`, storing in `versions` (the state folder's)."""
     md = tmp_path / name
     md.write_text(text, encoding="utf-8")
     return rdl.LiveDocument(md, render=lambda t: None, publish=lambda n, d: None, by="Ada",
@@ -740,6 +741,17 @@ def test_a_late_text_of_a_forgotten_document_does_not_move_with_the_page_that_le
     assert state.Versions().get("proj/moved.md", rds.md_hash(text)) is None
     assert state.Versions().get("proj/moved.md", kept) == "the folder that took the name\n"
     assert not state.Versions._claims
+
+
+def test_a_text_stored_at_the_address_after_the_page_moved_away_stays_when_the_late_forget_comes(tmp_path):
+    """The record of the address starts again once the page moved away: what is put there from then on, the very text the
+    forgotten document wrote among it, is another document's, and the late forget leaves it."""
+    old = _live(tmp_path, "old.md")
+    old.detach()
+    state.Versions().rename(ADDR, "proj/moved.md")
+    again = state.Versions().put(ADDR, DOC)
+    old.forget()
+    assert again == rds.md_hash(DOC) and state.Versions().get(ADDR, again) == DOC
 
 
 def test_every_text_handed_to_a_page_is_written_to_disk(stored):

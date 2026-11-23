@@ -1069,13 +1069,19 @@ class Hub:
             # then for the late forget to leave them (`LiveDocument.detach`).
             for a in held:
                 self.entries[a].live.detach()   # no wait for its lock here: a render holds it for up to 120 s
+            known = self.roots.get(name)
             try:
                 root = roots_mod.forget(self.roots, self.docs, self.seen, self.versions, name,
                                         members=self.member_seen)
-            except BaseException:
-                for a in held:          # the root stays, and so do its documents' versions
-                    self.entries[a].live.reattach()
-                raise
+            except Exception:
+                if self.roots.get(name) is not None:
+                    for a in held:      # the registry still holds the root: it stays, and so do its documents' versions
+                        self.entries[a].live.reattach()
+                    raise
+                # The registry let the name go, and another folder may take it now: the forget goes on, its documents
+                # detached, and only an entry store that was not emptied is left (a row in the diagnostics log).
+                self.record_exception("forget-failed")
+                root = known
             self.member_opened.forget_prefix(prefix)
             self.shared_ids.forget_prefix(prefix)
             self.forwards.forget_prefix(prefix)
@@ -1087,9 +1093,7 @@ class Hub:
                 self.session_tells.end_root(name, "the folder was forgotten")
             except Exception:
                 self.record_exception("tell-end-failed")
-            popped = [(a, self.entries.pop(a)) for a in [a for a in self.entries if a.startswith(prefix)]]
-            for _, e in popped:
-                e.live.detach()         # a no-op for those detached above
+            popped = [(a, self.entries.pop(a)) for a in held]      # all of them: no entry is made while the hub's lock is held
             # A Tell still running on a document that is gone: its dot, its
             # answer and its wait have nowhere to go, and the name may be taken at once. Also
             # when the registry no longer holds the root (another process forgot it, and this hub

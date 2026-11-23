@@ -60,6 +60,8 @@ def test_a_row_ticks_when_a_link_title_holds_data(title):
     ('<a href=a"b data-x=1>x</a>', '<a href=a"b>x</a>'),
     ("<a b'c data-x=1 d>x</a>", "<a b'c d>x</a>"),
     ("<a href=x'y'data-z=1 data-x=2>x</a>", "<a href=x'y'data-z=1>x</a>"),
+    # The tag ends at its first `>`, so a later tag is read as one too, and loses its own.
+    ('<a b=x ="><span data-x=1>"</span></a>', '<a b=x ="><span>"</span></a>'),
 ])
 def test_a_quote_inside_a_bare_value_or_a_name_is_no_quoted_value(html, want):
     assert rde.strip_data_attrs(html) == want
@@ -72,6 +74,9 @@ def test_a_quote_inside_a_bare_value_or_a_name_is_no_quoted_value(html, want):
     '<a title="a > b" data-x=1 c>x</a>',
     '<a b=="x" data-y=2>x</a>',
     '<a b="x"data-y="z" c=\'d\'>x</a>',
+    # An `=` inside a bare value or after one opens no quoted value: the tag ends at the first `>`.
+    '<a href=a="x>y" data-x=1>x</a>',
+    '<a b=x =">" data-x=1>x</a>',
 ])
 def test_the_attributes_left_are_those_the_page_keeps(html):
     """The source side keeps exactly the attributes `_sanitize` keeps on the page side, values included."""
@@ -81,12 +86,16 @@ def test_the_attributes_left_are_those_the_page_keeps(html):
 
 
 
-@pytest.mark.parametrize("src", ["<div class=a'b data-x=1>blk</div>", "<p title=a'b data-x=1>p</p>"])
-def test_a_raw_html_block_with_an_unpaired_quote_is_unchanged(src):
+@pytest.mark.parametrize("src, page", [
+    # The page's fragment as the browser serialises the block: every value quoted, the quote in it kept.
+    ("<div class=a'b data-x=1>blk</div>", '<div class="a\'b" data-x="1">blk</div>'),
+    ("<p title=a'b data-x=1>p</p>", '<p title="a\'b" data-x="1">p</p>'),
+])
+def test_a_raw_html_block_with_an_unpaired_quote_is_unchanged(src, page):
     """Pandoc escapes such a tag inline (it is text there), but passes a raw HTML block through as written. On main
     that block never compared equal to the page, so every save sent it through pandoc."""
     from types import SimpleNamespace
-    assert rde._unchanged(SimpleNamespace(content=src), rde._render_source(src))
+    assert rde._unchanged(SimpleNamespace(content=src), page)
 
 def test_a_start_tag_that_never_closes_is_read_in_linear_time(no_gc):
     import time

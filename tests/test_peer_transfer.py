@@ -173,6 +173,35 @@ def test_a_failed_landing_leaves_nothing_behind(members, monkeypatch):
     assert transfer(members, token).status == 200      # the id of a failed landing is free again
 
 
+def test_a_failed_landing_never_takes_back_the_page_of_a_folder_that_took_the_loose_roots_name(members, tmp_path, monkeypatch):
+    """8.11: a landing that fails takes back the file it made. The owner's loose root forgotten, and its name taken by
+    another folder that holds a page at the same path, during the landing, the other folder's page stays."""
+    import threading
+    intruder = tmp_path / "again" / "loose-bea"
+    (intruder / "projects" / "blog").mkdir(parents=True)
+    (intruder / "projects" / "blog" / "notes.md").write_text("# Not the landed page\n", encoding="utf-8")
+    (intruder / "top.md").write_text("# Top\n", encoding="utf-8")
+    seen = []
+
+    def boom(*a, **k):                      # the first version stored: the page was made, and the landing fails
+        def take():                         # another request's, which holds none of the landing's locks
+            seen.append(members.hub.roots.get("loose-bea").id)
+            members.hub.forget_root("loose-bea")
+            members.hub.roots.for_document(intruder / "top.md")
+        t = threading.Thread(target=take)
+        t.start()
+        t.join(10)
+        assert not t.is_alive() and members.hub.roots.get("loose-bea").id != seen[0]
+        raise OSError("disk")
+    with monkeypatch.context() as m:
+        m.setattr(members.hub.versions, "put", boom)
+        res = transfer(members, peer_token())
+    assert res.status == 500 and seen
+    assert (intruder / "projects" / "blog" / "notes.md").read_text(encoding="utf-8") == "# Not the landed page\n"
+    home = members.hub.loose.known(members.hub.proxy.members[BEA])
+    assert not (home / "projects" / "blog" / "notes.md").exists()       # the file the landing made is taken back
+
+
 # ── the sending side's refusal (the move itself is hooked up once ticket 17 is in) ──
 
 def test_a_member_with_no_email_or_the_made_up_one_has_none_to_send_and_the_line_says_why(members):

@@ -16,6 +16,7 @@ from pathlib import Path
 from .. import mcp, paths
 from . import channel, loose, proxy, root_moves, state, visibility
 from . import repos as repos_mod
+from .roots import NotFound
 from .state import TokenRow
 
 SAYS = {
@@ -134,6 +135,7 @@ def _land_steps(hub, door, b, owner, deadline, peer: str | None, mine) -> tuple:
             return _refused("name_taken") if e.why == "exists" else _refused("not_landed", str(e))
         raise
     address = made["doc"]
+    made_at = _made_file(hub, owner, address)     # a failed landing takes back this file, no other
     store = _versions_store(hub, owner)
     try:
         for v in b.get("versions", []):
@@ -150,8 +152,9 @@ def _land_steps(hub, door, b, owner, deadline, peer: str | None, mine) -> tuple:
         answer = {"address": address, "hash": made["hash"], "origin": hub.proxy.origin}
         state.write_json(_answers(), {**state.read_json(_answers(), {}), b["id"]: answer})
     except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(hub.file(address))
+        if made_at is not None:     # never the file of a folder that took the loose root's name since (8.11)
+            with contextlib.suppress(OSError):
+                os.unlink(made_at)
         with contextlib.suppress(Exception):
             store.forget(address, inside=True)
         with contextlib.suppress(Exception):
@@ -167,6 +170,20 @@ def _land_steps(hub, door, b, owner, deadline, peer: str | None, mine) -> tuple:
         if earlier != address:
             hub.forwards.add(earlier, address, was.get("by", owner.name))
     return 200, {"ok": True, **answer}
+
+
+def _made_file(hub, owner, address: str) -> Path | None:
+    """The real path of the file a landing just made at `address`, in the root registered at `owner`'s loose folder, found by
+    that folder and never by the name alone; None when the address names no such root now (its root forgotten, and maybe
+    its name taken, since the create)."""
+    held = hub.loose.known(owner)
+    root = hub.roots.lookup(held / "x.md") if held is not None else None
+    if root is None:
+        return None
+    try:
+        return Path(os.path.realpath(hub.file(address, root_id=root.id)))
+    except NotFound:
+        return None
 
 
 def _unkeep(root_path, address: str) -> None:

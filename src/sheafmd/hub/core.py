@@ -449,9 +449,12 @@ class Hub:
         if place.applies(self, a.root):
             try:
                 held = self._bound(address)              # the file an open document was made for, no other
-                got = place.file_at(self, address, held.file_root if held else "")
+                got = place.file_at(self, address, held.file_root if held else "", root_id)
             except roots_mod.NotFound:
-                self.record("commit-refused", address, why="its file is not where the rectoverso was opened")
+                if root_id and self.root_id_of(address) != root_id:     # forgotten, and maybe taken, since the check above
+                    self.record("commit-refused", address, why="its root was forgotten, and another took the name, since the write")
+                else:
+                    self.record("commit-refused", address, why="its file is not where the rectoverso was opened")
                 return
             root, rel = got if got else (root, place.file_rel(self, root, a.rel))
         else:

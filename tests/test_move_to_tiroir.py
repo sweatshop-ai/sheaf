@@ -5,6 +5,7 @@ the tailnet (`helpers.two_hubs`): no socket, no thread. The page is moved by the
 hub says the page landed."""
 import dataclasses
 import json
+import os
 
 import pytest
 from helpers import Link, build_side, hub_rows, pair_peers
@@ -403,6 +404,54 @@ def test_a_page_that_changed_while_the_transfer_ran_writes_no_forward_and_drops_
     with two.active():
         assert "Added while it was away." in two.hub.file(OLD).read_text(encoding="utf-8")
         assert two.hub.forwards.follow(OLD) is None
+
+
+@pytest.mark.parametrize("swap_at", ["answered", "dropping"])
+def test_a_move_never_reads_or_drops_the_page_of_a_folder_that_took_the_loose_roots_name(two, tmp_path, swap_at):
+    """8.11: the move holds the loose root it found the page in. Forgotten, and its name taken by another folder that
+    holds the same text at the same path, once the other tiroir answered ("answered") or while the page is dropped
+    ("dropping"), the other folder's page is never dropped: the first is a page that changed, the second drops the
+    moving root's own file."""
+    import threading
+    with two.active():
+        text = two.hub.file(OLD).read_text(encoding="utf-8")
+        rid = two.hub.roots.get("loose-alice").id
+        mine = os.path.realpath(two.hub.file(OLD))
+    intruder = tmp_path / "again" / "loose-alice"
+    (intruder / "notes").mkdir(parents=True)
+    (intruder / "notes" / "plan.md").write_text(text, encoding="utf-8")
+    (intruder / "top.md").write_text("# Top\n", encoding="utf-8")
+    real = two.hub.moved_remote
+
+    def swap():                             # another request's, which holds none of the move's locks
+        def take():
+            two.hub.forget_root("loose-alice")
+            two.hub.roots.for_document(intruder / "top.md")
+        t = threading.Thread(target=take)
+        t.start()
+        t.join(10)
+        assert not t.is_alive() and two.hub.roots.get("loose-alice").id != rid
+        assert os.path.realpath(two.hub.roots.get("loose-alice").path) == os.path.realpath(intruder)
+
+    def answered(verb, res):
+        two.link.between = None
+        swap()
+
+    def dropping(*a, **k):
+        two.hub.moved_remote = real
+        swap()
+        return real(*a, **k)
+
+    if swap_at == "answered":
+        two.link.between = answered
+    else:
+        two.hub.moved_remote = dropping
+    got = move(two)
+    assert got.status == (409 if swap_at == "answered" else 200), got.text
+    assert (intruder / "notes" / "plan.md").read_text(encoding="utf-8") == text
+    assert os.path.exists(mine) == (swap_at == "answered")
+    if swap_at == "answered":
+        assert "changed" in got.json()["say"]
 
 
 def test_only_the_owner_moves_and_another_member_gets_the_answer_of_a_page_that_is_not_there(two):

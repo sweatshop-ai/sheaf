@@ -24,6 +24,7 @@ from pathlib import Path
 from .. import connect, paths
 from ..source import STAMP_FORMAT, file_lock, md_hash
 from . import archive, channel, incoming, loose, moves, place, proxy, state
+from .roots import NotFound
 
 SECONDS = 3                     # what a read-through waits for a client tiroir: a page that is slow is a page that is not there
 
@@ -92,10 +93,11 @@ def _bundle(hub, member, root, rel: str, address: str, email: str, move_id: str)
     """(the bundle, the hash of the text it carries) of the page at `address`, read under the page's name lock."""
     with place.held(hub, address):
         try:
-            text = hub.file(address).read_text(encoding="utf-8")
-        except (OSError, ValueError):
+            path = hub.file(address, root_id=root.id)     # the moving root's file, never one of a folder that took its name since
+            text = path.read_text(encoding="utf-8")
+            mtime = os.stat(path).st_mtime
+        except (OSError, ValueError, NotFound):
             raise Refusal(404, "gone", "no such document") from None
-        mtime = os.stat(hub.file(address)).st_mtime
         folder, _, name = rel.rpartition("/")
         versions = (hub._versions_of(root) or hub.versions).texts(address)
         writes = [{k: v for k, v in dataclasses.asdict(line).items() if k != "address"} for line in hub.writes.lines(address)]
@@ -160,10 +162,14 @@ def _transfer(hub, member, root, rel: str, address: str, origin: str, email: str
         raise Refusal(409, why, str(answer.get("say") or incoming.SAYS.get(why) or "the other shared Sheaf refused the page"))
     if status != 200 or not isinstance(answer.get("address"), str) or not isinstance(answer.get("hash"), str):
         raise Refusal(502, "failed", f"{origin} could not take the page ({status}): it is where it was, and sending it again lands it once")
-    with moves._LOCK, place.held(hub, address), hub.page_lock(address), file_lock(hub.file(address)):     # the file lock a save takes: what it wrote is read here or after
+    with moves._LOCK, place.held(hub, address), hub.page_lock(address), contextlib.ExitStack() as locked:
         try:
-            now = md_hash(hub.file(address).read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            # The moving root's file, found once: its root forgotten, and the name taken by another folder, during the
+            # transfer, is a page that changed, and the other folder's file is neither read nor dropped (8.11).
+            path = hub.file(address, root_id=root.id)
+            locked.enter_context(file_lock(path))       # the file lock a save takes: what it wrote is read here or after
+            now = md_hash(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, NotFound):
             now = None
         if now != sent:
             _note(address, None)
@@ -171,7 +177,7 @@ def _transfer(hub, member, root, rel: str, address: str, origin: str, email: str
                                           "here. Move it again once you have looked at both")
         finish = hub.moved_remote(address, origin, answer["address"], member.name, answer["hash"], sent)
         try:
-            os.unlink(hub.file(address))
+            os.unlink(path)
             moves.tidy(Path(os.path.realpath(root.path)), rel)
         except OSError:
             hub.record_exception("move-store-failed", address)

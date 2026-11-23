@@ -1727,6 +1727,37 @@ def test_cancelling_a_tell_looks_the_session_up_only_when_a_stop_message_is_to_g
     assert looked == ([] if state == "ended" else [DOC])
 
 
+def test_a_cancel_that_waits_for_the_documents_lock_leaves_the_moves_lock_free(browser, hub, ready, session):
+    """7.3, 9.11 (182 H): the cancel compares the page's root and stops the job under the moves' lock, and waits for the
+    document's lock, which a render holds for up to 120 s, after letting it go: a move, a forget or an agent's Tell does
+    not wait behind the render with it."""
+    from sheafmd.hub import moves
+    post(browser, "/_/tell")
+    finish(hub)
+    held, release, done = threading.Event(), threading.Event(), []
+
+    def render():
+        with hub.entry(DOC).live.exclusive():
+            held.set()
+            release.wait(15)
+    r = threading.Thread(target=render, daemon=True)
+    r.start()
+    assert held.wait(5)
+    c = threading.Thread(target=lambda: done.append(post(browser, "/_/cancel").json()), daemon=True)
+    c.start()
+    try:
+        assert wait_until(lambda: hub.runner.held("stop", DOC, "c1"))
+        c.join(0.5)
+        assert c.is_alive(), "the cancel waits for the document's lock"
+        assert moves._LOCK.acquire(timeout=3), "the moves' lock is held while the cancel waits for the document"
+        moves._LOCK.release()
+    finally:
+        release.set()
+        r.join(5)
+        c.join(10)
+    assert done == [{"ok": True}]
+
+
 def test_a_cancel_that_fails_leaves_no_stop_message_listed_as_on_its_way(
         browser, hub, ready, session, monkeypatch):
     """What the list of running jobs holds for the stop message must end with the cancel, or no

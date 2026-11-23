@@ -2540,22 +2540,27 @@ class Handler:
         sent_root = req.body.get("root")
         # The compare and the cancel are one step (182 H): a forget takes the moves' lock (`Hub.forget_root`), so the
         # root that holds the name is the one compared until the cancel is over, and a folder that takes the name after a
-        # forget never has its Tell of the same id ended by a page of the forgotten root. Held through the wait for the
-        # document's lock too, which `tell.cancel` takes after the admission lock: a move or a forget waits for it.
+        # forget never has its Tell of the same id ended by a page of the forgotten root. Not held for the wait on the
+        # document's lock (`finish`), which a render holds for up to 120 s: a move or an agent's Tell would wait with it.
+        finish = None
         with moves.exclusive():
             held_root = self._root_id(req, doc)
             if isinstance(sent_root, str) and held_root is not None and held_root != sent_root:
                 raise Refuse(409, "another folder now holds this document's name: reload the page", answer={"root": held_root})
             if isinstance(sent_root, str) and held_root is None:
                 # The page's root was forgotten, and its forget ended its Tells and stopped its jobs. A folder that takes
-                # the name (a root is added under no lock of the cancel's) is not this page's to stop: nothing to do.
+                # the name (a root is added under no lock of the cancel's) is not this page's to stop: nothing to do. A job
+                # registered on a popped entry after the forget's `cancel_under` never runs its work (`_is_current`), and
+                # the runner, keyed by address, could stop the other folder's job of the same id here.
                 return _ok()
             # A Tell that waits for an agent ends here, the reader's own and no other's (9.8). A member has no
             # session to stop: theirs is only a waiting Tell.
             self.hub.waiting_tells.end(doc, cid, "cancelled", member=req.member, only_member=True)
             self.hub.session_tells.end(doc, cid, "cancelled", member=req.member, only_member=True)
             if req.member is None:
-                self.hub.tell.cancel(doc, cid)
+                finish = self.hub.tell.cancel(doc, cid)
+        if finish is not None:
+            finish()
         return _ok()
 
     def _retarget(self, req: Req) -> Response:

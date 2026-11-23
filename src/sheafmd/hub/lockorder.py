@@ -3,7 +3,7 @@ AFTER it in `ORDER`; it never waits for one that comes before. `tests/lockorder.
 acquisition against this list, in the move, Tell, save, door create, queue_agent and forget suites.
 
     stop      `Hub._stop_lock`: an upgrade stop, which takes the admission lock inside it
-    moves     `moves._LOCK`: one move at a time; also a door `create` in a loose root, `Tell.queue_agent`'s look at an address, an Archive, Restore or Keep from its read of the path to its write; a root's forget (`Hub.forget_root`); a page's cancel from its root compare to its end
+    moves     `moves._LOCK`: one move at a time; also a door `create` in a loose root, `Tell.queue_agent`'s look at an address, an Archive, Restore or Keep from its read of the path to its write; a root's forget (`Hub.forget_root`); a page's cancel from its root compare to its job's stop (the wait on the document comes after)
     admit     `Hub.admit`: every Tell start and the upgrade stop; held for a look and a mark, never for a wait on a file,
               a render or the hub's lock
     name      `place.held`: a rectoverso's name (`place._name_lock`); two names only under the moves' lock (`moves.exclusive()`, the one place two are held; their order is then free), or a link's name before its target's

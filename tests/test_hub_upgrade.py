@@ -598,3 +598,96 @@ def test_sheaf_stop_waits_as_long_as_every_other_stop_does(port, thread_hub, qui
     assert cli.cmd_stop([]) == 1
     assert time.monotonic() - began < 3                  # it waited STOP_WAIT, 0.3 s here, not a number of its own
     assert capsys.readouterr().err == PEER_OFF_LINE + "sheaf: the hub is still running after 0.3 s\n"
+
+
+# ── ticket 182 M, N, U: what ended the hub decides whether the command starts one ──
+
+@pytest.fixture
+def upgrade_spawns(monkeypatch):
+    """What the command started: `spawn_hub` records its arguments and starts nothing."""
+    made = []
+    monkeypatch.setattr(hubclient, "spawn_hub", lambda *a, **k: made.append(a))
+    return made
+
+
+def patch_the_stop_to_end_with(monkeypatch, hub, answer, ended_by):
+    """The hub answers the upgrade stop with `answer`, then ends: its exit row says `ended_by`, and nothing
+    answers on the port any more."""
+    from sheafmd import diagnostics
+    real_call, real_challenge, posted = hubclient.HubClient.call, hubclient.HubClient.challenge, []
+
+    def call(self, method, path, body=None, **kw):
+        if path == "/_/stop":
+            posted.append(body)
+            diagnostics.record("hub", "hub-exit", None, reason=ended_by, boot=hub.boot)
+            return 200, answer
+        return real_call(self, method, path, body, **kw)
+
+    def challenge(self):
+        return None if posted else real_challenge(self)
+    monkeypatch.setattr(hubclient.HubClient, "call", call)
+    monkeypatch.setattr(hubclient.HubClient, "challenge", challenge)
+
+
+@pytest.mark.parametrize("ended_by", ["stop", "signal"])
+def test_an_older_hub_whose_answer_names_no_reason_is_not_restarted_over_the_stop_that_ended_it(
+        port, thread_hub, quick_stop, monkeypatch, upgrade_spawns, ended_by):
+    """182 M (#508): a hub of the version before #508 answers the stop with no `reason`. That is not
+    the command's own upgrade stop taken: a person's stop may have won, and the exit row says which."""
+    hub = thread_hub(OLD)
+    patch_the_stop_to_end_with(monkeypatch, hub, {"ok": True}, ended_by)
+    with pytest.raises(hubclient.HubBeingStopped):
+        hubclient.ensure_hub("cli", lambda s: None, lambda s: None)
+    assert upgrade_spawns == []
+
+
+@pytest.mark.parametrize("service, ended_by", [(False, "stop"), (False, "signal"), (True, "stop")])
+def test_a_stop_that_wins_after_the_upgrade_stop_was_taken_starts_no_hub_behind_it(
+        port, thread_hub, quick_stop, monkeypatch, upgrade_spawns, ended_by, service):
+    """182 N (#508): the hub took the upgrade stop, then a stop or a signal came and won (8.4: only an
+    upgrade stop gives way). The command waited for the hub to end; it must not start one over it,
+    and under the service it says so at once rather than wait for a hub that will not come back."""
+    hub = thread_hub(OLD)
+    hub.service = service
+    patch_the_stop_to_end_with(monkeypatch, hub, {"ok": True, "reason": "upgrade"}, ended_by)
+    with pytest.raises(hubclient.HubBeingStopped):
+        hubclient.ensure_hub("cli", lambda s: None, lambda s: None)
+    assert upgrade_spawns == []
+
+
+def test_a_stray_signal_that_wins_under_the_service_waits_for_the_hub_the_unit_starts_again(
+        port, thread_hub, quick_stop, monkeypatch, upgrade_spawns):
+    """Under the service a signal the manager did not send is restarted by the unit (14.3), on the new
+    code: the command waits for it, as it did before 182, and starts none itself."""
+    hub = thread_hub(OLD)
+    hub.service = True
+    monkeypatch.setattr(hubclient, "wait_for_start", lambda *a, **k: {"boot": "new", "version": __version__})
+    patch_the_stop_to_end_with(monkeypatch, hub, {"ok": True, "reason": "upgrade"}, "signal")
+    c, started = hubclient.ensure_hub("cli", lambda s: None, lambda s: None)
+    assert started and upgrade_spawns == []
+
+
+def test_an_upgrade_stop_the_hub_ended_with_starts_the_new_hub(port, thread_hub, quick_stop, monkeypatch, upgrade_spawns):
+    """The other side of M and N: the exit row says upgrade, so the command starts the new code."""
+    hub = thread_hub(OLD)
+    monkeypatch.setattr(hubclient, "wait_for_start", lambda *a, **k: {"boot": "new", "version": __version__})
+    patch_the_stop_to_end_with(monkeypatch, hub, {"ok": True}, "upgrade")
+    hubclient.ensure_hub("cli", lambda s: None, lambda s: None)
+    assert upgrade_spawns == [("upgrade",)]
+
+
+def test_a_stop_decided_after_an_upgrade_stop_is_what_the_tabs_are_told_when_the_upgrade_s_callback_comes_first(
+        port, thread_hub):
+    """182 U (#508): the hub calls `on_stop` outside its stop lock, so the upgrade stop's callback can
+    reach the server after a stop has already won (`stop_requested` is stop). The tabs are told the
+    reason the hub exits with, so no tab waits for an upgrade that will not come back."""
+    hub = thread_hub(__version__)
+    sub = hub.index_bus.subscribe()
+    sub.drain()
+    real, calls = hub.on_stop, []
+    hub.on_stop = calls.append
+    assert hub.request_stop("upgrade", force=True) and hub.request_stop("stop")
+    assert hub.stop_requested == "stop" and calls == ["upgrade", "stop"]
+    for reason in calls:                     # the upgrade's callback first, as the race delivers it
+        real(reason)
+    assert sub.get(5) == ("hub-stopping", {"reason": "stop"})

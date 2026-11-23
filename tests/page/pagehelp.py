@@ -514,10 +514,11 @@ def launched_binary(exe):
     return exe
 
 
-def launch_chromium(chromium, error, in_ci):
-    """The browser, or a skip (a machine of a person) or a failure (CI) that says why it did not start."""
+def launch_chromium(chromium, error, in_ci, **options):
+    """The browser, or a skip (a machine of a person) or a failure (CI) that says why it did not start. `options` go to
+    `launch()` (the DevTools port of stall_evidence)."""
     try:
-        return chromium.launch()
+        return chromium.launch(**options)
     except error as e:
         if not in_ci:
             pytest.skip(f"no Chromium for Playwright (run `playwright install chromium`): "

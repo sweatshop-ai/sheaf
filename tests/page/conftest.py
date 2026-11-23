@@ -14,6 +14,8 @@ import time
 
 import pytest
 
+import driver_stall
+import stall_evidence
 from agent_fakes import PID, FakeClaude, Peer, write_record
 from helpers import PLAN
 from pagehelp import (DOC, PageStalled, close_context, landed, launch_chromium, new_context, note_route, settle_routes,
@@ -99,7 +101,9 @@ def chromium():
         unavailable("the playwright package is not installed", in_ci)
     pw = sync_api.sync_playwright().start()
     try:
-        b = launch_chromium(pw.chromium, sync_api.Error, in_ci)
+        extra = stall_evidence.launch_args()
+        b = launch_chromium(pw.chromium, sync_api.Error, in_ci, **({"args": extra} if extra else {}))
+        stall_evidence.confirm(b.version)
     except BaseException:
         pw.stop()
         raise
@@ -334,10 +338,30 @@ def stream_journal(pages, hub):
                      for t, side, what in sorted(lines))
 
 
+def stalled(call, rep):
+    """Why a failed phase counts as a stall whose evidence is kept, or None: the page stopped answering (PageStalled),
+    or pytest-timeout ended the phase (inside the driver or not: tests/driver_stall.py ends the run on the first)."""
+    if not rep.failed:
+        return None
+    if call.excinfo is not None and call.excinfo.errisinstance(PageStalled):
+        return f"PageStalled: {call.excinfo.value}"
+    text = str(rep.longrepr or "")
+    if driver_stall.TIMED_OUT in text:
+        inside = driver_stall.stalled_in_driver(rep) is not None
+        return "pytest-timeout" + (", inside the Playwright driver" if inside else "") + "\n\n" + text[-6000:]
+    return None
+
+
 @pytest.hookimpl(hookwrapper=True)
 def pytest_runtest_makereport(item, call):
     out = yield
     rep = out.get_result()
+    why = stalled(call, rep)
+    if why is not None:
+        # First, and through no Playwright call: the journal below asks the driver, which may be the part that froze.
+        kept = stall_evidence.save(item.nodeid, rep.when, why, item.funcargs.get("hub_journal"))
+        if kept is not None:
+            rep.sections.append(("stall evidence", f"kept in {kept}"))
     if rep.when != "call" or not rep.failed:
         return
     ctx = item.funcargs.get("context")

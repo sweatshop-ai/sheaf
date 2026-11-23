@@ -86,3 +86,26 @@ def test_a_cut_after_a_backslash_the_page_text_keeps_goes_with_the_break():
 def test_two_no_break_spaces_after_a_backslash_keep_the_break_and_leave_one():
     row = saved_cell("x\\*<br>\u00a0\u00a0")
     assert "<br>" in row and row.count("\u00a0") == 1
+
+
+# A table `_cell_breaks` does not take (a backslash or a shortcode left in it) goes as raw HTML, and its typed break
+# with it: two no-break spaces after a break are Enter's cut and a typed one, which shows (ticket 182 I).
+def test_two_no_break_spaces_in_a_table_with_a_backslash_keep_the_break():
+    src = "| a | b |\n|---|---|\n| x | a\\b |"
+    html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", ">x<br>\u00a0\u00a0<")
+    out = saved_table(html, src)
+    assert "<table" in out and "x<br />" in out and out.count("\u00a0") == 1 and "a\\b" in out
+
+
+def test_two_no_break_spaces_in_a_table_with_a_shortcode_keep_the_break():
+    src = "| a | b |\n|---|---|\n| x | `:smile:` |"
+    html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", ">x<br>\u00a0\u00a0<")
+    out = saved_table(html, src)
+    assert "<table" in out and "x<br />" in out and out.count("\u00a0") == 1 and ":smile:" in out
+
+
+def test_one_no_break_space_after_a_break_at_the_end_of_bold_in_a_table_with_a_backslash_goes_with_it():
+    src = "| a | b |\n|---|---|\n| x | a\\b |"
+    html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", "><b>x<br></b>\u00a0<")
+    out = saved_table(html, src)
+    assert "<table" not in out and "<br" not in out

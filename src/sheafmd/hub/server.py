@@ -376,7 +376,10 @@ class HubServer:
             return
         self._begun.set()
         self.closing.set()                # first: from here no kept-alive connection is served
-        self.hub.announce_stop(reason)
+        # The reason in force, not the caller's: the callbacks of two stops may arrive in the opposite
+        # order of their decisions (`Hub.request_stop`), and a stop decided after an upgrade stop wins it.
+        # The tabs are told the reason the hub exits with, so none waits for an upgrade that is not coming.
+        self.hub.announce_stop(self.hub.stop_requested or reason)
         self.hub.stop_jobs()
         time.sleep(0.15)                  # let the streams write it before the server goes
         self.tell_socket.stop()

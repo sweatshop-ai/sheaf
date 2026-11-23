@@ -163,7 +163,7 @@ class LiveDocument:
         if store is not None and self._address is not None:
             self._written.add(h)
             try:
-                store.put(self._address, text)
+                store.put(self._address, text, writer=self)
             except OSError:
                 pass            # a full disk costs a merge after a restart, never a save
 
@@ -527,6 +527,8 @@ class LiveDocument:
         the name next has versions of its own under the address."""
         store = self._store
         self._detached_store = store() if callable(store) else store
+        if self._detached_store is not None and self._address is not None and not self._detached:
+            self._detached_store.watch(self._address)      # before the name can be taken: who stores what from now on
         self._detached = True
 
     def forget(self):
@@ -539,7 +541,8 @@ class LiveDocument:
             store = self._detached_store if detached else self._stored()
             if store is not None and self._address is not None:
                 if detached:
-                    store.forget_texts(self._address, self._written)
+                    store.forget_texts(self._address, self._written, writer=self)
+                    self._detached_store = None         # its watch is ended: a second forget must not end another's
                 else:
                     store.forget(self._address)
             self._store = None
@@ -568,7 +571,7 @@ class LiveDocument:
             if store is not None and self._address is not None:
                 self._written.add(rds.md_hash(text))
                 try:
-                    store.pin(self._address, text, member)
+                    store.pin(self._address, text, member, writer=self)
                 except OSError:
                     pass        # a full disk costs the pin after a restart, never the one in memory
             return True

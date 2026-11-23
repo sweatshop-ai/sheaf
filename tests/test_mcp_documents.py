@@ -105,6 +105,15 @@ def test_the_persons_own_last_message_is_never_unread(browser, notes):
     assert r["unread"] == 0 and r["dot"] == "blue"
 
 
+def test_a_legacy_action_reply_is_the_persons_own_when_the_person_is_named_claude(browser, notes):
+    """The unread rule reads the last author as `display` names it (5.3, 8.7), as the index does: a legacy
+    `"Claude (action)"` reply is Claude's, so for a person named Claude only c2, Ada's, is unread."""
+    browser.hub.person = "Claude"
+    update_file(notes / "busy.md", lambda t: rdc.reply(t, "c1", "Did it.", "Claude (action)", "2026-10-14T11:00"))
+    [r] = docs(browser)
+    assert r["unread"] == 1
+
+
 def test_a_thread_that_was_told_and_waits_makes_the_dot_orange(browser, notes):
     e = browser.hub.entry("notes/busy.md")
     e.live.await_reply("c1")
@@ -322,3 +331,22 @@ def test_the_description_of_more_says_it_is_a_lower_bound():
     import sheafmd.mcp as mcp
     text = mcp.TOOLS["documents"]["description"]
     assert "at least" in text and "stopped" in text
+
+
+
+def test_the_walk_leaves_half_of_the_time_budget_to_the_opening_of_what_it_found(browser, tmp_path, monkeypatch):
+    """Ticket 182 review: the door's walk is not capped by count (the limit is spent on what the caller sees), so a root
+    far past the limit is bounded by time instead: its walk gets half of the time left, never the whole budget."""
+    import time
+    import sheafmd.mcp as mcp
+    root = tmp_path / "wiki"
+    doc(root, "0.md")
+    browser.hub.roots.for_document(root / "0.md")
+    comment(root / "0.md")
+    real, given = mcp.list_documents, []
+    def spy(src, cap=None, deadline=None):
+        given.append(deadline - time.monotonic())
+        return real(src, cap=cap, deadline=deadline)
+    monkeypatch.setattr(mcp, "list_documents", spy)
+    assert names(docs(browser)) == ["wiki/0.md"]
+    assert given and all(0 < left <= mcp.DOCUMENTS_SECONDS / 2 for left in given)

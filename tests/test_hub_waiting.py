@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 import sheafmd
-from helpers import PLAN, claim_port, comment, hub_rows, ok, refused
+from helpers import GIT_FAILS, PLAN, claim_port, comment, git_fails, hub_rows, ok, refused
 from sheafmd import comments as rdc
 from sheafmd.source import update_file
 from test_hub_tell import wait_until
@@ -1183,3 +1183,22 @@ def test_a_document_caught_part_way_through_a_save_ends_no_tell_when_the_text_ch
     waiting.watch()
     assert [w["id"] for w in waiting.waits(DOC, sweep=False)] == ["c1"]
     assert hub_rows("tell-cancelled") == []
+
+
+@pytest.mark.parametrize("how", GIT_FAILS)
+def test_a_tell_on_a_git_root_that_git_cannot_answer_is_still_listed_to_its_agent(browser, tmp_path, monkeypatch, how):
+    """Ticket 182 J: a git root that git gives no answer for lists nothing it has not vouched for (8.6), but a Tell that
+    waits there for the agent is not lost behind its `closed` row: the page was served and told, so it is listed."""
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    subprocess.run(["git", "init", "-q", str(proj)], check=True, capture_output=True)
+    (proj / "a.md").write_text(PLAN, encoding="utf-8")
+    browser.hub.roots.for_document(proj / "a.md")
+    comment(proj / "a.md")
+    token = agent_token()
+    assert pick(browser, "agent:ada-chatgpt", doc="proj/a.md").status == 200
+    assert browser.post("/_/tell", {"doc": "proj/a.md", "id": "c1"}).status == 200
+    git_fails(how, monkeypatch, tmp_path)
+    first, closed = documents(browser, token)
+    assert first["doc"] == "proj/a.md" and [t["thread"] for t in first["tells"]] == ["c1"]
+    assert closed == {"root": "proj", "closed": "git gave no answer"}

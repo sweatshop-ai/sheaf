@@ -150,6 +150,12 @@ class Comment:
         """The name to show for a reply: the author, without the legacy suffix."""
         return "Claude" if r.by == LEGACY_ACTION_BY else r.by
 
+    @property
+    def last_by(self) -> str:
+        """Who wrote the thread's last message, as `display` names it: the one author the
+        unread rule (SPEC 8.7) reads, for the index and the door's `documents` alike."""
+        return self.display(self.replies[-1]) if self.replies else self.by
+
     def effective_role(self, r: Reply) -> str | None:
         """What a reply is, as the page and the hub treat it (SPEC 5.3 table). A
         written role wins; else the two legacy forms are read as the role they

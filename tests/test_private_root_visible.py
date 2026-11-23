@@ -1346,7 +1346,37 @@ def test_documents_counts_the_overflow_of_a_members_private_root_to_that_member_
     w = world
     monkeypatch.setattr(roots, "COUNT_LIMIT", 3)
     for i in range(5):
-        (w.two.private_repo / f"loose{i}.md").write_text("# loose\n", encoding="utf-8")
+        (w.two.private_repo / f"acme/blog/loose{i}.md").write_text("# loose\n", encoding="utf-8")
     answers = {n: call(w.door, "documents", token=w.tokens[n], open_only=False) for n in ("tok-a", "tok-b", "loose")}
-    assert answers["tok-a"] == (False, [{"root": w.root.name, "more": 2}])
+    # only what is shown under a name counts: a file at the private root's top is no document (rule D)
+    assert answers["tok-a"][0] is False and answers["tok-a"][1][3:] == [{"root": w.root.name, "more": 2}]
+    assert len(answers["tok-a"][1]) == 4
     assert answers["tok-b"] == (False, []) and answers["loose"] == (False, [])
+
+
+def test_the_documents_count_limit_counts_only_what_the_caller_sees(world, monkeypatch):
+    """Ticket 182 K: the count limit of the door's `documents` is spent on the files the caller may see. Files of the
+    list's repo that a token bound to nobody may not see come first in the listing; the one it may see, after them,
+    is still listed, and nothing is said to be left out."""
+    import sheafmd.hub.roots as roots
+    w = world
+    monkeypatch.setattr(roots, "COUNT_LIMIT", 2)
+    for i in range(4):
+        (w.two.list_repo / f"acme/blog/hidden{i}.md").write_text(PRIVATE, encoding="utf-8")
+    (w.two.list_repo / "acme/blog/open.md").write_text(PROJECT_WIDE, encoding="utf-8")
+    is_error, rows = call(w.door, "documents", token=w.tokens["loose"], open_only=False)
+    assert not is_error and [r.get("doc", r) for r in rows] == [f"{w.root.name}/acme/blog/open.md"]
+
+
+def test_the_documents_count_limit_is_one_for_a_root_and_the_private_root_listed_under_it(world, monkeypatch):
+    """Ticket 182 S: the files of a member's private root are listed under the list root, and the count limit is the
+    list root's, not one per folder: past it the rest is told as `more`, never listed twice over."""
+    import sheafmd.hub.roots as roots
+    w = world
+    monkeypatch.setattr(roots, "COUNT_LIMIT", 3)
+    for i in range(3):
+        (w.two.list_repo / f"acme/blog/shared{i}.md").write_text(PROJECT_WIDE, encoding="utf-8")
+        (w.two.private_repo / f"acme/blog/mine{i}.md").write_text("# mine\n", encoding="utf-8")
+    is_error, rows = call(w.door, "documents", token=w.tokens["tok-a"], open_only=False)
+    assert not is_error
+    assert len([r for r in rows if "doc" in r]) == 3 and rows[3:] == [{"root": w.root.name, "more": 3}]

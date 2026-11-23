@@ -17,7 +17,7 @@ import threading
 import time
 from collections.abc import Callable
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -163,6 +163,13 @@ def doc_key(address: str) -> str:
     return hashlib.sha256(address.encode("utf-8")).hexdigest()[:16]
 
 
+@dataclass
+class _Claims:
+    """Who put each hash in one document's versions folder while a late forget watches it (`Versions.watch`)."""
+    watchers: int = 0
+    by_hash: dict = field(default_factory=dict)     # hash -> {writer, ...}; None is a writer that is no document
+
+
 class Versions:
     """Every text the hub handed a page, on disk, so a save against a page rendered before a
     restart still merges. `<state>/versions/<doc-key>/<hash>.md`, the newest 60 per document,
@@ -177,6 +184,15 @@ class Versions:
         documents, inside it at `.sheaf/versions/` (7.4, `versions = "root"`), keyed by the path in the
         root, not the address: another hub, a clone's, names the root otherwise. `name` is the root's."""
         self._root, self._prefix = root, f"{name}/"
+
+    # Between a document's `watch` (its root was forgotten, and the name may be another folder's at once) and its
+    # `forget_texts`, who put each hash in that document's folder, by the folder's path: one file holds a text whatever
+    # document stored it, and the late forget takes out only the texts the old document wrote (SPEC 8.2; ticket 182 L).
+    # In memory only, the stored format is unchanged: both documents are of one hub run, and the record is open no
+    # longer than that window. Shared by every store, since the forgotten document's store and the new document's are
+    # two objects over one folder.
+    _claims_lock = threading.Lock()
+    _claims: dict = {}          # folder -> _Claims
 
     @property
     def dir(self) -> Path:
@@ -231,15 +247,32 @@ class Versions:
                 pass
         return h
 
-    def put(self, address: str, text: str) -> str:
-        return self._keep(self._make_folder(address), text, VERSIONS_KEPT)
+    def _claimed(self, address: str, keep, writer) -> str:
+        """`keep()`, the write of a text in the folder of `address`, and, when a late forget watches that folder, the
+        record that `writer` put its hash there (None: a writer that is no document, which no forget owns either). Under
+        the claims' lock then, so that a forget never deletes between this write and its record. A folder no forget
+        watches is written without the lock: a watch starts before any other document can write there (`watch`)."""
+        folder = self._folder(address)
+        if folder not in self._claims:
+            return keep()
+        with self._claims_lock:
+            watched = self._claims.get(folder)
+            h = keep()
+            if watched is not None:
+                watched.by_hash.setdefault(h, set()).add(writer)
+            return h
 
-    def pin(self, address: str, text: str, member: str = "") -> str:
+    def put(self, address: str, text: str, writer=None) -> str:
+        return self._claimed(address, lambda: self._keep(self._make_folder(address), text, VERSIONS_KEPT), writer)
+
+    def pin(self, address: str, text: str, member: str = "", writer=None) -> str:
         """Keep `text` as a version a page of `member` keeps (the hub's person's: ""), apart from the newest 60,
         which writes from outside push out, and apart from the pins of every other member."""
-        folder = self._dir(self._make_folder(address) / _PINS_DIR)
-        key = member_key(member)
-        return self._keep(folder if key is None else self._dir(folder / key), text, PINS_KEPT)
+        def keep():
+            folder = self._dir(self._make_folder(address) / _PINS_DIR)
+            key = member_key(member)
+            return self._keep(folder if key is None else self._dir(folder / key), text, PINS_KEPT)
+        return self._claimed(address, keep, writer)
 
     @staticmethod
     def _members(pins: Path) -> list[Path]:
@@ -302,17 +335,38 @@ class Versions:
         if self._root is None or inside:
             shutil.rmtree(self._folder(address), ignore_errors=True)
 
-    def forget_texts(self, address: str, hashes, inside: bool = False):
+    def watch(self, address: str):
+        """A document at `address` lost its root (SPEC 8.2), and its `forget_texts` comes later: from now until then,
+        record who puts each text in the folder of `address`, which the folder that takes the name writes to as well.
+        Each `watch` is ended by one `forget_texts`."""
+        with self._claims_lock:
+            self._claims.setdefault(self._folder(address), _Claims()).watchers += 1
+
+    def forget_texts(self, address: str, hashes, inside: bool = False, writer=None):
         """`forget`, for the texts named by `hashes` only, newest and pinned alike: what one document put there, when
-        the folder of `address` may hold another document's by now (a forget that came after the name was taken)."""
-        if self._root is None or inside:
-            folder = self._folder(address)
-            for h in hashes:
-                for f in (folder / f"{h}.md", *self._pinned(folder, h)):
-                    try:
-                        f.unlink()
-                    except OSError:
-                        pass
+        the folder of `address` may hold another document's by now (a forget that came after the name was taken).
+        After a `watch`, a hash that a writer other than `writer` put there since stays, and its pins with it, the old
+        document's among them (the same text): that file is the other document's version too. Ends the `watch`, also
+        when a delete fails."""
+        folder = self._folder(address)
+        with self._claims_lock:
+            watched = self._claims.get(folder)
+            try:
+                if self._root is None or inside:
+                    by_hash = watched.by_hash if watched is not None else {}
+                    for h in hashes:
+                        if by_hash.get(h, set()) - {writer}:
+                            continue
+                        for f in (folder / f"{h}.md", *self._pinned(folder, h)):
+                            try:
+                                f.unlink()
+                            except OSError:
+                                pass
+            finally:
+                if watched is not None:
+                    watched.watchers -= 1
+                    if watched.watchers <= 0:
+                        del self._claims[folder]
 
     def rename(self, old: str, new: str):
         """The versions of the document at `old` are those of `new`: a page that moved keeps its history, newest and
@@ -320,13 +374,21 @@ class Versions:
         moved there)."""
         src = self._folder(old)
         dst = self._dir(self.dir) / doc_key(self._key(new))
-        if not src.is_dir():
-            shutil.rmtree(dst, ignore_errors=True)      # nothing moved there, so what `new` held is the history of a page that is gone
-            return
-        if dst != src:
-            shutil.rmtree(dst, ignore_errors=True)
-            os.replace(src, dst)
-        write_text_private(dst / _ADDRESS_FILE, self._key(new), self._root is not None)
+        with self._claims_lock:     # a late forget that watches `new` leaves what moved there: another page's history
+            if not src.is_dir():
+                shutil.rmtree(dst, ignore_errors=True)      # nothing moved there, so what `new` held is the history of a page that is gone
+                return
+            if dst != src:
+                shutil.rmtree(dst, ignore_errors=True)
+                os.replace(src, dst)
+            write_text_private(dst / _ADDRESS_FILE, self._key(new), self._root is not None)
+            watched = self._claims.get(dst)
+            if watched is not None:
+                pins = dst / _PINS_DIR
+                for files in (dst, pins, *self._members(pins)):
+                    for p in files.glob("*.md"):
+                        if _HASH_RE.fullmatch(p.stem):
+                            watched.by_hash.setdefault(p.stem, set()).add(None)
 
     def forget_prefix(self, prefix: str):
         """Drop the versions of every document whose address starts with `prefix` (`<root>/`),

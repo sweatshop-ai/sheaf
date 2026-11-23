@@ -87,15 +87,16 @@ def _running_or_failure(cannot_tell: Exception) -> int:
     return _hub_failure(cannot_tell)
 
 
-def _take_back_restart(c: hubclient.HubClient, token: int | None = None):
+def _take_back_restart(told: hubclient.Met, token: int | None = None):
     """The service manager failed to restart the hub that was told it would: tell it the restart is
     not coming, so that a logout or a `systemctl stop` in the next RESTART_TOLD_TTL is not taken for
     it (8.4). A hub of the version before has no such route (405) and keeps the announcement for its
     30 s, as it did; a hub that is gone by now has nothing to forget. Neither changes what the
     command says: the manager's failure. `token` is the announcement's own, so that a newer run's
-    announcement is not taken back with it; None when its answer was never read."""
+    announcement is not taken back with it; None when its answer was never read. It goes only to the
+    hub that was `told` (its boot): a hub that replaced it meanwhile keeps its own announcement."""
     try:
-        c.call("DELETE", "/_/restarting" if token is None else f"/_/restarting?token={token}")
+        told.call("DELETE", "/_/restarting" if token is None else f"/_/restarting?token={token}")
     except hubclient.Impostor:
         pass
 
@@ -131,7 +132,7 @@ def via_service(verb: service.Verb) -> int | None:
                 try:
                     _, announced = before.call("POST", "/_/restarting")
                 except hubclient.HubLost:       # the hub may have applied it though the answer never came
-                    _take_back_restart(c)
+                    _take_back_restart(before)
                     raise
                 told = True
                 token = announced.get("token")  # a hub of the version before returns none
@@ -143,7 +144,7 @@ def via_service(verb: service.Verb) -> int | None:
                 service.control(verb)
             except service.ServiceError:
                 if told:
-                    _take_back_restart(c, token)
+                    _take_back_restart(before, token)
                 raise
         got = hubclient.wait_for_start(
             c, hubclient.START_WAIT, lambda got: before is None or got.get("boot") != before.got.get("boot"))

@@ -215,7 +215,7 @@ def declared(environ=None, session=...) -> dict:
 # ── the door ─────────────────────────────────────────────────────────────────
 
 # What the caller reads from the result of a tool that did not fail: each must be text.
-_RESULT_TEXT = {"create": ("doc", "hash"), "update": ("doc", "hash"), "read": ("hash",)}
+_RESULT_TEXT = {"create": ("doc", "hash"), "update": ("doc", "hash"), "read": ("hash", "text")}
 
 
 class Door:

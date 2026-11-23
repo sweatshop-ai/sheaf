@@ -156,7 +156,7 @@ TOOLS = {
                        "stays. The old address forwards to the new one for ever, and the page's versions, comments, "
                        "marks and Share go with it; links to the old address are not rewritten. Only the owner moves a "
                        "page, and only within its root: a repo page moves by git. Answers the new `doc`, its `url` and "
-                       "`hash`, and `moved_from`.",
+                       "`hash` (null, with a `note`, when the page could not be read after the move), and `moved_from`.",
         "properties": {
             "doc": _DOC,
             "folder": {"type": "string", "description": "The folder of your loose root the page goes in "
@@ -992,7 +992,8 @@ class Door:
 
     def _mark_generated(self, address: str, on: bool, caller: Caller):
         """Set the mark with the calling token as its setter, or clear it (SPEC 8.3). The key sets none: the mark
-        names a token, so a page the key marks has no setter and only the key may change it."""
+        names a token, so a page the key marks has no setter and only the key may change it. Returns (the entry before,
+        the entry after), for `_put_back_mark`."""
         def settle(entry: dict) -> dict:
             if not on:
                 entry.pop("generated", None)
@@ -1000,7 +1001,24 @@ class Door:
                 entry["generated"] = ({"by": caller.display, "id": None, "at": now(), "key": True} if caller.is_key
                                       else {"by": caller.token_name, "id": caller.token.id, "at": now()})
             return entry
-        self.hub.docs.change(address, settle)
+        return self.hub.docs.change(address, settle)
+
+    def _put_back_mark(self, address: str, changed: tuple[dict, dict]):
+        """A write refused after `_mark_generated` made `changed`: the mark goes back to what the entry before held,
+        unless another write has changed it since. A `docs.json` that cannot be written now leaves it as it is; the
+        write's own failure is what the caller hears."""
+        before, after = changed
+
+        def settle(entry: dict) -> dict:
+            if entry.get("generated") != after.get("generated"):
+                return entry
+            if "generated" in before:
+                entry["generated"] = before["generated"]
+            else:
+                entry.pop("generated", None)
+            return entry
+        with contextlib.suppress(OSError):
+            self.hub.docs.change(address, settle)
 
     def _render_report(self, args: dict, caller: Caller) -> dict:
         """A render report (SPEC 13): the tiroir hears that the caller's member works on a repo page, and clones the
@@ -1234,14 +1252,25 @@ class Door:
                         self.hub.writes.told(address)
                         _unmake(top, made)
                         raise ToolError(f"{address} was not made: {e}.", "keep") from None
+                if args.get("generated"):   # under the name's lock with the write, before a tab or a commit hears of it
+                    try:
+                        self._mark_generated(address, True, caller)
+                    except OSError:         # a page refused is not left made and unmarked, its name taken (ticket 183 AA)
+                        with contextlib.suppress(OSError):
+                            os.unlink(top / rel)
+                        if args.get("keep"):
+                            with contextlib.suppress(loose.Refused):
+                                loose.keep(root.path, rel, on=False)
+                        self.hub.writes.told(address)
+                        _unmake(top, made)
+                        raise ToolError(f"{address} was not made: its generated mark could not be written.",
+                                        "generated") from None
             except Private:         # the root's folder, as opened, is a private root's: answered as a path in no root
                 raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path") from None
             self._agent_wrote(address, caller)          # before the tabs and indexes hear of it
             self.hub.wrote(address)
             self.hub.committed(address, by=caller.display, what="create", root_id=rid)
-            if args.get("generated"):
-                self._mark_generated(address, True, caller)
-        out = {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
+        out ={"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
         if visibility.audience(_as_read(args["text"])) is not None and visibility.audience(text) is None:
             out["note"] = ("The page holds private work, so it is not Shared: its Share line was written unticked. "
                            "Its owner shares it from the page or the Sheaf.")
@@ -1338,17 +1367,19 @@ class Door:
             if r.status == 404:
                 raise _absent(args["doc"]) from None
             raise ToolError(r.message, "owner" if r.status == 403 else "move") from None
+        out = {"doc": new, "url": self.hub.url(new), "moved_from": address}
         try:
             text = self.hub.file(new).read_text(encoding="utf-8", errors="replace")
-        except (OSError, NotFound):
-            raise ToolError(f"{address} was moved to {new}, and the page could not be read there.", "move") from None
-        return {"doc": new, "url": self.hub.url(new), "hash": md_hash(text), "moved_from": address}
+        except (OSError, NotFound):     # the move is made: it is answered, and logged, as made (ticket 183 AY)
+            return {**out, "hash": None, "note": f"The page could not be read at {new} after the move; read it there "
+                                                 "for its hash."}
+        return {**out, "hash": md_hash(text)}
 
     def _updated(self, address: str, args: dict, text: str, expected: str, caller: Caller, moved: list, rid: str):
         """The write of an update, and the rectoverso's file moved to its home (9.11): (the text before, the text
         written, the path in the root the file left or None). A move `ahead` makes is put in `moved` as it is made,
         so the caller commits it whatever comes after. `rid`: the id of the root the update was begun in (`_located_in`)."""
-        written = [text]
+        written, marked = [text], []
 
         def change(now_text, opened):
             # Each check on the file as it is, under its lock; a rectoverso the caller may not see first, so a
@@ -1362,7 +1393,7 @@ class Door:
             written[0] = self._door_text(text, now_text, address, caller)
             self._check_size(written[0])
             if "generated" in args:             # left out, the mark stays as it is (SPEC 12); set before the text is written, so a page is never changed and unmarked
-                self._mark_generated(address, args["generated"], caller)
+                marked.append(self._mark_generated(address, args["generated"], caller))
             self.hub.writes.expect_own(address, md_hash(written[0]))       # a look at the file before `wrote()` is not a disk write
             return written[0]
 
@@ -1384,6 +1415,8 @@ class Door:
                 before, _ = update_beneath(top.path, rel, change, move=move)
             except BaseException:
                 self.hub.writes.told(address)           # a write that failed after it was expected leaves nothing to expect
+                if marked:                              # the text was not written: nor is its mark (ticket 183 Z)
+                    self._put_back_mark(address, marked[0])
                 raise
         except (OSError, UnicodeDecodeError, NotFound):
             raise ToolError(f"{address} could not be written.", "not written") from None

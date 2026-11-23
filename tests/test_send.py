@@ -647,7 +647,8 @@ def test_a_certificate_the_laptop_cannot_trust_is_no_outage_and_falls_back_nowhe
 
 
 @pytest.mark.parametrize("name, answer", [("create", {"hash": "h"}), ("create", ["x"]), ("update", {"doc": "r/a.md"}),
-                                          ("read", {"hash": 3})])
+                                          ("read", {"hash": 3}), ("read", {"hash": "h"}),
+                                          ("read", {"hash": "h", "text": None})])
 def test_a_door_result_without_the_text_fields_the_caller_reads_is_a_send_error(name, answer):
     door = send.Door("https://t.example.com", "tok", {})
     door.started = True

@@ -68,10 +68,19 @@ def test_a_shortcode_in_a_comment_of_the_source_is_not_one_of_its_emoji():
     ('<span class="emoji" data-emoji="smile" title="> :tada:">x</span> :smile:', {"smile": [False, True]}),
     ('\\<span class="emoji" data-emoji="smile">x</span> :smile:', {"smile": [True]}),  # an escaped tag is text
     ("`:smile:` and\n\n```\n:smile:\n```\n\n:smile:", {"smile": [True]}),          # code draws none
+    ('<span class="emoji extra" data-emoji="smile">x</span> :smile:', {"smile": [True]}),  # not one the page takes
     ("a \\:smile: b", {}),
 ])
 def test_the_source_emoji_are_the_ones_markdown_draws(source, found):
     assert rde._source_emoji(source) == found
+
+
+def test_a_source_pandoc_cannot_read_refuses_the_save_rather_than_lose_its_shortcodes(monkeypatch):
+    from types import SimpleNamespace
+    rde._source_emoji.cache_clear()
+    monkeypatch.setattr(rde._pandoc, "run", lambda args, text: SimpleNamespace(returncode=1, stdout="", stderr="x"))
+    with pytest.raises(rde.EditError):
+        rde._source_emoji("a :smile: b")
 
 
 def test_a_comment_the_file_added_whose_quote_the_page_changes_is_an_orphan_as_on_a_plain_save():

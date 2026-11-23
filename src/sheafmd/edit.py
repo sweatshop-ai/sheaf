@@ -1024,7 +1024,8 @@ def _source_emoji(source: str) -> dict:
 
     r = _pandoc.run(["-f", "gfm", "-t", "json"], orderedtask.hide(copyblock.hide(source)))
     if r.returncode:
-        return {}
+        # Refused, as `_emoji_looked_at` refuses: an empty answer would write every shortcode as its emoji.
+        raise EditError("pandoc: the emoji of the block could not be read")
     found = {}
 
     def walk(x):
@@ -1036,9 +1037,11 @@ def _source_emoji(source: str) -> dict:
             if t == "Span" and "emoji" in c[0][1] and (name := dict(c[0][2]).get("data-emoji")):
                 found.setdefault(name, []).append(True)
             elif t in ("RawInline", "RawBlock") and c[0] == "html":
-                for tag in BeautifulSoup(c[1], "html.parser").find_all("span", class_="emoji"):
-                    if tag.get("data-emoji"):
-                        found.setdefault(tag["data-emoji"], []).append(False)
+                # The spans `_EMOJI_SPAN` takes on the page: class exactly `emoji`, a name of its characters.
+                for tag in BeautifulSoup(c[1], "html.parser", multi_valued_attributes=None).find_all("span"):
+                    name = tag.get("data-emoji") or ""
+                    if tag.get("class") == "emoji" and re.fullmatch(r"[a-z0-9_+-]+", name):
+                        found.setdefault(name, []).append(False)
             walk(c)
 
     walk(json.loads(r.stdout).get("blocks", []))

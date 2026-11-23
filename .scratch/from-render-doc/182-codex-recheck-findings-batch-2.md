@@ -37,3 +37,14 @@ Checked on bd3a9333, not repeated above: #486 share 403 (`handler.py:1582`), #48
 
 - [ ] `client.py:403-404` `ask_stop`: a hub that already answers `signal` as the reason in force makes the command fail at once, even under the service, which starts a signalled hub again (14.3). The exit-row check applies the service rule; this early exit does not. SPEC 8.4's "answered `stop` or `signal` … starts no hub" would follow.
 - [ ] Under the service, a `signal` exit row reads the same for a stray SIGTERM (restarted) and a `systemctl stop` or logout (not restarted): the second now waits UPGRADE_WAIT and says "did not come back on the new version". Say so in the code comment and SPEC 8.4, or tell the two apart.
+
+## Follow-ups from PR 611 (box L, review rounds 3 and 4, minor; core.py limits)
+
+- [ ] `state.py` `forget_texts`: two documents of one address that are both detached before the first late forget share one claim record, so a hash both put after the watch stays when either forgets (safe: kept, never lost).
+- [ ] `live.py` `detach`: a second call sets `_detached_store` again but opens the watch only on the first; with a callable store that resolves to another folder by then, `forget` ends the watch on the wrong folder.
+- [ ] `tests/test_hub_state.py`: the 182 L tests assert `not state.Versions._claims`, a class-level dict shared by the whole test process, and no fixture clears it.
+- [ ] `core.py` `forget_root`: `roots_mod.forget` drops the registry row before `detach` opens the watch, so an `incoming.py` `store.put` landing in that gap is unclaimed and a matching hash can go.
+- [ ] `core.py` `forget_root`: the loop over `e.live.forget()` has no try/except; one that raises leaves the later documents' watches open for the rest of the hub run, their `_Claims.by_hash` growing with each write to those folders.
+- [ ] `state.py` `Versions._claims`: the record is per hub process; another process, or anything else that writes version files in the same state folder, is not recorded.
+- [ ] `live.py` `forget`: `_detached_store = None` runs only after `forget_texts` returns; if it raises other than `OSError` (its `finally` has ended the watch), a second `forget()` ends a watch again, possibly another document's.
+- [ ] `state.py` `rename`: only a watched destination is claimed; a page moved away from a watched address before the late forget carries the forgotten document's late writes to the new address, out of `forget_texts`' reach (a stale copy stays, nothing lost).

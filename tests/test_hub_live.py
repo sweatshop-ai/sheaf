@@ -623,6 +623,48 @@ def test_a_detached_document_whose_store_was_none_leaves_the_store_that_resolves
     assert state.Versions().texts(ADDR) == ["the folder that took the name\n"]
 
 
+def test_a_late_forget_leaves_a_version_the_document_that_took_the_name_stored_with_the_same_text(tmp_path):
+    """Ticket 182 L. The root is forgotten (`detach`), another folder takes the name, and its document stores, and a page of
+    it pins, the very texts the forgotten document wrote (same hash, one file). The forgotten document's `forget` comes
+    after: what it takes out is its own, never a version the new document holds."""
+    old_md, new_md = tmp_path / "old.md", tmp_path / "new.md"
+    for md in (old_md, new_md):
+        md.write_text(DOC, encoding="utf-8")
+    old = rdl.LiveDocument(old_md, render=lambda text: None, publish=lambda n, d: None, by="Ada",
+                           versions=state.Versions(), address=ADDR)
+    got = old.save(rds.md_hash(DOC), edit_other(DOC))
+    late = old_md.read_text(encoding="utf-8")
+    old.detach()
+    new = rdl.LiveDocument(new_md, render=lambda text: None, publish=lambda n, d: None, by="Ada",
+                           versions=state.Versions(), address=ADDR)
+    new_md.write_text(late, encoding="utf-8")
+    new.refresh()
+    assert new.pin(rds.md_hash(DOC), "bob")
+    old.forget()
+    assert state.Versions().get(ADDR, rds.md_hash(DOC)) == DOC
+    assert state.Versions().get(ADDR, got["hash"]) == late
+
+
+def test_a_late_forget_still_takes_the_text_a_write_under_way_put_after_the_detach(tmp_path):
+    """The other half of 182 L: a text only the forgotten document stored, a write of it under way at the detach, goes."""
+    md = tmp_path / "d.md"
+    md.write_text(DOC, encoding="utf-8")
+    doc = rdl.LiveDocument(md, render=lambda text: None, publish=lambda n, d: None, by="Ada",
+                           versions=state.Versions(), address=ADDR)
+    store = doc._stored()
+    doc.detach()
+    doc._detached = False                   # the write had found its store before the detach
+    try:
+        doc._remember("written while the root was forgotten\n")
+    finally:
+        doc._detached = True
+    new = state.Versions().put(ADDR, "the folder that took the name\n")
+    doc.forget()
+    assert store.get(ADDR, rds.md_hash("written while the root was forgotten\n")) is None
+    assert store.get(ADDR, rds.md_hash(DOC)) is None
+    assert store.get(ADDR, new) == "the folder that took the name\n"
+
+
 def test_every_text_handed_to_a_page_is_written_to_disk(stored):
     doc, md, *_ = stored()
     assert state.Versions().get(ADDR, rds.md_hash(DOC)) == DOC
@@ -668,7 +710,7 @@ def test_a_version_in_neither_memory_nor_disk_is_refused(stored):
 
 def test_a_disk_that_cannot_be_written_never_stops_a_save(stored, monkeypatch):
     doc, md, *_ = stored()
-    monkeypatch.setattr(state.Versions, "put", lambda *a: (_ for _ in ()).throw(OSError("full")))
+    monkeypatch.setattr(state.Versions, "put", lambda *a, **k: (_ for _ in ()).throw(OSError("full")))
     got = doc.save(rds.md_hash(DOC), edit_other(DOC))
     assert got["changed"] and "Other paragraph, saved." in md.read_text(encoding="utf-8")
 
@@ -846,7 +888,7 @@ def test_an_unpinned_version_is_not_known_after_a_restart_and_more_writes_than_t
 
 def test_a_disk_that_cannot_be_written_never_stops_a_pin(stored, monkeypatch):
     doc, md, *_ = stored()
-    monkeypatch.setattr(state.Versions, "pin", lambda *a: (_ for _ in ()).throw(OSError("full")), raising=False)
+    monkeypatch.setattr(state.Versions, "pin", lambda *a, **k: (_ for _ in ()).throw(OSError("full")), raising=False)
     writes_from_outside(md, doc, 1)
     assert doc.pin(rds.md_hash(DOC)) is True
     writes_from_outside(md, doc, rdl.VERSIONS + 1)

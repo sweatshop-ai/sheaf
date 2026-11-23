@@ -263,6 +263,37 @@ def test_forgetting_texts_takes_the_ones_named_and_leaves_another_documents_at_t
     assert v.get(ADDR, new) == "the folder that took the name\n"
 
 
+def test_a_late_forget_leaves_the_history_of_a_page_that_moved_to_the_address_meanwhile():
+    """Ticket 182 L: a page moved into the name while the forgotten document's forget was still to come brings its
+    history, whose texts may hash as the forgotten document's did. The forget leaves them: they are that page's."""
+    v, old_doc = state.Versions(), object()
+    shared = v.put(ADDR, "same text\n", writer=old_doc)
+    v.watch(ADDR)
+    moved = v.put("proj/elsewhere.md", "same text\n")
+    pinned = v.pin("proj/elsewhere.md", "pinned\n", "bob")
+    v.rename("proj/elsewhere.md", ADDR)
+    v.forget_texts(ADDR, {shared, pinned}, writer=old_doc)
+    assert moved == shared and v.get(ADDR, shared) == "same text\n" and v.get(ADDR, pinned) == "pinned\n"
+    assert not state.Versions._claims
+
+
+def test_a_forget_whose_delete_fails_still_ends_its_watch(monkeypatch):
+    v, old_doc = state.Versions(), object()
+    h = v.put(ADDR, "old\n", writer=old_doc)
+    v.watch(ADDR)
+    monkeypatch.setattr(state.Versions, "_pinned", lambda self, folder, h: 1 / 0)
+    with pytest.raises(ZeroDivisionError):
+        v.forget_texts(ADDR, {h}, writer=old_doc)
+    assert not state.Versions._claims
+
+
+def test_a_store_no_forget_watches_records_no_writer():
+    v = state.Versions()
+    v.put(ADDR, "text\n", writer=object())
+    v.pin(ADDR, "text\n", writer=object())
+    assert not state.Versions._claims
+
+
 def member_pins(member):
     return pins_dir() / state.member_key(member)
 

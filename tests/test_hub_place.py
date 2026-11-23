@@ -131,6 +131,26 @@ def test_a_door_create_of_an_owner_only_sheaf_lands_in_its_owners_private_folder
     assert not (work / SHARED).exists()
 
 
+
+def test_a_door_create_at_home_whose_generated_mark_cannot_be_written_leaves_no_file_there(team, work, browser, tokens,
+                                                                                            monkeypatch):
+    """A create refused because its mark could not be written takes back the file it made at its home, not one at the
+    name: the same create then succeeds (ticket 183 AA)."""
+    change = browser.hub.docs.change
+
+    def refuse_the_mark(address, settle):
+        if "generated" in settle({}):
+            raise OSError(28, "No space left on device")
+        return change(address, settle)
+    monkeypatch.setattr(browser.hub.docs, "change", refuse_the_mark)
+    is_error, got = call(browser, "create", token=tokens["alice"], doc=f"work/{SHARED}", text=PRIVATE, generated=True)
+    assert is_error and "not made" in got
+    assert not (work / HOME).exists() and not (work / SHARED).exists()
+    monkeypatch.setattr(browser.hub.docs, "change", change)
+    is_error, got = call(browser, "create", token=tokens["alice"], doc=f"work/{SHARED}", text=PRIVATE, generated=True)
+    assert not is_error, got
+    assert (work / HOME).exists()
+
 def test_a_door_create_of_an_open_sheaf_lands_at_the_project(team, work, browser, tokens):
     is_error, got = call(browser, "create", token=tokens["alice"], doc=f"work/{SHARED}", text=OPEN)
     assert not is_error, got

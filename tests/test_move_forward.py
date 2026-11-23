@@ -350,7 +350,6 @@ def test_the_door_move_leaves_a_line_in_the_write_log_and_the_diagnostics(team):
     assert team.hub.writes.last(new).via == "move"
 
 
-
 def test_the_door_read_of_the_old_address_answers_the_new_one(team):
     old = made(team, "alice", PLAN)["doc"]
     new = moved(team, ALICE, old, "b")

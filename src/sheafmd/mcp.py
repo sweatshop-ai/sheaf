@@ -1239,7 +1239,7 @@ class Door:
                         raise _not_made(address, e) from None
                 rid = root.id       # the root written in is the one its commit goes to (8.11), never one that took its name since
                 try:
-                    text = self._make(root, top, rel, name, address, text, caller)
+                    text, at = self._make(root, top, rel, name, address, text, caller)
                 except BaseException:
                     _unmake(top, made)      # the folders this create made go with it
                     raise
@@ -1257,28 +1257,28 @@ class Door:
                         self._mark_generated(address, True, caller)
                     except OSError:         # a page refused is not left made and unmarked, its name taken (ticket 183 AA)
                         with contextlib.suppress(OSError):
-                            os.unlink(top / rel)
+                            os.unlink(at)           # where `_make` wrote it: a rectoverso's home, not its name
                         if args.get("keep"):
                             with contextlib.suppress(loose.Refused):
                                 loose.keep(root.path, rel, on=False)
                         self.hub.writes.told(address)
                         _unmake(top, made)
                         raise ToolError(f"{address} was not made: its generated mark could not be written.",
-                                        "generated") from None
+                                        "not written") from None
             except Private:         # the root's folder, as opened, is a private root's: answered as a path in no root
                 raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path") from None
             self._agent_wrote(address, caller)          # before the tabs and indexes hear of it
             self.hub.wrote(address)
             self.hub.committed(address, by=caller.display, what="create", root_id=rid)
-        out ={"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
+        out = {"doc": address, "url": self.hub.url(address), "hash": md_hash(text)}
         if visibility.audience(_as_read(args["text"])) is not None and visibility.audience(text) is None:
             out["note"] = ("The page holds private work, so it is not Shared: its Share line was written unticked. "
                            "Its owner shares it from the page or the Sheaf.")
         return out
 
     def _make(self, root, top: Path, rel: str, name: str | None, address: str, text: str, caller: Caller):
-        """The file of a create, at its home when the hub places it (9.11): the text written. The rectoverso's address is
-        its name wherever its file is."""
+        """The file of a create, at its home when the hub places it (9.11): (the text written, the file's path). The
+        rectoverso's address is its name wherever its file is."""
         judge = place.judge_for(self.hub, root)
         try:
             # The owner is judged by the list's row for the address, which a rectoverso already there may have: what
@@ -1330,7 +1330,7 @@ class Door:
             if isinstance(e, Private) or not isinstance(e, OSError):
                 raise
             raise _not_made(address, e) from None
-        return text
+        return text, top / rel
 
     def _update(self, args: dict, caller: Caller):
         followed: list = []

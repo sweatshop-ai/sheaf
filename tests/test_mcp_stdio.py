@@ -886,9 +886,9 @@ def test_a_restart_announcement_is_taken_back_only_from_the_hub_that_was_told(sh
     if how == "answer lost":
         stand_in.on_request["/_/restarting"] = "close"
     else:
-        def refused(verb):
+        def refuse_the_restart(verb):
             raise ServiceError("`systemctl --user restart sheaf.service` failed (1)")
-        monkeypatch.setattr("sheafmd.lifecycle.service.control", refused)
+        monkeypatch.setattr("sheafmd.lifecycle.service.control", refuse_the_restart)
 
     def replaced_after_the_announcement(n):     # 1: the command's meeting, 2: the announcement, 3: the take-back
         if n >= 3:

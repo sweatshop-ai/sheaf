@@ -68,6 +68,21 @@ Causes are read from the assertion text only: none of A to F is diagnosed yet. O
     - J. `test_public_tree.py::test_a_file_whose_name_is_not_utf8_is_read_under_its_real_name` (slice 6): macOS refuses to create the file, `OSError: [Errno 92] Illegal byte sequence` for `caf\udce9.txt` (APFS takes UTF-8 names only).
     - K. `tests/page/test_page_mode_toggle.py::test_the_e_key_enters_edit_and_inside_an_editable_area_it_is_a_letter` (slice 2, page tests): "E typed in an editable area was taken for the key".
   The boxes stay open; one PR per cause, as before. Not rerun (one run per attempt).
+  - **G to K merged (2026-11-22).**
+    - G/H/I: PR 582 (head c0cdb6a6, merge 74a8873b). On darwin the hub turns its peer check off at start, by design (SPEC 9.1). The tests now expect `helpers.PEER_OFF_LINE` and `PEER_OFF_ROWS` there; both are empty on Linux.
+    - J: PR 583 (head 2b750987, merge 066cd159). The test uses `helpers.undecodable_names_or_skip`.
+    - K: PR 584 (head bf74ae0b, merge 748c5dda). Not a product bug: a raw `Control+End` moves no caret in macOS Chromium. Every raw caret press in `tests/page` now goes through `pagehelp.key`.
+    - Each PR: Opus direct round 1 GO, no findings; tests only.
+    - macOS proof on a diagnosis branch (fixes plus a cut workflow, py3.13): run 45072224289, success (83 passed, 24 skipped; page tests 404 passed).
+  - **The one run on main 74a8873b** (`python=all macos=true`): run 45081970648. **macOS red**: 6 of 18 jobs failed, 12 green. G to K did not come back. Four new causes, each still open, none diagnosed beyond the assertion text and the class given:
+    - [ ] **L. darwin peer-check-off (same fix as G to I).** `test_cli_hub.py::test_where_the_hub_checks_the_user_open_gives_no_such_warning`: "cannot check" is in the output of `sheaf open`. Failed on py3.11 slice 3 (https://github.com/sweatshop-ai/sheaf/actions/runs/45081970648/job/137391927209), py3.13 slice 3 (https://github.com/sweatshop-ai/sheaf/actions/runs/45081970648/job/137391927119) and py3.14 slice 3 (https://github.com/sweatshop-ai/sheaf/actions/runs/45081970648/job/137391927415).
+    - [ ] **M. Shift+Arrow on macOS, to diagnose.** `tests/page/test_page_selection.py::test_a_selection_changed_with_shift_and_the_arrows_opens_the_box_once_it_is_usable`: `wait_for_selector` timed out after 20000 ms. Failed on py3.13 slice 6 (https://github.com/sweatshop-ai/sheaf/actions/runs/45081970648/job/137391927509) and py3.14 slice 6 (https://github.com/sweatshop-ai/sheaf/actions/runs/45081970648/job/137391927397).
+    - [ ] **N. List undo window.** `tests/page/test_page_list.py::test_a_press_on_another_row_in_the_five_seconds_is_sent_too_and_the_list_reloads_after_both`: the label read `'Done @dora'` where `'Undo'` was expected. Failed on py3.14 slice 6 (https://github.com/sweatshop-ai/sheaf/actions/runs/45081970648/job/137391927397).
+    - [ ] **O. Reload stall, also Linux** (a flaky test on every platform, not a macOS item).
+      - macOS py3.11 slice 6 (https://github.com/sweatshop-ai/sheaf/actions/runs/45081970648/job/137391927199): `tests/page/test_page_actions.py::test_a_box_typed_in_a_block_whose_save_is_merged_is_not_ticked_before_the_reload`, `PageStalled` (the page did not reload).
+      - ubuntu py3.11 slice 4 (https://github.com/sweatshop-ai/sheaf/actions/runs/45081970648/job/137391927112): `test_page_actions.py::test_a_reload_asked_only_by_an_upgrade_saves_what_was_typed_during_the_press` timed out ("the edit, saved before the reload").
+    - Ticket 101 box 1 stays open (main is not green on macOS) and ticket 96 stays blocked by this ticket.
+    - Not rerun (one run per attempt). Nine ubuntu jobs of that run were still queued or running when this was written; they are not read here.
 
 - [x] **Get a clean failure list.** Start a manual run on a branch for one Python (py3.13) with xdist off (`-p no:xdist`) or at `-n 2`, on the failing slices only, and read the first real traceback of each test. Cost: macOS minutes count ten times, so one Python, only the slices above.
 

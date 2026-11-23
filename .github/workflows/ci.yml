@@ -65,7 +65,10 @@ jobs:
     # request from a fork or opened by Dependabot (its branch is in this repository and skips the approval of a fork's
     # workflows, but it runs the code of an updated dependency), and macOS always, run on GitHub's. The label of the runner is chosen by the workflow file the
     # run reads, and a fork's pull request reads the fork's: so the repository setting that holds a fork's workflows until
-    # someone has read them (all external contributors) is what keeps a fork off those runners, not this line (SPEC 18).
+    # someone has read them (all external contributors) is what keeps a fork off those runners, not this line. That
+    # setting does not hold a member of the organisation, whose fork runs at once, so a member is trusted with these
+    # runners: today every member is an admin of this repository. Before a member without write access joins, set the
+    # approval to every fork pull request, or restrict the runner group to this workflow (SPEC 18).
     runs-on: ${{ matrix.os == 'ubuntu-24.04' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && fromJSON('["self-hosted","linux","sheaf-ci"]') || matrix.os }}
     # An ubuntu run takes about 25 minutes; 45 still stops a hang. A macOS runner (3 cores, an M1 VM) runs the
     # same suite about four times slower: a process start costs 50 ms there and pandoc's 210 ms, against 1 and

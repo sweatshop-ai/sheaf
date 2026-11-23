@@ -2,7 +2,7 @@
 
 **Claimed by:** Nadia
 
-**Status:** A and B done in #620 (merge 4d34e1ad, head 9f21f8df), CI green (run 45178873288), review GO (round 1, provisional: Opus fallback, Codex at its usage limit). C: a product defect of #617's own change, fixed on that PR, nothing to do here. D: a race in the test, fixed in #623.
+**Status:** done. A and B in #620 (merge 4d34e1ad, head 9f21f8df), CI green (run 45178873288). D in #623 (merge 52373e6f, head 1645e2d3), CI green (run 45189390912). Both review rounds were a provisional GO (Opus fallback, Codex at its usage limit). C needed nothing on main: it was the red phase of #617, which fixes the product itself (fed56e68, 0353dcca).
 
 **Priority:** high: each one turns a CI run red on a change that does not touch it.
 
@@ -81,7 +81,7 @@ Loop: hold the stylesheet of the delete's remount and let it through 0.5 s later
 - [x] Both tests pass in CI on the PR (run 45178873288: the control in chromium, firefox and webkit, and the two sends)
 - [x] No skip, xfail or retry added; no assertion loosened
 
-## Open: other page tests seen red in the same runs (not looked into)
+## Other page tests seen red in the same runs
 
-- [ ] **C.** `tests/page/test_page_move_box.py`: `test_a_box_moved_to_the_lower_right_is_inside_the_window_after_it_shrinks` ("timed out waiting for the moved box back inside the smaller window") and `test_a_box_moved_to_the_foot_that_grows_with_a_reply_keeps_its_controls_in_view` ("timed out waiting for the grown box inside the window"), both at `tests/page/pagehelp.py:195`, in run 45151298649 (job py3.13, the checks of #617).
-- [ ] **D.** `tests/page/test_sheaf_buttons.py::test_the_view_switch_shows_pages_archived_and_trash_each_with_its_own_list` ("timed out waiting for Archived: alpha only"), in the nightly run 45141939187, job py3.11 only (py3.13 and py3.14 passed it).
+- [x] **C.** `tests/page/test_page_move_box.py`: `test_a_box_moved_to_the_lower_right_is_inside_the_window_after_it_shrinks` ("timed out waiting for the moved box back inside the smaller window") and `test_a_box_moved_to_the_foot_that_grows_with_a_reply_keeps_its_controls_in_view` ("timed out waiting for the grown box inside the window"), both at `tests/page/pagehelp.py:195`, in run 45151298649 (job py3.13, the checks of #617). Not a test race: the red phase of #617, fixed there in fed56e68 and 0353dcca; see C above.
+- [x] **D.** `tests/page/test_sheaf_buttons.py::test_the_view_switch_shows_pages_archived_and_trash_each_with_its_own_list` ("timed out waiting for Archived: alpha only"), in the nightly run 45141939187, job py3.11 only (py3.13 and py3.14 passed it). Fixed in #623 (merge 52373e6f); see D above.

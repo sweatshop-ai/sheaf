@@ -38,7 +38,12 @@
   Decided by the track (2026-11-22): the mark refuses those writes too. PR #573: `/_/sessions` answers 403 with a `generated-refused` row (code or cookie), The List draws no button for a generated rectoverso, SPEC 7.2, 8.3, 8.5, 9.10. Review round 1 provisional GO on eab9c734 (Opus fallback, Codex out until 21:09Z; on the track's Codex recheck list), CI green, merged as d9a40b09.
 
 - **Follow-ups from #573's review (minor, not in #573):**
-  - [ ] A page both read-only (a clone, SPEC 14) and generated shows only the read-only note (`page.js:448`); SPEC 10.1 wants the generated notice too.
-  - [ ] The List hides a generated rectoverso's locked pressed one-offs too ("Approve ✓ by, date"); they write nothing and could stay drawn.
+  - [x] A page both read-only (a clone, SPEC 14) and generated shows only the read-only note (`page.js:448`); SPEC 10.1 wants the generated notice too.
+    Done in PR #639: both notes, the read-only line first; SPEC 10.1 says so. Page test `test_a_read_only_page_that_is_generated_shows_both_notices` (red with the old page.js on t-compute). Merged as 57833f96.
+  - [x] The List hides a generated rectoverso's locked pressed one-offs too ("Approve ✓ by, date"); they write nothing and could stay drawn.
+    Done in PR #639: a pressed one-off stays drawn, locked, with no action number; nothing pressable is drawn; SPEC 9.10. Test `test_a_generated_rectoverso_still_draws_its_locked_pressed_one_offs` (red on main). Merged as 57833f96.
   - [ ] `/_/sessions` on a generated page answers 403 before the 400 shape checks; harmless, SPEC 8.5 row order says otherwise.
+    No fix warranted (2026-11-23): `_save`, `_tick`, `_share` and `_sessions` all refuse 403 in `_text_writable` before their 400 shape checks (as #183 AV settled), and the 8.5 row lists codes, not an order (it lists 400 before 404, and 404 must come first).
   - [ ] The hub's own `_record_james` (`handler.py`, about line 2134) writes `sessions` into a generated rectoverso's front matter after a door write; the setter's next `update` drops it. Not a person's write, so not refused by #573.
+    No fix warranted (2026-11-23): `_record_james` writes only under `[list]`, which needs `[proxy]` (SPEC 4), and in proxy mode the door's `_visible` refuses any write that changes `sessions` (ToolError "sessions"), so the setter cannot drop the line silently: it is refused. Pinned by `test_james_s_session_on_a_generated_rectoverso_is_never_dropped_by_the_setter_s_next_update` (passes on main), in PR #639.
+  - [ ] From #639's review (minor, Opus fallback round 1): a generated rectoverso's page still draws no buttons (`core.py` sets `meta["actions"] = []`), while its List row now draws the locked pressed one-offs. SPEC 9.10 says the page draws the same buttons as the row (10.11). The page should draw the locked pressed one-offs too, and SPEC 10.1 say so. Nothing is written either way.

@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections import Counter
 from pathlib import Path
 
 import pypandoc
@@ -831,10 +832,22 @@ def silent_message(port, seconds=None):
     return f"the sheaf hub on 127.0.0.1:{port} did not answer{when}; try again, or run `sheaf restart`"
 
 
+def _alone(n):
+    return rf"(?<![\w.]){n}(?![\w.])"
+
+
 def count_number(text, n):
     """How many times `n` stands alone in `text`: not inside a longer number (`2600`), a word or hex id
     (`c8cd260c`), or a decimal or unit (`260.5`, `260px`)."""
-    return len(re.findall(rf"(?<![\w.]){n}(?![\w.])", text))
+    return len(re.findall(_alone(n), text))
+
+
+def number_places(text, n, around=16):
+    """Where `n` stands alone in `text` (see `count_number`), each place as the text around it, counted. A text that
+    holds `n` nowhere another text did is `number_places(text, n) <= number_places(other, n)`: a count alone lets
+    one occurrence added hide behind another one removed (ticket 185 BG)."""
+    return Counter((text[max(0, m.start() - around):m.start()], text[m.end():m.end() + around])
+                   for m in re.finditer(_alone(n), text))
 
 
 def holds_number(text, n):

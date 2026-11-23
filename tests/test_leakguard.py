@@ -349,3 +349,26 @@ def test_two_runs_of_these_tests_at_once_on_one_host_do_not_find_each_others_pro
     assert [t.returncode for t in twins] == [0, 0], "\n".join(outputs)
     assert all("5 passed" in out for out in outputs), \
         "the -k of TWIN no longer selects 5 tests:\n" + "\n".join(outputs)
+
+
+def test_a_sigterm_in_another_greenlet_is_raised_where_the_test_stands_and_leaves_that_greenlet_alive():
+    # Ticket 137: a page test waits in Playwright's dispatcher greenlet, where the SIGTERM handler ran. The
+    # interrupt ended that greenlet, and every call of the teardown into the browser spun on it at full CPU.
+    greenlet = pytest.importorskip("greenlet")
+    steps = []
+
+    def dispatcher():
+        leakguard._terminated(signal.SIGTERM, None)
+        steps.append("went on")
+
+    g = greenlet.greenlet(dispatcher)
+    with pytest.raises(KeyboardInterrupt, match="SIGTERM"):
+        g.switch()
+    assert not g.dead and steps == []
+    g.switch()                              # the next call into the browser
+    assert g.dead and steps == ["went on"]
+
+
+def test_a_sigterm_in_the_first_greenlet_is_raised_there():
+    with pytest.raises(KeyboardInterrupt, match="SIGTERM"):
+        leakguard._terminated(signal.SIGTERM, None)

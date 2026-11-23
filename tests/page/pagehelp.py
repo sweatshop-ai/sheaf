@@ -651,6 +651,33 @@ def new_context(browser, error=None, shared=False, **options):
         pytest.fail(f"Chromium went away under a new context (connected={browser.is_connected()}):\n{e}")
 
 
+# Every route the test's handlers were given this test, with its context: (context, route). The route wrapper of
+# conftest.py's `hub_journal` adds to it.
+_ROUTED = []
+
+
+def note_route(context, route):
+    _ROUTED.append((context, route))
+
+
+def settle_routes(context=None):
+    """Hand on every route of `context` (of every context: None) that a handler of the test kept and never answered.
+    Playwright's task for such a route waits for the answer for ever. Once nothing holds it, the garbage collector
+    ends it wherever the test then is: outside the event loop, where the task's `finally` fails ("Exception ignored
+    in: <coroutine object Page._on_route>", a PytestUnraisableExceptionWarning on a later test), or as "Task was
+    destroyed but it is pending!". `fallback` answers the route on this side alone, so the task ends in the loop;
+    what it then sends to a page that is gone, or whose routes are off, Playwright drops. An abort would not do:
+    once the routes are off, the driver takes the route as handled and refuses it, and the task still waits."""
+    mine = [(c, route) for c, route in _ROUTED if context is None or c is context]
+    _ROUTED[:] = [(c, route) for c, route in _ROUTED if not (context is None or c is context)]
+    for c, route in mine:   # taken off the list first: an error here is this test's, not every later test's
+        try:
+            route.fallback()
+        except Exception as e:  # the test answered it: the one error fallback() raises (Playwright 1.58)
+            if "Route is already handled!" not in str(e):
+                raise
+
+
 def close_context(context):
     """Close a context of new_context. A route of its pages still in `route.fetch` would otherwise fail
     there, and Playwright raises that failure in the next call into the browser: another test's new_context.
@@ -688,5 +715,6 @@ def _close_context(context):
             context.unroute_all(behavior="ignoreErrors")
     except PageStalled:     # a handler that does not end (CI, PR 227: 360 s): closing the context ends it
         pass
+    settle_routes(context)  # also after a stall: fallback() asks nothing of the driver
     with stalls_after(CLOSE_BOUND, "the context to close"):
         context.close()

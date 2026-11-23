@@ -1,7 +1,9 @@
 """A browser that will not start fails a CI run with what is known about its death; on a person's machine it skips."""
+import gc
 import signal
 import socket
 import stat
+import sys
 import threading
 import time
 
@@ -184,6 +186,34 @@ def test_a_route_unrouted_while_fetching_does_not_fail_the_next_context(chromium
             p.close()
         close_context(c)
     close_context(new_context(chromium))
+
+
+@pytest.mark.parametrize("closed", ["by close_context", "page by hand"])
+def test_a_route_kept_and_never_answered_leaves_no_task_for_the_garbage_collector(chromium, site, monkeypatch, caplog,
+                                                                                    closed):
+    # Ticket 137: about 70 tests keep a route in a list and never answer it. Playwright's task for it waited for
+    # ever; once the list went, the garbage collector ended it outside the event loop, and its `finally` failed:
+    # "Exception ignored in: <coroutine object Page._on_route>", 2 to 4 per full CI run, on whatever test ran then.
+    # A page closed with its route still on reports "Task was destroyed but it is pending!" instead.
+    caplog.set_level("ERROR", logger="asyncio")
+    ignored = []
+    monkeypatch.setattr(sys, "unraisablehook", lambda u: ignored.append(f"{u.object!r}: {u.exc_value!r}"))
+    c = new_context(chromium)
+    c.add_cookies([site.cookie()])
+    p = c.new_page()
+    p.goto(site.url)
+    held = []
+    p.route("**/_/not-a-route-of-the-hub", lambda route: held.append(route))
+    p.evaluate("() => { fetch('/_/not-a-route-of-the-hub').catch(() => {}); }")
+    until(lambda: held, what="the route to be held")
+    if closed == "page by hand":
+        p.close()
+    close_context(c)
+    held.clear()
+    gc.collect()
+    # Only what a route task leaves counts: an earlier test's leftovers on this worker are not this test's to fail.
+    assert [i for i in ignored if "_on_route" in i] == []
+    assert [m for r in caplog.records if r.name == "asyncio" and "_on_route" in (m := r.getMessage())] == []
 
 
 class StuckContext:

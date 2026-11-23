@@ -1318,6 +1318,8 @@ class Door:
             except OSError:
                 raise ToolError(f"{address} was not made: its generated mark could not be written.",
                                 "not written") from None
+        # A mark on an address with no page (ticket 183 BR), read now: the clear after the file takes this one only.
+        left = None if generated else self._mark(address)
         made = _Made(text, root, top, rel, name, judge, [], marked)
         self.hub.writes.expect_own(address, md_hash(text))     # a look at the file before `wrote()` is not a disk write
         try:
@@ -1333,13 +1335,18 @@ class Door:
             if isinstance(e, Private) or not isinstance(e, OSError):
                 raise
             raise _not_made(address, e) from None
-        if not generated and self._mark(address) is not None:
+        if left is not None:
             # A mark on an address that had no page: left by a create with `generated` that died between its mark and its
             # file, or whose take-back could not write `docs.json` (ticket 183 BR). The page made here is not generated.
             # After the file, never before: a create with `generated` that set its mark and loses the name to this one
             # finds its mark changed and leaves it, and one that wins makes this file refused before it gets here.
+            # Only that mark: one set on the new page since its file was written (an `update` with `generated`) stays.
+            def clear(entry: dict) -> dict:
+                if entry.get("generated") == left:
+                    entry.pop("generated", None)
+                return entry
             try:
-                self._mark_generated(address, False, caller)
+                self.hub.docs.change(address, clear)
             except OSError:
                 self._take_back(address, made)
                 raise ToolError(f"{address} was not made: a generated mark left on its address could not be cleared.",

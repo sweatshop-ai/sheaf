@@ -298,3 +298,21 @@ def test_a_create_whose_left_mark_cannot_be_cleared_leaves_no_page(browser, plan
     said = refused(browser, "create", doc="work/made.md", text="# Made\n\nBy hand.\n", token=other)
     assert "not made" in said
     assert not (work / "made.md").exists()
+
+
+def test_the_clear_of_a_left_mark_leaves_a_mark_set_on_the_new_page_meanwhile(browser, plan, work, monkeypatch):
+    """Ticket 183 BR: the clear of a mark left on the address takes only that mark. One set on the new page between its
+    file and the clear (here the key's, by an `update` with `generated`) stays."""
+    from sheafmd import mcp
+    builder, other = Tokens().add("builder", write=True), Tokens().add("other", write=True)
+    browser.hub.docs.change("work/made.md", lambda e: {**e, "generated": {"by": "builder", "id": builder.id,
+                                                                           "at": "2026-11-23T10:00:00+0100"}})
+    real, live = mcp.create_file, {"by": "the key", "id": None, "at": "2026-11-23T11:00:00+0100", "key": True}
+
+    def then_marked(top, rel, text, judge=None):
+        got = real(top, rel, text, judge)
+        browser.hub.docs.change("work/made.md", lambda e: {**e, "generated": live})
+        return got
+    monkeypatch.setattr(mcp, "create_file", then_marked)
+    ok(browser, "create", doc="work/made.md", text="# Made\n\nBy hand.\n", token=other)
+    assert browser.hub.docs.get("work/made.md")["generated"] == live

@@ -374,14 +374,16 @@ def test_the_comments_of_a_first_half_the_file_changed_and_of_the_split_line_are
     assert rep["conflicts"] == []
 
 
-def test_a_comment_whose_words_the_next_save_takes_out_stays_before_the_split_line_the_file_changed():
+def test_a_comment_whose_words_the_next_save_takes_out_is_an_orphan_after_the_split_line_the_file_changed_too():
     base, cid, once, saved, html = split_with_comments()
     cur = once.replace("Split off.", "Split off, and Claude's words.")
     new, rep = rde.merge_edits(base, cur, second_save(2, "<p>Split off. More.</p>", saved), at="2026-10-18T10:06")
     c = rdc.parse(new).by_id(cid)
     assert c and c.orphan and new.count("Why?") == 1
-    assert new.index("Split off. More.") < new.index(f"id={cid}") < new.index("Split off, and Claude's words.")
-    assert "Second paragraph" not in rde._prose(new) and rep["conflicts"] == []
+    [note] = [x for x in rdc.parse(new).comments if x.by == "sheaf"]
+    assert note.body == rde._both_note("Split off, and Claude's words.")
+    assert new.index("Split off. More.") < new.index(f"id={note.id}") < new.index(f"id={cid}")
+    assert "Second paragraph" not in rde._prose(new) and rep["conflicts"] == [{"i": 2, "kind": "both"}]
 
 
 @pytest.mark.parametrize("first", FIRST_LINES.values(), ids=FIRST_LINES.keys())
@@ -396,8 +398,8 @@ def test_the_block_after_the_split_edited_on_the_page_comes_back_after_the_split
 
 
 # The controls: without a split, the edit of the page's own save takes the block whatever the file did after it; a
-# block the file deleted further off changes nothing; a change the file made to the split line itself stays beside
-# the edit; a file block that the merge pairs with another base block by its words is never the page's own.
+# block the file deleted further off changes nothing; a change the file made to a split line stands where the next save
+# leaves the line as the page saved it, and goes into the note where it changes it too; a file block that the merge pairs with another base block by its words is never the page's own.
 @pytest.mark.parametrize("first", FIRST_LINES.values(), ids=FIRST_LINES.keys())
 def test_without_a_split_the_block_after_the_pages_own_save_deleted_in_the_file_leaves_the_edit_alone(first):
     cur = rde.apply_edits(FOUR, [{"i": 2, "html": f"<p>{first}</p>"}])[0].replace("Third paragraph here.\n\n", "")
@@ -415,21 +417,22 @@ def test_a_block_the_file_deleted_away_from_the_split_leaves_the_split_line_once
 
 
 @pytest.mark.parametrize("first", FIRST_LINES.values(), ids=FIRST_LINES.keys())
-def test_the_split_line_the_file_changed_stays_beside_the_edit(first):
+def test_the_split_line_the_file_changed_and_the_next_save_changes_too_is_the_pages_with_the_note(first):
     new, rep = split_then(first, lambda t, first: t.replace("Split off.", "Split off, and Claude's words."))
-    assert new == (f"# Title\n\nFirst paragraph here.\n\n{first}\n\nSplit off. More.\n\nSplit off, and Claude's words."
-                   + REST)
-    assert rep["conflicts"] == []
+    assert rde._prose(new) == f"# Title\n\nFirst paragraph here.\n\n{first}\n\nSplit off. More." + REST
+    [note] = [c for c in rdc.parse(new).comments if c.by == "sheaf"]
+    assert note.body == rde._both_note("Split off, and Claude's words.") and not note.orphan
+    assert rep["conflicts"] == [{"i": 2, "kind": "both"}]
 
 
 @pytest.mark.parametrize("first", FIRST_LINES.values(), ids=FIRST_LINES.keys())
-def test_the_split_line_the_file_changed_stays_beside_a_next_save_of_the_first_line_alone(first):
+def test_the_split_line_the_file_changed_stands_where_the_next_save_changes_the_first_line_alone(first):
     saved = f"<p>{first}<div>Split off.</div></p>"
     cur = rde.apply_edits(FOUR, [{"i": 2, "html": saved}])[0].replace("Split off.", "Split off, and Claude's words.")
     new, rep = rde.merge_edits(FOUR, cur, second_save(2, f"<p>{first[:-1]}, retyped.<div>Split off.</div></p>", saved),
                                at="2026-10-18T10:00")
-    assert new == (f"# Title\n\nFirst paragraph here.\n\n{first[:-1]}, retyped.\n\nSplit off.\n\n"
-                   "Split off, and Claude's words." + REST)
+    assert new == (f"# Title\n\nFirst paragraph here.\n\n{first[:-1]}, retyped.\n\nSplit off, and Claude's words."
+                   + REST)
     assert rep["conflicts"] == []
 
 

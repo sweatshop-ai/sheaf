@@ -432,12 +432,12 @@ def test_two_comments_the_file_gained_each_follow_their_own_words_across_a_split
     assert out[:second.start].endswith("Beta")
 
 
-def test_when_none_of_the_blocks_holds_the_words_the_comment_goes_to_the_last_that_says_something():
+def test_when_none_of_the_blocks_holds_the_words_the_comment_is_an_orphan_after_the_last_that_says_something():
     base = "Alpha Beta.\n"
     cur = "Alpha" + rdc.format(agent_note(), False) + " Beta.\n"
     out, _ = rde.merge_edits(base, cur, [{"i": 0, "html": "<p>One.</p><p>Two.</p>"}], AT)
     note = the_note(out)
-    assert out[:note.start].endswith("Two.") and rdc.parse(out).malformed == [], out
+    assert note.orphan and out[:note.start].rstrip().endswith("Two.") and rdc.parse(out).malformed == [], out
 
 
 def test_without_a_split_the_comment_the_file_gained_keeps_its_place():

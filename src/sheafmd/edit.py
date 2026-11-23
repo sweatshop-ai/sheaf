@@ -128,11 +128,12 @@ def _unwrap_strays(soup, source: str, strays) -> None:
             _styled_marks(soup, el, pasted_marks)
         if el.name in ("div", "span") or plain_b:
             if el.name == "div":
-                # A line: its words stay apart from the text around it.
+                # A line: its words stay apart from the text around it. A block beside it keeps them apart already:
+                # a break there ends no line, and pandoc would write it as a lone backslash.
                 prev, nxt = el.previous_sibling, el.next_sibling
-                if prev is not None and getattr(prev, "name", None) not in ("br", "div") and str(prev).strip():
+                if prev is not None and getattr(prev, "name", None) not in ("br", *_BLOCKS) and str(prev).strip():
                     el.insert_before(soup.new_tag("br"))
-                if nxt is not None and getattr(nxt, "name", None) != "br" and str(nxt).strip():
+                if nxt is not None and getattr(nxt, "name", None) not in ("br", *_BLOCKS) and str(nxt).strip():
                     el.insert_after(soup.new_tag("br"))
             el.unwrap()
             if strays is not None:
@@ -998,7 +999,7 @@ def _restore_dropped_hrefs(fragment: str, source, emoji=()) -> str:
         return fragment
 
     def text(a):
-        return _EMOJI_TOKEN.sub(lambda m: emoji[int(m.group(1))][1], a.get_text())
+        return emoji.token.sub(lambda m: emoji[int(m.group(1))][1], a.get_text()) if emoji else a.get_text()
 
     # By text, in order: the source's dropped address, or None for an anchor of its own; the page's `<a>`s.
     want, shown = {}, {}
@@ -1091,7 +1092,9 @@ def _gfm_links_bare(out: str, start: int, end: int, url: str) -> bool:
 
 # A shortcode drawn as its emoji: the name is in `data-emoji`, the emoji itself is the span's text.
 _EMOJI_SPAN = re.compile(r'<span\b(?=[^>]*\sclass="emoji")[^>]*?\sdata-emoji="([a-z0-9_+-]+)"[^>]*>([^<]*)</span>')
-_EMOJI_TOKEN = re.compile("\uF8FE([0-9]+)\uF8FF")
+# The characters an emoji token is written between, the first the fragment does not hold: the others of the private
+# area the save uses are `_CODE_LT`, `_LITERAL_COLON` and `_LINE_MARKS`.
+_EMOJI_MARKS = ("\uF8FE", "\uF8FF", *(chr(c) for c in range(0xF8FA, 0xF8EF, -1)))
 
 
 @lru_cache(maxsize=256)
@@ -1116,21 +1119,75 @@ def _emoji_drawn(name: str):
 _emoji_drawn.cache_clear = _emoji_looked_at.cache_clear
 
 
+class _Emoji(list):
+    """`_emoji_as_tokens`' (name, emoji) pairs, and `token`, the pattern of their tokens in the fragment."""
+    token = None
+
+
+@lru_cache(maxsize=256)
+def _source_emoji(source: str) -> dict:
+    """{name: [True for an emoji the source wrote as `:name:`, False for one it wrote as an HTML span, in order]}, read
+    from pandoc's own parse of the source, the one the page is drawn from: a shortcode it draws is a Span of class
+    `emoji`, an authored span is raw HTML, and code, comments, attributes and escaped text hold none."""
+    import json
+
+    from bs4 import BeautifulSoup
+
+    r = _pandoc.run(["-f", "gfm", "-t", "json"], orderedtask.hide(copyblock.hide(source)))
+    if r.returncode:
+        # Refused, as `_emoji_looked_at` refuses: an empty answer would write every shortcode as its emoji.
+        raise EditError("pandoc: the emoji of the block could not be read")
+    found = {}
+
+    def walk(x):
+        if isinstance(x, list):
+            for y in x:
+                walk(y)
+        elif isinstance(x, dict):
+            t, c = x.get("t"), x.get("c")
+            if t == "Span" and "emoji" in c[0][1] and (name := dict(c[0][2]).get("data-emoji")):
+                found.setdefault(name, []).append(True)
+            elif t in ("RawInline", "RawBlock") and c[0] == "html":
+                # The spans `_EMOJI_SPAN` takes on the page: class exactly `emoji`, a name of its characters.
+                for tag in BeautifulSoup(c[1], "html.parser", multi_valued_attributes=None).find_all("span"):
+                    name = tag.get("data-emoji") or ""
+                    if tag.get("class") == "emoji" and re.fullmatch(r"[a-z0-9_+-]+", name):
+                        found.setdefault(name, []).append(False)
+            walk(c)
+
+    walk(json.loads(r.stdout).get("blocks", []))
+    return found
+
+
 def _emoji_as_tokens(fragment: str, source):
-    """(the fragment with each emoji span the source wrote as `:name:` as a token, a (name, emoji) pair for each).
-    A token, not the shortcode: `_cell_breaks` sends a table holding a shortcode to raw HTML, which shows it as text.
-    A span the reader typed in the source has no `:name:` there, and a span whose text is no longer its emoji, have
-    their words kept."""
-    names = []
+    """(the fragment with each emoji span the source wrote as `:name:` as a token, a `_Emoji` of (name, emoji)
+    pairs). A token, not the shortcode: `_cell_breaks` sends a table holding a shortcode to raw HTML, which shows it
+    as text. Which span the source wrote as `:name:` goes by its order among the source's emoji of that name: where
+    the source wrote them all as shortcodes, every span; where it wrote them as HTML, or as both and the page added
+    or deleted one (which, is unknown), none. A span whose text is no longer its emoji has its words kept."""
+    names = _Emoji()
+    mark = next((c for c in _EMOJI_MARKS if c not in fragment), None)
+    if mark is None:
+        return fragment, names
+    names.token = re.compile(f"{mark}([0-9]+){mark}")
+    on_page = Counter(m.group(1) for m in _EMOJI_SPAN.finditer(fragment))
+    wrote = _source_emoji(source) if source is not None and on_page else None
+    seen = Counter()
 
     def token(m):
-        if (source is not None and f":{m.group(1)}:" not in source) or m.group(2) != _emoji_drawn(m.group(1)):
+        name = m.group(1)
+        nth, seen[name] = seen[name], seen[name] + 1
+        if wrote is not None:
+            shortcode = wrote.get(name, [])            # per emoji of this name in the source: written as :name:?
+            mixed = any(shortcode) and not all(shortcode)
+            aligned = len(shortcode) == on_page[name]  # the page's nth emoji of the name is the source's nth
+            if not any(shortcode) or mixed and not (aligned and shortcode[nth]):
+                return m.group(0)
+        if m.group(2) != _emoji_drawn(name):
             return m.group(0)
-        names.append((m.group(1), m.group(2)))
-        return f"\uF8FE{len(names) - 1}\uF8FF"
+        names.append((name, m.group(2)))
+        return f"{mark}{len(names) - 1}{mark}"
 
-    if "\uF8FE" in fragment or "\uF8FF" in fragment:
-        return fragment, names           # the text holds a token's own characters: the spans go as they did before
     return _EMOJI_SPAN.sub(token, fragment), names
 
 
@@ -1293,6 +1350,69 @@ def _code_table_tags(fragment: str):
     return (str(soup), True) if found else (fragment, False)
 
 
+# The character a line's backslash is written as, the first the fragment does not hold (as `_EMOJI_MARKS`).
+_LINE_MARKS = ("\uF8FC", *(chr(c) for c in range(0xF8EF, 0xF8E3, -1)))
+# A line of text markdown reads as a block. Pandoc's gfm writer escapes `***`, `# x`, `> x` and a list marker at the
+# start of a paragraph, but not a line of dashes (a rule, or under a line a heading), a line of `=` under a line (a
+# heading), nor a list marker on a line after a break, where it starts a list (an ordered one only from 1).
+_RULE_LINE = re.compile(r"-\s*-\s*-[-\s]*$")          # \s: a newline in the HTML's text is a space to pandoc
+_UNDER_LINE = re.compile(r"(?:-\s*)+$|=+\s*$")
+_ITEM_START = re.compile(r"[-+](?=[ \t])|0*1(?=[.)](?:[ \t]|$))")
+
+
+def _line_edge(t, forward: bool):
+    """What ends (forward) or starts the line at text node t: "block" (the edge of a block, or a block beside it),
+    "br", or None when other text or markup is on the same line."""
+    from bs4 import NavigableString
+
+    el = t
+    while True:
+        sib = el.next_sibling if forward else el.previous_sibling
+        while isinstance(sib, NavigableString) and not sib.strip():
+            sib = sib.next_sibling if forward else sib.previous_sibling
+        if sib is None:
+            if el.parent is None or el.parent.name not in _INLINE_TAGS:
+                return "block"
+            el = el.parent
+            continue
+        name = getattr(sib, "name", None)
+        return "br" if name == "br" else "block" if name in _BLOCKS else None
+
+
+def _line_marks(fragment: str):
+    """(the fragment with a token before each line of text markdown would read as a block of its own, the token or
+    None when it put none). The token becomes the backslash that keeps the line its text (`html_block_to_md`): a line of dashes typed
+    after Enter is not a rule, nor one after Shift+Enter a heading, nor `- x` there a list."""
+    from bs4 import BeautifulSoup
+
+    mark = next((c for c in _LINE_MARKS if c not in fragment), None)
+    if mark is None or not re.search(r"[-+=1]", fragment):
+        return fragment, None
+    soup, found = BeautifulSoup(fragment, "html.parser"), False
+    for t in _texts(soup):
+        words = str(t)
+        lead = len(words) - len(words.lstrip())
+        line = words[lead:]
+        if not line or _in_code(t) or any(u.name == "table" for u in t.parents):
+            continue
+        block = next((u for u in t.parents if u.name in _BLOCKS), None)
+        if block is not None and block.name in _HEADINGS:
+            continue
+        start = _line_edge(t, forward=False)
+        if start is None:
+            continue
+        whole = _line_edge(t, forward=True) is not None
+        at = None
+        if whole and (_RULE_LINE.match(line) or start == "br" and _UNDER_LINE.match(line)):
+            at = 0
+        elif start == "br" and (m := _ITEM_START.match(line)):
+            at = m.end() if m.group(0)[0].isdigit() else 0
+        if at is not None:
+            t.replace_with(words[:lead + at] + mark + words[lead + at:])
+            found = True
+    return (str(soup), mark) if found else (fragment, None)
+
+
 def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     """Convert one edited HTML block back to GitHub-flavoured markdown. With `source`, the block's markdown,
     markup the source did not have is unwrapped (`_unwrap_strays`) and named in `strays`."""
@@ -1315,13 +1435,14 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     clean = _without_placeholder_breaks(clean)
     if not clean.strip():
         return ""
+    clean, marked = _line_marks(clean)
     clean, pipe = _cell_code_pipes(clean)
     cells, token = _cell_breaks(clean)
     cells, hrefs = _hrefs_as_words(cells)
     # After the words: a URL or href word is one more reason for the raw-table depth count below, which a title's
     # `<table` must not move.
     code_lt = False
-    if pipe is not None or slash is not None or emoji or literal or urls or hrefs:
+    if pipe is not None or slash is not None or emoji or literal or marked or urls or hrefs:
         cells, code_lt = _code_table_tags(cells)
     r = _pandoc.run(["-f", "html", "-t", "gfm", "--wrap=none"], cells)
     if token is not None and r.returncode == 0 and r.stdout.count(token) != cells.count(token):
@@ -1332,7 +1453,7 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     if r.returncode != 0:
         raise EditError(f"pandoc: {r.stderr.strip()[:200]}")
     out = r.stdout if token is None else r.stdout.replace(token, "<br>")
-    if pipe is not None or slash is not None or emoji or literal or urls or hrefs:
+    if pipe is not None or slash is not None or emoji or literal or marked or urls or hrefs:
         # A table pandoc writes as raw HTML has no cell for a bare pipe to end, and `\\|` would show; nor does
         # HTML read a backslash as an escape, nor a shortcode as its emoji.
         # Only a tag counts: a `<table` in text pandoc writes as `\\<table`, and one in code or math is a token.
@@ -1347,11 +1468,13 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
                 part = part.replace(_CODE_LT, "&lt;" if depth else "<")
             if literal:
                 part = part.replace(_LITERAL_COLON, "" if depth else "\\")
+            if marked:
+                part = part.replace(marked, "" if depth else "\\")
             if emoji:
                 def shown(m, depth=depth):
                     name, drawn = emoji[int(m.group(1))]
                     return drawn if depth else f":{name}:"
-                part = _EMOJI_TOKEN.sub(shown, part)
+                part = emoji.token.sub(shown, part)
             if depth:
                 # Raw HTML links no bare URL; a link's address there is an attribute, read without escapes.
                 for word, url in urls.items():
@@ -2637,8 +2760,10 @@ def _written_block(blocks, j: int, grown: int, quote: str, nth: int = 0):
     Enter): the block of them that holds the `nth` occurrence of the comment's words,
     counted over all of them in order, and which occurrence it is in that block. When the
     page took that occurrence away, the first block that holds the words at all, at the
-    end of it; when none does, the last block that says something (not an orphan or a note
-    the edit left after itself), at the end of it."""
+    end of it. When none does, the last block that says something (not an orphan or a note
+    the edit left after itself), and occurrence None: the page took the words out, and a
+    comment is an orphan after that block (SPEC 5.4), as one on words the page itself
+    removes; a note of the merge's is about the block, and goes at the end of it."""
     last = j + max(grown, 0)
     q = rdc.squash(quote)
     first = None
@@ -2658,7 +2783,21 @@ def _written_block(blocks, j: int, grown: int, quote: str, nth: int = 0):
         return first, -1                 # no occurrence of its own is left: the end of the block
     while last > j and not _bare(blocks[last].content):
         last -= 1
-    return last, 0
+    return last, (None if q else 0)
+
+
+def _put_lifted(text: str, lifted, j: int, grown: int):
+    """Put each lifted comment back on the block of j..j+grown that holds its words. Returns the text and the
+    comments whose words none of them holds, each with the block to follow: the caller makes them orphans (5.4).
+    A merge's own note is never one: it stays at the end of its block."""
+    lost = []
+    for raw, quote, c, nth in lifted:
+        k, nth = _written_block(split_md_blocks(text), j, grown, quote, nth)
+        if nth is None and c.by != MERGE_BY:
+            lost.append((k, c))
+        else:
+            text = _insert_comment(text, k, raw, quote, nth or 0)
+    return text, lost
 
 
 def _put_orphans(text: str, j: int, comments) -> str:
@@ -2906,10 +3045,10 @@ def _marks(text: str):
 def _own_merge(region, first: int, rows, own, j: int, html: str, held):
     """The edit of a base block over `region`, the file blocks from `first` on, which hold the page's own
     last save of it as `rows` (`_own_rows`). The edit takes the place of the page's own blocks, and the
-    blocks the file put among them stay where they are. Block j, the one the merge paired with the base
-    block, as the file changed it stays where the edit leaves it as the page saved it; where the edit
-    changes it too or takes it out, the page's is written with the note. Another block the file changed
-    stays after the page's, as where the page's own save is not found. Returns (text, notes): the
+    blocks the file put among them stay where they are. A block of the page's own the file changed (block j, the
+    one the merge paired with the base block, or another line of the page's split) stays as the file changed it
+    where the edit leaves it as the page saved it; where the edit changes it too or takes it out, the page's is
+    written with the note, as for a block the page did not split (ticket 137). Returns (text, notes): the
     region's new text, without the blank lines after its last block, and [(block in it, the file's
     words)] for the notes; ("", []) when the file and the edit together leave none of its blocks; None when
     it cannot be done so (the edit is refused or deletes it all, or a comment would be written twice or lost),
@@ -2925,61 +3064,45 @@ def _own_merge(region, first: int, rows, own, j: int, html: str, held):
         return None
     in_file, file_added = _by_own(rows, len(own))
     in_edit, edit_added = _by_own(_rows([_said(o) for o in own], [_said(b) for b in edited], _pair), len(own))
-    pieces, kept, notes, said, beside = [], set(), [], [], []
-    owed = None       # the file's words of block j, for the note on the next block of the edit's
+    pieces, kept, notes, said = [], set(), [], []
+    owed = []         # the file's words of the blocks it changed, for the notes on the next block of the edit's
 
     def file_block(x):
         pieces.append(region[x])
         kept.add(x)
 
-    def flush():
-        # A block the file changed that is kept beside the page's comes after the page's and the lines
-        # without words that follow it (comments left without their text), as it does when the page's own
-        # save is not found and the edit is written whole before it.
-        while beside:
-            file_block(beside.pop(0))
-
-    def edit_block(y, hold=False):
-        nonlocal owed
+    def edit_block(y):
         b = edited[y]
-        if _bare(b.content) and not hold:
-            flush()
         pieces.append(b)
         if _bare(b.content):
             said.append(len(pieces) - 1)
-            if owed is not None:
-                notes.append((len(pieces) - 1, owed))
-                owed = None
+            notes.extend((len(pieces) - 1, words) for words in owed)
+            owed.clear()
 
     for k in range(len(own)):
         for x in file_added[k]:
-            flush()
             file_block(x)
         for y in edit_added[k]:
             edit_block(y)
         file_row, edit_row = in_file[k], in_edit[k]
-        if file_row.how != "changed" or file_row.other != j:
+        if file_row.how != "changed":
             # A line the file deleted and the edit leaves as the page saved it stays deleted.
             if edit_row.how != "gone" and not (file_row.how == "gone" and edit_row.how == "same"):
                 edit_block(edit_row.other)
-            if file_row.how == "changed":
-                beside.append(file_row.other)
         elif edit_row.how == "same":
-            flush()
             file_block(file_row.other)
         else:
-            owed = _said(region[file_row.other])
+            owed.append(_said(region[file_row.other]))
             if edit_row.how == "changed":
                 edit_block(edit_row.other)
     for y in edit_added[-1]:
-        edit_block(y, hold=True)
-    flush()
+        edit_block(y)
     for x in file_added[-1]:
         file_block(x)
-    if owed is not None:
+    if owed:
         if not said:
             return None
-        notes.append((said[-1], owed))
+        notes.extend((said[-1], words) for words in owed)
 
     if not pieces:
         # The file deleted what the edit leaves and the edit takes out the rest: the region goes, as a block the
@@ -2995,12 +3118,17 @@ def _own_merge(region, first: int, rows, own, j: int, html: str, held):
     for x in mine:
         starts.append((offset, x))
         offset += len(region[x].text)
-    for raw, quote, c, nth in lifted:
-        if [x for at, x in starts if at <= c.start][-1] in kept:
-            continue
-        k, nth = _written_block(split_md_blocks(text), 0, len(pieces) - 1, quote, nth)
-        text = _insert_comment(text, k, raw, quote, nth)
-    if len(split_md_blocks(text)) != len(pieces) or _marks(text) != _marks("".join(b.text for b in region)):
+    text, lost = _put_lifted(text, [x for x in lifted if [y for at, y in starts if at <= x[2].start][-1] not in kept],
+                             0, len(pieces) - 1)
+    if len(split_md_blocks(text)) != len(pieces):
+        return None
+    if lost:
+        # Words the edit took out: the comments on them are orphans after the last block that says something.
+        k = lost[0][0]
+        text = _put_orphans(text, k, [c for _, c in lost])
+        grew = len(split_md_blocks(text)) - len(pieces)
+        notes = [(b + grew * (b > k), w) for b, w in notes]
+    if _marks(text) != _marks("".join(b.text for b in region)):
         return None
     return text, notes
 
@@ -3255,9 +3383,9 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
             continue
         if rep["changed"]:
             changed.append(i)
-        for raw, quote, _, nth in lifted:
-            k, nth = _written_block(split_md_blocks(text), j, grown, quote, nth)
-            text = _insert_comment(text, k, raw, quote, nth)
+        text, lost = _put_lifted(text, lifted, j, grown)
+        if lost:
+            text = _put_orphans(text, lost[0][0], [c for _, c in lost])
         if mode == "both" and rep["changed"]:
             conflicts.append({"i": i, "kind": "both"})
             text = _note(text, j, _both_note(theirs.strip()), at, base_text, cur_text)

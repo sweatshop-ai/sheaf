@@ -6,6 +6,7 @@ from the later of that and the mtime, so a page that arrives with an old mtime, 
 at once. Delete moves a page into `.sheaf/trash/<time>/<path>` for thirty days. Repo pages are never touched: they are
 not in a loose root."""
 import contextlib
+import errno
 import os
 import shutil
 import stat
@@ -22,6 +23,8 @@ SWEEP_EVERY = 600           # seconds between two sweeps on the hub's tick
 TRASH_DAYS = 30
 ARCHIVED, SEEN = loose.ARCHIVED, loose.SEEN
 TRASH = Path(".sheaf") / "trash"
+# what os.link answers where a file system or a policy (fs.protected_hardlinks) allows no hard link
+NO_HARD_LINKS = frozenset({errno.EPERM, errno.EOPNOTSUPP, errno.ENOTSUP, errno.EMLINK, errno.ENOSYS, errno.EXDEV})
 
 
 def is_archived(archived: dict, rel: str, mtime: float) -> bool:
@@ -199,11 +202,20 @@ class Archive:
     def trash(self, root, rel: str) -> None:
         """Move the page into the root's trash under the time of the deletion; its marks go, its versions stay where they are."""
         src = Path(root.path) / rel
-        if not stat.S_ISREG(os.lstat(src).st_mode):
-            raise loose.Refused("the page is not a plain file: refused")
+        try:
+            if not stat.S_ISREG(os.lstat(src).st_mode):
+                raise loose.Refused("the page is not a plain file: refused")
+        except FileNotFoundError:
+            raise KeyError(rel) from None
         base = os.path.realpath(root.path)
-        if os.path.commonpath([os.path.realpath(src), base]) != base:      # lstat looks at the last part of the path only
+        real = os.path.realpath(src)
+        if os.path.commonpath([real, base]) != base:      # lstat looks at the last part of the path only
             raise loose.Refused("the page is in a folder that leads out of the root: refused")
+        if real != os.path.join(base, rel):
+            # 183 BJ: a folder link that stays in the root gives a page a second address, which the Sheaf never lists (its
+            # walk follows no link). The page is deleted at its own address, where its marks, versions and Forwards are.
+            own = Path(os.path.relpath(real, base)).as_posix()
+            raise loose.Refused(f"this address reaches the page through a folder link: delete it at its own address, {own}")
         at = int(self.hub.clock())
         # The page's file lock first, as a writer takes it (the order of the hub's locks: a file lock, then the state stores'):
         # a door write of a page the hub holds no entry for comes before the move or finds the page gone.
@@ -218,27 +230,36 @@ class Archive:
             # a folder on the way swapped for a link since the look by path above is refused, never followed out of the root.
             try:
                 sfd, sname = _folder_of(root.path, rel)
+            except FileNotFoundError:
+                raise KeyError(rel) from None       # 183 BK: a folder on the way went away since the look: the page is not there
             except OSError:
                 raise loose.Refused("the page is in a folder that is a link or went away: refused") from None
             try:
-                if not stat.S_ISREG(os.stat(sname, dir_fd=sfd, follow_symlinks=False).st_mode):
-                    raise loose.Refused("the page is not a plain file: refused")
+                try:
+                    if not stat.S_ISREG(os.stat(sname, dir_fd=sfd, follow_symlinks=False).st_mode):
+                        raise loose.Refused("the page is not a plain file: refused")
+                except FileNotFoundError:
+                    raise KeyError(rel) from None   # 183 BK: deleted between the first look and the lock
                 try:
                     dfd, dname = _folder_of(root.path, str(dest.relative_to(root.path)))
                 except OSError:
                     raise loose.Refused("the trash of the loose root is in a folder that is a link or a file: refused") from None
                 try:
-                    # a link, never a rename: it fails when the name is taken, so nothing in the trash is overwritten
-                    os.link(sname, dname, src_dir_fd=sfd, dst_dir_fd=dfd, follow_symlinks=False)
-                except FileExistsError:
-                    raise loose.Refused("a page of that name was deleted in the same second: try again") from None
-                except OSError as e:
-                    raise loose.Refused(f"the page could not be moved to the trash ({e.strerror})") from None
-                else:
+                    # A rename, one step (183 BL, BM): it needs no hard link (exFAT, SMB, FUSE, fs.protected_hardlinks), and
+                    # neither a failure nor a crash can leave the page in two places. A rename replaces a name that is taken,
+                    # so the name in the trash is looked at first: every move into a trash holds `loose-keep.lock`, a flock
+                    # each process of the hub takes, so nothing of the hub's comes in between the look and the rename.
                     try:
-                        os.unlink(sname, dir_fd=sfd)
+                        os.stat(dname, dir_fd=dfd, follow_symlinks=False)
+                    except FileNotFoundError:
+                        pass
+                    else:
+                        raise loose.Refused("a page of that name was deleted in the same second: try again")
+                    try:
+                        os.rename(sname, dname, src_dir_fd=sfd, dst_dir_fd=dfd)
+                    except FileNotFoundError:
+                        raise KeyError(rel) from None
                     except OSError as e:
-                        os.unlink(dname, dir_fd=dfd)        # the page stays at its address, never in two places
                         raise loose.Refused(f"the page could not be moved to the trash ({e.strerror})") from None
                 finally:
                     os.close(dfd)
@@ -306,6 +327,12 @@ class Archive:
                     raise KeyError(ident) from None     # purged since its status above
                 raise loose.Refused("the page could not be put back (its folder went away)") from None
             except OSError as e:
+                if e.errno in NO_HARD_LINKS:
+                    # 183 BL: a restore links, never renames, so a page a door create puts at the address meanwhile is never
+                    # replaced; a file system without hard links cannot do that, and the owner moves the page back by hand.
+                    raise loose.Refused(f"the page could not be put back: this file system does not allow the hard link a "
+                                        f"restore needs so it never overwrites a page ({e.strerror}). Move "
+                                        f"{TRASH / ident} back to {rel} by hand") from None
                 raise loose.Refused(f"the page could not be put back ({e.strerror})") from None
             try:
                 made = os.lstat(dest)

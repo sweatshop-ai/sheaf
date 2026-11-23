@@ -215,9 +215,9 @@ def behind_a_delete(agents, monkeypatch, *racers):
     """Run each of `racers` (a function) in a thread started while Delete holds the page, after the page's locks are taken and
     before it moves: each must still be waiting 0.3 s later, and is joined once Delete is done. Their results, in order."""
     results, threads = [None] * len(racers), []
-    real_link = os.link
+    real_rename = os.rename
 
-    def link(src, dst, *a, **kw):
+    def rename(src, dst, *a, **kw):
         if kw.get("dst_dir_fd") is not None and not threads:      # the move into the trash, made from folder descriptors
             for i, racer in enumerate(racers):
                 t = threading.Thread(target=lambda i=i, racer=racer: results.__setitem__(i, racer()))
@@ -226,8 +226,8 @@ def behind_a_delete(agents, monkeypatch, *racers):
             for t in threads:
                 t.join(0.3)
             assert all(t.is_alive() for t in threads), "a writer came in while Delete moved the page"
-        return real_link(src, dst, *a, **kw)
-    monkeypatch.setattr(os, "link", link)
+        return real_rename(src, dst, *a, **kw)
+    monkeypatch.setattr(os, "rename", rename)
     return results, threads
 
 
@@ -497,14 +497,106 @@ def test_a_folder_swapped_for_a_link_after_the_check_does_not_bring_an_outside_f
 def test_a_page_that_cannot_be_taken_from_its_address_is_not_left_in_the_trash_too(agents, clock, monkeypatch):
     doc = made(agents, "bea-claude")
     path = agents.hub.file(doc)
-    real, refused = os.unlink, []
 
-    def unlink(p, *a, dir_fd=None, **k):
-        if dir_fd is not None and str(p) == path.name and not refused:      # the page's own address, once: the undo goes through
-            refused.append(p)
-            raise PermissionError(1, "Operation not permitted")
-        return real(p, *a, dir_fd=dir_fd, **k)
-    monkeypatch.setattr(archive.os, "unlink", unlink)
+    def rename(*a, **k):
+        raise PermissionError(1, "Operation not permitted")
+    monkeypatch.setattr(archive.os, "rename", rename)
     assert delete(agents, doc).status == 409
     assert path.exists()
     assert not list((root_of(agents, doc).path / ".sheaf").rglob(path.name))
+
+
+# ── Ticket 183 BJ, BK, BL and BM ─────────────────────────────────────────────
+
+def _linked_page(agents):
+    """A page of the root, and the address it also has through a folder link that stays in the root."""
+    doc = made(agents, "bea-claude")
+    root = root_of(agents, doc)
+    (root.path / "sub").mkdir()
+    (root.path / "sub" / "x.md").write_text("# The root's\n", encoding="utf-8")
+    os.symlink("sub", root.path / "alias")
+    return root, f"{root.name}/alias/x.md"
+
+
+def test_a_page_reached_through_a_folder_link_inside_the_root_is_refused_with_its_own_address(agents, clock):
+    root, linked = _linked_page(agents)
+    got = delete(agents, linked)
+    assert got.status == 409, got.text
+    assert "sub/x.md" in got.text                   # the answer names the address the Sheaf lists, where Delete works
+    assert (root.path / "sub" / "x.md").read_text(encoding="utf-8") == "# The root's\n"
+    assert not list((root.path / ".sheaf" / "trash").rglob("x.md"))
+    assert delete(agents, f"{root.name}/sub/x.md").status == 200       # at its own address it is deleted as any page
+
+
+def test_a_page_deleted_between_the_first_look_and_the_lock_is_not_found(agents, clock, monkeypatch):
+    doc = made(agents, "bea-claude")
+    path = agents.hub.file(doc)
+    real = archive.file_lock
+
+    @contextlib.contextmanager
+    def deleting(p):
+        os.unlink(path)                             # another process deletes the page between the look and the lock
+        with real(p):
+            yield
+    monkeypatch.setattr(archive, "file_lock", deleting)
+    got = delete(agents, doc)
+    assert got.status == 404, got.text
+
+
+@pytest.mark.parametrize("err", [1, 95], ids=["EPERM", "EOPNOTSUPP"])
+def test_delete_works_where_the_file_system_refuses_hard_links(agents, clock, monkeypatch, err):
+    doc = made(agents, "bea-claude")
+    path = agents.hub.file(doc)
+    text = path.read_text(encoding="utf-8")
+
+    def link(*a, **k):
+        raise OSError(err, os.strerror(err))        # exFAT, SMB, FUSE; EPERM under fs.protected_hardlinks
+    monkeypatch.setattr(archive.os, "link", link)
+    got = delete(agents, doc)
+    assert got.status == 200, got.text
+    assert not path.exists()
+    [held] = list((root_of(agents, doc).path / ".sheaf" / "trash").rglob(path.name))
+    assert held.read_text(encoding="utf-8") == text
+
+
+def test_a_delete_never_leaves_the_page_in_two_places(agents, clock, monkeypatch):
+    doc = made(agents, "bea-claude")
+    path = agents.hub.file(doc)
+    real = os.unlink
+
+    def unlink(p, *a, dir_fd=None, **k):
+        if dir_fd is not None:
+            raise PermissionError(1, "Operation not permitted")     # no entry can be taken off, the undo's neither
+        return real(p, *a, dir_fd=dir_fd, **k)
+    monkeypatch.setattr(archive.os, "unlink", unlink)
+    got = delete(agents, doc)
+    assert got.status in (200, 409), got.text
+    held = list((root_of(agents, doc).path / ".sheaf" / "trash").rglob(path.name))
+    assert path.exists() + len(held) == 1
+
+
+def test_a_delete_does_not_overwrite_a_page_in_the_trash_under_the_same_second_and_name(agents, clock):
+    doc = made(agents, "bea-claude")
+    path = agents.hub.file(doc)
+    root = root_of(agents, doc)
+    there = root.path / ".sheaf" / "trash" / str(int(clock.now)) / path.relative_to(root.path)
+    there.parent.mkdir(parents=True)
+    there.write_text("# Deleted a moment ago\n", encoding="utf-8")
+    got = delete(agents, doc)
+    assert got.status == 409, got.text
+    assert there.read_text(encoding="utf-8") == "# Deleted a moment ago\n"
+    assert path.exists()
+
+
+def test_a_restore_where_the_file_system_refuses_hard_links_says_so_and_moves_nothing(agents, clock, monkeypatch):
+    doc = made(agents, "bea-claude")
+    assert delete(agents, doc).status == 200
+    [row] = trash_rows(agents)
+
+    def link(*a, **k):
+        raise OSError(95, os.strerror(95))
+    monkeypatch.setattr(archive.os, "link", link)
+    got = agents.post("/_/restore-trash", {"id": row["id"]}, member=BEA)
+    assert got.status == 409, got.text
+    assert "hard link" in got.text and row["id"] in got.text     # what the owner can do: move that entry back by hand
+    assert not agents.hub.file(doc).exists() and len(trash_rows(agents)) == 1

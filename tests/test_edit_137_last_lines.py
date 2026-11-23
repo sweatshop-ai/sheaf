@@ -58,6 +58,29 @@ def test_a_line_of_dashes_broken_over_lines_in_the_html_stays_its_text(html):
 
 def test_a_shortcode_in_a_comment_of_the_source_is_not_one_of_its_emoji():
     assert rde._source_emoji('a :smile: <!-- c1 quote=":tada: :smile:" -->') == {"smile": [True]}
+
+
+@pytest.mark.parametrize("source, found", [
+    ("a \\\\:smile: b", {"smile": [True]}),                   # an escaped backslash escapes nothing after it
+    ("a \\<!-- :smile: --> b", {"smile": [True]}),              # an escaped comment is text
+    ('<span title=":smile:">x</span> :smile:', {"smile": [True]}),  # an attribute is not text
+    ('<span class="emoji" data-emoji="smile" title=":tada:">x</span> :smile:', {"smile": [False, True]}),
+    ("a \\:smile: b", {}),
+])
+def test_the_source_emoji_are_the_ones_markdown_draws(source, found):
+    assert rde._source_emoji(source) == found
+
+
+def test_a_comment_the_file_added_whose_quote_the_page_changes_is_an_orphan_as_on_a_plain_save():
+    # SPEC 5.4: a quote the edit no longer holds makes an orphan, the page's own comment and the file's alike.
+    i = FOUR.split("\n\n").index("Third paragraph here.")
+    cur, cid = with_comment(FOUR, "Third paragraph here", body="Agent asks", by="Claude")
+    new, _ = rde.merge_edits(FOUR, cur, [{"i": i, "html": "<p>Third paragraph hare.</p>"}], at="2026-10-18T10:00")
+    base, mine = with_comment(FOUR, "Third paragraph here", body="Mine")
+    out, _ = rde.apply_edits(base, [{"i": i, "html": "<p>Third paragraph hare.</p>"}])
+    assert rdc.parse(new).by_id(cid).orphan and rdc.parse(out).by_id(mine).orphan
+
+
 def test_a_private_use_character_in_the_text_leaves_the_typed_line_its_text():
     # The token is picked among characters the text does not hold, as an emoji token is (ticket 181, E).
     out = save("Ab \uF8FC", "<p>Ab \uF8FC<br>---</p>")

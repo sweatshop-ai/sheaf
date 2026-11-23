@@ -1018,15 +1018,26 @@ _FENCED_CODE = re.compile(r"^ {0,3}(`{3,}|~{3,})[^\n]*\n.*?(?:^ {0,3}\1[ \t]*$|\
 _SOURCE_EMOJI = re.compile(r'<span\b(?=[^>]*\sclass="emoji")[^>]*?\sdata-emoji="([a-z0-9_+-]+)"|(?<!\\):([a-z0-9_+-]+):')
 
 
-_HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+# What the scan reads past: an escaped backslash (it escapes nothing after it), an HTML comment and an HTML tag (its
+# attributes are not text). A backslash before a comment or a tag makes it text, and the scan reads it.
+_ESCAPED_BACKSLASH = re.compile(r"\\\\")
+_HTML_COMMENT = re.compile(r"(?<!\\)<!--.*?-->", re.S)
+_HTML_TAG = re.compile(r"(?<!\\)</?[A-Za-z][^>]*>")
+
+
+def _emoji_tag_only(m) -> str:
+    # An emoji span's opening tag, reduced to its name so no other attribute of it is scanned; any other tag, a space.
+    e = _SOURCE_EMOJI.match(m.group(0))
+    return f'<span class="emoji" data-emoji="{e.group(1)}">' if e and e.group(1) else " "
 
 
 def _source_emoji(source: str) -> dict:
     """{name: [True for a `:name:` the source wrote, False for an emoji span it wrote as HTML, in order]}. A
-    shortcode in code, in an HTML comment (a sheaf comment's body or quote) or after a backslash draws no emoji, and
-    is not one."""
+    shortcode in code, in an HTML comment (a sheaf comment's body or quote), in a tag's attribute or after a backslash
+    draws no emoji, and is not one."""
     found = {}
-    shown = _HTML_COMMENT.sub(" ", _CODE_SPAN.sub(" ", _FENCED_CODE.sub("", source)))
+    shown = _ESCAPED_BACKSLASH.sub("  ", _CODE_SPAN.sub(" ", _FENCED_CODE.sub("", source)))
+    shown = _HTML_TAG.sub(_emoji_tag_only, _HTML_COMMENT.sub(" ", shown))
     for m in _SOURCE_EMOJI.finditer(shown):
         found.setdefault(m.group(1) or m.group(2), []).append(not m.group(1))
     return found

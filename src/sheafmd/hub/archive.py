@@ -146,6 +146,18 @@ class Archive:
         pages = self._pages(member, root)            # the slow part, outside the lock
         with state.file_locked("loose-keep.lock"):   # the marks are read and the archive written in one hold: a Keep or a Restore comes before or after
             marks = Marks(root.path)
+            # 183 BY: the marks of an address with no page go (emptied from outside the hub, a delete that found it gone or
+            # put a folder back there), or a page made there later is born kept. Two looks: not in the listing, and no file
+            # under the lock, so a page made (and kept) since the listing keeps its marks.
+            listed = {rel for rel, _, _ in pages}
+            empty = {rel for rel in {*marks.archived, *marks.seen, *marks.kept}
+                     if rel not in listed and not os.path.isfile(Path(root.path) / rel)}
+            if empty:
+                loose.stamp_held(root.path, ARCHIVED, dict.fromkeys(empty))
+                loose.stamp_held(root.path, SEEN, dict.fromkeys(empty))
+                for rel in empty:
+                    loose.keep_held(root.path, rel, False)
+                marks = Marks(root.path)
             loose.stamp_held(root.path, SEEN, {rel: now for rel, _, _ in pages if rel not in marks.seen}, only_new=True)
             seen = {**{rel: now for rel, _, _ in pages}, **marks.seen}
             gone = due(pages, marks.archived, seen, marks.kept, now, self.days(root))

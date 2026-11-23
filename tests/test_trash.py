@@ -781,3 +781,35 @@ def test_a_page_that_went_while_a_delete_waited_for_a_render_is_not_found(agents
     deleting.join(10)
     assert answer == [404]
     assert trash_rows(agents) == []
+
+
+# ── 183 BY: the sweep drops the marks of an address with no page ─────────────
+
+def test_a_page_removed_from_outside_the_hub_leaves_no_marks_after_the_sweep(agents, clock):
+    doc, root, rel = _marked_everywhere(agents, clock)
+    os.unlink(agents.hub.file(doc))                 # something outside the hub empties the address before the delete reaches it
+    assert delete(agents, doc).status == 404
+    sweep(agents)
+    assert _marks_of(root, rel) == NO_MARKS
+    assert made(agents, "bea-claude") == doc
+    assert doc in docs(agents) and doc not in docs(agents, view="archived")
+    assert not next(r for r in rows(agents) if r["doc"] == doc)["kept"]
+
+
+def test_a_folder_put_back_at_a_pages_address_leaves_no_marks_after_the_sweep(agents, clock, monkeypatch):
+    doc, root, rel = _marked_everywhere(agents, clock)
+    path = agents.hub.file(doc)
+    monkeypatch.setattr(archive.os, "rename", _folder_swapped_in(path))
+    assert delete(agents, doc).status == 409
+    monkeypatch.undo()
+    assert path.is_dir()
+    sweep(agents)
+    assert _marks_of(root, rel) == NO_MARKS
+
+
+def test_the_sweep_keeps_the_marks_of_a_page_its_listing_did_not_see(agents, clock, monkeypatch):
+    doc, root, rel = _marked_everywhere(agents, clock)
+    # the listing is read outside the lock: a page made (and kept) after it is on disk when the marks are read
+    monkeypatch.setattr(archive.Archive, "_pages", lambda self, member, root: [])
+    sweep(agents)
+    assert _marks_of(root, rel) == ALL_MARKS

@@ -5,7 +5,7 @@ import re
 
 import pytest
 
-from pagehelp import settled, open_box, DOC, at, comment_on, draft_key, key, mark, reloaded, select, toast, toasted, toasts_to_the_end, type_at_end, until, rewrite
+from pagehelp import settled, open_box, DOC, at, comment_on, draft_key, key, mark, reloaded, select, stand_still, toast, toasted, toasts_to_the_end, type_at_end, until, rewrite
 
 pytestmark = pytest.mark.page
 
@@ -83,20 +83,6 @@ def upgrade(page, site, what="the upgrade"):
     until(lambda: heard(page, "hello"), what="the page's stream, open")
     site.hub.entry(DOC).bus.publish("hello", {"version": NEW_VERSION})
     until(lambda: NEW_VERSION in page.evaluate("window.__versions"), what=what)
-
-
-def stand_still(page):
-    """The installed clock runs at the real pace: from now on it moves only when the test runs it. Called before a
-    press, so the half second it jumps is not the Undo's. A page that read the clock past that time meanwhile makes
-    `pause_at` refuse ("fast-forward to the past"): the time is read again."""
-    for _ in range(5):
-        try:
-            page.clock.pause_at((page.evaluate("Date.now()") + 500) / 1000)       # seconds, in Playwright's Python
-            return
-        except Exception as e:
-            if "past" not in str(e):
-                raise
-    raise AssertionError("the page clock would not pause")
 
 
 def test_the_page_draws_a_one_off_where_its_box_is_and_share_as_a_tick_box_with_no_row_above_the_document(sheaf):

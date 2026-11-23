@@ -160,6 +160,11 @@ def test_a_selection_changed_with_shift_and_the_arrows_opens_the_box_once_it_is_
     its disabled button; once the arrows bring the selection back inside one paragraph, the box opens by itself."""
     p = doc.page
     select(p, at(MAIN, "Second"), at("ul", "first item", 2))
+    # The same range, given its direction (anchor at "Second"), as a selection the keyboard has extended has one.
+    # `select` puts it with addRange, which leaves it without one; Linux Blink treats every selection as directional,
+    # macOS Blink does not, and there Shift+ArrowLeft moved the start leftwards, so the range never came back inside
+    # one paragraph (ticket 173 M).
+    p.evaluate("(s => s.setBaseAndExtent(s.anchorNode, s.anchorOffset, s.focusNode, s.focusOffset))(getSelection())")
     assert p.wait_for_selector(BTN).is_disabled()
     p.keyboard.press("Shift+ArrowLeft")
     settled(p)

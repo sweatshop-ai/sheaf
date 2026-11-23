@@ -21,7 +21,7 @@ import _ci
 _ci.guard("macOS")
 
 from sheafmd import signals  # noqa: E402
-from sheafmd.hub import service  # noqa: E402  (after the guard: nothing of sheaf is touched on a laptop)
+from sheafmd.hub import server, service  # noqa: E402  (after the guard: nothing of sheaf is touched on a laptop)
 
 
 def domain() -> str:
@@ -39,28 +39,28 @@ def launchd_job() -> dict:
 def parse_print(text: str) -> dict:
     """The process id, the state and the last exit code out of `launchctl print` of one job.
 
-    launchd follows the code with its name (`last exit code = 75: EX_TEMPFAIL`), so only the
-    number is taken; `last_exit_line` keeps the whole line for a failure to quote."""
+    launchd writes something after the number (the old pattern, any run of non-spaces, captured
+    `75:`), so only the number is taken; `last_exit_line` keeps the whole line for a failure to quote."""
     out = {}
     pid = re.search(r"^\s*pid = (\d+)", text, flags=re.M)
-    last = re.search(r"^\s*last exit code = (-?\d+)", text, flags=re.M)
-    line = re.search(r"^\s*(last exit code = .*)$", text, flags=re.M)
+    last = re.search(r"^\s*(last exit code = (-?\d+)?.*)$", text, flags=re.M)
     state = re.search(r"^\s*state = (\S+)", text, flags=re.M)
     if pid:
         out["pid"] = pid.group(1)
     if last:
-        out["last_exit"] = last.group(1)
-    if line:
-        out["last_exit_line"] = line.group(1).strip()
+        out["last_exit_line"] = last.group(1).strip()
+        if last.group(2):
+            out["last_exit"] = last.group(2)
     if state:
         out["state"] = state.group(1)
     return out
 
 
 def check_the_upgrade_exit(job: dict):
-    """An upgrade stop exits 75 (SPEC 14.3); launchd must have seen that code, or CI fails."""
-    _ci.check(job.get("last_exit") == "75", "launchctl print: last exit code = 75",
-              f"launchctl print says {job.get('last_exit_line', 'no last exit code')!r}")
+    """An upgrade stop exits `server.EXIT_UPGRADE` (SPEC 14.4); launchd must have seen that code, or CI fails."""
+    _ci.check(job.get("last_exit") == str(server.EXIT_UPGRADE),
+              f"launchd saw the upgrade stop exit {server.EXIT_UPGRADE}",
+              f"launchctl print says: {job.get('last_exit_line', 'no last exit code')}")
 
 
 def lint_the_plist(port: int, tmp: Path):

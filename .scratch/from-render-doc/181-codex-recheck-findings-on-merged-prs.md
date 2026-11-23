@@ -38,8 +38,8 @@ One box per item. Red test first on main for each; an item that cannot be reprod
 
 ## E. Emoji token provenance (from #479, minor)
 
-- [ ] `edit.py:979-994`: the check is a substring check over the whole block, so an authored span is rewritten when `:+1:` appears only inside code.
-- [ ] A U+F8FE or U+F8FF character in the block turns the preservation off.
+- [x] `edit.py:979-994`: the check is a substring check over the whole block, so an authored span is rewritten when `:+1:` appears only inside code. *(merged: #600, 37d8a5ed; head c9be440c, CI green, Codex round 5 GO; provenance read by source order from pandoc's parse of the source, so code, comments, attributes and escaped text hold none; tests/test_edit_137_last_lines.py, red on main)*
+- [x] A U+F8FE or U+F8FF character in the block turns the preservation off. *(merged: #600, 37d8a5ed; head c9be440c, CI green, Codex round 5 GO; the token is picked fresh from 13 private-use characters, one the block does not hold; red on main)*
 
 ## F. `the_list` code detection (from #477, minor)
 

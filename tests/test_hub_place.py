@@ -1509,12 +1509,15 @@ def test_a_page_save_never_moves_a_file_of_a_root_that_took_the_name_after_the_s
     monkeypatch.setattr(owner, name, swapped)
     text = e.live.current()[1]
     n = [a[0] for a in the_list.read_rectoverso(SHARED, text).actions].index("Share")
-    got = box.post("/_/save", {"doc": f"rectoversos/{SHARED}", "hash": md_hash(text),
-                               "edits": [the_list.tick_edit(text, n, "Share")]}, member=ALICE)
+    try:
+        got = box.post("/_/save", {"doc": f"rectoversos/{SHARED}", "hash": md_hash(text),
+                                   "edits": [the_list.tick_edit(text, n, "Share")]}, member=ALICE)
+    finally:
+        for t in forgetting:                # once the save let the page's lock go, even when a check in it failed
+            t.join(10)
     # "ahead": nothing is written, the root it was found in is gone; "after": written, and its commit refused.
     assert got.status == (409 if moves == "ahead" else 200), got.text      # a second name lock fails it with a 500
-    forgetting[0].join(10)
-    assert not forgetting[0].is_alive()
+    assert forgetting and not forgetting[0].is_alive()
     assert hub.commits.settle()
     assert (intruder / at).read_text(encoding="utf-8") == PRIVATE
     assert not (intruder / (SHARED if at == HOME else HOME)).exists()

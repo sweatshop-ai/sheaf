@@ -2084,6 +2084,7 @@ def test_a_fork_on_a_generated_rectoverso_that_is_also_read_only_is_refused_as_g
     assert got.status == 403 and GENERATED in got.text and ".sheaf.toml" not in got.text
     assert hub_rows("generated-refused")[-1]["endpoint"] == "/_/sessions"
 
+
 def test_a_fork_on_a_rectoverso_marked_generated_after_the_first_look_is_refused_and_writes_nothing(team, box, work,
                                                                                                     monkeypatch):
     # 183 BE: a door write marks the page between the fork's first look and its write; the look under the file's lock

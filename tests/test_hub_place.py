@@ -151,6 +151,7 @@ def test_a_door_create_at_home_whose_generated_mark_cannot_be_written_leaves_no_
     assert not is_error, got
     assert (work / HOME).exists()
 
+
 def test_a_door_create_at_home_whose_generated_mark_cannot_be_written_makes_no_folder_there(team, work, browser,
                                                                                              tokens, monkeypatch):
     """The mark is refused before anything is made, so the private folders of the home are not left behind

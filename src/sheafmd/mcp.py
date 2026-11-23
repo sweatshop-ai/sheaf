@@ -1172,7 +1172,10 @@ class Door:
         try:
             # A loose root's names have no lock of their own (`place.held` holds nothing there): a create of one takes the
             # moves' lock, so it is not made between a move's checks and its rename, nor reads a Forward half written.
-            with moves.exclusive() if self._in_loose_root(args, caller) else contextlib.nullcontext():
+            # A create with `generated` takes it too: it marks the page before its file, and where the name's lock holds
+            # nothing a second create of the name could take the mark back from the page the other made (ticket 183 BD).
+            with moves.exclusive() if args.get("generated") or self._in_loose_root(args, caller) \
+                    else contextlib.nullcontext():
                 return self._created(given, args, caller)
         except BaseException:
             if fresh is not None:       # a refused create leaves no loose root it made behind
@@ -1240,16 +1243,16 @@ class Door:
                         raise _not_made(address, e) from None
                 rid = root.id       # the root written in is the one its commit goes to (8.11), never one that took its name since
                 try:
-                    m = self._make(root, top, rel, name, address, text, caller, bool(args.get("generated")))
+                    page = self._make(root, top, rel, name, address, text, caller, bool(args.get("generated")))
                 except BaseException:
                     _unmake(top, made, loose_judge)     # the folders this create made go with it
                     raise
-                text = m.text
+                text = page.text
                 if args.get("keep"):        # under the name's lock with the write: the page is never there unmarked
                     try:
-                        loose.keep(m.root.path, m.rel)      # where the file was written (ticket 183 BA)
+                        loose.keep(page.root.path, page.rel)    # where the file was written (ticket 183 BA); `rid` is the same root
                     except loose.Refused as e:
-                        self._take_back(address, m)     # made a moment ago under this name's lock
+                        self._take_back(address, page)      # made a moment ago under this name's lock
                         _unmake(top, made, loose_judge)
                         raise ToolError(f"{address} was not made: {e}.", "keep") from None
             except Private:         # the root's folder, as opened, is a private root's: answered as a path in no root
@@ -1264,7 +1267,7 @@ class Door:
         return out
 
     def _make(self, root, top: Path, rel: str, name: str | None, address: str, text: str, caller: Caller,
-              generated: bool = False) -> "_Made":
+              generated: bool) -> "_Made":
         """The file of a create, at its home when the hub places it (9.11), and its `generated` mark when asked. The
         rectoverso's address is its name wherever its file is. A file refused takes back the mark and the folders made
         for it here; a refusal after this returns goes through `_take_back`."""
@@ -1583,7 +1586,7 @@ class _Made:
     name: str | None
     judge: object
     folders: list
-    marked: tuple | None
+    marked: tuple[dict, dict] | None
 
 
 def _unmake(top: Path, made: list, judge=None):

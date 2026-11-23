@@ -210,3 +210,38 @@ def test_a_create_with_generated_of_a_name_taken_leaves_that_pages_mark_alone(br
     token = Tokens().add("builder", write=True)
     refused(browser, "create", doc=DOC, text="# Made\n\nBy a job.\n", generated=True, token=token)
     assert "generated" not in browser.hub.docs.get(DOC)
+
+
+def test_two_creates_with_generated_of_one_name_leave_the_page_made_marked(browser, plan, work, monkeypatch):
+    """The second create comes while the first has set its mark and not yet written its file. Both marks are the
+    same token's in the same minute, so the loser's take-back cannot tell them apart: the two are made one after the
+    other, and the page made keeps its mark (ticket 183 BD)."""
+    import threading
+
+    from sheafmd import mcp
+    token, real, answers, threads = Tokens().add("builder", write=True), mcp.create_file, [], []
+    send = {"doc": "work/made.md", "text": "# Made\n\nBy a job.\n", "generated": True, "token": token}
+
+    def create():
+        try:
+            answers.append(ok(browser, "create", **send))
+        except AssertionError as e:     # refused: the name is taken by the other
+            answers.append(e)
+
+    def second():
+        create()
+
+    def first_writes(top, rel, text, judge=None):
+        monkeypatch.setattr(mcp, "create_file", real)
+        t = threading.Thread(target=second)
+        t.start()
+        t.join(1)
+        threads.append(t)
+        return real(top, rel, text, judge)
+    monkeypatch.setattr(mcp, "create_file", first_writes)
+    create()
+    threads[0].join(10)
+    assert not threads[0].is_alive(), "the second create did not finish"
+    assert sorted(isinstance(a, AssertionError) for a in answers) == [False, True], answers
+    assert (work / "made.md").exists()
+    assert browser.hub.docs.get("work/made.md")["generated"]["by"] == "builder"

@@ -103,6 +103,7 @@ def chromium():
     try:
         extra = stall_evidence.launch_args()
         b = launch_chromium(pw.chromium, sync_api.Error, in_ci, **({"args": extra} if extra else {}))
+        stall_evidence.confirm(b.version)
     except BaseException:
         pw.stop()
         raise

@@ -167,7 +167,9 @@ jobs:
         # The page tests take 4 to 8 minutes; the install is bounded below. A step that runs past 40 is stuck.
         timeout-minutes: 40
         # A page test that stalls (PageStalled, or a timeout in the Playwright driver) leaves its evidence here:
-        # tests/page/stall_evidence.py, ticket 173 O. Set, it also gives the session's Chromium a DevTools port on the loopback.
+        # tests/page/stall_evidence.py, ticket 173 O. Set, it also gives the session's Chromium a DevTools port on the loopback,
+        # open to any process of the machine for the step: that browser holds only the test hubs' throwaway pages and
+        # cookies, and a self-hosted machine here runs only this repository's jobs (runner group, SPEC 18).
         env:
           SHEAF_STALL_EVIDENCE: ${{ runner.temp }}/stall-evidence
         shell: bash

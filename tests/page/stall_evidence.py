@@ -41,6 +41,7 @@ PAGE_JS = ("JSON.stringify({url: location.href, leaving: window.__leaving === tr
            "journal: window.__sseJournal || null})")
 
 _port = None             # the DevTools port of the session's Chromium, once `launch_args` gave it one
+_port_lost = None        # why that port is not used after all (`confirm`)
 
 
 def folder():
@@ -62,6 +63,24 @@ def launch_args():
         return []
     _port = free_port()
     return [f"--remote-debugging-port={_port}"]
+
+
+def confirm(launched_by):
+    """After the launch: the port `launch_args` gave answers, and the browser behind it is the one Playwright launched.
+    A free port is picked by closing it again, so another process of the machine can take it before Chromium binds;
+    then Chromium opens no port and the evidence must not read the other process's. `launched_by` is the browser's
+    version as Playwright reports it."""
+    global _port, _port_lost
+    if _port is None:
+        return
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{_port}/json/version", timeout=ASK_BOUND) as r:
+            said = json.loads(r.read().decode()).get("Browser", "")
+    except Exception as e:
+        said = f"no answer ({type(e).__name__}: {e})"
+    if launched_by not in said:
+        _port_lost = f"port {_port} is not the session's Chromium {launched_by}: {said}"
+        _port = None
 
 
 # ── a DevTools client with no Playwright in it ─────────────────────────────────────────────────────────────
@@ -163,7 +182,8 @@ def evaluate(ws_url, expression, bound=ASK_BOUND):
 def pages_report(port):
     """Each page of the browser behind `port`: its URL, its flags and its stream journal, or why it could not be read."""
     if port is None:
-        return f"no DevTools port: the session's Chromium was launched without one ({ENV} was unset then)\n"
+        return (f"no DevTools port: {_port_lost}\n" if _port_lost else
+                f"no DevTools port: the session's Chromium was launched without one ({ENV} was unset then)\n")
     began = time.monotonic()
     try:
         listed = targets(port)

@@ -276,6 +276,65 @@ def test_a_comment_and_a_closing_tag_with_no_opener_at_one_place_keep_their_orde
     assert saved(src, html=page) == src.replace("here", "there") + "\n"
 
 
+# Ticket 183 BV: a comment at the edge of an element, with the closing tag on the other side of the element's edge.
+
+@pytest.mark.parametrize("src,page", [
+    ("*Start" + C1 + "*</x1> b here.", "<p><em>Start" + A1 + "</em> b there.</p>"),
+    ("*Start<!-- foreign -->*</x1> b here.", "<p><em>Start<!-- foreign --></em> b there.</p>"),
+    ("*Start*" + C1 + "</x1> b here.", "<p><em>Start</em>" + A1 + " b there.</p>"),
+    ("*Start" + C1 + "*" + C2 + "</x1> b here.", "<p><em>Start" + A1 + "</em>" + A2 + " b there.</p>"),
+    ("- a\n- </x1>*<!-- foreign -->Start* b here.",
+     "<ul>\n<li>a</li>\n<li><em><!-- foreign -->Start</em> b there.</li>\n</ul>"),
+    ("- a\n- </x1><!-- foreign -->*Start* b here.",
+     "<ul>\n<li>a</li>\n<li><!-- foreign --><em>Start</em> b there.</li>\n</ul>"),
+], ids=["comment-in-em", "foreign-in-em", "comment-after-em", "comment-in-and-after-em", "item-foreign-in-em",
+        "item-foreign-before-em"])
+def test_a_comment_at_the_edge_of_an_element_keeps_its_side_of_a_closing_tag_with_no_opener(src, page):
+    assert saved(src, html=page) == src.replace("here", "there") + "\n"
+
+
+# Ticket 183 BX: the tag steps over the comments that stood beside it, not over any comment that is there now.
+
+@pytest.mark.parametrize("src,page,want", [
+    ("Start" + C1 + "</x1>" + C2 + " b here.", "<p>Start" + A2 + " b there.</p>", "Start</x1>" + C2 + " b there."),
+    ("Start<!-- f1 --></x1><!-- f2 --> b here.", "<p>Start<!-- f2 --> b there.</p>",
+     "Start</x1><!-- f2 --> b there."),
+    ("| h |\n|---|\n| <!-- f1 --></x1><!-- f2 -->Start b here. |",
+     "<table><thead><tr><th>h</th></tr></thead><tbody><tr><td><!-- f1 -->Start b there.</td></tr></tbody></table>",
+     "<!-- f1 --></x1>Start b there."),
+], ids=["sheaf-before-deleted", "foreign-before-deleted", "cell-after-deleted"])
+def test_a_closing_tag_with_no_opener_steps_over_only_the_comments_that_stood_beside_it(src, page, want):
+    assert want in saved(src, html=page)
+
+
+def test_a_comment_in_a_crlf_file_keeps_its_side_of_a_closing_tag_with_no_opener():
+    c1 = C1.replace("\n", "\r\n")
+    doc = "# Title\r\n\r\nStart" + c1 + "</x1> b here.\r\n"
+    out, rep = rde.apply_edits(doc, [{"i": 1, "html": "<p>Start" + A1 + " b there.</p>"}])
+    assert "Start" + c1 + "</x1> b there." in out
+
+
+# Ticket 183 BU: a tag inside an HTML block nested in the block (pandoc reads a list item that starts with a comment
+# as one) is not kept by the save: a closing tag with no opener is not on the page, and the others are written as
+# the page has them, or dropped. The save is refused rather than lose or change it.
+
+@pytest.mark.parametrize("block,page", [
+    ("- a\n- <!-- f --></x1>Start b here.", "<ul>\n<li>a</li>\n<li><!-- f -->Start b there.</li>\n</ul>"),
+    ("- a\n- <!-- f --><kbd>x</kbd> here.", "<ul>\n<li>a</li>\n<li><!-- f --><kbd>x</kbd> there.</li>\n</ul>"),
+    ("> <!-- f -->\n> <details>\n> words here\n> </details>", None),
+], ids=["lone-closing-tag", "kbd", "details-in-quote"])
+def test_a_tag_in_a_nested_html_block_refuses_the_save(block, page):
+    doc = "# Title\n\n" + block + "\n"
+    frag = page if page is not None else page_fragment(block).replace("here", "there")
+    out, rep = rde.apply_edits(doc, [{"i": 1, "html": frag}])
+    assert out == doc and rep["skipped"] == [(1, "block holds raw HTML the edit cannot keep; edit it in the .md")]
+
+
+@pytest.mark.parametrize("src", ["- a\n- <!-- f -->Start b here.", "- a\n- <!-- see </x1> -->Start b here."])
+def test_a_nested_html_block_whose_tags_the_save_keeps_is_saved(src):
+    assert saved(src) == src.replace("here", "there") + "\n"
+
+
 # Gate 3 on #157: a tag between words in the source stays between words when the word before it changes.
 
 @pytest.mark.parametrize("src,html,want", [

@@ -347,7 +347,7 @@ class Commits:
         takes the moves' lock, which comes before the repo's (9.11)."""
         self._record = record
         self._pulling = pulling or (lambda folder, files: None)
-        self._pulled = pulled or (lambda folder, files, ok, left=None: None)
+        self._pulled = pulled or (lambda folder, files, ok, left=None, named=None: None)
         self._renamed = renamed or (lambda folder, pairs: None)
         self._guard = guard or (lambda root, files: nullcontext())
         self._roots = roots or (lambda: ())
@@ -671,7 +671,7 @@ class Commits:
         # The Write log's window opens now and closes however the pull ends, so the page that takes the pull in is never
         # taken for a disk write, nor a later write for the pull.
         pages = [top / p for p in changed if p.endswith(".md")]
-        self._tell(self._pulling, address, folder, [(path, "?") for path in pages])
+        names = self._tell(self._pulling, address, folder, [(path, "?") for path in pages])
         # The save side and this list read `--no-renames`: a rename is then a delete and an add, and both paths are locked and
         # told to the Write log. Renames are looked at apart, for the Forward a moved page leaves (9.11), once the pull went through.
         renames = self._renames(folder, base, theirs, top)
@@ -687,7 +687,7 @@ class Commits:
             # Who last wrote each page, asked of the commit pulled, which the locks do not guard: a slow git holds up no writer.
             ok = go is not False
             authors = [(path, _author(top, theirs, path.relative_to(top).as_posix()) if ok else "?") for path in pages]
-            self._tell(self._pulled, address, folder, authors, ok, left)
+            self._tell(self._pulled, address, folder, authors, ok, left, named=names)
         if go and renames:                             # after `pulled`, so its lines for the old paths are carried with the page
             self._tell(self._renamed, address, folder, renames)
         return go
@@ -719,7 +719,7 @@ class Commits:
         changed = [p for p in _git(folder, "diff", "--name-only", "--no-renames", "-z", "HEAD", target).stdout.split("\0")
                    if p]
         pages = [top / p for p in changed if p.endswith(".md")]
-        self._tell(self._pulling, address, folder, [(path, "?") for path in pages])
+        names = self._tell(self._pulling, address, folder, [(path, "?") for path in pages])
         why, left = "move failed", {}
         try:
             with self._guard(root, [top / p for p in changed]), self._repo_lock(folder):
@@ -728,15 +728,17 @@ class Commits:
         finally:
             ok = why == ""
             authors = [(path, _author(top, target, path.relative_to(top).as_posix()) if ok else "?") for path in pages]
-            self._tell(self._pulled, address, folder, authors, ok, left)
+            self._tell(self._pulled, address, folder, authors, ok, left, named=names)
         return why
 
-    def _tell(self, call, address, *args):
-        """The Write log's hearing of a pull: its failure is a diagnostics row, never the pull's."""
+    def _tell(self, call, address, *args, **kwargs):
+        """The Write log's hearing of a pull: its failure is a diagnostics row, never the pull's. Returns what `call`
+        returned, None when it failed."""
         try:
-            call(*args)
+            return call(*args, **kwargs)
         except Exception:
             self._record("write-log-failed", address)
+            return None
 
     def seed(self, roots):
         """At hub start: for each repo of `roots` (git work trees) that has no last-seen ref for its branch yet, set it

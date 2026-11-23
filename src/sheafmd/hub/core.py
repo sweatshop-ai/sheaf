@@ -55,7 +55,7 @@ from .events import Bus
 from .index import Index
 from .jobs import Jobs
 from .writelog import WriteLog
-from .live import LiveDocument
+from .live import RETRY, LiveDocument
 
 # What a render may set (SPEC 8.3). Every other key of docs.json is the hub's own.
 SETTING_KEYS = ("title", "toc", "max_image_width", "by", "for", "theme", "credit")
@@ -971,11 +971,23 @@ class Hub:
             raise RenderError(f"{md} is not in a root the hub serves.") from None
         with place.held(self, address):                    # the name's lock first (9.11), as `entry` takes it
             with self._lock:
-                e, rebuild = self._render_entry(address, md, settings, target)
-            if rebuild:
-                # A render of the page (pandoc, up to 120 s) waits for the document's lock, and every request that needs
-                # the hub would wait with it were the hub's lock still held.
-                e.live.rebuild()
+                e, rebuild, existed = self._render_entry(address, md, settings, target)
+            # A delete, move or forget between the two parts under the hub's lock has taken the entry: its page is not read
+            # again (its file may be gone, and its tabs were told `gone`, after which they hear nothing more).
+            kept = self.entries.get(address) is e
+            if not kept and not md.exists():
+                raise RenderError(f"{md} went away while its page was rendered.")
+            try:
+                if existed and kept:
+                    # A file written on disk since, seen at this render: its refresh can render the page, so outside the
+                    # hub's lock.
+                    self._refreshed(e)
+                if rebuild and kept:
+                    # A render of the page (pandoc, up to 120 s) waits for the document's lock, and every request that needs
+                    # the hub would wait with it were the hub's lock still held.
+                    e.live.rebuild()
+            except FileNotFoundError:          # deleted after the look above
+                raise RenderError(f"{md} went away while its page was rendered.") from None
             with self._lock:
                 warnings = []
                 if self.entries.get(address) is e:      # a forget, move or delete in between has taken the entry: nothing to mark
@@ -987,7 +999,8 @@ class Hub:
 
     def _render_entry(self, address: str, md: Path, settings: dict, target: dict | None):
         """The part of `render` that is done with the hub's lock held by the caller: the settings are recorded and the entry is
-        found or made. Returns it and whether the page is to be rebuilt."""
+        found or made. Returns it, whether the page is to be rebuilt, and whether the entry was there before (the caller
+        takes in a write on disk since then, with the hub's lock let go)."""
         live = self.tell_live(address)         # beside the docs lock, not inside it
         def settle(new: dict) -> dict:
             old = dict(new)
@@ -1011,11 +1024,9 @@ class Hub:
         old, new = self.docs.change(address, settle)
         existed = address in self.entries
         e = self.entry(address)
-        if existed:
-            self._refreshed(e)          # a file written on disk since, seen at this render
         rebuild = existed and (any(old.get(k) != new[k] for k in SETTING_KEYS)
                                or old.get("target") != new.get("target"))
-        return e, rebuild
+        return e, rebuild, existed
 
     @contextmanager
     def page_lock(self, address: str):
@@ -1627,8 +1638,8 @@ class Hub:
                 key = (st.st_mtime_ns, st.st_size)
                 if key == e.last_stat:
                     continue
-                self._refreshed(e)
-                e.last_stat = key        # after: a rebuild that failed is tried again next tick
+                if self._refreshed(e) is not RETRY:      # one it could not decide is looked at again next tick
+                    e.last_stat = key        # after: a rebuild that failed is tried again next tick
             except Exception as ex:
                 self._rebuild_failed(e, ex)
         try:
@@ -1697,8 +1708,7 @@ class Hub:
         try:
             st = e.stat()
             key = (st.st_mtime_ns, st.st_size)
-            if key != e.last_stat:
-                self._refreshed(e)
+            if key != e.last_stat and self._refreshed(e) is not RETRY:
                 e.last_stat = key
             if self._images_moved(e):           # projects.toml or the owners moved: its images are judged otherwise
                 e.live.rebuild()
@@ -1712,7 +1722,7 @@ class Hub:
         """Take in a write from outside, and write it in the Write log: a text that moved behind the hub's back is a file
         written on disk, whoever wrote it (`?`), unless a pull of its repo is bringing it in (that has its own line)."""
         got = e.live.refresh()
-        if got is not None:
+        if got is not None and got is not RETRY:
             hash_ = e.live.current()[0]
             own = self.writes.is_own(e.address, hash_)         # both asked, so that a look that is a pull's settles a door
             if not self.writes.is_pull(e.address, hash_) and not own:   # write's expectation too, and never leaves it to swallow a later write
@@ -1747,7 +1757,9 @@ class Hub:
 
     def pulling(self, folder: Path, files: list[tuple[Path, str]]):
         """A pull of the repo at `folder` is about to change `files`, (absolute path, last author): the page open on one
-        sees it change: until `pulled`, what it sees of the file is the pull's, not a disk write."""
+        sees it change: until `pulled`, what it sees of the file is the pull's, not a disk write. Returns `{path: name}` of
+        the pages it opened a window for, which `pulled` is given back to close each by that same name."""
+        named = {}
         for path, _ in files:
             try:
                 address = self._page_of(path)
@@ -1758,17 +1770,24 @@ class Hub:
             # would close the window of another pull of the same page, one that began after the page opened.
             if address is not None:
                 self.writes.expect_pull(address)
+                named[path] = address
+        return named
 
-    def pulled(self, folder: Path, files: list[tuple[Path, str]], ok: bool, left: dict | None = None):
+    def pulled(self, folder: Path, files: list[tuple[Path, str]], ok: bool, left: dict | None = None,
+               named: dict | None = None):
         """The pull of `files` ended: each open page is known by the text the pull left (`left`: path to hash, read under the
         pull's locks; read now when not given), so the page's next sight of it is the pull's; when the pull went through, a
-        line each, `git · <author>`, for each that is a page of a root the hub serves."""
+        line each, `git · <author>`, for each that is a page of a root the hub serves. `named`: what `pulling` returned, the
+        name each window was opened under, so that a look that fails now cannot leave one open; None names each file again."""
         for path, author in files:
-            try:
-                address = self._page_of(path)
-            except Exception:       # a file that cannot be named holds no pull open: the others' end all the same
-                self.record_exception("pull-page-failed")
-                continue
+            if named is not None:
+                address = named.get(path)
+            else:
+                try:
+                    address = self._page_of(path)
+                except Exception:       # a file that cannot be named holds no pull open: the others' end all the same
+                    self.record_exception("pull-page-failed")
+                    continue
             if address is None:
                 continue
             if address in self.entries and ok:
@@ -1830,9 +1849,11 @@ class Hub:
                 st = e.stat()
                 if moved:
                     e.live.rebuild()
+                    got = None
                 else:
-                    e.live.refresh()
-                e.last_stat = (st.st_mtime_ns, st.st_size)
+                    got = e.live.refresh()
+                if got is not RETRY:         # one it could not decide is left to the watcher, which looks again
+                    e.last_stat = (st.st_mtime_ns, st.st_size)
             except Exception as ex:
                 self._rebuild_failed(e, ex)
         self.writes.told(address)

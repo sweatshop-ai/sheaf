@@ -153,3 +153,21 @@ def test_a_pull_that_began_before_the_page_opened_does_not_close_the_window_of_a
     assert world.hub.writes.is_pull(world.address, "any")      # the second is still under way
     world.hub.pulled(path.parent, files, True)
     assert not world.hub.writes.is_pull(world.address, "any")
+
+
+def test_a_pull_whose_file_cannot_be_named_again_at_its_end_still_closes_the_window_it_opened(world, monkeypatch):
+    """Ticket 183 AM: `pulled` closes each window by the name `pulling` opened it under, not by naming the file again. A
+    later look that fails (a root forgotten, a name the hub cannot decide now) would otherwise leave the window open, and
+    every later write of the page on disk would be taken for the pull's."""
+    world.put(OPEN)
+    path = world.two.private_repo / NAME
+    world.hub.entry(world.address)
+    files = [(path, "Ada")]
+    named = world.hub.pulling(path.parent, files)
+
+    def cannot(_path):
+        raise RuntimeError("the name cannot be decided now")
+    monkeypatch.setattr(world.hub, "_page_of", cannot)
+    world.hub.pulled(path.parent, files, True, named=named)
+    assert not world.hub.writes.is_pull(world.address, "any")
+    assert [line.via for line in world.hub.writes.lines(world.address)] == ["pull"]

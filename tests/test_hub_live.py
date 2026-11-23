@@ -1070,7 +1070,7 @@ def test_a_refresh_that_a_write_moved_under_publishes_nothing_and_the_next_one_t
     writes = iter([lambda: md.write_text(whole, encoding="utf-8")])
     served = []
     doc._render = lambda text: (served.append(text), next(writes, lambda: None)())[1]
-    assert doc.refresh() is None and events == []
+    assert doc.refresh() is rdl.RETRY and events == []
     assert served == [torn, DOC]                  # the page served is rendered again from the text the tabs hold
     assert doc.current() == (rds.md_hash(DOC), DOC)
     snap = doc.refresh()
@@ -1084,7 +1084,7 @@ def test_a_torn_read_that_a_refresh_gives_up_is_not_kept_as_a_version(made):
     md.write_text(torn, encoding="utf-8")
     writes = iter([lambda: md.write_text(whole, encoding="utf-8")])
     doc._render = lambda text: next(writes, lambda: None)()
-    assert doc.refresh() is None
+    assert doc.refresh() is rdl.RETRY
     assert rds.md_hash(torn) not in doc._versions
 
 
@@ -1105,7 +1105,7 @@ def test_a_refresh_whose_second_look_at_the_file_cannot_decide_it_keeps_what_the
                 raise place.Undecided("a private root cannot be looked at")
             return md.stat()
     doc._entry = Entry()
-    assert doc.refresh() is None and events == []
+    assert doc.refresh() is rdl.RETRY and events == []
     assert doc.current() == (rds.md_hash(DOC), DOC)
 
 
@@ -1121,5 +1121,5 @@ def test_a_refresh_whose_first_look_at_the_file_cannot_decide_it_either_publishe
         def stat(self):
             raise place.Undecided("a private root cannot be looked at")
     doc._entry = Entry()
-    assert doc.refresh() is None and events == []
+    assert doc.refresh() is rdl.RETRY and events == []
     assert doc.current() == (rds.md_hash(DOC), DOC)

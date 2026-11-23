@@ -2,7 +2,7 @@
 
 **Claimed by:** Nadia
 
-**Status:** in progress
+**Status:** A and B done in #620 (merge 4d34e1ad, head 9f21f8df), CI green (run 45178873288), review GO (round 1, provisional: Opus fallback, Codex at its usage limit). C and D open.
 
 **Priority:** high: each one turns a CI run red on a change that does not touch it.
 
@@ -50,5 +50,10 @@ Four copies of the test at once on the runner host: 160 rounds out of 160 race, 
 
 ## Acceptance
 
-- [ ] Both tests pass in CI on the PR
-- [ ] No skip, xfail or retry added; no assertion loosened
+- [x] Both tests pass in CI on the PR (run 45178873288: the control in chromium, firefox and webkit, and the two sends)
+- [x] No skip, xfail or retry added; no assertion loosened
+
+## Open: other page tests seen red in the same runs (not looked into)
+
+- [ ] **C.** `tests/page/test_page_move_box.py`: `test_a_box_moved_to_the_lower_right_is_inside_the_window_after_it_shrinks` ("timed out waiting for the moved box back inside the smaller window") and `test_a_box_moved_to_the_foot_that_grows_with_a_reply_keeps_its_controls_in_view` ("timed out waiting for the grown box inside the window"), both at `tests/page/pagehelp.py:195`, in run 45151298649 (job py3.13, the checks of #617).
+- [ ] **D.** `tests/page/test_sheaf_buttons.py::test_the_view_switch_shows_pages_archived_and_trash_each_with_its_own_list` ("timed out waiting for Archived: alpha only"), in the nightly run 45141939187, job py3.11 only (py3.13 and py3.14 passed it).

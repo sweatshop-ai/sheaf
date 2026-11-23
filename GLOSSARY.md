@@ -271,3 +271,19 @@ _Avoid_: voice message, speech-to-text send
 **Shared with me**:
 The top-level folder of a member's Sheaf that holds the loose pages other members Shared with them, one sub-folder per owner. It tells nothing of the owner's own folders. A row in it is `new` until the member opens the page, and again when the page changed since. See SPEC 9.11, "Share on a loose page".
 _Avoid_: inbox, received
+
+**Block**:
+One unit of a rectoverso's recto that a member can add, move or remove as a whole: a paragraph, a heading, a list, a callout. Every block has exactly one Block type. (Named 2026-11-23, wayfinder `sheaf-modular-editor` ticket 04.)
+_Avoid_: section, element, node
+
+**Block type**:
+The kind of a Block and the attributes it may carry, one fixed set declared by sheaf itself: paragraph, heading, list, quote, table, image, callout, columns, button. A member cannot define a type of their own.
+_Avoid_: widget, component
+
+**Rich block**:
+A Block whose type has no plain Markdown form (callout, columns, button). It is the only kind of Block that keeps a stored id of its own; it may hold plain Blocks, one level deep.
+_Avoid_: HTML block, island, custom block
+
+**Stub**:
+A Block whose type the page does not know. It is shown locked and written back byte for byte, never dropped and never refused.
+_Avoid_: invalid block, unknown block error

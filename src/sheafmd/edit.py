@@ -105,6 +105,7 @@ def _unwrap_strays(soup, source: str, strays) -> None:
         return (el.name, tuple(sorted((k, str(v)) for k, v in el.attrs.items())))
 
     had = Counter(key(el) for el in BeautifulSoup(source, "html.parser").find_all(True))
+    pasted_marks = {}   # the marks `_styled_marks` made, by id: a span that says normal inside one ends it
     new_br = set()      # the <br> the source did not have: two in a row make a paragraph break (`_split_at_double_breaks`)
     for el in soup.find_all(True):
         if _page_own(el):
@@ -115,8 +116,7 @@ def _unwrap_strays(soup, source: str, strays) -> None:
             continue
         if el.name == "br":
             new_br.add(id(el))
-        plain_b = (el.name in ("b", "strong")
-                   and re.search(r"font-weight:\s*(normal|400)", el.get("style", "")))
+        plain_b = el.name in ("b", "strong") and _weight(el.get("style", "")) is False
         if el.name == "br" and _beside_a_block(el):
             # An empty line a paste writes as a <br> beside a paragraph is no line of the markdown:
             # pandoc would write it as a paragraph holding a lone backslash.
@@ -125,7 +125,7 @@ def _unwrap_strays(soup, source: str, strays) -> None:
                 strays.append("br")
             continue
         if el.name == "span":
-            _styled_marks(soup, el)
+            _styled_marks(soup, el, pasted_marks)
         if el.name in ("div", "span") or plain_b:
             if el.name == "div":
                 # A line: its words stay apart from the text around it.
@@ -205,18 +205,129 @@ def _beside_a_block(br) -> bool:
 _HEADINGS = ("h1", "h2", "h3", "h4", "h5", "h6")     # a heading is bold already: a bold span in one takes no <strong>
 
 
-def _styled_marks(soup, span) -> None:
+def _declarations(style: str) -> dict:
+    """A style attribute as {property: value}, both lowercase, `!important` dropped: `--font-weight:bold`, a custom
+    property, is no `font-weight`, and a declaration's words inside another's value are no declaration."""
+    out, parts, quote, start = {}, [], None, 0
+    for k, ch in enumerate(style):
+        if quote:
+            quote = None if ch == quote else quote
+        elif ch in "'\"":
+            quote = ch
+        elif ch == ";":
+            parts.append(style[start:k])
+            start = k + 1
+    parts.append(style[start:])
+    for d in parts:
+        prop, colon, value = d.partition(":")
+        if colon:
+            out[prop.strip().lower()] = value.lower().replace("!important", "").strip()
+    return out
+
+
+def _weight(style: str):
+    """True when the style says bold, False when it says a normal weight, None when it says neither."""
+    v = _declarations(style).get("font-weight")
+    if not v:
+        return None
+    if v in ("bold", "bolder") or re.fullmatch(r"[6-9]00", v):
+        return True
+    if v in ("normal", "lighter") or re.fullmatch(r"[1-5]00", v):
+        return False
+    return None
+
+
+def _slant(style: str):
+    """True when the style says italic, False when it says upright (`normal`), None when it says neither."""
+    v = _declarations(style).get("font-style")
+    if not v:
+        return None
+    if v == "italic" or v.split()[0] == "oblique":
+        return True
+    return False if v == "normal" else None
+
+
+_LIFTS_THROUGH = ("span", "strong", "em", "b", "i")    # what a mark may be ended across: never a link, code or a block
+
+
+def _liftable(node, mark) -> bool:
+    """Whether every element between `node` and `mark` is a span or a mark, none of them the page's own: anything else
+    (a link, code, a block, a note) would be cut in two, so the words stay marked as before."""
+    el = node.parent
+    while el is not mark:
+        if el.name not in _LIFTS_THROUGH or _page_own(el):
+            return False
+        el = el.parent
+    return True
+
+
+def _breaks_out(mark, side: str) -> None:
+    """The <br> at the `side` ("last" or "first") end of `mark`, however deep, put just outside it: a break left
+    before a closing `**` is written as a backslash that escapes it."""
+    while True:
+        el = mark
+        while getattr(el, "name", None) not in (None, "br") and el.contents:
+            el = el.contents[-1 if side == "last" else 0]
+        if getattr(el, "name", None) != "br":
+            return
+        (mark.insert_after if side == "last" else mark.insert_before)(el.extract())
+
+
+def _lift_out(soup, node, mark, pasted_marks: dict) -> None:
+    """`node` taken out of `mark`, which ends before it and starts again after it; the spans between the two stay
+    around `node` and around what was on either side of it (`_liftable`). A copy of a mark in `pasted_marks` is in it
+    too. A <br> at either cut goes outside the mark."""
+
+    def copy(el):
+        new = soup.new_tag(el.name, attrs=dict(el.attrs))
+        if id(el) in pasted_marks:
+            pasted_marks[id(new)] = new
+        return new
+
+    child = node
+    while True:
+        el = child.parent
+        right = copy(el)
+        while child.next_sibling is not None:
+            right.append(child.next_sibling.extract())
+        if right.contents:
+            el.insert_after(right)
+        child.extract()
+        if el is mark:
+            el.insert_after(child)
+        else:
+            mid = copy(el)
+            mid.append(child)
+            el.insert_after(mid)
+        if not el.contents:
+            el.extract()
+        if el is mark:
+            if el.parent is not None:
+                _breaks_out(el, "last")
+            if right.parent is not None:
+                _breaks_out(right, "first")
+            return
+        child = mid
+
+
+def _styled_marks(soup, span, pasted_marks: dict) -> None:
     """A word processor writes bold and italic as a <span> with a style, and no <b> or <i>: the span's words go
     inside a <strong> or an <em>, or pandoc would drop the style and the words would lose it. Inside a mark of the
-    same kind the words are marked already, and a heading's are bold already."""
+    same kind the words are marked already, and a heading's are bold already. A span that says normal inside a mark
+    made here (`pasted_marks`) ends that mark around its words, as its own style wins on the page; an authored mark and a
+    heading stay as they are."""
     style = span.get("style", "")
-    for found, name, same in ((re.search(r"font-style:\s*italic\b", style), "em", ("em", "i")),
-                              (re.search(r"font-weight:\s*(bold|bolder|[6-9]00)\b", style), "strong", ("strong", "b", *_HEADINGS))):
-        if found and not any(p.name in same for p in span.parents):
+    for says, name, same in ((_slant(style), "em", ("em", "i")),
+                             (_weight(style), "strong", ("strong", "b", *_HEADINGS))):
+        mark = next((p for p in span.parents if p.name in same), None)
+        if says is False and mark is not None and id(mark) in pasted_marks and _liftable(span, mark):
+            _lift_out(soup, span, mark, pasted_marks)
+        elif says and mark is None:
             inner = soup.new_tag(name)
             for c in list(span.contents):
                 inner.append(c.extract())
             span.append(inner)
+            pasted_marks[id(inner)] = inner     # held, so no later tag takes its id
 
 
 def _trim_lead(li, skip: int) -> None:

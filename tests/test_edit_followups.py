@@ -1367,3 +1367,78 @@ def test_a_split_heading_saves_as_two_headings_with_the_comment_on_its_half():
     assert "\n## A title\n" in new and "\n## here" in new
     [c] = rdc.parse(new).comments
     assert c.id == cid and not c.orphan
+
+
+# ── ticket 181 B: a pasted span that ends a styled mark, and a style read as declarations ─────────────
+
+@pytest.mark.parametrize("html, md", [
+    ('<p><span style="font-weight:700">bold <span style="font-weight:400">plain</span></span> words</p>',
+     "**bold** plain words"),
+    ('<p><span style="font-weight:700">one <span style="font-weight:normal">two</span> three</span></p>',
+     "**one** two **three**"),
+    ('<p><span style="font-style:italic">slant <span style="font-style:normal">upright</span></span> words</p>',
+     "*slant* upright words"),
+    ('<p><span style="font-weight:bold">a <span style="font-weight:400">b <span style="font-weight:700">c</span></span></span></p>',
+     "**a** b **c**"),
+    ('<p><span style="font-weight:700">a <span style="font-weight:400">b</span> c <span style="font-weight:400">d</span> e</span></p>',
+     "**a** b **c** d **e**"),
+    ('<p><span style="font-weight:700">a <span style="font-style:italic">b <span style="font-weight:400">c</span> d</span></span></p>',
+     "**a *b*** *c* ***d***")],
+    ids=["400 in 700", "normal in the middle", "normal in italic", "bold again inside", "two normals in one mark",
+         "normal inside an italic inside bold"])
+def test_a_pasted_span_that_says_normal_ends_the_mark_of_the_span_around_it(html, md):
+    """CSS: the inner span's own weight or style wins, so its words show plain; the saved markdown says so too."""
+    assert rde.html_block_to_md(html, source="Old words") == md
+
+
+@pytest.mark.parametrize("style", ["--font-weight:bold", "x-font-weight: 700", "--font-style:italic",
+                                   "content:'font-weight:700'"])
+def test_a_style_that_only_holds_the_words_of_a_bold_or_italic_declaration_stays_plain(style):
+    html = f'<p>Two <span style="{style}">plain</span> words</p>'
+    assert rde.html_block_to_md(html, source="Two words") == "Two plain words"
+
+
+@pytest.mark.parametrize("style", ["color: red; FONT-WEIGHT: Bold", "font-weight:700 !important"])
+def test_a_bold_declaration_among_others_or_marked_important_is_bold(style):
+    html = f'<p>Two <span style="{style}">bold</span> words</p>'
+    assert rde.html_block_to_md(html, source="Two words") == "Two **bold** words"
+
+
+def test_a_b_whose_style_only_holds_the_words_of_a_normal_weight_stays_bold():
+    html = '<p>Two <b style="--font-weight:normal">bold</b> words</p>'
+    assert rde.html_block_to_md(html, source="Two words") == "Two **bold** words"
+
+
+def test_a_break_before_a_span_that_says_normal_stays_outside_the_mark():
+    """A <br> at the cut left inside the mark would put a backslash before its closing `**`, which then shows."""
+    html = '<p><span style="font-weight:700">a<br><span style="font-weight:400">b</span></span></p>'
+    md = rde.html_block_to_md(html, source="Old words")
+    assert "\\**" not in md and md.startswith("**a**"), md
+
+
+@pytest.mark.parametrize("html", [
+    '<p><span style="font-weight:700">aa <a href="https://example.com/">bb <span style="font-weight:400">cc</span></a></span></p>',
+    '<p><span style="font-weight:700">aa <code>bb <span style="font-weight:400">cc</span></code></span></p>',
+    '<p><span style="font-weight:700">aa <a data-rd-note="1" href="#fn1">bb <span style="font-weight:400">cc</span></a></span></p>'],
+    ids=["a link", "code", "the page's own note"])
+def test_a_span_that_says_normal_inside_a_link_or_code_leaves_them_whole(html):
+    """Ending the mark there would cut the link, the code or the note in pieces; they stay one, as before."""
+    md = rde.html_block_to_md(html, source="Old words")
+    assert md.count("](") <= 1 and md.count("`") <= 2 and "bb" in md and "cc" in md, md
+
+
+def test_a_block_inside_a_bold_span_is_not_cut_by_a_span_that_says_normal():
+    html = '<p><span style="font-weight:700"><p>a <span style="font-weight:400">b</span> c</p></span></p>'
+    md = rde.html_block_to_md(html, source="Old words")
+    assert "\n\n" not in md.strip(), md
+
+
+def test_a_semicolon_inside_a_quoted_value_ends_no_declaration():
+    html = """<p>Two <span style="content:'x; font-weight: bold; y'">plain</span> words</p>"""
+    assert rde.html_block_to_md(html, source="Two words") == "Two plain words"
+
+
+@pytest.mark.parametrize("weight", ["300", "lighter", "500"])
+def test_a_b_that_says_a_light_weight_is_unwrapped(weight):
+    html = f'<p>Two <b style="font-weight:{weight}">plain</b> words</p>'
+    assert rde.html_block_to_md(html, source="Two words") == "Two plain words"

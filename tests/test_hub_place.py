@@ -1364,3 +1364,34 @@ def test_the_lock_of_a_name_nobody_holds_is_let_go(team, work):
     with place.held(team.hub, f"work/{SHARED}"):
         assert place.owns(team.hub, f"work/{SHARED}") and len(place._LOCKS) == before + 1
     assert len(place._LOCKS) == before and not place.owns(team.hub, f"work/{SHARED}")
+
+
+def test_a_move_never_commits_into_a_root_that_took_the_name_of_the_one_it_moved_in(hub, browser, tmp_path, monkeypatch):
+    """8.11 and 9.11: the move is made in the root `place` found first. Forgotten, and its name taken by another folder,
+    before the move reads the root its commit goes to, the commit must not land in the other repo."""
+    _, repo = committing(hub, browser, tmp_path)
+    intruder = tmp_path / "again" / "rectoversos"
+    intruder.mkdir(parents=True)
+    git(intruder, "init", "-q", "-b", "main")
+    git(intruder, "config", "user.name", "the box")
+    git(intruder, "config", "user.email", "box@example.com")
+    (intruder / ".sheaf.toml").write_text("commit = true\n", encoding="utf-8")
+    (intruder / SHARED).parent.mkdir(parents=True)
+    (intruder / SHARED).write_text("Not the contract.\n", encoding="utf-8")
+    git(intruder, "add", "-A")
+    git(intruder, "commit", "-q", "-m", "first")
+    (intruder / SHARED).write_text("Not the contract, changed by hand.\n", encoding="utf-8")   # a commit of the address would take it
+    real = place._where
+
+    def swapped(hub_, address):
+        got = real(hub_, address)
+        monkeypatch.setattr(place, "_where", real)
+        hub_.forget_root("rectoversos")
+        assert hub_.roots.for_document(intruder / SHARED).name == "rectoversos"
+        return got
+
+    monkeypatch.setattr(place, "_where", swapped)
+    assert place.place(hub, f"rectoversos/{SHARED}") == SHARED
+    assert hub.commits.settle()
+    assert subjects(intruder) == ["first"]
+    assert hub_rows("commit-refused")

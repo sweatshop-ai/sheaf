@@ -17,7 +17,7 @@ import difflib
 import os
 import re
 from collections import Counter
-from functools import lru_cache
+from functools import cached_property, lru_cache
 from html import escape as html_escape, unescape as html_unescape
 from types import SimpleNamespace
 from typing import NamedTuple
@@ -162,28 +162,28 @@ def _split_at_double_breaks(soup, new_br) -> None:
             continue
         while True:
             kids = list(p.children)
-            run, at = [], None
+            run, first_br = [], None
             for k, c in enumerate(kids):
                 if getattr(c, "name", None) == "br" and id(c) in new_br:
-                    if at is None:
-                        at = k
+                    if first_br is None:
+                        first_br = k
                     run.append(k)
-                elif blank(c) and at is not None:
+                elif blank(c) and first_br is not None:
                     continue
-                elif at is not None and len(run) >= 2:
+                elif first_br is not None and len(run) >= 2:
                     break
                 else:
-                    run, at = [], None
+                    run, first_br = [], None
             else:
                 if len(run) < 2:
                     break
             if len(run) < 2 or not any(_shows(str(c)) or getattr(c, "name", None) in ("img", "a", "b", "i", "strong", "em", "code")
-                                        for c in kids[:at]) or run[-1] + 1 >= len(kids) or all(blank(c) for c in kids[run[-1] + 1:]):
+                                        for c in kids[:first_br]) or run[-1] + 1 >= len(kids) or all(blank(c) for c in kids[run[-1] + 1:]):
                 break
             tail = soup.new_tag("p")
             for c in kids[run[-1] + 1:]:
                 tail.append(c.extract())
-            for c in kids[at:run[-1] + 1]:
+            for c in kids[first_br:run[-1] + 1]:
                 c.extract()
             p.insert_after(tail)
             p = tail
@@ -386,9 +386,9 @@ def _lines_as_items(soup) -> None:
             moved = []
             for box in wrap.find_all("label", recursive=False) + [wrap]:
                 kids = list(box.children)
-                at = next((k for k, c in enumerate(kids) if is_line(c)), None)
-                if at is not None:
-                    moved = kids[at:] + (list(box.next_siblings) if box is not wrap else [])
+                first_line = next((k for k, c in enumerate(kids) if is_line(c)), None)
+                if first_line is not None:
+                    moved = kids[first_line:] + (list(box.next_siblings) if box is not wrap else [])
                     break
             for c in reversed(moved):
                 wrap.insert_after(c.extract())
@@ -446,12 +446,12 @@ def _lines_as_items(soup) -> None:
                 # a comment anchored at the very start of the line is its token first in the text, not the line's words
                 token_end = _LEADING_TOKENS.match(first).end() if isinstance(first, NavigableString) else 0
                 m = _TYPED_TASK.match(first, token_end) if isinstance(first, NavigableString) else None
-                own = ""  # the words before the first list, block or line: pandoc writes a box before one as a character
+                lead_words = ""  # the words before the first list, block or line: pandoc writes a box before one as a character
                 for t in item.find_all(string=True):
                     if t.find_parent(["ul", "ol", "blockquote", "pre", "table", "div", "p"]):
                         break
-                    own += t
-                if m and not (_shows(_COMMENT_TOKEN.sub("", own[m.end():])) or item.find("img")):
+                    lead_words += t
+                if m and not (_shows(_COMMENT_TOKEN.sub("", lead_words[m.end():])) or item.find("img")):
                     # a typed box with no words after it (a comment's token is none) is words itself, as in a paragraph: an item without a box
                     last.insert_after(item)
                     last = item
@@ -576,28 +576,28 @@ def _lines_as_paragraphs(soup):
     def lines_of(line):
         # Enter or Shift+Enter inside a line that is already a <div> nests the next one in it. The line's own
         # words are a line, each nested line follows it, and words after a nested line are another.
-        out, run = [], []
+        pieces, run = [], []          # runs of the line's own children (lists), and the nested lines between them
+        for c in list(line.children):
+            c.extract()
+            if is_line(c):
+                pieces += [run, c]
+                run = []
+            else:
+                run.append(c)
+        pieces.append(run)
+        out = []
         split = line.has_attr(_SPLIT)          # the line's own words carry its mark; a nested line has its own
-
-        def close():
-            nonlocal split
-            if any(not blank(c) for c in run):
+        for piece in pieces:
+            if not isinstance(piece, list):
+                out.extend(lines_of(piece))
+            elif any(not blank(c) for c in piece):
                 d = soup.new_tag("div")
                 if split:
                     d[_SPLIT] = ""
                 split = False
-                for c in run:
+                for c in piece:
                     d.append(c)
                 out.append(d)
-            run.clear()
-        for c in list(line.children):
-            c.extract()
-            if is_line(c):
-                close()
-                out.extend(lines_of(c))
-            else:
-                run.append(c)
-        close()
         return out or [line]
 
     for host in soup.find_all(_LINE_HOSTS):
@@ -1221,10 +1221,10 @@ def _places_by_order(old: str, new: str, olds) -> set:
     stays text: a shortcode the reader typed then shows as its words, rather than one the source wrote as text
     as its emoji. Linear, for a changed part too long to diff."""
     def starts(text):
-        at = {}
+        by_name = {}
         for m in _SHORTCODE_TEXT.finditer(text):
-            at.setdefault(m.group(1), []).append(m.start())
-        return at
+            by_name.setdefault(m.group(1), []).append(m.start())
+        return by_name
 
     was, now, places = starts(old), starts(new), set()
     for start, name in olds:
@@ -1309,17 +1309,17 @@ def _literal_shortcodes(fragment: str, source, slash):
     soup = BeautifulSoup(fragment, "html.parser")
     texts = _shortcode_texts(soup)
     places = _source_literals(source, "".join(texts)) if escaped else set()
-    found, at = False, 0
+    found, pos = False, 0
     for t in texts:
         glued = after_slash and _typed_slash_before(t, slash)     # a typed backslash ends the text before t
 
-        def mark(m, at=at, glued=glued):
+        def mark(m, pos=pos, glued=glued):
             typed = slash is not None and (m.string.endswith(slash, 0, m.start()) or (glued and m.start() == 0))
-            if (typed or at + m.start() in places) and _emoji_drawn(m.group(1)):
+            if (typed or pos + m.start() in places) and _emoji_drawn(m.group(1)):
                 return _LITERAL_COLON + m.group(0)
             return m.group(0)
 
-        at, new = at + len(t), _SHORTCODE_TEXT.sub(mark, str(t))
+        pos, new = pos + len(t), _SHORTCODE_TEXT.sub(mark, str(t))
         if new != str(t):
             t.replace_with(new)
             found = True
@@ -1402,13 +1402,13 @@ def _line_marks(fragment: str):
         if start is None:
             continue
         whole = _line_edge(t, forward=True) is not None
-        at = None
+        cut = None
         if whole and (_RULE_LINE.match(line) or start == "br" and _UNDER_LINE.match(line)):
-            at = 0
+            cut = 0
         elif start == "br" and (m := _ITEM_START.match(line)):
-            at = m.end() if m.group(0)[0].isdigit() else 0
-        if at is not None:
-            t.replace_with(words[:lead + at] + mark + words[lead + at:])
+            cut = m.end() if m.group(0)[0].isdigit() else 0
+        if cut is not None:
+            t.replace_with(words[:lead + cut] + mark + words[lead + cut:])
             found = True
     return (str(soup), mark) if found else (fragment, None)
 
@@ -1630,10 +1630,10 @@ def _drawing_marks(content: str, marks: list) -> list:
     return keep
 
 
-def _goes_on(content: str, at: int, line: int) -> bool:
-    """Is the line starting at `at` a non-blank line indented deeper than the one starting at `line`?"""
-    eol = content.find("\n", at)
-    nxt = content[at:eol if eol >= 0 else len(content)]
+def _goes_on(content: str, pos: int, line: int) -> bool:
+    """Is the line starting at `pos` a non-blank line indented deeper than the one starting at `line`?"""
+    eol = content.find("\n", pos)
+    nxt = content[pos:eol if eol >= 0 else len(content)]
     if not nxt.strip():
         return False
     indent = lambda row: len(row) - len(row.lstrip(" \t"))
@@ -1766,19 +1766,19 @@ _MISS = object()
 _BOX_NUMBERS_MAX = 4096
 
 
-def box_number(content: str, at: int) -> int | None:
-    """The number, among the boxes the page draws for `content`, of the box whose state is the character at `at`
+def box_number(content: str, pos: int) -> int | None:
+    """The number, among the boxes the page draws for `content`, of the box whose state is the character at `pos`
     (the state character of a task mark): the one box that flips when that character does. None when none does
     (an empty item has a mark and no box) or when the source does not render. The count of marks is not this
     number: a mark may draw no box (an empty item) and a box may have no mark (a raw `<input>`), so the render
-    is asked. An answer is kept by (content, at), for the page asks it of every
+    is asked. An answer is kept by (content, pos), for the page asks it of every
     button on every serve and the render of a long list takes seconds; a render that failed is not kept."""
-    if not 0 <= at < len(content) or content[at] not in " xX":
+    if not 0 <= pos < len(content) or content[pos] not in " xX":
         return None
-    key = (content, at)
+    key = (content, pos)
     if (kept := _BOX_NUMBERS.get(key, _MISS)) is not _MISS:      # one read: another thread may clear between two
         return kept
-    flipped = content[:at] + (" " if content[at] != " " else "x") + content[at + 1:]
+    flipped = content[:pos] + (" " if content[pos] != " " else "x") + content[pos + 1:]
     try:
         was, now = (_ticks(copyblock.mark(h, page=True))[0] if (h := _render_source(c)) is not None else None
                     for c in (content, flipped))
@@ -1871,14 +1871,14 @@ def _foreign_comments(content: str) -> list:
     person who must fix it is told by `sheaf comments`, and an edit of the
     paragraph beside it is no reason to delete it. Matched by occurrence, so of two
     comments with one id the first is the comment and the second is kept."""
-    mine = Counter(content[c.start:c.end] for c in rdc.parse(content).comments)
+    parsed = Counter(content[c.start:c.end] for c in rdc.parse(content).comments)
     found = []
     for m in CODE_OR_COMMENT_RE.finditer(content):
         raw = m.group(0)
         if not raw.startswith("<!--"):
             continue
-        if mine[raw]:
-            mine[raw] -= 1
+        if parsed[raw]:
+            parsed[raw] -= 1
             continue
         found.append(raw)
     return found
@@ -1938,15 +1938,15 @@ def _raw_tags(content: str):
                 walk(x, in_table)
 
     walk(doc["blocks"])
-    tags, lone, open_, at = [], [], {}, 0
+    tags, lone, open_, pos = [], [], {}, 0
     for node, in_table in nodes:
         raw = seen = node["c"][1]
         # In a table cell pandoc's RawInline has `|` where the source has `\|`, which keeps the cell
         # whole: the tag is the source's bytes. Nowhere else does pandoc take a backslash out of a tag.
         if in_table and "|" in raw:
-            found = re.compile(re.escape(raw).replace("\\|", r"\\?\|")).search(content, at)
+            found = re.compile(re.escape(raw).replace("\\|", r"\\?\|")).search(content, pos)
             if found:
-                raw, at = found.group(0), found.end()
+                raw, pos = found.group(0), found.end()
         m = TAG_RE.match(raw)
         if not m:
             continue
@@ -1976,6 +1976,59 @@ def _texts(soup) -> list:
 # where the change begins: a diff of a longer stretch costs seconds.
 LONE_DIFF_MAX = 2000
 LONE_CONTEXT = 40
+
+
+class _Shift:
+    """Where an offset in the text `old` lands in the text `new`, by the words around it: the same offset
+    before the first change and after the last, and inside the changed part after the same words when they
+    are still there, else before the words after it when those are, else after the last words before it that
+    are. Where the changed part is longer than LONE_DIFF_MAX, two edits far apart, by the LONE_CONTEXT
+    letters on either side of it, if they are there once; else the start of the change."""
+
+    def __init__(self, old: str, new: str):
+        self.old, self.new = old, new
+        pre = 0
+        while pre < min(len(old), len(new)) and old[pre] == new[pre]:
+            pre += 1
+        suf = 0
+        while suf < min(len(old), len(new)) - pre and old[-1 - suf] == new[-1 - suf]:
+            suf += 1
+        self.pre, self.suf = pre, suf
+
+    @cached_property
+    def same(self) -> list:
+        """The runs of letters the changed parts of `old` and `new` share, as difflib's (a, b, size), counted
+        from the start of each changed part. Diffed once, and only when an offset falls inside the change."""
+        old, new, pre, suf = self.old, self.new, self.pre, self.suf
+        return [m for m in difflib.SequenceMatcher(None, old[pre:len(old) - suf], new[pre:len(new) - suf],
+                                                   autojunk=False).get_matching_blocks() if m.size]
+
+    def where(self, offset: int) -> int:
+        """Where `offset`, a place in `old`, lands in `new`."""
+        old, new, pre, suf = self.old, self.new, self.pre, self.suf
+        if offset <= pre:
+            return offset
+        if offset >= len(old) - suf:
+            return offset + len(new) - len(old)
+        a0, b0, a1, b1 = pre, pre, len(old) - suf, len(new) - suf
+        if max(a1 - a0, b1 - b0) > LONE_DIFF_MAX:
+            # Two edits far apart: the words around it, if they are there once.
+            left, right = old[max(a0, offset - LONE_CONTEXT):offset], old[offset:offset + LONE_CONTEXT]
+            for ctx, off in ((left + right, len(left)), (left, len(left)), (right, 0)):
+                if ctx and new.count(ctx, b0, b1) == 1:
+                    return new.index(ctx, b0, b1) + off
+            return pre
+        # After the same words when they are still there, else before the words after it when those
+        # are, else after the last words before it that are.
+        offset, k = offset - a0, b0
+        for a, b, n in self.same:
+            if a < offset <= a + n:
+                return b0 + b + offset - a
+            if a + n <= offset:
+                k = b0 + b + n
+        return next((b0 + b for a, b, n in self.same if a == offset), k)
+
+
 _ENCLOSED = ("code", "pre")
 # A comment's placeholder (`_convert_with_comments`) is text on the page side only.
 _COMMENT_TOKEN = re.compile("(?<!\u27e6)RDCMT[0-9A-F]{10}(?!\u27e7)")
@@ -1998,7 +2051,6 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
     source: {placeholder: the tag's bytes}. The browser drops a closing tag with no opener, so the
     page holds no element for it; its place is found in the page's words, against a render of the
     source with the tag written as its placeholder, and on the same side of the elements around it."""
-    import difflib
     import json
 
     from bs4 import BeautifulSoup, Comment, NavigableString
@@ -2021,7 +2073,7 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
         if len(parts) > 1:
             t.replace_with(*(NavigableString(x) for x in parts))
     texts = _texts(src)
-    old, at = "", []
+    old, sites = "", []
     for i, t in enumerate(texts):
         if str(t) not in placed:
             old += t
@@ -2038,7 +2090,7 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
         climb = sum(id(u) not in ups for u in side.parents) if side is not None else 0
         # The spaces between the words before it and the tag, in the same text.
         gap = len(before) - len(before.rstrip()) if before is not None and before.strip() else 0
-        at.append((len(old), str(t), before is not None, climb, gap))
+        sites.append((len(old), str(t), before is not None, climb, gap))
     # A line break of the render and of the page is a space to the diff.
     old = re.sub(r"\s", " ", old)
     words = [_COMMENT_TOKEN.sub("", t) for t in _texts(soup)]
@@ -2050,40 +2102,7 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
     for w in words:
         cum += len(w)
         edges.add(cum)
-    pre = 0
-    while pre < min(len(old), len(new)) and old[pre] == new[pre]:
-        pre += 1
-    suf = 0
-    while suf < min(len(old), len(new)) - pre and old[-1 - suf] == new[-1 - suf]:
-        suf += 1
-    same = None
-
-    def where(o):
-        nonlocal same
-        if o <= pre:
-            return o
-        if o >= len(old) - suf:
-            return o + len(new) - len(old)
-        a0, b0, a1, b1 = pre, pre, len(old) - suf, len(new) - suf
-        if max(a1 - a0, b1 - b0) > LONE_DIFF_MAX:
-            # Two edits far apart: the words around it, if they are there once.
-            left, right = old[max(a0, o - LONE_CONTEXT):o], old[o:o + LONE_CONTEXT]
-            for ctx, off in ((left + right, len(left)), (left, len(left)), (right, 0)):
-                if ctx and new.count(ctx, b0, b1) == 1:
-                    return new.index(ctx, b0, b1) + off
-            return pre
-        if same is None:
-            same = [m for m in difflib.SequenceMatcher(None, old[a0:a1], new[b0:b1], autojunk=False)
-                    .get_matching_blocks() if m.size]
-        # After the same words when they are still there, else before the words after it when those
-        # are, else after the last words before it that are.
-        o, k = o - a0, b0
-        for a, b, n in same:
-            if a < o <= a + n:
-                return b0 + b + o - a
-            if a + n <= o:
-                k = b0 + b + n
-        return next((b0 + b for a, b, n in same if a == o), k)
+    where = _Shift(old, new).where
 
     def between_words(o, back, gap):
         # The diff matches letters: where the word before it was replaced, it can point into the new
@@ -2109,7 +2128,7 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
     # From the end, so that the offsets still to place stay where they were; of two at one place, the
     # second goes first and the first lands before it.
     for o, p, back, climb in reversed(sorted(((between_words(o, back, gap), p, back, climb)
-                                              for o, p, back, climb, gap in at), key=lambda x: x[0])):
+                                              for o, p, back, climb, gap in sites), key=lambda x: x[0])):
         cum, spot = 0, None
         for t in _texts(soup):
             kept = _kept(str(t))
@@ -2421,7 +2440,7 @@ def _close_up(blocks, touched, dropped) -> None:
                 a.gap = "\n" + LIST_BREAK + "\n\n"
 
 
-def _span_text(blocks, i: int, n: int) -> str:
+def _width_text(blocks, i: int, n: int) -> str:
     """Blocks i to i + n - 1 as the content of one: their text, without the blank lines after the last."""
     return "".join(x.text for x in blocks[i:i + n - 1]) + blocks[i + n - 1].content
 
@@ -2429,13 +2448,13 @@ def _span_text(blocks, i: int, n: int) -> str:
 def _join(blocks, i: int, n: int) -> None:
     """Blocks i to i + n - 1 as one, in block i, the others left empty so that every index holds."""
     b, last = blocks[i], blocks[i + n - 1]
-    b.content = _span_text(blocks, i, n)
+    b.content = _width_text(blocks, i, n)
     b.gap = last.gap
     for x in blocks[i + 1:i + n]:
         x.content = x.gap = ""
 
 
-def apply_edits(md_text: str, edits, _tomb: str = "", _span: int = 1, _named: bool = False):
+def apply_edits(md_text: str, edits, _tomb: str = "", _width: int = 1, _named: bool = False):
     """Splice edited blocks into the source. Returns (new_text, report).
 
     `edits` is an iterable of {"i": block index, "html": edited fragment}.
@@ -2443,10 +2462,10 @@ def apply_edits(md_text: str, edits, _tomb: str = "", _span: int = 1, _named: bo
     block whose edit only flipped task marks, its (old, new) content: the hub's Share and Stop James
     count only those (SPEC 9.11).
 
-    `_tomb` and `_span`, for `merge_edits`, which passes one edit: an emptied block becomes this
+    `_tomb` and `_width`, for `merge_edits`, which passes one edit: an emptied block becomes this
     one line instead of going, so the block count and every index stay as they were; the edit
-    takes the place of the `_span` blocks from its index, which the page's own earlier save made
-    of the one block the page still shows (`_own_span`). The page never sends a span. `_named`, for
+    takes the place of the `_width` blocks from its index, which the page's own earlier save made
+    of the one block the page still shows (`_own_span`). The page never sends a width. `_named`, for
     `merge_edits` too: its footnote refs are named already, against the base (`_name_notes`).
     """
     blocks = split_md_blocks(md_text)
@@ -2456,15 +2475,15 @@ def apply_edits(md_text: str, edits, _tomb: str = "", _span: int = 1, _named: bo
     for e in (edits if _named else _name_notes(md_text, edits)):
         i = int(e["i"])
         toggled.pop(i, None)            # a later edit of the block decides what it holds
-        if not (0 <= i and i + _span <= len(blocks)):
+        if not (0 <= i and i + _width <= len(blocks)):
             skipped.append((i, "no such block"))
             continue
-        locked = next((x for x in blocks[i:i + _span] if not x.editable), None)
+        locked = next((x for x in blocks[i:i + _width] if not x.editable), None)
         if locked is not None:
             skipped.append((i, f"{locked.kind} blocks are not editable"))
             continue
-        if _span > 1:
-            _join(blocks, i, _span)
+        if _width > 1:
+            _join(blocks, i, _width)
         b = blocks[i]
         if _unchanged(b, e["html"]):
             continue
@@ -2626,26 +2645,26 @@ def _pair(base: list, cur: list, placed=None) -> list:
 
 
 class _Row(NamedTuple):
-    """A row of `_rows`: `own`, the index of a block among the page's own, or None for one the other side
+    """A row of `_rows`: `page`, the index of a block among the page's own, or None for one the other side
     added; `other`, its index on the other side, or None for one that side does not have; and `how`:
     "same" (the same words), "changed" (paired by their words or place), "gone" or "added"."""
-    own: int | None
+    page: int | None
     other: int | None
     how: str
 
 
-def _rows(own: list, other: list, pair) -> list:
-    """The blocks of `own` against those of `other` (each as its words, comments aside), in order, as
+def _rows(page: list, other: list, pair) -> list:
+    """The blocks of `page` against those of `other` (each as its words, comments aside), in order, as
     `_Row`s; `pair` pairs those that are not the same."""
     from difflib import SequenceMatcher
 
     rows = []
-    for tag, a1, a2, b1, b2 in SequenceMatcher(None, own, other, autojunk=False).get_opcodes():
+    for tag, a1, a2, b1, b2 in SequenceMatcher(None, page, other, autojunk=False).get_opcodes():
         if tag == "equal":
             rows += [_Row(a1 + d, b1 + d, "same") for d in range(a2 - a1)]
             continue
         b = b1
-        for d, p in enumerate(pair(own[a1:a2], other[b1:b2])):
+        for d, p in enumerate(pair(page[a1:a2], other[b1:b2])):
             if p is None:
                 rows.append(_Row(a1 + d, None, "gone"))
                 continue
@@ -2656,15 +2675,15 @@ def _rows(own: list, other: list, pair) -> list:
     return rows
 
 
-def _by_own(rows, n: int):
+def _by_page(rows, n: int):
     """`_rows` read by the page's n own blocks: the row of each, and for each of the n + 1 places before,
     between and after them the indices of the blocks the other side added there."""
     each, added, k = [None] * n, [[] for _ in range(n + 1)], 0
     for r in rows:
-        if r.own is None:
+        if r.page is None:
             added[k].append(r.other)
         else:
-            each[r.own], k = r, r.own + 1
+            each[r.page], k = r, r.page + 1
     return each, added
 
 
@@ -2725,14 +2744,14 @@ def _insert_comment(md_text: str, j: int, raw: str, quote: str, nth: int = 0) ->
     if own_line:
         end = start + len(b.content)
         lead = "" if b.content.endswith("\n") else "\n"
-        at = end + len(lead) + 1
+        pos = end + len(lead) + 1
         out = md_text[:end] + lead + "\n" + raw + "\n" + md_text[end:]
     else:
-        at = start + at_off
-        out = md_text[:at] + raw + md_text[at:]
+        pos = start + at_off
+        out = md_text[:pos] + raw + md_text[pos:]
     offset = 0
     for x in split_md_blocks(out):
-        if at < offset + len(x.text):
+        if pos < offset + len(x.text):
             if x.kind in rdc.CODE_KINDS:
                 return md_text[:start] + raw + "\n\n" + md_text[start:]
             break
@@ -2956,7 +2975,7 @@ def _restore(text, blocks, j, i, base, html, tomb, at, avoid, changed, skipped, 
 
 
 def _apply_one(md: str, html: str, **kw):
-    """`apply_edits` of one edit, to the first block of `md` (and the `_span` after it, if given), its footnote
+    """`apply_edits` of one edit, to the first block of `md` (and the `_width` after it, if given), its footnote
     refs named already by `merge_edits`."""
     return apply_edits(md, [{"i": 0, "html": html}], _named=True, **kw)
 
@@ -2987,21 +3006,21 @@ def _alike(o, c) -> bool:
     return c.editable and o.kind == c.kind and _said(o) == _said(c)
 
 
-def _own_span(own, file_blocks, j: int):
+def _own_span(page_blocks, file_blocks, j: int):
     """(first, count) of the `file_blocks` that are the page's own last save of a base block, its
-    blocks `own` (`_own_blocks`): not a change made in the file; None when the file does not hold them
+    blocks `page_blocks` (`_own_blocks`): not a change made in the file; None when the file does not hold them
     so. Block j, which the merge paired with the base block, is one of them."""
-    n = len(own)
+    n = len(page_blocks)
     for first in range(min(j, len(file_blocks) - n), max(j - n + 1, 0) - 1, -1):
-        if all(_alike(o, c) for o, c in zip(own, file_blocks[first:first + n])):
+        if all(_alike(o, c) for o, c in zip(page_blocks, file_blocks[first:first + n])):
             return first, n
     return None
 
 
-def _own_rows(own, file_blocks, j: int, free):
-    """The page's own last save of a base block, `own` (several blocks), where the file has since changed
+def _own_rows(page_blocks, file_blocks, j: int, free):
+    """The page's own last save of a base block, `page_blocks` (several blocks), where the file has since changed
     one of them or put a block among them: read around file block j over the blocks that `free` says no
-    other base block has, as `_rows` with file block indices, a block of `own` paired with a file block
+    other base block has, as `_rows` with file block indices, a block of `page_blocks` paired with a file block
     it does not equal only by their words. None unless block j is one of them, one at least still says
     the page's words, and the file changed one or put one among them."""
     lo = hi = j
@@ -3010,18 +3029,18 @@ def _own_rows(own, file_blocks, j: int, free):
     while hi + 1 < len(file_blocks) and free(hi + 1):
         hi += 1
     rows = [r if r.other is None else r._replace(other=lo + r.other)
-            for r in _rows([_said(o) for o in own], [_said(c) for c in file_blocks[lo:hi + 1]], _align)]
-    ends = [r.other for r in rows if r.own is not None and r.other is not None]
+            for r in _rows([_said(o) for o in page_blocks], [_said(c) for c in file_blocks[lo:hi + 1]], _align)]
+    ends = [r.other for r in rows if r.page is not None and r.other is not None]
     if not ends:
         return None
     # The blocks the file added before the first of them or after the last are not among them.
     rows = [r for r in rows if r.other is None or ends[0] <= r.other <= ends[-1]]
     how = {r.other: r.how for r in rows if r.other is not None}
-    deleted = any(r.other is None and r.own is not None for r in rows)
+    deleted = any(r.other is None and r.page is not None for r in rows)
     if (how.get(j) not in ("same", "changed") or "same" not in how.values()
             or not ({"changed", "added"} & set(how.values()) or deleted)):
         return None
-    if any(r.how == "same" and not _alike(own[r.own], file_blocks[r.other])
+    if any(r.how == "same" and not _alike(page_blocks[r.page], file_blocks[r.other])
            or r.how == "changed" and not file_blocks[r.other].editable for r in rows):
         return None
     return rows
@@ -3042,7 +3061,7 @@ def _marks(text: str):
     return Counter(c.id for c in rdc.parse(text).comments), Counter(_foreign_comments(text))
 
 
-def _own_merge(region, first: int, rows, own, j: int, html: str, held):
+def _own_merge(region, first: int, rows, page_blocks, j: int, html: str, held):
     """The edit of a base block over `region`, the file blocks from `first` on, which hold the page's own
     last save of it as `rows` (`_own_rows`). The edit takes the place of the page's own blocks, and the
     blocks the file put among them stay where they are. A block of the page's own the file changed (block j, the
@@ -3055,15 +3074,15 @@ def _own_merge(region, first: int, rows, own, j: int, html: str, held):
     and the edit goes where the merge put it."""
     rows = [r if r.other is None else r._replace(other=r.other - first) for r in rows]
     j -= first          # from here on the blocks are counted in the region
-    mine = [r.other for r in rows if r.how in ("same", "changed")]
-    span = "".join(region[x].text for x in mine)
-    content, lifted = _lift(span, held)
-    edit_text, rep = _apply_one(content, html, _span=len(mine))
+    matched = [r.other for r in rows if r.how in ("same", "changed")]
+    matched_text = "".join(region[x].text for x in matched)
+    content, lifted = _lift(matched_text, held)
+    edit_text, rep = _apply_one(content, html, _width=len(matched))
     edited = split_md_blocks(edit_text)
     if rep["skipped"] or not any(_bare(b.content) for b in edited):
         return None
-    in_file, file_added = _by_own(rows, len(own))
-    in_edit, edit_added = _by_own(_rows([_said(o) for o in own], [_said(b) for b in edited], _pair), len(own))
+    in_file, file_added = _by_page(rows, len(page_blocks))
+    in_edit, edit_added = _by_page(_rows([_said(o) for o in page_blocks], [_said(b) for b in edited], _pair), len(page_blocks))
     pieces, kept, notes, said = [], set(), [], []
     owed = []         # the file's words of the blocks it changed, for the notes on the next block of the edit's
 
@@ -3079,7 +3098,7 @@ def _own_merge(region, first: int, rows, own, j: int, html: str, held):
             notes.extend((len(pieces) - 1, words) for words in owed)
             owed.clear()
 
-    for k in range(len(own)):
+    for k in range(len(page_blocks)):
         for x in file_added[k]:
             file_block(x)
         for y in edit_added[k]:
@@ -3115,10 +3134,10 @@ def _own_merge(region, first: int, rows, own, j: int, html: str, held):
         return None
     # A comment the file added goes back where its words now are, unless it is in a block of the file's kept whole.
     starts, offset = [], 0
-    for x in mine:
+    for x in matched:
         starts.append((offset, x))
         offset += len(region[x].text)
-    text, lost = _put_lifted(text, [x for x in lifted if [y for at, y in starts if at <= x[2].start][-1] not in kept],
+    text, lost = _put_lifted(text, [x for x in lifted if [y for start, y in starts if start <= x[2].start][-1] not in kept],
                              0, len(pieces) - 1)
     if len(split_md_blocks(text)) != len(pieces):
         return None
@@ -3155,14 +3174,14 @@ def _both_note(words: str) -> str:
 
 
 class _Step(NamedTuple):
-    """One edit of a merge as it is written: at file block `at`, in `mode`, the edit of base block `i`
-    with its `html`, over `span` file blocks; `merged`, the text `_own_merge` made of them with its notes,
+    """One edit of a merge as it is written: at file block `start`, in `mode`, the edit of base block `i`
+    with its `html`, over `width` file blocks; `merged`, the text `_own_merge` made of them with its notes,
     and `back`, the (block, mode) where the merge put the edit, for when that text no longer fits."""
-    at: int
+    start: int
     mode: str
     i: int
     html: str
-    span: int = 1
+    width: int = 1
     merged: tuple | None = None
     back: tuple | None = None
 
@@ -3210,7 +3229,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
         plan = {i: ((1, mode) if mode == "gone" and j == 0 else (j, mode)) for i, (j, mode) in plan.items()}
 
     # Each edit as a `_Step`. The edit of a block the merge paired takes the place of the page's own save of it,
-    # all `span` of its blocks, when the merge paired none of them with another base block, no other edit has
+    # all `width` of its blocks, when the merge paired none of them with another base block, no other edit has
     # taken one of them and none is put back among them or, coming after it on the page, before them (a paragraph
     # the file deleted); else it goes where the merge put it. One the merge put back as deleted stays so: two such
     # edits can find the same file block for their own. Where the file changed one of several blocks of the page's
@@ -3222,7 +3241,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
 
     claims_of, page_of = {}, {}     # by base block k / by edit (i, html): a conversion, which `moves` asks for per file block
 
-    def moves(x, i, own, html):
+    def moves(x, i, page_blocks, html):
         """Does file block x go to edit i from the base block the merge paired it with by its place alone? It
         says what one of the page's own blocks of block i says: that base block was deleted in the file, unless
         its own edit of this save claims the block. The file may also have written the page's words over it,
@@ -3231,7 +3250,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
         k = paired.get(x)
         if k is None or k == i or k not in placed:
             return False
-        if not any(_alike(o, cb[x]) for o in own):
+        if not any(_alike(o, cb[x]) for o in page_blocks):
             return False
         if k not in claims_of:
             claims_of[k] = _own_blocks(bb[k], by_i[k].get("saved")) if k in by_i else None
@@ -3247,17 +3266,17 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
     for e in edits:
         i = int(e["i"])
         j, mode = plan[i]
-        span, place, rows, merged, back = 1, None, None, None, None
-        own = None if mode == "gone" else _own_blocks(bb[i], e.get("saved"))
-        if own:
+        width, place, rows, merged, back = 1, None, None, None, None
+        page_blocks = None if mode == "gone" else _own_blocks(bb[i], e.get("saved"))
+        if page_blocks:
             def free(x):
-                return x not in taken and (paired.get(x, i) == i or moves(x, i, own, e["html"]))
+                return x not in taken and (paired.get(x, i) == i or moves(x, i, page_blocks, e["html"]))
 
-            place = _own_span(own, cb, j)
+            place = _own_span(page_blocks, cb, j)
             if place and not all(free(x) for x in range(place[0], sum(place))):
                 place = None
-            if not place and len(own) > 1:
-                rows = _own_rows(own, cb, j, free)
+            if not place and len(page_blocks) > 1:
+                rows = _own_rows(page_blocks, cb, j, free)
                 # A block that moves to this edit says the page's words; one the file changed stays the other's.
                 if rows and all(r.how == "same" for r in rows if r.other is not None and paired.get(r.other, i) != i):
                     xs = [r.other for r in rows if r.other is not None]
@@ -3270,7 +3289,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
             place = None
         if place and rows:
             held = {_identity(c) for c in rdc.parse(bb[i].content).comments}
-            merged = _own_merge(cb[place[0]:sum(place)], place[0], rows, own, j, e["html"], held)
+            merged = _own_merge(cb[place[0]:sum(place)], place[0], rows, page_blocks, j, e["html"], held)
             place, back = (place, (j, mode)) if merged else (None, None)
         if place:
             first, n = place
@@ -3283,20 +3302,20 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
                     if k in by_i:
                         put_back.append((plan[k][0], k))
                     if k in in_todo:
-                        todo[in_todo[k]] = _Step(at=first, mode="gone", i=k, html=by_i[k]["html"])
+                        todo[in_todo[k]] = _Step(start=first, mode="gone", i=k, html=by_i[k]["html"])
                 paired[x] = i
             for g, gi in among:
                 plan[gi] = (first + n, "gone")
                 put_back[put_back.index((g, gi))] = (first + n, gi)
             taken |= set(range(first, first + n))
-            j, mode, span = first, "same", n
+            j, mode, width = first, "same", n
         in_todo[i] = len(todo)
-        todo.append(_Step(at=j, mode=mode, i=i, html=e["html"], span=span, merged=merged, back=back))
+        todo.append(_Step(start=j, mode=mode, i=i, html=e["html"], width=width, merged=merged, back=back))
     # From the end backwards, so every target index still points where it did.
     # At a shared index the block that is there goes first and the re-inserted
     # ones after it, later base blocks first, so each lands before it and they
     # keep their order.
-    todo.sort(key=lambda t: (t.at, t.mode != "gone", t.i), reverse=True)
+    todo.sort(key=lambda t: (t.start, t.mode != "gone", t.i), reverse=True)
 
     # A deleted paragraph keeps its place as this line until the last edit is in. Taken
     # out at once it can leave its neighbours one block (two lists, say), and the next
@@ -3306,12 +3325,12 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
         tomb = f"<!--sheaf-merge-{os.urandom(6).hex()}-->"
     text, changed, skipped, conflicts, toggled = cur_text, [], [], [], []
     for t in todo:
-        j, mode, i, html, span = t.at, t.mode, t.i, t.html, t.span
+        j, mode, i, html, width = t.start, t.mode, t.i, t.html, t.width
         blocks = split_md_blocks(text)
         if t.merged:
             region, notes = t.merged
             # An empty region keeps its place as the tomb line, as a deleted block does, until the last edit is in.
-            done = _splice(text, blocks, j, span, region or tomb + "\n")
+            done = _splice(text, blocks, j, width, region or tomb + "\n")
             if done is not None:
                 if done != text:
                     changed.append(i)
@@ -3321,7 +3340,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
                 if notes:
                     conflicts.append({"i": i, "kind": "both"})
                 continue
-            (j, mode), span = t.back, 1
+            (j, mode), width = t.back, 1
         if mode == "gone":
             # Deleted on disk while being edited here. The edit is made on the base
             # block alone, so it cannot meet the file's text, and what it says is put
@@ -3352,21 +3371,21 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
         # the id of a comment the file deleted is new, and the page's anchor for the old one
         # must not be bound to it.
         held = {_identity(c) for c in rdc.parse(bb[i].content).comments}
-        mine = _span_text(blocks, j, span)
+        current = _width_text(blocks, j, width)
         # A box counts as ticked by this save (SPEC 9.11) only when the file's block is still the one the
         # page held: else the page's boxes are compared with boxes someone else changed since.
-        as_held = span == 1 and mine == bb[i].content
-        content, lifted = _lift(mine, held)
+        as_held = width == 1 and current == bb[i].content
+        content, lifted = _lift(current, held)
         if lifted:
             pos = sum(len(x.text) for x in blocks[:j])
-            text = text[:pos] + content + text[pos + len(mine):]
+            text = text[:pos] + content + text[pos + len(current):]
         n_before = len(split_md_blocks(text))
-        text, rep = apply_edits(text, [{"i": j, "html": html}], _tomb=tomb, _span=span, _named=True)
+        text, rep = apply_edits(text, [{"i": j, "html": html}], _tomb=tomb, _width=width, _named=True)
         skipped += [(i, why) for _, why in rep["skipped"]]
         if as_held:
             toggled += rep["toggled"]
-        # The edit of `span` blocks is now blocks j .. j + grown.
-        grown = len(split_md_blocks(text)) - n_before + span - 1
+        # The edit of `width` blocks is now blocks j .. j + grown.
+        grown = len(split_md_blocks(text)) - n_before + width - 1
         if rep["changed"] and (j in rep["deleted"] or not _bare(split_md_blocks(text)[j].content)):
             # The page deleted this paragraph. What the file put on it is not hidden
             # by that: the comments, and the note about the file's version, become

@@ -47,3 +47,16 @@ def test_a_line_typed_in_a_task_item_counts_only_comments_as_placeholders(line, 
     html = page_fragment(src + NOTE).split("</ul>")[0] + "</ul>"
     out = saved(src, html.replace("</li>", f"<div>{line}</div></li>", 1))
     assert out == "- [ ] eggs[^1] here\n" + want
+
+
+# Ticket 183 BC: placing a closing tag with no opener counts the page's words the same way, with words of a
+# placeholder's shape the text held among them.
+@pytest.mark.parametrize("src", ["Before RDCMT0123456789</x1> here.",
+                                 "Before RDCMT0123456789</x1>RDCMT0123456789 here.",
+                                 "x <x1>RDCMT0123456789</x2> here.",
+                                 "- a RDCMT0123456789</x1>\n- b here"])
+def test_a_closing_tag_with_no_opener_stays_in_place_beside_a_word_of_a_placeholder_s_shape(src):
+    html = page_fragment(src).replace("here", "there")
+    out, rep = rde.apply_edits("# Title\n\n" + src + "\n", [{"i": 1, "html": html}])
+    assert rep["skipped"] == []
+    assert out == "# Title\n\n" + src.replace("here", "there") + "\n"

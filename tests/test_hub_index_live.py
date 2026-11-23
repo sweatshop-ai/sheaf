@@ -18,6 +18,7 @@ from sheafmd.hub import events
 from sheafmd.hub import index as index_mod
 from sheafmd.hub import roots as roots_mod
 from sheafmd.hub import server
+from sheafmd.hub import state
 from sheafmd.hub.core import Hub
 from sheafmd.source import md_hash
 
@@ -1249,6 +1250,57 @@ def test_a_forget_does_not_hold_the_hubs_lock_while_a_render_of_its_document_run
         renderer.join(5)
         forgetting.join(5)
     assert not forgetting.is_alive()
+
+
+def test_a_text_stored_while_the_registry_lets_the_root_go_is_not_taken_by_the_late_forget(world, put, monkeypatch):
+    """Ticket 182, follow-up of #611: a store that takes no lock of the forget's (a landing's) writes, just after the registry
+    let the root go, the text the forgotten document wrote. The document's forget must leave it: that write may be
+    the folder's that takes the name, so the watch is open before the name is let go."""
+    put("a.md")
+    e = world.hub.entry("work/a.md")
+    text = e.live._text
+    forget = roots_mod.forget
+
+    def letting_go(*args, **kwargs):
+        root = forget(*args, **kwargs)
+        world.hub.versions.put("work/a.md", text)
+        return root
+    monkeypatch.setattr(roots_mod, "forget", letting_go)
+    assert world.hub.forget_root("work").name == "work"
+    assert world.hub.versions.get("work/a.md", md_hash(text)) == text
+
+
+def test_a_forget_whose_registry_write_fails_leaves_the_roots_documents_as_they_were(world, put, monkeypatch):
+    """The watches open before the registry lets go; when it cannot (its file is not written), the root stays, and so do
+    its documents: their watch ends and their texts reach the store again."""
+    put("a.md")
+    e = world.hub.entry("work/a.md")
+
+    def failing(*args, **kwargs):
+        raise OSError("no space left on device")
+    monkeypatch.setattr(roots_mod, "forget", failing)
+    with pytest.raises(OSError):
+        world.hub.forget_root("work")
+    assert world.hub.entries.get("work/a.md") is e and not state.Versions._claims
+    text = "# Written after the failed forget\n"
+    e.live._remember(text)
+    assert world.hub.versions.get("work/a.md", md_hash(text)) == text
+
+
+def test_one_documents_forget_that_raises_does_not_keep_the_others_of_the_root_from_theirs(world, put, monkeypatch):
+    """Ticket 182, follow-up of #611: one entry's forget raises. The others of the root are forgotten all the same (their
+    watch ends, their pages are told `gone`), and the failure is a row in the diagnostics log."""
+    put("a.md")
+    put("b.md")
+    a, b = world.hub.entry("work/a.md"), world.hub.entry("work/b.md")
+    told = []
+    b.bus.publish = lambda name, data: told.append(name)
+    monkeypatch.setattr(a.live, "forget", lambda: 1 / 0)
+    assert list(world.hub.entries).index("work/a.md") < list(world.hub.entries).index("work/b.md")    # a's forget first
+    world.hub.forget_root("work")
+    assert "gone" in told
+    assert world.hub.versions._folder("work/b.md") not in state.Versions._claims
+    assert any(r.get("kind") == "forget-failed" for r in diagnostics.read())
 
 
 def test_a_late_forget_leaves_the_versions_of_the_folder_that_took_the_name(world, put, tmp_path):

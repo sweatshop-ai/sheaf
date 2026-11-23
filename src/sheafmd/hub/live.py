@@ -528,12 +528,25 @@ class LiveDocument:
         """Its root was forgotten (SPEC 8.2), and the hub must not wait for this document's lock to say so: from now
         on its texts stay in memory, and none reaches the store. Takes no lock. A write already under way may still
         put its text there, so `forget` then takes out what this document wrote, and no more: the folder that takes
-        the name next has versions of its own under the address."""
+        the name next has versions of its own under the address. Once: a second call keeps the store, and the watch,
+        of the first (a store that follows the file may resolve to another folder by then)."""
+        if self._detached:
+            return
         store = self._store
         self._detached_store = store() if callable(store) else store
-        if self._detached_store is not None and self._address is not None and not self._detached:
-            self._detached_store.watch(self._address)      # before the name can be taken: who stores what from now on
+        if self._detached_store is not None and self._address is not None:
+            self._detached_store.watch(self._address, self)     # before the name can be taken: who stores what from now on
         self._detached = True
+
+    def reattach(self):
+        """`detach` taken back: the root it was for stays (its forget failed before the name was let go). The watch
+        ends, nothing is deleted, and the texts it hands out reach the store again from now on."""
+        if not self._detached:
+            return
+        store, self._detached_store = self._detached_store, None
+        self._detached = False
+        if store is not None and self._address is not None:
+            store.forget_texts(self._address, (), writer=self)
 
     def forget(self):
         """Its root was forgotten (SPEC 8.2): drop its versions on disk, and keep the texts it hands out in
@@ -545,8 +558,10 @@ class LiveDocument:
             store = self._detached_store if detached else self._stored()
             if store is not None and self._address is not None:
                 if detached:
-                    store.forget_texts(self._address, self._written, writer=self)
-                    self._detached_store = None         # its watch is ended: a second forget must not end another's
+                    try:
+                        store.forget_texts(self._address, self._written, writer=self)
+                    finally:
+                        self._detached_store = None     # its watch is ended, also when it raised: a second forget ends none
                 else:
                     store.forget(self._address)
             self._store = None

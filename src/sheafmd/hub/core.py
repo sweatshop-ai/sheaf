@@ -1062,11 +1062,23 @@ class Hub:
     def _let_go_root(self, name: str):
         """(the root, the entries popped) of `forget_root`: the name let go, under the moves' lock and the hub's."""
         with self._lock:
-            root = roots_mod.forget(self.roots, self.docs, self.seen, self.versions, name,
-                                    members=self.member_seen)
-            self.member_opened.forget_prefix(roots_mod.Address.prefix(name))
-            self.shared_ids.forget_prefix(roots_mod.Address.prefix(name))
-            self.forwards.forget_prefix(roots_mod.Address.prefix(name))
+            prefix = roots_mod.Address.prefix(name)
+            held = [a for a in self.entries if a.startswith(prefix)]
+            # Before the registry lets go: from then on another folder may take the name and write versions at these
+            # addresses, through a store that takes no lock of this forget (a landing's), and the watch must be open by
+            # then for the late forget to leave them (`LiveDocument.detach`).
+            for a in held:
+                self.entries[a].live.detach()   # no wait for its lock here: a render holds it for up to 120 s
+            try:
+                root = roots_mod.forget(self.roots, self.docs, self.seen, self.versions, name,
+                                        members=self.member_seen)
+            except BaseException:
+                for a in held:          # the root stays, and so do its documents' versions
+                    self.entries[a].live.reattach()
+                raise
+            self.member_opened.forget_prefix(prefix)
+            self.shared_ids.forget_prefix(prefix)
+            self.forwards.forget_prefix(prefix)
             # After the registry lets go (a Tell queued from now on is refused, `Waiting.queue`) and before the
             # entries go, so the pages open on them hear `tell-cancelled` ahead of `gone`. A failure here must not
             # keep the root from being forgotten.
@@ -1075,16 +1087,14 @@ class Hub:
                 self.session_tells.end_root(name, "the folder was forgotten")
             except Exception:
                 self.record_exception("tell-end-failed")
-            popped = []
-            for address in [a for a in self.entries if a.startswith(roots_mod.Address.prefix(name))]:
-                e = self.entries.pop(address)
-                e.live.detach()         # no wait for its lock here: a render holds it for up to 120 s
-                popped.append((address, e))
+            popped = [(a, self.entries.pop(a)) for a in [a for a in self.entries if a.startswith(prefix)]]
+            for _, e in popped:
+                e.live.detach()         # a no-op for those detached above
             # A Tell still running on a document that is gone: its dot, its
             # answer and its wait have nowhere to go, and the name may be taken at once. Also
             # when the registry no longer holds the root (another process forgot it, and this hub
             # reloaded the file): its entries were popped above all the same.
-            self.runner.cancel_under(roots_mod.Address.prefix(name))
+            self.runner.cancel_under(prefix)
             if root is not None:
                 self.index.forgot(name)
         return root, popped
@@ -1095,7 +1105,10 @@ class Hub:
         a cancel) in that time would wait with it. What each document wrote goes from the store (`LiveDocument.detach`),
         never the versions of the folder that takes the name meanwhile."""
         for address, e in popped:
-            e.live.forget()
+            try:
+                e.live.forget()
+            except Exception:       # one document's failure keeps no other from its forget, and no page from `gone`
+                self.record_exception("forget-failed", address)
             # After that write's own `changed`, which the page takes in first.
             e.bus.publish("gone", {"doc": address})
 

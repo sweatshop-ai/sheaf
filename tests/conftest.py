@@ -250,6 +250,16 @@ def no_real_sockets_folder(tmp_path, own_patches):
 
 
 @pytest.fixture(autouse=True)
+def no_claims_left():
+    """`state.Versions._claims`, the record of a late forget's watch, is one dict of the class for the whole process:
+    each test starts and ends with it empty, so a watch one test leaves open is never seen, or ended, by the next."""
+    from sheafmd.hub import state
+    state.Versions._claims.clear()
+    yield
+    state.Versions._claims.clear()
+
+
+@pytest.fixture(autouse=True)
 def port(sheaf_env, own_patches):
     """A free port of this test's own, held until the test ends (helpers.claim_port): a hub that a
     command starts never lands on 27419, which is the port of the hub of whoever runs the suite, and

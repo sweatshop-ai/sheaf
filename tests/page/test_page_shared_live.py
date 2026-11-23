@@ -2,7 +2,9 @@
 each sheaf tab held one for its event stream: the seventh page never loaded, and a comment sent
 from any tab waited for ever. The tabs now share one stream (page/live.js): the seventh loads at
 once, the hub counts every tab, and a change on disk still reaches all of them."""
+import re
 import time
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 
@@ -341,4 +343,33 @@ def test_a_join_refused_again_just_after_a_reopen_opens_once_more_and_closes_no_
     f = site.file
     rewrite(f, f.read_text(encoding="utf-8") + "\nOn the third connection.\n")
     until(lambda: shows(p, "On the third connection."), what="the change on the page")
+    assert errors == []
+
+
+def test_a_shared_stream_refused_409_is_opened_again_under_a_new_id(shared, site):
+    """Ticket 187 CA. Proxy mode, a member switch while the hub still holds the first member's shared stream (a
+    half-open connection hid its end): the hub answers 409 to the leader's connection under that id, for another
+    owner, until it drops the stream (up to 300 s). The browser does not retry a refused EventSource
+    (readyState 2), and the tabs join again 2 s later. A leader that kept its id asked for the same refused one each
+    time, and no tab had live updates until the hub let it go. Stood in for here: every connection under the first
+    id is answered 409."""
+    sids, refused = [], []
+
+    def refuse(route):
+        sid = parse_qs(urlparse(route.request.url).query)["shared"][0]
+        sids.append(sid)
+        if not refused:
+            refused.append(sid)
+        if sid in refused:
+            route.fulfill(status=409, content_type="application/json",
+                          body='{"ok": false, "error": "that stream belongs to another member"}')
+        else:
+            route.continue_()
+    shared.route(re.compile(r"/_/live\?shared="), refuse)
+    p, errors = opened(shared, site)
+    until(lambda: any(s not in refused for s in sids), timeout=10, what="a connection under a new id")
+    until(lambda: site.hub.tabs(DOC) == 1, timeout=10, what="the tab counted on the new connection")
+    f = site.file
+    rewrite(f, f.read_text(encoding="utf-8") + "\nOn the new id.\n")
+    until(lambda: shows(p, "On the new id."), what="the change on the page")
     assert errors == []

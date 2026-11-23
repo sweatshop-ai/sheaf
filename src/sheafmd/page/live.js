@@ -189,9 +189,15 @@
     this.es.onerror = function () {
       var s = es.readyState === 2 ? 2 : 0;
       self.open = false;
-      // Refused (401, 5xx): no browser retry comes. The tabs hear their streams closed, ask the hub why as they
-      // did, and join again; the first join opens the connection again (`take`), none opens nothing.
-      if (s === 2) { self.joined = {}; self.es = null; }
+      // Refused (401, 409, 5xx): no browser retry comes. The tabs hear their streams closed, ask the hub why as they
+      // did, and join again; the first join opens the connection again (`take`), none opens nothing. Under a new id:
+      // a 409 means the hub holds this one for another member (proxy mode, a member switch beside a stale
+      // connection) and would refuse it again until it drops that stream, up to 300 s (ticket 187 CA). A reopen still
+      // waiting for its RETRY was for the connection that just ended: it would close the one the next join opens.
+      if (s === 2) {
+        self.joined = {}; self.es = null; self.sid = rnd();
+        clearTimeout(self.again); self.again = null; self.deferred = false;
+      }
       tell({ t: 'down', s: s });
     };
     this.es.addEventListener('m', function (ev) {

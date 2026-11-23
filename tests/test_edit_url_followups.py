@@ -115,3 +115,28 @@ def test_a_bare_url_with_a_backslash_whose_parentheses_do_not_balance_keeps_its_
     out = saved(src)
     same_page(src, out)
     assert anchors(page_fragment(out)) == anchors(page_fragment(src)) != []
+
+
+# Ticket 183 BT: a failed run of the link probe is not remembered; it refuses that save, and the next one asks again.
+def test_a_failed_look_at_a_bare_url_is_not_kept_for_the_next_save(monkeypatch):
+    src = r"see http://x.com/a(\*b)) here"
+    rde._pandoc_links_bare.cache_clear()
+    real, failed = rde._pandoc.run, []
+
+    def probe_fails_once(args, text):
+        r = real(args, text)
+        if text.startswith("x http") and not failed:
+            failed.append(1)
+            r.returncode = 1
+        return r
+
+    monkeypatch.setattr(rde._pandoc, "run", probe_fails_once)
+    doc = "# Title\n\n" + src + "\n"
+    try:
+        out, rep = rde.apply_edits(doc, [{"i": 1, "html": page_fragment(src).replace("here", "there")}])
+        assert failed
+        assert out == doc
+        assert [i for i, _ in rep["skipped"]] == [1]
+        same_page(src, saved(src))
+    finally:
+        rde._pandoc_links_bare.cache_clear()

@@ -35,9 +35,10 @@ class EditError(Exception):
 
 # Transforms sheaf applies on the way out that must be undone on the way
 # back in, or the markdown would inherit presentation artefacts.
-def _sanitize(fragment: str, source=None, strays=None) -> str:
+def _sanitize(fragment: str, source=None, strays=None, comments=frozenset()) -> str:
     """`source`, the block's markdown, and `strays`, a list, are for a save: markup the browser wrote that the
-    source did not have is unwrapped, and each one is named in `strays`."""
+    source did not have is unwrapped, and each one is named in `strays`. `comments` are the placeholders of the
+    block's comments (`_convert_with_comments`)."""
     from bs4 import BeautifulSoup
 
     soup = BeautifulSoup(fragment, "html.parser")
@@ -46,7 +47,7 @@ def _sanitize(fragment: str, source=None, strays=None) -> str:
     for div in soup.select("div.tblwrap"):
         div.unwrap()
     _lines_as_paragraphs(soup)
-    _lines_as_items(soup)
+    _lines_as_items(soup, comments)
     _drop_empty_task_items(soup)
     if source is not None:
         _unwrap_strays(soup, source, strays)
@@ -359,12 +360,15 @@ def _trim_lead(li, skip: int) -> None:
         lead = nxt
 
 
-def _lines_as_items(soup) -> None:
+def _lines_as_items(soup, comments=frozenset()) -> None:
     """Each line typed after Enter in a task item, as a task item after it. The browser writes a <div> inside
     the <li>, which pandoc would keep as raw <div> lines. The line has a box of its own; one typed as
     `- [ ] words` or `- [x] words` is that box and those words. Words after a line, outside
-    any, are an item of their own, and a line with nothing in it is none."""
+    any, are an item of their own, and a line with nothing in it is none. `comments` are the placeholders of the
+    block's comments: one at the start of a line is not its words."""
     from bs4 import NavigableString
+
+    comment, leading = _placeholders(comments)
 
     def is_line(el):
         # a line that holds a heading, a quote, code or a table stays in its item, as it did
@@ -444,14 +448,14 @@ def _lines_as_items(soup) -> None:
                     work.append(item)
                     continue
                 # a comment anchored at the very start of the line is its token first in the text, not the line's words
-                token_end = _LEADING_TOKENS.match(first).end() if isinstance(first, NavigableString) else 0
+                token_end = leading.match(first).end() if isinstance(first, NavigableString) else 0
                 m = _TYPED_TASK.match(first, token_end) if isinstance(first, NavigableString) else None
                 lead_words = ""  # the words before the first list, block or line: pandoc writes a box before one as a character
                 for t in item.find_all(string=True):
                     if t.find_parent(["ul", "ol", "blockquote", "pre", "table", "div", "p"]):
                         break
                     lead_words += t
-                if m and not (_shows(_COMMENT_TOKEN.sub("", lead_words[m.end():])) or item.find("img")):
+                if m and not (_shows(comment.sub("", lead_words[m.end():])) or item.find("img")):
                     # a typed box with no words after it (a comment's token is none) is words itself, as in a paragraph: an item without a box
                     last.insert_after(item)
                     last = item
@@ -692,8 +696,13 @@ def _boxes_as_text(fragment: str) -> str:
     return str(soup)
 
 
-_COMMENT_TOKEN = re.compile(r"RDCMT[0-9A-F]{10}")  # a comment on its way through pandoc (`_convert_with_comments`)
-_LEADING_TOKENS = re.compile(r"(?:RDCMT[0-9A-F]{10})*")
+def _placeholders(tokens):
+    """(a pattern of any of `tokens`, one of a run of them). Only the placeholders `_convert_with_comments` issued
+    for the block are its placeholders: words of their shape the text held are words."""
+    one = "|".join(re.escape(t) for t in sorted(tokens)) or "(?!)"
+    return re.compile(one), re.compile(f"(?:{one})*")
+
+
 _TYPED_TASK = re.compile(r"[-*][ \u00a0]\[([ \u00a0xX])\][ \u00a0\u200b-\u200d\u2060\ufeff]+")
 _UNSEEN = re.compile(r"[\s\u200b-\u200d\u2060\ufeff]+")  # white space and the zero-width characters: nothing shows
 
@@ -713,23 +722,26 @@ def _list_beside(el, side: str):
     return sib if getattr(sib, "name", None) == "ul" else None
 
 
-def _typed_tasks(fragment: str) -> str:
+def _typed_tasks(fragment: str, comments=frozenset()) -> str:
     """A paragraph that starts `- [ ] `, `- [x] ` or `* [ ] ` was typed as a task line: it becomes a
     list item with a box, which `_boxes_as_text` and pandoc then write as `- [ ] words`. Only a top-level
     paragraph is looked at, and only the start of its text (a comment anchored at its very start is not words):
     a code block, a quote and a `[ ]` mid-sentence are words.
-    It runs before `_boxes_as_text`, which turns the boxes made here into the characters pandoc reads back."""
+    It runs before `_boxes_as_text`, which turns the boxes made here into the characters pandoc reads back.
+    `comments` are the placeholders of the block's comments; a citation's is words."""
     from bs4 import BeautifulSoup, NavigableString
+
+    comment, leading = _placeholders(comments)
 
     soup = BeautifulSoup(fragment, "html.parser")
     done = False
     for p in [el for el in soup.contents if getattr(el, "name", None) == "p"]:
         first = next(iter(p.contents), None)
         # a comment anchored at the very start of the line comes first in the text, as its token: it is not the line's words
-        token_end = _LEADING_TOKENS.match(first).end() if isinstance(first, NavigableString) else 0
+        token_end = leading.match(first).end() if isinstance(first, NavigableString) else 0
         m = _TYPED_TASK.match(first, token_end) if isinstance(first, NavigableString) else None
         # words after the box, anywhere in the paragraph: a break, a comment or an empty mark is none
-        if not m or not (_shows(_COMMENT_TOKEN.sub("", p.get_text()[m.end():])) or p.find("img")):
+        if not m or not (_shows(comment.sub("", p.get_text()[m.end():])) or p.find("img")):
             continue
         first.replace_with(NavigableString(first[:token_end] + first[m.end():]))
         box = soup.new_tag("input", type="checkbox")
@@ -926,10 +938,10 @@ def _cell_code_pipes(fragment: str):
 # A backslash before the placeholder of a comment or a citation (`_convert_with_comments`) escapes what takes its place.
 # A raw tag's placeholder (`_tags_as_text`) opens with `⟦`, which is not in the ASCII class here: a backslash before a tag
 # keeps pandoc's own handling (pinned by the controls in tests/test_edit_backslash_placeholder.py).
-_BACKSLASH_ESCAPES = re.compile(r"\\(?=[!-/:-@\[-`{-~\n]|\Z|RDCMT[0-9A-F]{10})")
+_BACKSLASH_ESCAPES = r"\\(?=[!-/:-@\[-`{-~\n]|\Z|{tokens})"
 
 
-def _text_backslashes(fragment: str):
+def _text_backslashes(fragment: str, tokens=frozenset()):
     """(the fragment with each backslash of its text that the .md would read as an escape as a token, the token
     or None). Pandoc's gfm writer leaves a backslash bare: two were saved as one, and one before a character
     the writer escapes swallowed that character. The token comes back as `\\\\`. A backslash before a letter,
@@ -944,8 +956,9 @@ def _text_backslashes(fragment: str):
     token = next((t for t in (chr(0xF800) + chr(0xF801 + k) for k in range(1024)) if t not in fragment), None)
     if not texts or token is None:
         return fragment, None
+    escapes = re.compile(_BACKSLASH_ESCAPES.replace("{tokens}", _placeholders(tokens)[0].pattern))
     for t in texts:
-        t.replace_with(NavigableString(_BACKSLASH_ESCAPES.sub(token, t)))
+        t.replace_with(NavigableString(escapes.sub(token, t)))
     return str(soup), token
 
 
@@ -1427,9 +1440,10 @@ def _line_marks(fragment: str):
     return (str(soup), mark) if found else (fragment, None)
 
 
-def html_block_to_md(fragment: str, source=None, strays=None) -> str:
+def html_block_to_md(fragment: str, source=None, strays=None, comments=frozenset(), notes=frozenset()) -> str:
     """Convert one edited HTML block back to GitHub-flavoured markdown. With `source`, the block's markdown,
-    markup the source did not have is unwrapped (`_unwrap_strays`) and named in `strays`."""
+    markup the source did not have is unwrapped (`_unwrap_strays`) and named in `strays`. `comments` and `notes`
+    are the placeholders `_convert_with_comments` put in the fragment for its comments and footnote citations."""
     _reject_irreversible(fragment)
     fragment, emoji = _emoji_as_tokens(fragment, source)
     fragment = copyblock.tokenize(fragment)
@@ -1438,13 +1452,13 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     # that can run, and the .md never holds active markup a tool without a sanitiser
     # of its own would show. Task boxes and comments survive it; a paragraph typed as
     # `- [ ] words` becomes a task item (`_typed_tasks`).
-    clean = _boxes_as_text(_typed_tasks(sanitize(_sanitize(fragment, source, strays))))
+    clean = _boxes_as_text(_typed_tasks(sanitize(_sanitize(fragment, source, strays, comments)), comments))
     clean = _restore_dropped_hrefs(clean, source, emoji)
     # The backslashes go first: `_without_placeholder_breaks` and `_cell_breaks` each decide whether the table is
     # one `_cell_breaks` takes, by a backslash in the fragment, and must see the same one. A bare URL is taken before
     # them, so that its backslashes stay the URL's.
     clean, urls = _bare_urls_as_words(clean)
-    clean, slash = _text_backslashes(clean)
+    clean, slash = _text_backslashes(clean, comments | notes)
     clean, literal = _literal_shortcodes(clean, source, slash)
     clean = _without_placeholder_breaks(clean)
     if not clean.strip():
@@ -2367,7 +2381,7 @@ def _convert_with_comments(block, fragment: str, strays=None):
     frag = RAW_COMMENT_RE.sub(keep, ANCHOR_RE.sub(swap, fragment))
     frag, tags = _tags_as_text(block.content, frag, token)
     frag, notes = _notes_as_tokens(frag, token)
-    new_md = html_block_to_md(frag, block.content, strays)
+    new_md = html_block_to_md(frag, block.content, strays, frozenset(tokens.values()) | frozenset(placed), frozenset(notes))
     for t, cited in notes.items():
         if new_md.count(t) != 1:
             raise EditError("block cites a footnote the edit cannot keep; edit it in the .md")

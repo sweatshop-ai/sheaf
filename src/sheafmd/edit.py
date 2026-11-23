@@ -696,10 +696,15 @@ def _boxes_as_text(fragment: str) -> str:
     return str(soup)
 
 
+def _placeholder_alternation(tokens) -> str:
+    """A pattern of any of `tokens`, which matches nothing when there are none. Only the placeholders
+    `_convert_with_comments` issued for the block are its placeholders: words of their shape the text held are words."""
+    return "|".join(re.escape(t) for t in sorted(tokens)) or "(?!)"
+
+
 def _placeholders(tokens):
-    """(a pattern of any of `tokens`, one of a run of them). Only the placeholders `_convert_with_comments` issued
-    for the block are its placeholders: words of their shape the text held are words."""
-    one = "|".join(re.escape(t) for t in sorted(tokens)) or "(?!)"
+    """(a pattern of any of `tokens`, one of a run of them)."""
+    one = _placeholder_alternation(tokens)
     return re.compile(one), re.compile(f"(?:{one})*")
 
 
@@ -942,7 +947,10 @@ def _cell_code_pipes(fragment: str):
 # A backslash before the placeholder of a comment or a citation (`_convert_with_comments`) escapes what takes its place.
 # A raw tag's placeholder (`_tags_as_text`) opens with `⟦`, which is not in the ASCII class here: a backslash before a tag
 # keeps pandoc's own handling (pinned by the controls in tests/test_edit_backslash_placeholder.py).
-_BACKSLASH_ESCAPES = r"\\(?=[!-/:-@\[-`{-~\n]|\Z|{tokens})"
+def _backslash_escapes(tokens):
+    """The backslashes of a text that the .md reads as escapes: before an ASCII mark, a line end or the end, or one
+    of `tokens`, the placeholders of the block's comments and citations."""
+    return re.compile(r"\\(?=[!-/:-@\[-`{-~\n]|\Z|" + _placeholder_alternation(tokens) + ")")
 
 
 def _text_backslashes(fragment: str, tokens=frozenset()):
@@ -960,7 +968,7 @@ def _text_backslashes(fragment: str, tokens=frozenset()):
     token = next((t for t in (chr(0xF800) + chr(0xF801 + k) for k in range(1024)) if t not in fragment), None)
     if not texts or token is None:
         return fragment, None
-    escapes = re.compile(_BACKSLASH_ESCAPES.replace("{tokens}", _placeholders(tokens)[0].pattern))
+    escapes = _backslash_escapes(tokens)
     for t in texts:
         t.replace_with(NavigableString(escapes.sub(token, t)))
     return str(soup), token
@@ -2062,7 +2070,8 @@ class _Shift:
 
 
 _ENCLOSED = ("code", "pre")
-# A comment's placeholder (`_convert_with_comments`) is text on the page side only.
+# A comment's placeholder (`_convert_with_comments`) is text on the page side only. It is matched by its shape here,
+# unlike in `html_block_to_md`, which is handed the placeholders issued for the block (ticket 183 AD, AH).
 _COMMENT_TOKEN = re.compile("(?<!\u27e6)RDCMT[0-9A-F]{10}(?!\u27e7)")
 
 
@@ -2385,7 +2394,7 @@ def _convert_with_comments(block, fragment: str, strays=None):
     frag = RAW_COMMENT_RE.sub(keep, ANCHOR_RE.sub(swap, fragment))
     frag, tags = _tags_as_text(block.content, frag, token)
     frag, notes = _notes_as_tokens(frag, token)
-    new_md = html_block_to_md(frag, block.content, strays, frozenset(tokens.values()) | frozenset(placed), frozenset(notes))
+    new_md = html_block_to_md(frag, block.content, strays, frozenset(tokens.values()) | frozenset(placed.keys()), frozenset(notes.keys()))
     for t, cited in notes.items():
         if new_md.count(t) != 1:
             raise EditError("block cites a footnote the edit cannot keep; edit it in the .md")

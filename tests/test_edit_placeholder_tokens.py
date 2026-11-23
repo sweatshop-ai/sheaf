@@ -34,3 +34,16 @@ def test_words_before_a_typed_box_keep_it_words(html):
 def test_a_typed_box_before_only_a_citation_is_a_task():
     out = saved("x[^1] here", f"<p>- [ ] {REF}</p>")
     assert out == "- [ ] [^1]"
+
+
+# The same in a task item: a line typed after Enter (`_lines_as_items`).
+@pytest.mark.parametrize("line, want", [
+    (f"{REF}- [ ] milk", "- [ ] [^1]- \\[ \\] milk"),
+    ("RDCMT0123456789- [ ] milk", "- [ ] RDCMT0123456789- \\[ \\] milk"),
+    (f"- [ ] {REF}", "- [ ] [^1]"),
+])
+def test_a_line_typed_in_a_task_item_counts_only_comments_as_placeholders(line, want):
+    src = "- [ ] eggs[^1] here"
+    html = page_fragment(src + NOTE).split("</ul>")[0] + "</ul>"
+    out = saved(src, html.replace("</li>", f"<div>{line}</div></li>", 1))
+    assert out == "- [ ] eggs[^1] here\n" + want

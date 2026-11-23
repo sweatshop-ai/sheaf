@@ -16,10 +16,11 @@ from pathlib import Path
 import pytest
 
 from agent_fakes import PID, FakeClaude, write_record
-from helpers import PLAN, Impostor, Silent, gone, http_get, hub_alive, hub_rows, key, run_hub, silent_message, wait_alive
+from helpers import PEER_CHECK_ON, PEER_OFF_ROWS, PLAN, Impostor, Silent, gone, http_get, hub_alive, hub_rows, key, run_hub, silent_message, wait_alive
 from sheafmd import config, diagnostics, paths, seat, signals
 from sheafmd.hub import client as hubclient
 from sheafmd.hub import peer, server
+from sheafmd.hub.handler import LINK_LIMIT
 
 TIP = "tip: sheaf service install keeps the hub running across reboots"
 NONCE_URL = re.compile(r"http://127\.0\.0\.1:PORT/_/open\?nonce=[A-Za-z0-9_-]{43}&next=/work/plan\.md")
@@ -108,9 +109,18 @@ def test_a_linux_hub_whose_peer_self_test_failed_makes_every_open_warn_once_on_s
 
 
 def test_where_the_hub_checks_the_user_open_gives_no_such_warning(sheaf, opened_browser, doc, port, monkeypatch):
+    """The command takes this for a Linux machine, but the hub it starts is a new interpreter on the real
+    platform. On Linux that hub checks the user, and nothing is said. Elsewhere (darwin) no hub checks:
+    it turns the check off at start (SPEC 9.1) and says so in its answer, and `sheaf open` passes that on
+    once, on stderr, although its own platform reads as Linux."""
     monkeypatch.setattr(peer, "PLATFORM", "linux")
     r = sheaf("open", doc)
-    assert r.code == 0 and "cannot check" not in r.err + r.out
+    assert r.code == 0, r.err
+    if PEER_CHECK_ON:
+        assert "cannot check" not in r.err + r.out
+    else:
+        assert r.err.count(LINK_LIMIT) == 1 and "cannot check" not in r.out, r.err
+        assert [r["kind"] for r in hub_rows("peer-check-off")] == PEER_OFF_ROWS     # its cause: the hub turned it off
 
 
 def test_the_hub_keeps_running_after_the_command_ends(sheaf, opened_browser, doc, port):

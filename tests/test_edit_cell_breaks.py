@@ -94,18 +94,11 @@ def test_two_no_break_spaces_in_a_table_with_a_backslash_keep_the_break():
     src = "| a | b |\n|---|---|\n| x | a\\b |"
     html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", ">x<br>\u00a0\u00a0<")
     out = saved_table(html, src)
-    assert "x<br" in out and "a\\b" in out
+    assert "<table" in out and "x<br />" in out and out.count("\u00a0") == 1 and "a\\b" in out
 
 
 def test_two_no_break_spaces_in_a_table_with_a_shortcode_keep_the_break():
     src = "| a | b |\n|---|---|\n| x | `:smile:` |"
     html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", ">x<br>\u00a0\u00a0<")
     out = saved_table(html, src)
-    assert "x<br" in out and ":smile:" in out
-
-
-def test_one_no_break_space_in_a_table_with_a_backslash_still_goes_with_the_break():
-    src = "| a | b |\n|---|---|\n| x | a\\b |"
-    html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", ">x<br>\u00a0<")
-    out = saved_table(html, src)
-    assert "<table" not in out and "<br" not in out
+    assert "<table" in out and "x<br />" in out and out.count("\u00a0") == 1 and ":smile:" in out

@@ -816,17 +816,18 @@ def _without_placeholder_breaks(fragment: str) -> str:
     for br in reversed(soup.find_all("br")):
         block = block_ended_by(br)
         # Python's strip() takes a no-break space for white space and the page does not: one after a break
-        # in a cell is Enter's cut, which _cell_breaks sorts from a typed one: only where it takes the table
-        # (not with a backslash or a shortcode in it) and the break is not the code's.
-        if (block is not None and block.name in ("td", "th") and table_is_taken
-                and type(br.next_sibling) is NavigableString and br.next_sibling.startswith("\xa0")
-                and not br.find_parent(["code", "pre"])):
-            continue
-        # Where it does not, the table goes as raw HTML with its breaks: a typed no-break space after Enter's cut
-        # shows a line there too, so its break is the writer's.
-        if (block is not None and block.name in ("td", "th") and not br.find_parent(["code", "pre"])
-                and not _ends_its_cell(br, block)):
-            continue
+        # in a cell is Enter's cut, and two are Enter's cut and a typed one. A break in code is the code's.
+        if block is not None and block.name in ("td", "th") and not br.find_parent(["code", "pre"]):
+            if table_is_taken:
+                # _cell_breaks takes the table (no backslash or shortcode in it) and sorts the cut from a typed one.
+                if type(br.next_sibling) is NavigableString and br.next_sibling.startswith("\xa0"):
+                    continue
+            elif not _ends_its_cell(br, block):
+                # The table goes as raw HTML with its breaks: the typed line stays, without Enter's cut.
+                for t, end in ((br.previous_sibling, True), (br.next_sibling, False)):
+                    if type(t) is NavigableString:
+                        _cut(t, end)
+                continue
         if block is not None and not any(block is b for b in cleared):
             cleared.append(block)
             br.decompose()

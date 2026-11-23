@@ -509,7 +509,11 @@ _THREAD = threading.local()
 
 def owns(hub, address: str) -> bool:
     """Whether this thread holds the lock of the rectoverso's name `address`; True where the hub does not place it. A
-    commit asserts it (`Hub.committed`): nothing commits a rectoverso's file without holding its name (9.11)."""
+    commit asserts it (`Hub.committed`): nothing commits a rectoverso's file without holding its name (9.11). An address
+    held through `held` is owned whatever root its name names now, as `held` taken again is: a root forgotten and its
+    name taken since is then refused by the commit's root id, never taken for a commit outside the lock."""
+    if address in _held_here():
+        return True
     got = _where(hub, address)
     return got is None or (str(got[1]), got[2]) in _owned()
 

@@ -1702,7 +1702,7 @@ class Handler:
     def _delete(self, req: Req) -> Response:
         """Delete (8.6): the owner's page goes into its root's trash for thirty days. Never through the door."""
         doc = req.body.get("doc")
-        self._own_loose(req, doc)
+        self._own_loose(req, doc)       # a stranger's or a missing page is refused before any lock is taken
         # The moves' lock first (the hub's lock order): a move is between its link and its unlink or it is not, never under the
         # trash's move. Then the name, the page's lock (a save in the middle of its write finishes first, one after it finds the
         # page gone), and the file's lock in `trash`. The page's lock is taken only when free, else waited for with the moves'

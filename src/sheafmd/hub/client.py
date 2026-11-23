@@ -45,7 +45,7 @@ STOP_WAIT = 8.0
 EXIT_ROW_WAIT = 2.0                  # for the exit row of a hub that no longer answers (8.4)
 TIMEOUT = 3.0
 DOOR_TIMEOUT = 130.0             # a reply re-renders the page; pandoc is given 120 s (SPEC 3.2)
-RENDER_TIMEOUT = 130.0           # `sheaf open`'s render runs pandoc in the request, as a reply does (ticket 173 R)
+RENDER_TIMEOUT = DOOR_TIMEOUT    # `sheaf open`'s render runs pandoc in the request, as a reply does (SPEC 3.2, 9.4)
 DOOR_ANSWER_MAX = 64 * 1024 * 1024
 ANSWER_MAX = 1024 * 1024
 _AGENT_ENV_PREFIXES = ("CLAUDE", "CODEX_", "CURSOR_", "GEMINI_", "OPENCODE")
@@ -272,9 +272,11 @@ class HubClient:
         a hub of another boot id is not sent the request (`HubChanged`). Raises Impostor when what
         answers is not the hub; HubSilent when nothing answers the proof in time; HubHungUp when the hub ends the connection after its proof twice (the
         second time on a connection of its own: a hub that ended one is asked again); and HubLost when
-        the hub is gone by the request, or does not answer it within `answer_within` (TIMEOUT when None, read at the
-        call; the proof keeps TIMEOUT: a request that does work, a render, is given the time of that work). Every one is an Impostor, which is what a
-        command stops at, so a command never meets a socket's own error."""
+        the hub is gone by the request, or does not answer it in time. Every one is an Impostor, which is what a
+        command stops at, so a command never meets a socket's own error.
+        `answer_within` is the time the hub has to answer the request once it has proved itself: a request that does
+        work (a render) is given the time of that work. The proof keeps TIMEOUT, and so does the request when None,
+        read when `call` runs, not when it is defined."""
         data = None if body is None else json.dumps(body).encode()
         headers = {"X-Sheaf-Key": self.key, **({} if data is None else {"Content-Type": "application/json"})}
         answer_within = TIMEOUT if answer_within is None else answer_within

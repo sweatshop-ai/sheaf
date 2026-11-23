@@ -183,7 +183,7 @@ def test_a_first_render_that_takes_longer_than_the_proof_timeout_still_opens(she
     render that takes more than the 3 s of a proof (a large document, a starved machine) is no hub that
     stopped answering, and `sheaf open` waits for it (ticket 173 R; macOS run 45240441030)."""
     import pypandoc
-    slow = tmp_path / "slow-pandoc"
+    slow = tmp_path / "slow-pandoc"         # `--no-highlight` is the page's own render (render.py), not a check of a block
     slow.write_text("#!/bin/sh\n"
                     'case " $* " in *" --no-highlight "*) sleep 4 ;; esac\n'
                     f'exec "{pypandoc.get_pandoc_path()}" "$@"\n')

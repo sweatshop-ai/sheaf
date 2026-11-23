@@ -353,6 +353,43 @@ def test_a_member_tells_through_the_tell_route_only_their_own_agent_and_cannot_c
     assert front.post("/_/cancel", {"doc": "other/theirs.md", "id": "c1"}).status == 404
 
 
+def test_a_cancel_from_a_page_of_a_forgotten_root_never_ends_the_same_id_tell_of_the_folder_that_took_the_name(browser, talk, tmp_path, monkeypatch):
+    """182 H: the cancel compares the page's root with the one that holds the name, and ends the Tell, in one step. A
+    forget, and another folder that takes the name and Tells its own thread c1, while the cancel runs, waits for the
+    cancel: the other folder's Tell is never ended by a page of the forgotten root."""
+    from sheafmd.hub.handler import Handler
+    token = agent_token()
+    target(browser)
+    assert tell(browser).status == 200
+    old = browser.get(f"/_/doc?doc={DOC}").json()["root"]
+    again = tmp_path / "again" / "work"
+    again.mkdir(parents=True)
+    (again / "plan.md").write_text(talk.read_text(encoding="utf-8"), encoding="utf-8")
+    real, taken = Handler._root_id, []
+
+    def take():                             # another request's, which holds nothing of the cancel's
+        browser.hub.forget_root("work")
+        browser.hub.roots.for_document(again / "plan.md")
+        target(browser)
+        assert tell(browser).status == 200
+        taken.append(browser.hub.roots.get("work").id)
+
+    def compared(self, req, address):
+        monkeypatch.setattr(Handler, "_root_id", real)
+        held = real(self, req, address)
+        t = threading.Thread(target=take, daemon=True)
+        t.start()
+        t.join(2)
+        swapping.append(t)
+        return held
+    swapping = []
+    monkeypatch.setattr(Handler, "_root_id", compared)
+    assert browser.post("/_/cancel", {"doc": DOC, "id": "c1", "root": old}).status == 200
+    swapping[0].join(10)
+    assert not swapping[0].is_alive() and taken and taken[0] != old
+    assert [t["thread"] for t in documents(browser, token)[0]["tells"]] == ["c1"]     # the other folder's Tell waits
+
+
 # ── the transitions are made under one lock ──────────────────────────────────
 
 def test_a_cancel_that_comes_while_the_first_listing_is_out_ends_it_once_and_seen_never_returns(browser, talk):

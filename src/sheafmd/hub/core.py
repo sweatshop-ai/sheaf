@@ -1039,7 +1039,14 @@ class Hub:
         """`sheaf roots forget`: take the root out, and its documents' entries with it (their
         render settings and read state, and the pages the hub holds). The documents themselves
         are files and stay where they are. Each page open on one of them is told `gone`, the last
-        event of its stream (SPEC 8.8). Returns the root, or None when there was none."""
+        event of its stream (SPEC 8.8). Returns the root, or None when there was none. Under the moves' lock, taken
+        before the hub's: a move, which checks its root by id and then drops by name (`moved_remote`), and a cancel, which
+        compares the page's root and then ends a Tell by address (`/_/cancel`), are over before the name is let go."""
+        with moves_mod.exclusive():
+            return self._forget_root(name)
+
+    def _forget_root(self, name: str):
+        """`forget_root`, under the moves' lock."""
         with self._lock:
             root = roots_mod.forget(self.roots, self.docs, self.seen, self.versions, name,
                                     members=self.member_seen)

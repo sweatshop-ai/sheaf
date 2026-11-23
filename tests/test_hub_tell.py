@@ -1016,7 +1016,8 @@ def test_a_job_registered_when_a_forget_comes_is_refused_and_its_work_never_runs
     real, forgotten = hub.tell._is_current, []
 
     def forgotten_first(e):
-        forgotten.append(hub.forget_root("work").name)
+        # Another request's forget, which takes the moves' lock before anything of the Tell's: its body is what comes here.
+        forgotten.append(hub._forget_root("work").name)
         return real(e)
     monkeypatch.setattr(hub.tell, "_is_current", forgotten_first)
     r = post(browser, "/_/tell", hash=held)

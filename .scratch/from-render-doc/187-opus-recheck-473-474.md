@@ -1,8 +1,8 @@
 # 187: Opus re-check of the merged PRs #473 and #474
 
-**Claimed by:** none
+**Claimed by:** Lior
 
-**Status:** open
+**Status:** in progress
 
 **Blocked by:** none
 

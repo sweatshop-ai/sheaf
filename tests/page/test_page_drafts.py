@@ -5,7 +5,7 @@ import re
 import pytest
 
 from helpers import comment
-from pagehelp import settled, clock_at, open_box, P1, P2, T0, at, draft_key, mark, set_kept, reloaded, select, toasted, toasts_to_the_end, type_at_end, until, rewrite
+from pagehelp import settled, clock_at, open_box, P1, P2, T0, at, draft_key, mark, set_kept, reloaded, select, stand_still, toasted, toasts_to_the_end, type_at_end, until, rewrite
 from sheafmd import comments as rdc
 
 pytestmark = pytest.mark.page
@@ -506,8 +506,15 @@ def test_discard_removes_only_the_draft_this_tab_was_offered(lost_edit, context,
 
 def upgraded_over_an_offer(lost_edit, context, writing=False):
     """A page that offers the lost edit and has met an upgraded hub with something of its own on screen:
-    edits, or (with `writing`) a comment being written."""
+    edits, or (with `writing`) a comment being written.
+    The edits must still be unsaved when the hello comes. The page autosaves 2.5 s after the last key, and a save
+    out at the hello makes the page reload once it is answered (meetVersion), with no notice: on a slow runner the
+    restart and the stream's 2 s retry took longer, and the save reached the new hub 20 ms before the hello did
+    (ticket 173 P, macOS py3.14). So the page's clock stands still before the edit: its autosave never comes, and
+    the stream, which the browser reconnects by itself, brings the hello over edits that are on screen only."""
     page = context.new_page()
+    if not writing:
+        page.clock.install()
     page.goto(lost_edit.site.url)
     page.wait_for_selector("#rd-notice button[data-d=restore]")
     lost_edit.site.kill()
@@ -516,6 +523,7 @@ def upgraded_over_an_offer(lost_edit, context, writing=False):
         open_box(page)
         page.fill("#rd-popover textarea", "about the pears")
     else:
+        stand_still(page)
         type_at_end(page, P2, " and kiwis")
     lost_edit.site.start(version="99.0.0")
     until(lambda: "The sheaf hub was upgraded" in page.inner_text("#rd-notice"), timeout=15, what="the upgrade notice")

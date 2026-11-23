@@ -45,6 +45,7 @@ STOP_WAIT = 8.0
 EXIT_ROW_WAIT = 2.0                  # for the exit row of a hub that no longer answers (8.4)
 TIMEOUT = 3.0
 DOOR_TIMEOUT = 130.0             # a reply re-renders the page; pandoc is given 120 s (SPEC 3.2)
+RENDER_TIMEOUT = DOOR_TIMEOUT    # `sheaf open`'s render runs pandoc in the request, as a reply does (SPEC 3.2, 9.4)
 DOOR_ANSWER_MAX = 64 * 1024 * 1024
 ANSWER_MAX = 1024 * 1024
 _AGENT_ENV_PREFIXES = ("CLAUDE", "CODEX_", "CURSOR_", "GEMINI_", "OPENCODE")
@@ -264,25 +265,30 @@ class HubClient:
             raise Impostor(self.port)
         return got
 
-    def call(self, method: str, path: str, body=None, boot: str | None = None) -> tuple[int, dict]:
+    def call(self, method: str, path: str, body=None, boot: str | None = None,
+             answer_within: float | None = None) -> tuple[int, dict]:
         """A request with the key header. The hub proves itself (9.4) on the connection that then
         carries the request. A command that read a hub's answer with `challenge` passes its `boot`:
         a hub of another boot id is not sent the request (`HubChanged`). Raises Impostor when what
         answers is not the hub; HubSilent when nothing answers the proof in time; HubHungUp when the hub ends the connection after its proof twice (the
         second time on a connection of its own: a hub that ended one is asked again); and HubLost when
-        the hub is gone by the request, or does not answer it. Every one is an Impostor, which is what a
-        command stops at, so a command never meets a socket's own error."""
+        the hub is gone by the request, or does not answer it in time. Every one is an Impostor, which is what a
+        command stops at, so a command never meets a socket's own error.
+        `answer_within` is the time the hub has to answer the request once it has proved itself: a request that does
+        work (a render) is given the time of that work. The proof keeps TIMEOUT, and so does the request when None,
+        read when `call` runs, not when it is defined."""
         data = None if body is None else json.dumps(body).encode()
         headers = {"X-Sheaf-Key": self.key, **({} if data is None else {"Content-Type": "application/json"})}
+        answer_within = TIMEOUT if answer_within is None else answer_within
         for _ in range(2):
             try:
-                status, answer = self._send_proved(method, path, data, headers, TIMEOUT, ANSWER_MAX, boot)
+                status, answer = self._send_proved(method, path, data, headers, answer_within, ANSWER_MAX, boot)
             except NotSent:
                 continue
             except ConnectionRefusedError:               # nothing listens by now: nothing was sent
                 raise HubLost(self.port, sent=False) from None
             except TimeoutError:
-                raise HubLost(self.port, sent=True, waited=TIMEOUT) from None
+                raise HubLost(self.port, sent=True, waited=answer_within) from None
             except (OSError, http.client.HTTPException):
                 raise HubLost(self.port, sent=True) from None
             if hub_is_stopping(status, answer):          # it applied nothing, and is not sent to again

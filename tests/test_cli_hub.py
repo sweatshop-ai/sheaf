@@ -177,6 +177,23 @@ def test_a_browser_that_is_off_is_not_opened_and_the_url_is_still_printed(sheaf,
     assert f"  ~ http://127.0.0.1:{port}/work/plan.md" in r.out
 
 
+def test_a_first_render_that_takes_longer_than_the_proof_timeout_still_opens(sheaf, opened_browser, doc, port,
+                                                                            monkeypatch, tmp_path):
+    """The hub renders a new document inside `POST /_/render`, and pandoc is given 120 s (SPEC 3.2): a
+    render that takes more than the 3 s of a proof (a large document, a starved machine) is no hub that
+    stopped answering, and `sheaf open` waits for it (ticket 173 R; macOS run 45240441030)."""
+    import pypandoc
+    slow = tmp_path / "slow-pandoc"         # `--no-highlight` is the page's own render (render.py), not a check of a block
+    slow.write_text("#!/bin/sh\n"
+                    'case " $* " in *" --no-highlight "*) sleep 4 ;; esac\n'
+                    f'exec "{pypandoc.get_pandoc_path()}" "$@"\n')
+    slow.chmod(0o755)
+    monkeypatch.setenv("PYPANDOC_PANDOC", str(slow))         # the hub this command starts inherits it
+    r = sheaf("open", "--no-browser", doc)
+    assert r.code == 0, r.err
+    assert f"  ~ http://127.0.0.1:{port}/work/plan.md" in r.out
+
+
 def test_a_browser_that_cannot_be_started_says_so_and_still_exits_0(sheaf, opened_browser, doc, port):
     opened_browser.result = False
     r = sheaf("open", doc)

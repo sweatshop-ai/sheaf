@@ -339,7 +339,7 @@ def _open(args) -> int:
                                  "max_image_width": args.max_image_width, "by": args.by,
                                  "for": args.for_, "theme": _theme_spec(args.theme), "credit": args.credit},
                     "target": _target(args)}
-            status, res = c.call("POST", "/_/render", body)
+            status, res = c.call("POST", "/_/render", body, answer_within=hubclient.RENDER_TIMEOUT)
             if status != 200 or not res.get("ok"):
                 _err(f"sheaf: {md}: {res.get('error') or f'the hub answered {status}'}")
                 return EXIT_FAILED

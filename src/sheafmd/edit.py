@@ -867,15 +867,18 @@ def _restore_dropped_hrefs(fragment: str, source, emoji=()) -> str:
     SPEC 9.5's list (`ftp:`, also `javascript:`), so only an address the source already held, never a new one. The
     page shows such a link as its text and sends it as an `<a>` with no address; the .md keeps the address the
     source wrote, as it keeps a raw tag. The links are matched by their text, the k-th with the k-th, and only where
-    the page holds as many such links of that text as the source: after one was deleted, which went is unknown, and
-    each stays its text. An `<a>` with a name or an id is an anchor of the source's own, not such a link. `emoji` is
+    the page holds as many `<a>` with no address of that text as the source, these links and its anchors together:
+    after one was deleted, which went is unknown, and each stays its text. An anchor of the source's own (`<a name>`,
+    `<a id>`, an `<a>` with no address) takes none: the page sends it with its name or, on a mounted page, which
+    drops `name` (`sanitize.py`, mount mode), as a bare `<a>` in its place among them. `emoji` is
     `_emoji_as_tokens`' list, so a link's text reads as the source's render shows it."""
     from bs4 import BeautifulSoup
 
     if not source or not re.search(r"<a(?:\s[^>]*)?>", fragment):
         return fragment
     soup = BeautifulSoup(fragment, "html.parser")
-    bare = [a for a in soup.find_all("a") if not any(a.has_attr(k) for k in ("href", "name", "id"))]
+    loose = [a for a in soup.find_all("a") if not a.has_attr("href")]
+    bare = {id(a) for a in loose if not any(a.has_attr(k) for k in ("name", "id"))}
     html = _render_source(source) if bare else None
     if not html:
         return fragment
@@ -883,17 +886,24 @@ def _restore_dropped_hrefs(fragment: str, source, emoji=()) -> str:
     def text(a):
         return _EMOJI_TOKEN.sub(lambda m: emoji[int(m.group(1))][1], a.get_text())
 
-    dropped, shown = {}, Counter(text(a) for a in bare)
-    for a in BeautifulSoup(html, "html.parser").find_all("a", href=True):
-        if not _url_ok(a, "href", a["href"]):
-            dropped.setdefault(a.get_text(), []).append(a["href"])
+    want, shown = {}, {}    # by text, in order: the source's dropped address, or None for an anchor; the page's `<a>`s
+    for a in BeautifulSoup(html, "html.parser").find_all("a"):
+        if not a.has_attr("href"):
+            want.setdefault(a.get_text(), []).append(None)
+        elif not _url_ok(a, "href", a["href"]):
+            want.setdefault(a.get_text(), []).append(a["href"])
+    for a in loose:
+        shown.setdefault(text(a), []).append(a)
     put = False
-    for a in bare:
-        hrefs = dropped.get(text(a))
-        if hrefs and len(hrefs) == shown[text(a)]:
-            a["href"] = hrefs.pop(0)
-            shown[text(a)] -= 1
-            put = True
+    for words, links in shown.items():
+        hrefs = want.get(words, [])
+        # A page anchor that kept its name in the place of a dropped link: the two do not line up.
+        if len(hrefs) != len(links) or any(h is not None and id(a) not in bare for a, h in zip(links, hrefs)):
+            continue
+        for a, href in zip(links, hrefs):
+            if href is not None:
+                a["href"] = href
+                put = True
     return str(soup) if put else fragment
 
 
@@ -1004,11 +1014,43 @@ def _shortcode_texts(soup) -> list:
         u.name in ("code", "pre", "script", "style") or "math" in (u.get("class") or []) for u in t.parents)]
 
 
+# A shortcode the source writes as text, `\:name:`.
+_ESCAPED_SHORTCODE = re.compile(r"\\:([a-z0-9_+-]+):")
+# The diff of `_source_literals` keeps this many characters of the common start and end on each side of the part
+# that changed, so that a literal next to the change is still placed by its neighbours; a shortcode name is shorter.
+_DIFF_MARGIN = 32
+# The most characters squared the diff of `_source_literals` takes (`SequenceMatcher` is quadratic): about 20 ms
+# of CPU, measured. A larger changed part is placed by order (`_places_by_order`).
+_DIFF_BOUND = 2_000_000
+
+
+def _places_by_order(old: str, new: str, olds) -> set:
+    """The places in `new` of the literals `olds`, (place in `old`, name) pairs, by order: the k-th `:name:` of
+    `old` is the k-th of `new` where both hold as many of that name. Where they do not, every `:name:` of `new`
+    stays text: a shortcode the reader typed then shows as its words, rather than one the source wrote as text
+    as its emoji. Linear, for a changed part too long to diff."""
+    def starts(text):
+        at = {}
+        for m in _SHORTCODE_TEXT.finditer(text):
+            at.setdefault(m.group(1), []).append(m.start())
+        return at
+
+    was, now, places = starts(old), starts(new), set()
+    for start, name in olds:
+        before, after = was.get(name, []), now.get(name, [])
+        if len(before) == len(after) and start in before:
+            places.add(after[before.index(start)])
+        else:
+            places.update(after)
+    return places
+
+
 def _source_literals(source: str, new: str) -> set:
     """The places in `new`, the page's shortcode text, of each `:name:` that the source wrote as `\\:name:`: its
     render shows that one as text, and a diff of the render's text against the page's carries it over. By place,
-    not by name: a `:name:` the reader typed beside one the source escapes is the emoji. A render that fails
-    refuses the save (EditError), rather than guess."""
+    not by name: a `:name:` the reader typed beside one the source escapes is the emoji. The common start and end
+    are matched as they are and only the part between them is diffed, up to `_DIFF_BOUND`; past it, that part is
+    placed by order (`_places_by_order`). A render that fails refuses the save (EditError), rather than guess."""
     from bs4 import BeautifulSoup
 
     html = _render_source(source)
@@ -1016,10 +1058,47 @@ def _source_literals(source: str, new: str) -> set:
         raise EditError("pandoc: the block's source could not be rendered to place its shortcodes")
     old = "".join(_shortcode_texts(BeautifulSoup(html, "html.parser")))
     olds = [m for m in _SHORTCODE_TEXT.finditer(old) if f"\\:{m.group(1)}:" in source]
-    places = set()
-    for a, b, size in difflib.SequenceMatcher(None, old, new, autojunk=False).get_matching_blocks():
+    if not olds:
+        return set()
+    head = len(os.path.commonprefix([old, new]))
+    tail = len(os.path.commonprefix([old[head:][::-1], new[head:][::-1]]))
+    head, tail = max(0, head - _DIFF_MARGIN), max(0, tail - _DIFF_MARGIN)
+    for m in olds:              # no literal is cut between the common start or end and the part between them
+        if m.start() < head < m.end():
+            head = m.start()
+        if m.start() < len(old) - tail < m.end():
+            tail = len(old) - m.end()
+    lo, ln = len(old) - tail, len(new) - tail
+    blocks, places = [(0, 0, head), (lo, ln, tail)], set()
+    if (lo - head) * (ln - head) <= _DIFF_BOUND:
+        blocks += [(a + head, b + head, size) for a, b, size in
+                   difflib.SequenceMatcher(None, old[head:lo], new[head:ln], autojunk=False).get_matching_blocks()]
+    else:
+        places = {head + x for x in _places_by_order(old[head:lo], new[head:ln], [
+            (m.start() - head, m.group(1)) for m in olds if head <= m.start() and m.end() <= lo])}
+    for a, b, size in blocks:
         places.update(b + m.start() - a for m in olds if a <= m.start() and m.end() <= a + size)
     return places
+
+
+_INLINE_TAGS = frozenset({"a", "abbr", "b", "cite", "del", "em", "i", "ins", "kbd", "mark", "q", "s", "small", "span",
+                          "strong", "sub", "sup", "u"})
+
+
+def _typed_slash_before(t, slash: str) -> bool:
+    """Whether the text right before the text node t, with only inline tags between them, ends with the backslash
+    token `slash` and is not code: a backslash typed in another text node than the shortcode at t's start (an
+    `<em>\\</em>:smile:`). A break, an image or the start of a block between them is no such backslash."""
+    from bs4 import Comment, NavigableString, Tag
+
+    for el in t.previous_elements:
+        if isinstance(el, Tag):
+            if el.name not in _INLINE_TAGS:
+                return False
+        elif isinstance(el, NavigableString) and not isinstance(el, Comment) and str(el):
+            return str(el).endswith(slash) and not any(
+                u.name in ("code", "pre", "script", "style") or "math" in (u.get("class") or []) for u in el.parents)
+    return False
 
 
 def _literal_shortcodes(fragment: str, source, slash):
@@ -1027,19 +1106,25 @@ def _literal_shortcodes(fragment: str, source, slash):
     page shows such a shortcode as the words it is; written bare, the next render would draw its emoji. That is one
     the source wrote as `\\:name:` (`_source_literals`), and one right after a backslash the reader typed, which
     `_text_backslashes` has made the token `slash`: the page shows that backslash, so the .md escapes it and the
-    colon both. A shortcode the reader typed bare stays bare. Runs after `_text_backslashes`."""
+    colon both, also where the backslash is in another text node (`_typed_slash_before`). A shortcode the reader
+    typed bare stays bare. The source is rendered only when it escapes a name the page's text holds. Runs after
+    `_text_backslashes`."""
     from bs4 import BeautifulSoup
 
-    after_slash = slash is not None and slash + ":" in fragment
-    if ":" not in fragment or _LITERAL_COLON in fragment or not (after_slash or (source and "\\:" in source)):
+    after_slash = slash is not None and re.search(re.escape(slash) + r"(?:<[^>]*>)*:", fragment) is not None
+    escaped = bool(source) and "\\:" in source and any(
+        f":{name}:" in fragment for name in set(_ESCAPED_SHORTCODE.findall(source)))
+    if ":" not in fragment or _LITERAL_COLON in fragment or not (after_slash or escaped):
         return fragment, False
     soup = BeautifulSoup(fragment, "html.parser")
     texts = _shortcode_texts(soup)
-    places = _source_literals(source, "".join(texts)) if source and "\\:" in source else set()
+    places = _source_literals(source, "".join(texts)) if escaped else set()
     found, at = False, 0
     for t in texts:
-        def mark(m, at=at):
-            typed = slash is not None and m.string.endswith(slash, 0, m.start())
+        glued = after_slash and _typed_slash_before(t, slash)
+
+        def mark(m, at=at, glued=glued):
+            typed = slash is not None and (m.string.endswith(slash, 0, m.start()) or (glued and m.start() == 0))
             if (typed or at + m.start() in places) and _emoji_drawn(m.group(1)):
                 return _LITERAL_COLON + m.group(0)
             return m.group(0)
@@ -2693,8 +2778,9 @@ def _own_merge(region, first: int, rows, own, j: int, html: str, held):
     changes it too or takes it out, the page's is written with the note. Another block the file changed
     stays after the page's, as where the page's own save is not found. Returns (text, notes): the
     region's new text, without the blank lines after its last block, and [(block in it, the file's
-    words)] for the notes; None when it cannot be done so (the edit is refused or deletes it all, or a
-    comment would be written twice or lost), and the edit goes where the merge put it."""
+    words)] for the notes; ("", []) when the file and the edit together leave none of its blocks; None when
+    it cannot be done so (the edit is refused or deletes it all, or a comment would be written twice or lost),
+    and the edit goes where the merge put it."""
     rows = [r if r.other is None else r._replace(other=r.other - first) for r in rows]
     j -= first          # from here on the blocks are counted in the region
     mine = [r.other for r in rows if r.how in ("same", "changed")]
@@ -2762,8 +2848,10 @@ def _own_merge(region, first: int, rows, own, j: int, html: str, held):
             return None
         notes.append((said[-1], owed))
 
-    if not pieces:      # the file deleted what the edit leaves and the edit takes out the rest
-        return None
+    if not pieces:
+        # The file deleted what the edit leaves and the edit takes out the rest: the region goes, as a block the
+        # page empties does. A comment in it would have nowhere to go, so then the edit goes where the merge put it.
+        return None if any(_marks("".join(b.text for b in region))) else ("", [])
     text = "".join((b.content if b.content.endswith("\n") else b.content + "\n") + (b.gap or "\n")
                    for b in pieces[:-1])
     text += pieces[-1].content if pieces[-1].content.endswith("\n") else pieces[-1].content + "\n"
@@ -2961,7 +3049,8 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
         blocks = split_md_blocks(text)
         if t.merged:
             region, notes = t.merged
-            done = _splice(text, blocks, j, span, region)
+            # An empty region keeps its place as the tomb line, as a deleted block does, until the last edit is in.
+            done = _splice(text, blocks, j, span, region or tomb + "\n")
             if done is not None:
                 if done != text:
                     changed.append(i)

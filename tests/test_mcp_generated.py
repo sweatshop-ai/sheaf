@@ -245,3 +245,56 @@ def test_two_creates_with_generated_of_one_name_leave_the_page_made_marked(brows
     assert sorted(isinstance(a, AssertionError) for a in answers) == [False, True], answers
     assert (work / "made.md").exists()
     assert browser.hub.docs.get("work/made.md")["generated"]["by"] == "builder"
+
+
+def test_a_create_without_generated_clears_a_mark_left_on_an_address_with_no_page(browser, plan, work):
+    """A crash between the mark and the file leaves a mark on an address with no page (ticket 183 BR). The page a create
+    without `generated` makes there is not generated: another write token updates it."""
+    builder, other = Tokens().add("builder", write=True), Tokens().add("other", write=True)
+    browser.hub.docs.change("work/made.md", lambda e: {**e, "generated": {"by": "builder", "id": builder.id,
+                                                                           "at": "2026-11-23T10:00:00+0100"}})
+    assert not (work / "made.md").exists()
+    made = ok(browser, "create", doc="work/made.md", text="# Made\n\nBy hand.\n", token=other)
+    assert "generated" not in browser.hub.docs.get("work/made.md")
+    assert ok(browser, "read", doc="work/made.md", token=other)["generated"] is None
+    ok(browser, "update", doc="work/made.md", text="# Made\n\nBy hand, again.\n", expected_hash=made["hash"], token=other)
+
+
+def test_a_create_without_generated_that_loses_the_name_leaves_the_winners_mark(browser, plan, work, monkeypatch):
+    """The clear of a mark left behind comes after the create's own file is written (ticket 183 BR): a create without
+    `generated` whose file is refused because a create with it made the page first leaves that page marked."""
+    import threading
+
+    from sheafmd import mcp
+    builder, other = Tokens().add("builder", write=True), Tokens().add("other", write=True)
+    real, answers = mcp.create_file, []
+
+    def plain_writes(top, rel, text, judge=None):
+        monkeypatch.setattr(mcp, "create_file", real)
+        t = threading.Thread(target=lambda: answers.append(
+            ok(browser, "create", doc="work/made.md", text="# Made\n\nBy a job.\n", generated=True, token=builder)))
+        t.start()
+        t.join(5)
+        return real(top, rel, text, judge)
+    monkeypatch.setattr(mcp, "create_file", plain_writes)
+    refused(browser, "create", doc="work/made.md", text="# Made\n\nBy hand.\n", token=other)
+    assert answers and "By a job." in (work / "made.md").read_text(encoding="utf-8")
+    assert browser.hub.docs.get("work/made.md")["generated"]["by"] == "builder"
+
+
+def test_a_create_whose_left_mark_cannot_be_cleared_leaves_no_page(browser, plan, work, monkeypatch):
+    """`docs.json` refuses the clear of a mark left on the address (ticket 183 BR): the create is refused and its file
+    taken back, so no page is made that a token other than its writer's may not update."""
+    builder, other = Tokens().add("builder", write=True), Tokens().add("other", write=True)
+    left = {"by": "builder", "id": builder.id, "at": "2026-11-23T10:00:00+0100"}
+    browser.hub.docs.change("work/made.md", lambda e: {**e, "generated": left})
+    change = browser.hub.docs.change
+
+    def refuse_the_clear(address, settle):
+        if "generated" not in settle({"generated": left}):
+            raise OSError(28, "No space left on device")
+        return change(address, settle)
+    monkeypatch.setattr(browser.hub.docs, "change", refuse_the_clear)
+    said = refused(browser, "create", doc="work/made.md", text="# Made\n\nBy hand.\n", token=other)
+    assert "not made" in said
+    assert not (work / "made.md").exists()

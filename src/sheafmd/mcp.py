@@ -1333,6 +1333,17 @@ class Door:
             if isinstance(e, Private) or not isinstance(e, OSError):
                 raise
             raise _not_made(address, e) from None
+        if not generated and self._mark(address) is not None:
+            # A mark on an address that had no page: left by a create with `generated` that died between its mark and its
+            # file, or whose take-back could not write `docs.json` (ticket 183 BR). The page made here is not generated.
+            # After the file, never before: a create with `generated` that set its mark and loses the name to this one
+            # finds its mark changed and leaves it, and one that wins makes this file refused before it gets here.
+            try:
+                self._mark_generated(address, False, caller)
+            except OSError:
+                self._take_back(address, made)
+                raise ToolError(f"{address} was not made: a generated mark left on its address could not be cleared.",
+                                "not written") from None
         return made
 
     def _take_back(self, address: str, made: "_Made", written: bool = True):

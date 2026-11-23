@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from agent_fakes import PID, FakeClaude, write_record
-from helpers import PEER_CHECK_ON, PLAN, Impostor, Silent, gone, http_get, hub_alive, hub_rows, key, run_hub, silent_message, wait_alive
+from helpers import PEER_CHECK_ON, PEER_OFF_ROWS, PLAN, Impostor, Silent, gone, http_get, hub_alive, hub_rows, key, run_hub, silent_message, wait_alive
 from sheafmd import config, diagnostics, paths, seat, signals
 from sheafmd.hub import client as hubclient
 from sheafmd.hub import peer, server
@@ -120,6 +120,7 @@ def test_where_the_hub_checks_the_user_open_gives_no_such_warning(sheaf, opened_
         assert "cannot check" not in r.err + r.out
     else:
         assert r.err.count(LINK_LIMIT) == 1 and "cannot check" not in r.out, r.err
+        assert [r["kind"] for r in hub_rows("peer-check-off")] == PEER_OFF_ROWS     # its cause: the hub turned it off
 
 
 def test_the_hub_keeps_running_after_the_command_ends(sheaf, opened_browser, doc, port):

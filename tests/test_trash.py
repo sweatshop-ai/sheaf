@@ -728,3 +728,56 @@ def test_a_mark_file_that_cannot_be_written_does_not_keep_the_other_marks_on_the
     assert got.status == 409, got.text
     assert not agents.hub.file(doc).exists()
     assert _marks_of(root, rel) == {**NO_MARKS, unwritable: True}
+
+
+def test_a_delete_lets_go_of_the_moves_lock_while_it_waits_for_a_render_of_its_page(agents, clock, lock_order):
+    """Ticket 182 line 56: a Delete waits for the page's writer lock, which a render holds for up to 120 s. It waits with the
+    moves' lock let go (`moves.page_held`), so a cancel (`/_/cancel`), a move or a forget does not wait behind that render."""
+    from sheafmd.hub import moves
+    doc = made(agents, "bea-claude", text=PAGE)
+    e = agents.hub.entry(doc)
+    held, release, got, answer = threading.Event(), threading.Event(), [], []
+
+    def render():
+        with e.live.exclusive():
+            held.set()
+            release.wait(15)
+
+    threading.Thread(target=render, daemon=True).start()
+    assert held.wait(5)
+    deleting = threading.Thread(target=lambda: answer.append(delete(agents, doc).status), daemon=True)
+    deleting.start()
+    deleting.join(0.3)
+    ok = moves._LOCK.acquire(timeout=3)
+    if ok:
+        moves._LOCK.release()
+    got.append(ok)
+    release.set()
+    deleting.join(10)
+    assert got == [True], "the moves' lock is held while the Delete waits for a render of its page"
+    assert answer == [200] and not agents.hub.file(doc).exists()
+
+
+def test_a_page_that_went_while_a_delete_waited_for_a_render_is_not_found(agents, clock, lock_order):
+    """Ticket 182 line 56: the Delete looks at the owner's page again each time it takes the moves' lock back after waiting for
+    a render (`moves.page_held`'s `look`), so a page that went meanwhile is answered as a page that is not there."""
+    doc = made(agents, "bea-claude", text=PAGE)
+    e, path = agents.hub.entry(doc), agents.hub.file(doc)
+    held, release, answer = threading.Event(), threading.Event(), []
+
+    def render():
+        with e.live.exclusive():
+            held.set()
+            release.wait(15)
+
+    threading.Thread(target=render, daemon=True).start()
+    assert held.wait(5)
+    deleting = threading.Thread(target=lambda: answer.append(delete(agents, doc).status), daemon=True)
+    deleting.start()
+    deleting.join(0.3)
+    assert deleting.is_alive()
+    os.unlink(path)                                 # another process takes the page away while the Delete waits
+    release.set()
+    deleting.join(10)
+    assert answer == [404]
+    assert trash_rows(agents) == []

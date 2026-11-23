@@ -322,3 +322,22 @@ def test_the_description_of_more_says_it_is_a_lower_bound():
     import sheafmd.mcp as mcp
     text = mcp.TOOLS["documents"]["description"]
     assert "at least" in text and "stopped" in text
+
+
+
+def test_the_walk_leaves_half_of_the_time_budget_to_the_opening_of_what_it_found(browser, tmp_path, monkeypatch):
+    """Ticket 182 review: the door's walk is not capped by count (the limit is spent on what the caller sees), so a root
+    far past the limit is bounded by time instead: its walk gets half of the time left, never the whole budget."""
+    import time
+    import sheafmd.mcp as mcp
+    root = tmp_path / "wiki"
+    doc(root, "0.md")
+    browser.hub.roots.for_document(root / "0.md")
+    comment(root / "0.md")
+    real, given = mcp.list_documents, []
+    def spy(src, cap=None, deadline=None):
+        given.append(deadline - time.monotonic())
+        return real(src, cap=cap, deadline=deadline)
+    monkeypatch.setattr(mcp, "list_documents", spy)
+    assert names(docs(browser)) == ["wiki/0.md"]
+    assert given and all(0 < left <= mcp.DOCUMENTS_SECONDS / 2 for left in given)

@@ -229,11 +229,13 @@ def test_the_token_can_only_read_and_the_one_secret_is_the_list_of_names_for_the
     assert "pull_request_target" not in text
 
 
-def test_only_three_actions_are_used_each_at_a_major_version(text):
+def test_only_four_actions_are_used_each_at_a_major_version(text):
+    # actions/upload-artifact keeps the evidence of a stalled page test (tests/page/stall_evidence.py, ticket 173 O), and
+    # only on a failure: GitHub's own, as checkout and cache are.
     used = re.findall(r"^\s*(?:- )?uses: (\S+)\s*$", text, flags=re.M)
     assert used
     names = {u.split("@")[0] for u in used}
-    assert names <= {"actions/checkout", "actions/cache", "astral-sh/setup-uv"}
+    assert names <= {"actions/checkout", "actions/cache", "actions/upload-artifact", "astral-sh/setup-uv"}
     assert all(re.fullmatch(r"[\w./-]+@v\d+", u) for u in used), used
 
 

@@ -640,3 +640,69 @@ def test_a_restore_where_the_file_system_refuses_hard_links_says_so_and_moves_no
     assert got.status == 409, got.text
     assert "hard link" in got.text and row["id"] in got.text     # what the owner can do: move that entry back by hand
     assert not agents.hub.file(doc).exists() and len(trash_rows(agents)) == 1
+
+
+def _marked_everywhere(agents, clock):
+    """An archived page that also carries a keep mark and a seen time: all three marks the delete takes."""
+    doc = archived_page(agents, clock)
+    root, rel = root_of(agents, doc).path, doc.split("/", 1)[1]
+    loose.keep(root, rel, True)
+    assert rel in loose.marks(root) and rel in loose.times(root, "archived.json") and rel in loose.times(root, "seen.json")
+    return doc, root, rel
+
+
+def _marks_of(root, rel):
+    return [rel in loose.marks(root), rel in loose.times(root, "archived.json"), rel in loose.times(root, "seen.json")]
+
+
+def test_a_page_taken_from_the_trash_right_after_the_move_leaves_no_marks_at_its_empty_address(agents, clock, monkeypatch):
+    doc, root, rel = _marked_everywhere(agents, clock)
+    path = agents.hub.file(doc)
+    real = os.rename
+
+    def rename(a, b, *args, **k):
+        real(a, b, *args, **k)
+        if k.get("dst_dir_fd") is not None:
+            os.unlink(b, dir_fd=k["dst_dir_fd"])    # a program outside the hub takes the entry from the trash in that instant
+    monkeypatch.setattr(archive.os, "rename", rename)
+    got = delete(agents, doc)
+    assert got.status == 409, got.text
+    assert not path.exists()
+    assert _marks_of(root, rel) == [False, False, False]
+
+
+def test_a_folder_swapped_in_that_cannot_be_put_back_leaves_no_marks_at_the_empty_address(agents, clock, monkeypatch):
+    doc, root, rel = _marked_everywhere(agents, clock)
+    path = agents.hub.file(doc)
+    real, calls = os.rename, []
+
+    def rename(a, b, *args, **k):
+        calls.append(a)
+        if len(calls) == 1:
+            os.unlink(path)
+            os.mkdir(path)                          # another process puts a folder at the page's name
+            return real(a, b, *args, **k)
+        raise OSError(errno.EACCES, os.strerror(errno.EACCES))     # and the move back is refused
+    monkeypatch.setattr(archive.os, "rename", rename)
+    got = delete(agents, doc)
+    assert got.status == 409 and "by hand" in got.text, got.text
+    assert not os.path.lexists(path)
+    assert _marks_of(root, rel) == [False, False, False]
+
+
+def test_a_folder_swapped_in_and_put_back_keeps_the_marks_of_its_address(agents, clock, monkeypatch):
+    doc, root, rel = _marked_everywhere(agents, clock)
+    path = agents.hub.file(doc)
+    real, swapped = os.rename, []
+
+    def rename(a, b, *args, **k):
+        if not swapped:
+            swapped.append(a)
+            os.unlink(path)
+            os.mkdir(path)
+        return real(a, b, *args, **k)
+    monkeypatch.setattr(archive.os, "rename", rename)
+    got = delete(agents, doc)
+    assert got.status == 409, got.text
+    assert path.is_dir()
+    assert _marks_of(root, rel) == [True, True, True]

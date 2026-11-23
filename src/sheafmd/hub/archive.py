@@ -268,12 +268,14 @@ class Archive:
                     try:
                         moved = os.stat(dname, dir_fd=dfd, follow_symlinks=False).st_mode
                     except OSError as e:
+                        self._unmark_refused(root, rel)
                         raise loose.Refused(f"the page was moved to the trash, then something else took it from there "
                                             f"({e.strerror})") from None
                     if not stat.S_ISREG(moved):
                         try:
                             os.rename(dname, sname, src_dir_fd=dfd, dst_dir_fd=sfd)
                         except OSError as e:
+                            self._unmark_refused(root, rel)
                             raise loose.Refused(f"what was at the page's address changed during the delete and is in the "
                                                 f"trash now ({e.strerror}): move {TRASH / str(at) / rel} back by hand") from None
                         raise loose.Refused("what is at the page's address changed during the delete: refused, nothing was moved")
@@ -281,9 +283,22 @@ class Archive:
                     os.close(dfd)
             finally:
                 os.close(sfd)
-            loose.stamp_held(root.path, ARCHIVED, {rel: None})      # the marks go in the hold of the move: no sweep between
-            loose.stamp_held(root.path, SEEN, {rel: None})
-            loose.keep_held(root.path, rel, False)
+            self._unmark(root, rel)     # the marks go in the hold of the move: no sweep between
+
+    @staticmethod
+    def _unmark(root, rel: str) -> None:
+        """Take the archived, seen and keep marks of `rel`. The caller holds `loose-keep.lock`."""
+        loose.stamp_held(root.path, ARCHIVED, {rel: None})
+        loose.stamp_held(root.path, SEEN, {rel: None})
+        loose.keep_held(root.path, rel, False)
+
+    @classmethod
+    def _unmark_refused(cls, root, rel: str) -> None:
+        """183 BW: a delete refused after the rename has still emptied the address, so its marks go as well, or a page made
+        there later would be born archived or kept. A mark file that cannot be written does not hide the refusal that says
+        where the page went."""
+        with contextlib.suppress(loose.Refused, OSError):
+            cls._unmark(root, rel)
 
     def trashed(self, root) -> list:
         """`[{id, rel, deleted_at, days_left}]` of the root's trash, newest first."""

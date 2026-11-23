@@ -468,7 +468,10 @@ def test_a_caller_that_did_not_ask_for_html_still_gets_the_json_refusal(browser,
                                             "has expired or is not this hub's"}
 
 
-@pytest.mark.parametrize("accept", ["text/html;q=0", "text/html; q=0.0, application/json", "xtext/html", "application/xhtml+xml"])
+@pytest.mark.parametrize("accept", ["text/html;q=0", "text/html; q=0.0, application/json", "xtext/html", "application/xhtml+xml",
+                                    # 183 AT: a quoted parameter that holds `,` or `;` does not end the item or its parameters
+                                    'text/html;foo="a,b";q=0', 'text/html;foo="a;b";q=0',
+                                    'text/html;foo="a\\";b";q=0', 'application/json;foo="x, text/html"'])
 def test_an_accept_that_refuses_html_or_only_looks_like_it_still_gets_the_json_refusal(browser, plan, accept):
     nonce = sign_in_nonce(browser)
     assert open_with(browser, nonce).status == 303
@@ -476,7 +479,8 @@ def test_an_accept_that_refuses_html_or_only_looks_like_it_still_gets_the_json_r
     assert r.status == 401 and r.json()["ok"] is False
 
 
-@pytest.mark.parametrize("accept", ["TEXT/HTML", "Text/Html;Q=0.5", "application/json, text/html;q=0.1", "text/html ; charset=utf-8"])
+@pytest.mark.parametrize("accept", ["TEXT/HTML", "Text/Html;Q=0.5", "application/json, text/html;q=0.1", "text/html ; charset=utf-8",
+                                    'text/html;foo="a,b";q=0.5', 'application/json;foo="a,b", text/html'])
 def test_an_accept_that_asks_for_html_in_any_case_or_with_a_weight_gets_the_page(browser, plan, accept):
     nonce = sign_in_nonce(browser)
     assert open_with(browser, nonce).status == 303

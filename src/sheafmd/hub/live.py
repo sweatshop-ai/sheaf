@@ -33,6 +33,10 @@ UNKNOWN = "the .md changed on disk and this page's version is no longer known to
 # The same for a request that names a thread by its id (SPEC 7.3).
 BY_ID = f"{UNKNOWN}, so this comment may not be the one on the page"
 
+# What `LiveDocument.refresh` returns when it could not decide what the file holds (a write in flight, a file it could not
+# stat): it kept what the tabs hold and published nothing, and the caller must look at the file again, even unchanged.
+RETRY = object()
+
 
 class NotAuthor(Exception):
     """An edit or a delete, by an author who may change only their own (9.9), of a comment that
@@ -668,7 +672,7 @@ class LiveDocument:
 
     def refresh(self, force=False):
         """Catch up with a write from outside (the CLI, an agent, an editor). Publishes
-        `changed` and returns its snapshot, or returns None when nothing moved.
+        `changed` and returns its snapshot, returns None when nothing moved, and RETRY when it could not decide (look again).
 
         force: render whatever the file holds and return the snapshot, publishing nothing: the
         caller announces the result itself."""
@@ -687,6 +691,6 @@ class LiveDocument:
                 self._text, self._hash, self._branch = kept
                 branch = self._render(self._text)         # the page the hub serves is the one the tabs hold, not the torn one
                 self._branch = branch if isinstance(branch, str) else None
-                return None
+                return RETRY
             self._remember(self._text)
             return self._announce(self._snapshot(self._text), before)

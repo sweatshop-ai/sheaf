@@ -1077,7 +1077,7 @@ def test_a_pull_names_the_author_of_a_file_of_a_root_that_is_a_folder_of_its_rep
     merged_on_github(tmp_path, remote, {"acme/plan.md": "# acme, on GitHub\n"}, "on GitHub")
     told = []
     hub_commits = commits.Commits(lambda kind, doc, **detail: None,
-                                  pulled=lambda folder, files, ok, left=None: told.append((files, ok)))
+                                  pulled=lambda folder, files, ok, left=None, named=None: told.append((files, ok)))
     hub_commits.poll([a, b])
     assert hub_commits.settle()
     assert told == [([(repo / "acme" / "plan.md", "Ada")], True)]

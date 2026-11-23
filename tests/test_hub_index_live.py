@@ -1125,6 +1125,77 @@ def test_a_render_with_new_settings_does_not_hold_the_hubs_lock_while_the_page_i
     assert not rendering.is_alive()
 
 
+def test_a_render_that_takes_in_a_write_from_disk_does_not_hold_the_hubs_lock_meanwhile(lock_order, world, put):
+    """Ticket 182 P: a render of a document written on disk since takes the write in (a refresh, which can render the page)
+    with the hub's lock let go, as its rebuild does."""
+    f = put("a.md")
+    world.hub.render(f, {"title": "One"}, None)
+    e = world.hub.entry("work/a.md")
+    edit(f, "# Written on disk since\n")
+    refreshing, release = threading.Event(), threading.Event()
+
+    def refresh(*a, **k):
+        refreshing.set()
+        release.wait(15)
+    e.live.refresh = refresh
+    rendering = threading.Thread(target=lambda: world.hub.render(f, {"title": "One"}, None), daemon=True)
+    rendering.start()
+    try:
+        assert refreshing.wait(5)
+        assert world.hub._lock.acquire(timeout=3), "the hub's lock is held while the write on disk is taken in"
+        world.hub._lock.release()
+    finally:
+        release.set()
+        rendering.join(5)
+    assert not rendering.is_alive()
+
+
+def test_a_render_whose_page_is_deleted_between_its_locks_says_so_and_tells_no_change_after_gone(lock_order, world, put, monkeypatch):
+    """Ticket 182 R: a delete between the part of a render under the hub's lock and its rebuild leaves no file to read. The
+    render says the page went away (not a raw FileNotFoundError), and the page open on it hears nothing after `gone`."""
+    from sheafmd.render import RenderError
+    f = put("a.md")
+    world.hub.render(f, {"title": "One"}, None)
+    e = world.hub.entry("work/a.md")
+    sub = e.bus.subscribe()
+    sub.drain()
+    original = world.hub._render_entry
+
+    def then_deleted(*a, **k):
+        got = original(*a, **k)
+        f.unlink()
+        world.hub.forget_document("work/a.md")
+        return got
+    monkeypatch.setattr(world.hub, "_render_entry", then_deleted)
+    with pytest.raises(RenderError, match="went away"):
+        world.hub.render(f, {"title": "Two"}, None)
+    names = [name for name, _ in sub.drain()]
+    assert "gone" in names and "changed" not in names[names.index("gone"):], names
+
+
+def test_a_write_that_a_refresh_could_not_decide_is_taken_in_on_the_next_tick(world, put):
+    """Ticket 183 AO: a refresh that cannot stat the file it read keeps what the tabs hold and comes back later. The watcher
+    must come back: the file's (mtime, size) are not marked as seen, so the next tick refreshes the unchanged file again."""
+    f = put("a.md")
+    e = world.hub.entry("work/a.md")
+    sub = e.bus.subscribe()
+    world.hub.tick()
+    sub.drain()
+    edit(f, "# Written on disk since\n")
+    real, undecided = e.live._stamp, [True]
+
+    def stamp():
+        if undecided:
+            undecided.pop()
+            return None         # the file cannot be stat-ed this once (a name the hub cannot decide now)
+        return real()
+    e.live._stamp = stamp
+    world.hub.tick()
+    assert "changed" not in [name for name, _ in sub.drain()]
+    world.hub.tick()
+    assert "changed" in [name for name, _ in sub.drain()]
+
+
 def test_a_render_whose_root_is_forgotten_while_the_page_is_rebuilt_makes_no_entry_again(world, put):
     f = put("a.md")
     world.hub.render(f, {"title": "One"}, None)

@@ -5078,6 +5078,11 @@ def test_typing_while_a_change_from_outside_settles_is_refused_and_said(tab):
 # Two pages of one document write the store. Both sends fail at the same instant, each page's renderer in its own
 # process, so neither may have heard of the other's write when it writes: the store must still hold both (each entry
 # has a key of its own, SPEC 10.4).
+# Each page spins from its own send on, so it cannot hear the other's write before its own fails. The test gives
+# each page only the key-downs before the instant (the send is on keydown) and the key-ups after it. A whole
+# `press` waits for its page to take the key-up: when page A's spin began first, the press held page B's send
+# past the instant, and the round did not race. That happened in all three jobs of nightly run 45141939187, and
+# in 40 rounds out of 40 when the key was held 30 ms.
 FAIL_TOGETHER = """(at) => {
   const real = window.fetch;
   window.fetch = function (url, init) {
@@ -5104,9 +5109,13 @@ def test_two_sends_that_fail_at_the_same_instant_on_two_pages_are_both_kept(thre
         if time.time() * 1000 > at_ms - 300:        # the setup ran into the instant: the round would not race
             idle.append(i)
             continue
-        a.keyboard.press("Control+Enter")
-        b.keyboard.press("Control+Enter")
+        for p in (a, b):
+            p.keyboard.down("Control")
+            p.keyboard.down("Enter")
         a.wait_for_timeout(1300)
+        for p in (a, b):
+            p.keyboard.up("Enter")
+            p.keyboard.up("Control")
         # Both pages were spinning at once, so they ran on two threads: on one, the second spin starts when the first ends.
         (sa, ea), (sb, eb) = (p.evaluate("window.__spins.pop()") for p in (a, b))
         if not (sa < eb and sb < ea):

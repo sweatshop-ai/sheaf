@@ -166,11 +166,23 @@ def test_the_whole_corpus_in_one_document_runs_nothing(env):
     assert_in_the_lists(env)
 
 
+def count_runs_outside_the_page(page, hits):
+    """Each `__pwned` the page sets is heard here, in the test, the moment it is set. The corpus holds a meta refresh to a
+    stranger's address: through innerHTML, Chromium follows it and its main frame lands on its error page some time after
+    the payloads ran (35 ms as a rule, 594 ms once on a loaded machine). That takes the page's `__pwned` with it, and a
+    read of it while the navigation lands fails with "Execution context was destroyed" (runs 45151298649, #615)."""
+    page.expose_binding("__sheafPwned", lambda source: hits.append(1))
+    page.evaluate("""() => { let n = 0; Object.defineProperty(window, '__pwned', {configurable: true,
+        get: () => n, set: (v) => { n = v; window.__sheafPwned(); }}); }""")
+
+
 def test_control_the_same_corpus_through_innerHTML_does_run_and_does_load(env):
     """The harness can see a failure: the naive way to mount the text executes it and reaches the stranger's address."""
+    hits = []
+    count_runs_outside_the_page(env, hits)
     env.evaluate("""(html) => { const d = document.createElement('div'); document.body.append(d); d.innerHTML = html; }""", "".join(HOSTILE))
     env.wait_for_timeout(600)
-    assert env.evaluate("window.__pwned || 0") > 0 or strangers(env), env.engine
+    assert hits or strangers(env), env.engine
 
 
 def test_a_dropped_image_leaves_its_alt_text(env):

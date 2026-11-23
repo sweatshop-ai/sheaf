@@ -5078,6 +5078,10 @@ def test_typing_while_a_change_from_outside_settles_is_refused_and_said(tab):
 # Two pages of one document write the store. Both sends fail at the same instant, each page's renderer in its own
 # process, so neither may have heard of the other's write when it writes: the store must still hold both (each entry
 # has a key of its own, SPEC 10.4).
+# Each page starts to spin at the same fixed time, 300 ms before the instant, never right after its own send: a key
+# press waits for its page to take the key-up, so a page that spun from its send on held the press of the other page
+# until the instant had passed, and the two sends no longer raced (all three jobs of nightly run 45141939187: a key-up
+# that reaches page A after its spin began, forced with a key held 30 ms, made 40 rounds out of 40 idle).
 FAIL_TOGETHER = """(at) => {
   const real = window.fetch;
   window.fetch = function (url, init) {
@@ -5086,7 +5090,7 @@ FAIL_TOGETHER = """(at) => {
       (window.__spins = window.__spins || []).push([Date.now(), at]);
       while (Date.now() < at) { }
       done(new Response(JSON.stringify({ok: false, error: 'the hub broke off'}), {status: 500, headers: {'Content-Type': 'application/json'}}));
-    }, 0));
+    }, Math.max(0, at - 300 - Date.now())));
   };
 }"""
 
@@ -5097,11 +5101,11 @@ def test_two_sends_that_fail_at_the_same_instant_on_two_pages_are_both_kept(thre
     b.wait_for_selector("#rd-popover textarea")
     lost, idle = [], []
     for i in range(40):
-        at_ms = int(time.time() * 1000) + 700
+        at_ms = int(time.time() * 1000) + 1000
         for p, who in ((a, "A"), (b, "B")):
             p.evaluate(FAIL_TOGETHER, at_ms)
             p.fill("#rd-popover textarea", f"words from page {who} round {i}")
-        if time.time() * 1000 > at_ms - 300:        # the setup ran into the instant: the round would not race
+        if time.time() * 1000 > at_ms - 500:        # the setup ran into the spins: the round would not race
             idle.append(i)
             continue
         a.keyboard.press("Control+Enter")

@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import quote
 
-from .. import __version__, config, paths, signals
+from .. import __version__, config, diagnostics, paths, signals
 from .auth import Auth
 
 # A hub's start is its imports, 0.75 s of a free core: sixteen starts at once on two cores answer after
@@ -42,6 +42,7 @@ UPGRADE_WAIT = 20.0                   # for the new version to answer after an u
 # More than jobs.TERM_GRACE + 1 s: a hub stop gives a child that ignores SIGTERM the grace, then a second
 # after the SIGKILL (`Jobs.kill_all`), then writes its exit row (8.10).
 STOP_WAIT = 8.0
+EXIT_ROW_WAIT = 2.0                  # for the exit row of a hub that no longer answers (8.4)
 TIMEOUT = 3.0
 DOOR_TIMEOUT = 130.0             # a reply re-renders the page; pandoc is given 120 s (SPEC 3.2)
 DOOR_ANSWER_MAX = 64 * 1024 * 1024
@@ -111,6 +112,11 @@ class HubDidNotStart(Exception):
 
 class HubBeingStopped(HubDidNotStart):
     """A newer command met a stop already under way: it starts no hub behind it and fails (8.4)."""
+
+
+BEING_STOPPED = (f"the hub is being stopped; this is {__version__}. "
+                 "Run the command again when it has stopped")
+PERSON_STOPS = ("stop", "signal")     # the stops an upgrade stop gives way to (8.4)
 
 
 class HubChanged(Impostor):
@@ -394,10 +400,25 @@ def ask_stop(met: Met, reason: str, force: bool = False, yield_to_stop: bool = F
         raise JobsRunning(res.get("error") or "a Tell is running")
     if status != 200 or not res.get("ok"):
         raise StopRefused(res.get("error") or status)
-    if yield_to_stop and reason == "upgrade" and res.get("reason") in ("stop", "signal"):
-        raise HubBeingStopped(f"the hub is being stopped; this is {__version__}. "
-                              "Run the command again when it has stopped")
+    if yield_to_stop and reason == "upgrade" and res.get("reason") in PERSON_STOPS:
+        raise HubBeingStopped(BEING_STOPPED)
     return pid
+
+
+def exit_reason(boot: str, wait: float = EXIT_ROW_WAIT) -> str | None:
+    """The reason the exit row of the hub `boot` gives (`hub-exit`, 8.4), or None when it wrote none
+    within `wait` seconds. A hub writes it after it has stopped serving and before its process ends,
+    so a command that found the port silent without a pid to wait for may read before it is there."""
+    if not boot:
+        return None
+    deadline = time.time() + wait
+    while True:
+        for r in reversed(diagnostics.read(since_days=1)):
+            if r.get("source") == "hub" and r.get("kind") == "hub-exit" and r.get("boot") == boot:
+                return r.get("reason")
+        if time.time() >= deadline:
+            return None
+        time.sleep(0.05)
 
 
 def wait_stopped(met: Met, pid: int | None) -> str:
@@ -489,6 +510,13 @@ def _meet_version(met: Met, warn) -> tuple[Met, bool]:
         return met, False
     if left:
         raise HubDidNotStart(f"the hub did not stop for the upgrade ({left}; see `sheaf diag`)")
+    # The answer to the stop does not say what ended the hub: a hub older than #508 answers no
+    # reason, and a stop or a signal that comes after the upgrade stop wins over it (8.4). The
+    # exit row says it. A hub that left none (killed) was stopped by no person: start the new one.
+    # Under the service a signal is restarted by the unit (14.3), on the new code: only a stop stays down.
+    ended_by = exit_reason(met.boot)
+    if ended_by == "stop" or (ended_by == "signal" and not met.got.get("service")):
+        raise HubBeingStopped(BEING_STOPPED)
     if not met.got.get("service"):                      # under the service, exit 75 starts the new code
         spawn_hub("upgrade")
     now = wait_for_start(met.client, UPGRADE_WAIT, lambda now: now.get("version") == __version__)

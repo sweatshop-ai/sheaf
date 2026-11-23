@@ -1,6 +1,6 @@
 # 185: Codex recheck findings, batch 4
 
-**Status:** open
+**Status:** done
 
 **Blocked by:** none
 
@@ -9,14 +9,14 @@
 **Counts:** 6 findings:
 
 - 4 still present: 0 serious, 4 minor (fixed in #624).
-- 1 filed later: BJ, a flaky test seen in #624's CI.
+- 1 filed later: BJ, a flaky test seen in #624's CI (fixed in #629).
 - 2 already fixed on main.
 - 0 already filed.
 - 0 not a defect.
 
 Codex marked 5 of the 6 serious; the ratings below are the triage's own, by the rule of 183. Serious means a wrong result in ordinary use, a crash, data loss, or a security or privacy breach. Minor means the defect needs a narrow race, a malformed answer from a peer, or an unusual name, or it changes only a status code, a log row or the form of the source.
 
-**Where (open items):** `src/sheafmd/hub/events.py` (BD), `.github/workflows/ci.yml` with SPEC 18 (BF), `tests/test_hub_tell.py` (BG), `src/sheafmd/send.py` (BH).
+**Where (items, all closed):** `src/sheafmd/hub/events.py` (BD), `.github/workflows/ci.yml` with SPEC 18 (BF), `tests/test_hub_tell.py` (BG), `src/sheafmd/send.py` (BH).
 
 Each open item has one box. Write a red test on main first for each. If an item cannot be reproduced, leave its box unticked and give the reason.
 
@@ -33,7 +33,7 @@ None.
 
 Ticked BD, BF, BG and BH: merged in #624 (merge e9abcfae, head bb741e89). BD: `Subscription.put` reads `on_put` once and `Bus.publish` records `publish-failed` and goes on (`tests/test_hub_events_bus.py`). BH: `pull` passes `check_unchanged` to `write_text_atomic` (`test_pull_never_overwrites_an_edit_saved_while_it_writes_the_file`). BG: `number_places` in `tests/helpers.py` compares the pid by place. BF: the `ci.yml` comment and SPEC 18 say a member of the organisation is trusted with the runners, and what to change before a member without write access joins.
 
-- [ ] **BJ** (from #624's CI, run 45194438767): `tests/test_repo_pages.py::test_a_slow_clone_never_holds_a_report_and_one_repo_does_not_hold_another` (`test_repo_pages.py:719`) asserts that a report comes back within 0.5 s of `time.monotonic()`. Under 16 workers on the shared runner one took 0.636 s and the job failed; the re-run of the failed job passed. The house rule (SPEC 18) has a test that times computation read `time.process_time()`; wall time stays only where a real timeout is the point. Make the check not depend on wall time under load: for example, have the slowed `_clone` block on an event the test sets only after `report_once` has answered, so an answer that waited for the clone cannot come back at all.
+- [x] **BJ** (from #624's CI, run 45194438767): `tests/test_repo_pages.py::test_a_slow_clone_never_holds_a_report_and_one_repo_does_not_hold_another` (`test_repo_pages.py:719`) asserts that a report comes back within 0.5 s of `time.monotonic()`. Under 16 workers on the shared runner one took 0.636 s and the job failed; the re-run of the failed job passed. The house rule (SPEC 18) has a test that times computation read `time.process_time()`; wall time stays only where a real timeout is the point. Make the check not depend on wall time under load: for example, have the slowed `_clone` block on an event the test sets only after `report_once` has answered, so an answer that waited for the clone cannot come back at all. Fixed in #629 (merge 0fb75ab3): each clone waits on a gate the test opens only after that repo's reports answered, so a report that waited for a clone is caught by a gate's timeout, not by a clock. Known limit: a short bounded wait inside `report` is not caught (no clock-free check can see it).
 
 ## Already filed
 

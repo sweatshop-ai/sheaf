@@ -640,13 +640,13 @@ def cmd_pull(argv: list[str], out=None, err=None) -> int:
         if now["hash"] == row["hash"]:
             out(f"{md} is the shared Sheaf's latest text already.")
             return EXIT_OK
-        def unchanged():
+        def check_unchanged():
             # An edit saved while the door was asked, or while the new text is written and synced, is the file's,
             # not the pull's: checked again just before the new text takes the file's place.
             if md_hash(_read_local(md)) != md_hash(local):
                 raise _leave_theirs(md, row, now, sending=False)
-        unchanged()
-        write_text_atomic(md, now["text"], check=unchanged)
+        check_unchanged()
+        write_text_atomic(md, now["text"], check=check_unchanged)
         keep_row(md, {**row, "hash": now["hash"], "local": md_hash(now["text"])})
         out(f"{md} now holds the shared Sheaf's latest text of {row['doc']}.")
         return EXIT_OK

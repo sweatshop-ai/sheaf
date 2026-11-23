@@ -3,6 +3,10 @@
 A break after which the cell shows nothing is the placeholder the browser keeps at the end of a line and
 goes. Python's `str.strip()` also strips a no-break space, so a typed one counted as nothing.
 """
+import re
+
+import pytest
+
 from helpers import pandoc
 from sheafmd import edit as rde
 
@@ -109,3 +113,38 @@ def test_one_no_break_space_after_a_break_at_the_end_of_bold_in_a_table_with_a_b
     html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", "><b>x<br></b>\u00a0<")
     out = saved_table(html, src)
     assert "<table" not in out and "<br" not in out
+
+
+# Ticket 183 AF: Enter at the end of code that the cell's words go on after is a break in the cell, not the code's.
+@pytest.mark.parametrize("cell", ["<code>red<br></code> now", "<code>red<br> </code> now",
+                                  "<code>red <br></code> now"])
+def test_enter_at_the_end_of_code_among_words_in_a_cell_stays_a_pipe_table(cell):
+    src = "| a |\n|---|\n| x |"
+    html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", ">" + cell + "<")
+    out = saved_table(html, src)
+    assert "<table" not in out
+    row = out.splitlines()[-1]
+    assert re.search(r"`red\s?`<br>\s*now", row), row
+
+
+# What a save wrote for that cell before 183 AF: the whole table as raw HTML. It still reads as the same cell, and an
+# edit elsewhere in the page leaves it as it is.
+OLD_AF_TABLE = ('<table>\n<colgroup>\n<col style="width: 100%" />\n</colgroup>\n<thead>\n<tr>\n<th>a</th>\n</tr>\n'
+                '</thead>\n<tbody>\n<tr>\n<td><code>red</code><br />\nnow</td>\n</tr>\n</tbody>\n</table>\n')
+
+
+def test_the_raw_table_a_save_wrote_before_reads_as_the_cell_the_pipe_table_now_holds():
+    def cell(md):
+        html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], md)
+        return re.sub(r"\s+", " ", re.search(r"<td>(.*?)</td>", html, re.S).group(1)).replace("<br />", "<br>")
+
+    src = "| a |\n|---|\n| x |"
+    html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", "><code>red<br></code> now<")
+    assert cell(OLD_AF_TABLE) == cell(saved_table(html, src)) == "<code>red</code><br> now"
+
+
+def test_the_raw_table_a_save_wrote_before_stays_as_it_is_when_another_block_is_edited():
+    doc = "# Title\n\n" + OLD_AF_TABLE + "\nwords here\n"
+    out, rep = rde.apply_edits(doc, [{"i": 2, "html": "<p>words there</p>"}])
+    assert rep["skipped"] == []
+    assert out == doc.replace("here", "there")

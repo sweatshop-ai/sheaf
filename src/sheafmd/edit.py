@@ -854,7 +854,8 @@ def _split_code_at_breaks(soup):
     """Chromium's Enter inside inline code in a table cell leaves a <br> in the <code>, which a cell cannot hold
     and which sent the whole table to raw HTML. The code is cut there into two spans with the break between
     them, as a break between words is. A break with nothing but white space after it in the code is the
-    placeholder at its end, which stays where it is."""
+    placeholder at its end, which stays where it is when it ends the cell too; where the cell's words go on after
+    the code, it is Enter at the end of the code, and goes after it with the white space, a break in the cell."""
     from bs4 import NavigableString
 
     codes = soup.find_all("code")
@@ -864,6 +865,9 @@ def _split_code_at_breaks(soup):
         for br in code.find_all("br", recursive=False):
             after = [x for x in br.next_siblings]
             if not any(str(x.get_text() if hasattr(x, "get_text") else x).strip(" \t\n\r\f\xa0") for x in after):
+                if not _ends_its_cell(br, br.find_parent(["td", "th"])):
+                    for x in reversed([br, *after]):
+                        code.insert_after(x.extract())
                 continue
             tail = soup.new_tag("code", attrs=code.attrs)
             for x in after:

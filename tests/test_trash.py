@@ -790,6 +790,8 @@ def test_a_page_removed_from_outside_the_hub_leaves_no_marks_after_the_sweep(age
     os.unlink(agents.hub.file(doc))                 # something outside the hub empties the address before the delete reaches it
     assert delete(agents, doc).status == 404
     sweep(agents)
+    assert _marks_of(root, rel) == ALL_MARKS        # one sweep that misses the page is not enough
+    sweep(agents)
     assert _marks_of(root, rel) == NO_MARKS
     assert made(agents, "bea-claude") == doc
     assert doc in docs(agents) and doc not in docs(agents, view="archived")
@@ -803,6 +805,7 @@ def test_a_folder_put_back_at_a_pages_address_leaves_no_marks_after_the_sweep(ag
     assert delete(agents, doc).status == 409
     monkeypatch.undo()
     assert path.is_dir()
+    sweep(agents)
     sweep(agents)
     assert _marks_of(root, rel) == NO_MARKS
 
@@ -836,7 +839,7 @@ def test_a_sweep_during_a_move_leaves_the_moved_page_its_marks(agents, clock, mo
 
     def marks_moved(root_path, old, new):
         # the page is at its new address and gone from the old one; its marks are still at the old one
-        t = threading.Thread(target=sweep, args=(agents,))
+        t = threading.Thread(target=lambda: (sweep(agents), sweep(agents)))
         t.start()
         t.join(1.0)
         sweeps.append(t)
@@ -847,3 +850,31 @@ def test_a_sweep_during_a_move_leaves_the_moved_page_its_marks(agents, clock, mo
     sweeps[0].join(10)
     new = got.json()["doc"]
     assert _marks_of(root, new.split("/", 1)[1]) == ALL_MARKS
+
+
+def test_a_page_a_sync_tool_takes_away_for_one_sweep_keeps_its_marks(agents, clock):
+    doc, root, rel = _marked_everywhere(agents, clock)
+    path = agents.hub.file(doc)
+    held = path.read_bytes()
+    path.unlink()
+    sweep(agents)
+    path.write_bytes(held)                          # back before the next sweep
+    sweep(agents)
+    path.unlink()
+    sweep(agents)                                   # missed once again: a first miss, not a second
+    assert _marks_of(root, rel) == ALL_MARKS
+
+
+def test_a_page_that_cannot_be_looked_at_for_a_moment_keeps_its_marks(agents, clock, monkeypatch):
+    doc, root, rel = _marked_everywhere(agents, clock)
+    monkeypatch.setattr(archive.Archive, "_pages", lambda self, member, root: [])     # the index has dropped it too
+    real = os.stat
+
+    def stat(path, *a, **k):
+        if str(path) == str(agents.hub.file(doc)):
+            raise OSError(errno.EACCES, os.strerror(errno.EACCES))
+        return real(path, *a, **k)
+    monkeypatch.setattr(archive.os, "stat", stat)
+    sweep(agents)
+    sweep(agents)
+    assert _marks_of(root, rel) == ALL_MARKS

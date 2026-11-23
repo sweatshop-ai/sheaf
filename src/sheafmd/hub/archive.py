@@ -62,6 +62,18 @@ class Archive:
         self._next = 0.0
         self._worker: threading.Thread | None = None    # the sweep, the purge and the clones' sleep: one at a time, off the tick
         self._refused: set = set()                      # roots whose refusal is recorded already, until they are read again
+        self._unpaged: dict = {}                        # per root, the marked addresses the last sweep found with no page (183 BY)
+
+    @staticmethod
+    def _holds_a_page(root, rel: str) -> bool:
+        """Whether `rel` may still hold a page: False only when nothing is there, or a folder is. A look that fails another
+        way (a folder unreadable for a moment, a stale network handle) is not taken for an empty address."""
+        try:
+            return not stat.S_ISDIR(os.stat(Path(root.path) / rel).st_mode)
+        except (FileNotFoundError, NotADirectoryError):
+            return False
+        except OSError:
+            return True
 
     def own_root(self, folder):
         """The root of a member's loose `folder` when that folder is the root itself, else None: a folder inside another root
@@ -150,13 +162,16 @@ class Archive:
             marks = Marks(root.path)
             # 183 BY: the marks of an address with no page go (emptied from outside the hub, a delete that found it gone or
             # put a folder back there), or a page made there later is born kept. Two looks: not in the listing, and no file
-            # under the lock, so a page made (and kept) since the listing keeps its marks. A mark file that cannot be
+            # under the lock, so a page made (and kept) since the listing keeps its marks. And at two sweeps running: a
+            # page a sync tool takes away and puts back between two of them keeps its marks. A mark file that cannot be
             # written leaves those marks for the next sweep and stops nothing of this one.
             listed = {rel for rel, _, _ in pages}
             unpaged = {rel for rel in {*marks.archived, *marks.seen, *marks.kept}
-                       if rel not in listed and not os.path.isfile(Path(root.path) / rel)}
-            if unpaged:
-                self._unmark_quietly(root, unpaged)
+                       if rel not in listed and not self._holds_a_page(root, rel)}
+            missed_before = self._unpaged.get(root.path, set())
+            self._unpaged[root.path] = unpaged
+            if unpaged & missed_before:
+                self._unmark_quietly(root, unpaged & missed_before)
                 marks = Marks(root.path)
             loose.stamp_held(root.path, SEEN, {rel: now for rel, _, _ in pages if rel not in marks.seen}, only_new=True)
             seen = {**{rel: now for rel, _, _ in pages}, **marks.seen}

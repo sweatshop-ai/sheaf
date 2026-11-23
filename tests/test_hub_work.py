@@ -1157,7 +1157,8 @@ def test_the_loopback_port_answers_404_not_405_for_a_member_route(team, box, bro
 
 def test_a_members_save_cannot_write_a_front_matter_onto_a_sheaf(team, box, work):
     # The page cannot edit a front matter (5): a save of `---` paragraphs would list any transcript id as the
-    # sheaf's box session, of another project or of a rectoverso the member cannot open.
+    # sheaf's box session, of another project or of a rectoverso the member cannot open. A line of dashes typed on
+    # the page is written as its text, `\---` (ticket 137), so the save opens no front matter.
     from sheafmd.source import md_hash
     bare = put(team, work, "acme/tiroir/bare.md", "Hello world\n\nSecond para\n")
     before = (work / "acme/tiroir/bare.md").read_text(encoding="utf-8")
@@ -1165,8 +1166,8 @@ def test_a_members_save_cannot_write_a_front_matter_onto_a_sheaf(team, box, work
             f"date: 2026-10-28T05:12:03Z}}</li></ul><p>---</p>")
     got = team.post("/_/save", {"doc": bare, "hash": md_hash(before), "edits": [{"i": 0, "html": html}]},
                     member=BOB)
-    assert got.status == 409
-    assert (work / "acme/tiroir/bare.md").read_text(encoding="utf-8") == before
+    after = (work / "acme/tiroir/bare.md").read_text(encoding="utf-8")
+    assert got.status == 200 and after.startswith("\\---\n\nsessions:")
     assert download(team, doc=bare, id=OLDER).status == 404
 
 

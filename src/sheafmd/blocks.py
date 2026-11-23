@@ -37,7 +37,8 @@ HR_RE      = re.compile(r"^\s{0,3}((\*\s*){3,}|(-\s*){3,}|(_\s*){3,})$")
 IMG_TAG_RE = re.compile(r"<img\b", re.I)
 SETEXT_RE  = re.compile(r"^\s{0,3}(=+|-+)\s*$")
 TBLSEP_RE  = re.compile(r"^\s{0,3}\|?[\s:|-]*-[\s:|-]*$")
-INDENT_RE  = re.compile(r"^(\s{4,}|\t)")
+# A tab stops at column 4, so one to three spaces before it indent the line as far as four do.
+INDENT_RE  = re.compile(r"^(\s{4,}| {0,3}\t)")
 
 # Blocks we must never let the browser edit: converting their HTML back to markdown
 # would destroy the source (a chart's JSON becomes an <svg>, an image line becomes a

@@ -2025,6 +2025,7 @@ var create = function (ROOT, CFG, opts) {
     if (!dock()) {
       undock();
       if (pop._target && pop._target.isConnected && pop.style.position !== 'fixed' && !pop._moved) place(pop, pop._target);
+      clampMoved();       // a moved box that grew (a reply came in) or was handed back by undock() outside a turned screen
     }
     if (atEnd) sc.scrollTop = sc.scrollHeight;       // a thread that was at its last message stays there when the box changes size
   }
@@ -2078,7 +2079,7 @@ var create = function (ROOT, CFG, opts) {
     });
   });
   // A frame resized, a phone turned, with a mouse as with a thumb: the thread wraps at another width.
-  listen(window, 'resize', function () { if (pop) keepThread(); });
+  listen(window, 'resize', function () { if (pop) { keepThread(); clampMoved(); } });
   // A popover with no place in the text (a kept comment, a thread whose badge is hidden or gone) is pinned
   // beside the panel.
   function pin(p) { p.style.position = 'fixed'; p.style.top = '80px'; p.style.left = ''; p.style.right = '390px'; }
@@ -2109,6 +2110,7 @@ var create = function (ROOT, CFG, opts) {
     if (!drag.on) {
       if (Math.abs(dx) < MOVE_SLOP && Math.abs(dy) < MOVE_SLOP) return;
       drag.on = true;
+      if (emptyTouch) emptyTouch.moved = true;      // a finger that drags the band is not a tap on it: no cursor in the field at its end
       try { drag.head.setPointerCapture(e.pointerId); } catch (_) { /* a pointer that is gone */ }
     }
     var v = viewRect(), w = pop.offsetWidth, h = pop.offsetHeight, o = pageOrigin();
@@ -2120,6 +2122,19 @@ var create = function (ROOT, CFG, opts) {
     pop.style.right = '';
     pop._moved = true;
   });
+  // A moved box is held inside the visible area again after the area or the box changed size: only the part that lies outside
+  // is taken back, so a box that still lies inside where it was dropped does not move. A box taller than the area keeps its head.
+  function clampMoved() {
+    if (!pop || !pop._moved || pop.classList.contains('rd-docked')) return;
+    var r = pop.getBoundingClientRect(), v = viewRect(), o = pageOrigin(), w = pop.offsetWidth, h = pop.offsetHeight;
+    var x = Math.max(v.left + MOVE_EDGE, Math.min(r.left, v.right - w - MOVE_EDGE));
+    var y = Math.max(v.top + MOVE_EDGE, Math.min(r.top, v.bottom - h - MOVE_EDGE));
+    if (Math.abs(x - r.left) < 0.5 && Math.abs(y - r.top) < 0.5) return;
+    var fixed = pop.style.position === 'fixed';
+    pop.style.left = (fixed ? x : o.x + x) + 'px';
+    pop.style.top = (fixed ? y : o.y + y) + 'px';
+    pop.style.right = '';
+  }
   function dropped(e) {
     if (!drag || e.pointerId !== drag.id) return;
     drag = null;

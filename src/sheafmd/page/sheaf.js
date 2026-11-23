@@ -573,11 +573,14 @@ function create(ROOT, opts) {
     no.addEventListener('click', function () { form.remove(); });
     form.addEventListener('submit', function (e) {
       e.preventDefault();
-      if (input.value.trim() === at) { form.remove(); return; }      // nothing to move: the hub would answer 409 "into itself"
+      var to = input.value.trim();
+      // Nothing to move: the hub would answer 409 "into itself". The name as given against the name as it is, and the trimmed
+      // name against the trimmed one: a folder whose name has white space at an end is not renamed by a form sent untouched.
+      if (input.value === at || to === at.trim()) { form.remove(); return; }
       go.disabled = true;
       say('');
       fetch('/_/move-folder', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify({ folder: at, to: input.value.trim() }) }).then(function (r) {
+        body: JSON.stringify({ folder: at, to: to }) }).then(function (r) {
         return r.json().then(function (b) { return { ok: r.ok && !(b && b.ok === false), error: b && b.error }; }, function () { return { ok: r.ok }; });
       }).then(function (got) {
         if (gone) return;

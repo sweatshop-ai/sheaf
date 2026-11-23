@@ -35,15 +35,15 @@ class Titles:
         try:
             st = path.stat()
             key = (str(path), st.st_mtime_ns, st.st_size)
-            if key not in self._kept:
+            kept = self._kept.get(key)       # one look: another thread's clear() between a look and a read raised KeyError
+            if kept is None:
                 text = path.read_bytes().decode("utf-8", errors="replace")      # bytes: the hash is of the text a save reads, line ends as they are
                 if len(self._kept) >= TITLES_KEPT:
                     self._kept.clear()
                 kept = (the_list.read_rectoverso(rel, text).title, shared_by(text),
                         md_hash(text) if visibility.audience(text) is None else "")
                 self._kept[key] = kept      # another thread's clear() may come before a read of it: the local is the answer
-                return kept
-            return self._kept[key]
+            return kept
         except OSError:
             return rel.rsplit("/", 1)[-1][:-3], "", ""
 

@@ -13,7 +13,7 @@ import sys
 import threading
 
 import pytest
-from helpers import BEA, CAL, FRONT, door, hub_rows, rpc
+from helpers import BEA, CAL, FRONT, door, hub_rows, mark_generated, rpc
 from test_send import keyring, local, no_real_keyring, run, scratch, tiroir  # noqa: F401  (fixtures)
 from test_hub_commits import DOC, box, git, merged_on_github, rectoversos, remote  # noqa: F401  (fixtures)
 from test_write_log import agents, declared  # noqa: F401  (fixtures)
@@ -330,8 +330,7 @@ def test_share_on_a_read_only_page_is_refused_before_anything_is_written(hub_rep
 def test_a_generated_page_of_a_read_only_clone_is_refused_as_generated_with_its_row(hub_repos, endpoint):
     # 183 AV: the page's own reason comes first, so the refusal says the page is generated and the row is written.
     text = served(hub_repos)
-    hub_repos.hub.docs.put(ADDRESS, {**hub_repos.hub.docs.get(ADDRESS),
-                                     "generated": {"by": "builder", "id": "tok1", "at": "2026-11-20T10:00:00+0100"}})
+    mark_generated(hub_repos.hub, ADDRESS)
     assert hub_repos.hub.read_only_line(ADDRESS) != ""
     body = {"/_/save": {"edits": []}, "/_/tick": {"action": 0, "word": "Approve"}, "/_/share": {"with": []}}[endpoint]
     r = hub_repos.post(endpoint, {"doc": ADDRESS, "hash": md_hash(text), **body}, member=BEA)

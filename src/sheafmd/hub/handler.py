@@ -1835,13 +1835,14 @@ class Handler:
                 fm = visibility.front_matter(text)
                 if not self.hub.may_open(m, e.address, fm):
                     raise Refuse(404, "no such document")
+            # The look before the locks let the write in; a door write that marked the page generated since did so under
+            # this file's lock, so it is seen here (182 G), before any refusal of what the edit holds.
+            self._text_writable(req, e.address, endpoint)
+            if m is not None:
                 # The page cannot edit a front matter (5): paragraphs of `---` would write one, and its
                 # `sessions` would serve any transcript (9.12), its `visibility` open the rectoverso.
-                if visibility.front_matter(new) != fm:
+                if visibility.front_matter(new) != visibility.front_matter(text):
                     raise EditError("A save cannot change the front matter: change it in the file.")
-            # The look before the locks let the write in; a door write that marked the page generated since did so under
-            # this file's lock, so it is seen here (182 G).
-            self._text_writable(req, e.address, endpoint)
             if (word := the_list.unticks_one_off(text, new)) is not None:
                 # A one-off action stays pressed (9.10, #108), for every person and by whatever edit: the deployment's
                 # routine has acted on its tick, and an untick would move nothing back.
@@ -1898,8 +1899,9 @@ class Handler:
             elif (visibility.audience(text) is None and visibility.audience(new) is not None
                   and visibility.effective(visibility.front_matter(new)) == "owner" and self.hub.loose_owner(e.address) is None):
                 # A line that became a ticked Share or `Share with <names>` by an edit that is not the owner's tick of it (a box
-                # renamed and ticked in one save) shares nothing on a page of a shared root: it is left unticked, as a door create leaves it, so the
-                # box does not say the page is shared when it is not (9.11). A loose page is Shared by the line itself.
+                # renamed and ticked in one save) shares nothing on a page of a shared root: it is left unticked, as a door create
+                # leaves it, so the box does not say the page is shared when it is not (9.11). A loose page is Shared by the line
+                # itself.
                 new = visibility.without_ticked_share(new)
             ticked.clear()
             ticked.update(words)

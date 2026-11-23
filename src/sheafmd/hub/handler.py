@@ -2544,16 +2544,18 @@ class Handler:
         # document's lock (`finish`), which a render holds for up to 120 s: a move or an agent's Tell would wait with it.
         finish = None
         with moves.exclusive():
-            held_root = self._root_id(req, doc)
-            if isinstance(sent_root, str) and held_root is not None and held_root != sent_root:
-                raise Refuse(409, "another folder now holds this document's name: reload the page", answer={"root": held_root})
-            # No root holds the name, looked up in the registry: `_root_id`'s None also stands for a root the member does
-            # not own (a clone the tiroir serves, a loose page Shared with them), whose cancel ends their Tell as before.
-            if isinstance(sent_root, str) and self.hub.roots.get(Address.parse(doc).root) is None:
-                # The page's root was forgotten, and its forget ended its Tells and stopped its jobs. A folder that takes
-                # the name (a root is added under no lock of the cancel's) is not this page's to stop: nothing to do. A job
-                # registered on a popped entry after the forget's `cancel_under` never runs its work (`_is_current`), and
-                # the runner, keyed by address, could stop the other folder's job of the same id here.
+            # Compared with the root the registry holds, not `_root_id`, whose None also stands for a root the member
+            # reaches but does not own (a clone the tiroir serves, a loose page Shared with them).
+            holder = self.hub.roots.get(Address.parse(doc).root)
+            if isinstance(sent_root, str) and (holder is None or holder.id != sent_root):
+                held_root = self._root_id(req, doc)
+                if held_root is not None:
+                    raise Refuse(409, "another folder now holds this document's name: reload the page", answer={"root": held_root})
+                # The page's root was forgotten, and its forget ended its Tells and stopped its jobs. A folder that took
+                # the name, or takes it now (a root is added under no lock of the cancel's), is not this page's to stop,
+                # and a member who does not own it is not told it exists (9.9): ok, and nothing to do. A job registered on
+                # a popped entry after the forget's `cancel_under` never runs its work (`_is_current`), and the runner,
+                # keyed by address, could stop the other folder's job of the same id here.
                 return _ok()
             # A Tell that waits for an agent ends here, the reader's own and no other's (9.8). A member has no
             # session to stop: theirs is only a waiting Tell.

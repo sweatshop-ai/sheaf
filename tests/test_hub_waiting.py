@@ -367,11 +367,24 @@ def test_a_members_cancel_from_a_page_of_a_root_they_reach_but_do_not_own_ends_t
     assert documents(browser, bea)[0]["tells"] == []
 
 
+def test_a_members_cancel_from_a_page_of_a_forgotten_root_they_did_not_own_leaves_their_tell_on_the_folder_that_took_the_name(
+        front, browser, talk, work, other, monkeypatch):
+    """7.3, 182 H: a page of a root the member reached without owning it sends that root's id. After a forget, another
+    folder took the name and the member has a Tell of the same id there: the cancel answers ok, as for a name no root
+    holds, ends nothing and tells the member of no other root."""
+    bea, cal, loose = bea_tells(front, browser, work, other)
+    monkeypatch.setattr(front.hub, "owns", lambda member, root: False)          # reached as a clone root, not owned
+    monkeypatch.setattr(front.hub, "member_owns", lambda member, address: True)
+    r = front.post("/_/cancel", {"doc": DOC, "id": "c1", "root": "the-forgotten-roots-id"})
+    assert r.status == 200 and r.json() == {"ok": True}
+    monkeypatch.undo()
+    assert documents(browser, bea)[0]["tells"]
+
+
 def test_a_cancel_from_a_page_of_a_forgotten_root_never_ends_the_same_id_tell_of_the_folder_that_took_the_name(browser, talk, tmp_path, monkeypatch):
     """7.3, 182 H: the cancel compares the page's root with the one that holds the name, and ends the Tell, in one step. A
     forget, and another folder that takes the name and Tells its own thread c1, while the cancel runs, waits for the
     cancel: the other folder's Tell is never ended by a page of the forgotten root."""
-    from sheafmd.hub.handler import Handler
     token = agent_token()
     target(browser)
     assert tell(browser).status == 200
@@ -379,7 +392,8 @@ def test_a_cancel_from_a_page_of_a_forgotten_root_never_ends_the_same_id_tell_of
     again = tmp_path / "again" / "work"
     again.mkdir(parents=True)
     (again / "plan.md").write_text(talk.read_text(encoding="utf-8"), encoding="utf-8")
-    real, taken, swapping = Handler._root_id, [], []
+    roots = browser.hub.roots
+    real, taken, swapping = roots.get, [], []
 
     def take():                             # another request's, which holds nothing of the cancel's
         browser.hub.forget_root("work")
@@ -388,15 +402,15 @@ def test_a_cancel_from_a_page_of_a_forgotten_root_never_ends_the_same_id_tell_of
         assert tell(browser).status == 200
         taken.append(browser.hub.roots.get("work").id)
 
-    def compared(self, req, address):
-        monkeypatch.setattr(Handler, "_root_id", real)
-        held = real(self, req, address)
+    def compared(name):                     # the cancel's look at the root that holds the name
+        monkeypatch.setattr(roots, "get", real)
+        held = real(name)
         t = threading.Thread(target=take, daemon=True)
         t.start()
         t.join(2)
         swapping.append(t)
         return held
-    monkeypatch.setattr(Handler, "_root_id", compared)
+    monkeypatch.setattr(roots, "get", compared)
     assert browser.post("/_/cancel", {"doc": DOC, "id": "c1", "root": old}).status == 200
     swapping[0].join(10)
     assert not swapping[0].is_alive() and taken and taken[0] != old

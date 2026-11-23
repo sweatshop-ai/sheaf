@@ -763,26 +763,20 @@ class Door:
             privates = [p for p in place.private_listed(hub, member) if p.closed() is None and not p.missing()] if placed else []
             files = []
             for src in (root, *privates):          # the hub's own lister (8.6), past the index's cap: nothing that waits is hidden
-                # Not capped here: the count limit is the list root's, spent on what the caller may see (below).
-                listing = list_documents(src, cap=LISTED_ALL, deadline=deadline)
-                files += [(src, f.rel, None) for f in listing.docs]
+                # Not capped by count: the count limit is the list root's, spent below on what the caller may see. The
+                # walk gets half of the time left, so a root far past the limit leaves time to open what it found.
+                walk = time.monotonic() + max(0.0, deadline - time.monotonic()) / 2
+                listing = list_documents(src, cap=LISTED_ALL, deadline=walk)
+                files += [(src, f.rel) for f in listing.docs]
                 if listing.failed and not giving and not any(s["root"] == root.name for s in shut):
                     shut.append({"root": root.name, "closed": "git gave no answer"})   # not nothing: git could not say
                 if listing.stopped and not giving:
                     late.add(root.name)
-            # A Tell that waits for the agent on this root is listed even where the listing did not reach its page (git
-            # gave no answer, the time ran out): the page was served and told (9.8). Judged as every listed page is.
-            files += [(None, None, a) for a in sorted(pending) if Address.parse(a).root == root.name]
             seen, listed, more = 0, set(), 0     # what the caller may see of this root, and how much of it was left out
-            for src, found, waiting in files:   # a listed file (src, found), or the address of a waiting Tell
-                if waiting is None and time.monotonic() > deadline:
-                    if not giving:
-                        late.add(root.name)
-                    continue                                   # the Tells after them are still listed
-                if waiting is not None and waiting in listed:
-                    continue
-                if waiting is None and more >= roots_mod.COUNT_LIMIT:
-                    continue                                   # the count stops at the limit
+
+            def consider(src, found, waiting):
+                """List the file `found` of `src`, or the page `waiting` where a Tell waits, when the caller sees it."""
+                nonlocal seen, more
                 # A rectoverso of the list's root is listed by its name (9.11), wherever its file is; a private path is
                 # none. Each file is read under its name's lock, as every read.
                 if waiting is not None:
@@ -792,12 +786,10 @@ class Door:
                     name = f"{root.name}/{logical}" if logical else None
                 with place.held(hub, name) if name else contextlib.nullcontext():
                     if waiting is None:
-                        if src is not root:
-                            rel = place.named_in(hub, root, src, found)
-                        else:
-                            rel = place.named(hub, root, top, found) if placed else found
+                        rel = (place.named_in(hub, root, src, found) if src is not root
+                               else place.named(hub, root, top, found) if placed else found)
                         if rel is None:
-                            continue
+                            return
                         at = str(Address(root.name, rel))
                     else:
                         at = waiting                           # in the root or private root that holds its name
@@ -808,36 +800,52 @@ class Door:
                         if folder not in in_git:
                             in_git[folder] = in_git_dir(path, src)
                         if in_git[folder]:
-                            continue                               # nor one in a git directory
+                            return                             # nor one in a git directory
                         if seen >= roots_mod.COUNT_LIMIT and at not in pending and not self._judged(caller):
                             listed.add(at)
-                            more += 1                              # every file is the caller's: counted unopened
-                            continue
+                            more += 1                          # every file is the caller's: counted unopened
+                            return
                         threads, fm, mtime, private, text = self._open_in(at, whole=at in pending)
                     except (NotFound, OSError, UnicodeDecodeError):
-                        continue
+                        return
                 listed.add(at)
                 # Whether the member owns a file asks git of its folder (8.2), and every file of a folder has the
                 # same answer: asked once a folder, not once a file.
                 if member is not None and (giving or folder not in owned):
                     owned[folder] = hub.member_owns(member, at)
                 if not self._sees(fm, at, caller, owned.get(folder), private):
-                    continue                                   # nor a rectoverso the caller may not see (9.11)
+                    return                                     # nor a rectoverso the caller may not see (9.11)
                 if giving:
                     reached.add(root.name)
                 tells = self._tells(at, text, agent, member) if text is not None else []
                 if not tells and seen >= roots_mod.COUNT_LIMIT:
                     more += 1                                  # past the limit: told as `more`, a Tell never is
-                    continue
+                    return
                 seen += 1
                 if args.get("open_only", True) and not threads and not tells:
-                    continue
+                    return
                 # the index page's dot, for the member it is asked as (8.6, 9.9)
                 dot, unread = hub.index.dot(at, threads, len(threads), member)
                 told = hub.alias(member, at) != at        # a page Shared with the member: no path on disk (9.9)
                 rows.append((-1 if tells else DOT_ORDER[dot], -mtime, at,
                              {**self._told(at, caller), **({} if told else {"path": str(path)}),
                               "open": len(threads), "unread": unread, "dot": dot, "tells": tells}))
+
+            for src, found in files:
+                if more >= roots_mod.COUNT_LIMIT:
+                    break                                      # the count stops at the limit
+                if time.monotonic() > deadline:
+                    # Past the limit every page the caller may see was listed: only the count of the rest is cut short.
+                    if not giving and seen < roots_mod.COUNT_LIMIT:
+                        late.add(root.name)
+                    break
+                consider(src, found, None)
+            # A Tell that waits for the agent on this root is listed even where the listing did not reach its page (git
+            # gave no answer, the time ran out): the page was served and told (9.8). Judged as every
+            # listed page is.
+            for waiting in sorted(pending):
+                if Address.parse(waiting).root == root.name and waiting not in listed:
+                    consider(None, None, waiting)
             if more and not giving:                    # another's loose root is told to no one (9.11)
                 left_out[root.name] = more
         if "root" in args and member is not None and not hub.owns(member, wanted[0]) and wanted[0].name not in reached:

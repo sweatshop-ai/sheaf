@@ -47,5 +47,5 @@ A tab sends its first join only once its own `sheaf-tab-<TAB>` lock is granted: 
 
 ## Acceptance
 
-- [x] A page test that runs in full Chromium (`channel="chromium"`, new headless) in CI: three tabs of one shared context, the hub counts 3 of 3, and a change on disk reaches a follower tab. `tests/page/test_page_shared_live_full_chromium.py`; red on the old `live.js` on t-compute ("timed out waiting for three tabs counted by the hub"), PASSED in CI on 60513fd8 (job 137379785797).
+- [x] A page test that runs in full Chromium (`channel="chromium"`, new headless) in CI: three tabs of one shared context, the hub counts 3 of 3, and a change on disk reaches a follower tab. `tests/page/test_page_shared_live_full_chromium.py`; red on the old `live.js` on the CI runner host ("timed out waiting for three tabs counted by the hub"), PASSED in CI on 60513fd8 (job 137379785797).
 - [x] The existing shared-live tests still pass in the headless shell. All 10 of `tests/page/test_page_shared_live.py` PASSED in the same CI job.

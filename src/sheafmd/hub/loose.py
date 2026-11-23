@@ -321,7 +321,8 @@ class Loose:
                 os.rmdir(folder)            # first: a folder that cannot go leaves the root and its entry as they were
             except OSError:
                 return
-            pending.append(self.hub.let_go_root(root.name)[1])
+            _, finish = self.hub.let_go_root(root.name)
+            pending.append(finish)
             state.write_json(_file(), {k: v for k, v in self._read().items() if k != member.id})
             proxy = getattr(self.hub, "proxy", None)
             m = proxy.members.get(member.id) if proxy is not None else None

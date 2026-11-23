@@ -242,6 +242,7 @@ class _SharedStream(events.Shared):
         super().__init__(owner)
         self._handler, self._sid = handler, sid
         self.seq = 0                     # set when it is listed: a newer stream has a higher one
+        self.had: set = set()            # every key joined here, left or not: an older stream takes none of them
 
     def close(self):
         super().close()
@@ -1034,12 +1035,13 @@ class Handler:
         sub = self._joined_sub(req, doc)
         # A key names one tab. After a leader hand-over the tab joins the new connection while the old one, whose tab
         # closed, is still open here until a write to it fails: drop the key there, or the hub counts the tab twice.
-        # The old leader's own join of the key can reach the hub after that (ticket 181 D): a newer connection that
-        # holds the key keeps it, and the late join is dropped.
+        # The old leader's own join of the key can reach the hub after that (ticket 181 D): once a newer connection
+        # had the key, held still or left since, the late join is dropped.
         with self._join_lock:
             with self._shared_lock:
                 others = [s for s in self._shared.values() if s is not stream and s.owner == stream.owner]
-            if not any(s.seq > stream.seq and key in s.keys() for s in others):
+            if not any(s.seq > stream.seq and key in s.had for s in others):
+                stream.had.add(key)
                 stream.join(key, sub)
                 for other in others:
                     other.leave(key)

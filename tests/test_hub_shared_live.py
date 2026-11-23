@@ -157,6 +157,19 @@ def test_a_late_join_on_the_old_connection_leaves_the_new_one_its_stream(world, 
     new.close()
 
 
+def test_a_late_join_on_the_old_connection_after_the_tab_left_the_new_one_is_dropped(world, docs):
+    """The tab joined the new connection and closed, and its leave arrived there first: the old leader's late join must
+    not give the closed tab a stream on the old connection, which the hub would count until that connection ends."""
+    old = shared(world)
+    new = shared(world, sid="n" * 24)
+    assert join(world, "t1:1", docs[0], sid="n" * 24).status == 200
+    assert world.post("/_/live/leave", {"stream": "n" * 24, "key": "t1:1"}).status == 200
+    assert join(world, "t1:1", docs[0]).status == 200          # the late one, on the older connection
+    assert old.keys() == [] and new.keys() == [] and world.hub.tabs(docs[0]) == 0
+    old.close()
+    new.close()
+
+
 def test_a_connection_opened_again_under_its_id_is_the_newest(world, docs):
     """The same browser comes back under the same id: the stream that replaced the old one takes its keys."""
     other = shared(world, sid="n" * 24)

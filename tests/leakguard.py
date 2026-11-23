@@ -17,6 +17,7 @@ end of it. It needs /proc: where there is none (macOS) nothing is found and noth
 import os
 import signal
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -198,6 +199,20 @@ def report(left: list[Left]) -> str:
 
 
 def _terminated(signum, frame):
+    """End the run as Ctrl-C does. A page test waits for the browser inside Playwright's dispatcher greenlet, which
+    runs the event loop, so that is where the signal mostly lands. Raised there, the interrupt ended that greenlet:
+    every call into the browser after it (the teardown) switched to a dead greenlet, which returns at once, and spun
+    at full CPU (ticket 137: 15 minutes), and the loop's tasks were left pending ("Task was destroyed but it is
+    pending! ... Page._on_route()"). It is raised in the thread's first greenlet instead, where the test stands; the
+    dispatcher stays where it was and goes on at the next call."""
+    greenlet = sys.modules.get("greenlet")     # only a run that loaded it (Playwright's) has greenlets to mind
+    if greenlet is not None:
+        here = root = greenlet.getcurrent()
+        while root.parent is not None:
+            root = root.parent
+        if here is not root:
+            root.throw(KeyboardInterrupt("SIGTERM"))
+            return
     raise KeyboardInterrupt("SIGTERM")
 
 

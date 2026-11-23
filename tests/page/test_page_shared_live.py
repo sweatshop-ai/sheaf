@@ -8,7 +8,7 @@ import pytest
 
 from sheafmd import comments as rdc
 from sheafmd.source import update_file
-from pagehelp import DOC, RELOADING, close_context, new_context, until, rewrite
+from pagehelp import DOC, RELOADING, close_context, new_context, opened, rewrite, shows, until
 
 pytestmark = pytest.mark.page
 
@@ -21,26 +21,6 @@ def shared(chromium, site):
     c.add_cookies([site.cookie()])
     yield c
     close_context(c)
-
-
-def opened(context, site):
-    p = context.new_page()
-    errors = []
-    p.on("pageerror", lambda e: errors.append(str(e)))
-    p.goto(site.url)
-    p.wait_for_selector("#rd-menu-btn", state="attached")
-    return p, errors
-
-
-def shows(p, text):
-    """Whether the page shows `text`. A change from outside reloads the page, so a read can fall on the reload:
-    that is not yet."""
-    try:
-        return text in p.evaluate("document.body.textContent")
-    except Exception as e:
-        if any(said in str(e) for said in RELOADING):
-            return False
-        raise
 
 
 def badges(p):

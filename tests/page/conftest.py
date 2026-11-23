@@ -16,7 +16,8 @@ import pytest
 
 from agent_fakes import PID, FakeClaude, Peer, write_record
 from helpers import PLAN
-from pagehelp import DOC, PageStalled, close_context, landed, launch_chromium, new_context, stalls_after, unavailable, use_pump
+from pagehelp import (DOC, PageStalled, close_context, landed, launch_chromium, new_context, note_route, settle_routes,
+                      stalls_after, unavailable, use_pump)
 from sheafmd import paths
 from sheafmd.agents.base import Target
 from sheafmd.agents.claude_code import proc_start
@@ -238,7 +239,9 @@ def until_live(page, pattern, log):
 
 @pytest.fixture(autouse=True)
 def hub_journal(monkeypatch):
-    """What the hub published and wrote to a stream, with the time (time.time()), for `pytest_runtest_makereport`."""
+    """What the hub published and wrote to a stream, with the time (time.time()), for `pytest_runtest_makereport`.
+    It also notes every route a handler of the test is given, so that one the test kept and never answered is
+    answered when its context closes, or here at the end of the test (pagehelp.settle_routes)."""
     log = []
     publish, frame = events.Bus.publish, server.frame
 
@@ -276,6 +279,7 @@ def hub_journal(monkeypatch):
                 if route.request.headers.get(PROBE):
                     return route.fulfill(status=204)
                 noted(route)
+                note_route(self if _name == "BrowserContext" else self.context, route)
                 return handler(*args)
             # Playwright passes the request too to a handler that takes two arguments, and none to one that takes none.
             n = len(inspect.signature(handler).parameters)
@@ -311,7 +315,8 @@ def hub_journal(monkeypatch):
         monkeypatch.setattr(cls, "route", noting_route)
     monkeypatch.setattr(events.Bus, "publish", noting_publish)
     monkeypatch.setattr(server, "frame", noting_frame)
-    return log
+    yield log
+    settle_routes()
 
 
 def stream_journal(pages, hub):

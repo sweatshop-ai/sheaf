@@ -234,9 +234,14 @@ class Archive:
                     raise loose.Refused("a page of that name was deleted in the same second: try again") from None
                 except OSError as e:
                     raise loose.Refused(f"the page could not be moved to the trash ({e.strerror})") from None
+                else:
+                    try:
+                        os.unlink(sname, dir_fd=sfd)
+                    except OSError as e:
+                        os.unlink(dname, dir_fd=dfd)        # the page stays at its address, never in two places
+                        raise loose.Refused(f"the page could not be moved to the trash ({e.strerror})") from None
                 finally:
                     os.close(dfd)
-                os.unlink(sname, dir_fd=sfd)
             finally:
                 os.close(sfd)
             loose.stamp_held(root.path, ARCHIVED, {rel: None})      # the marks go in the hold of the move: no sweep between

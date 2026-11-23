@@ -492,3 +492,19 @@ def test_a_folder_swapped_for_a_link_after_the_check_does_not_bring_an_outside_f
         agents.hub.archive.trash(root, "sub/x.md")
     assert (outside / "x.md").read_text(encoding="utf-8") == "# Not the root's\n"
     assert not list((root.path / ".sheaf").rglob("x.md"))
+
+
+def test_a_page_that_cannot_be_taken_from_its_address_is_not_left_in_the_trash_too(agents, clock, monkeypatch):
+    doc = made(agents, "bea-claude")
+    path = agents.hub.file(doc)
+    real, refused = os.unlink, []
+
+    def unlink(p, *a, dir_fd=None, **k):
+        if dir_fd is not None and str(p) == path.name and not refused:      # the page's own address, once: the undo goes through
+            refused.append(p)
+            raise PermissionError(1, "Operation not permitted")
+        return real(p, *a, dir_fd=dir_fd, **k)
+    monkeypatch.setattr(archive.os, "unlink", unlink)
+    assert delete(agents, doc).status == 409
+    assert path.exists()
+    assert not list((root_of(agents, doc).path / ".sheaf").rglob(path.name))

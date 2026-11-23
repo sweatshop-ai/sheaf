@@ -1970,36 +1970,44 @@ MARKDOWN_TAGS = frozenset({
     "th", "thead", "tr", "ul",
 })
 TAG_RE = re.compile(r"^<(/?)([A-Za-z][A-Za-z0-9-]*)\b[^>]*?(/?)>$")
+_HELD_TAG_RE = re.compile(r"</?([A-Za-z][A-Za-z0-9-]*)\b[^>]*>")
 
 
 def _raw_tags(content: str):
-    """The raw inline tags of a block's source, in order, as (tags, lone, doc), each tag in the source's
+    """The raw inline tags of a block's source, in order, as (tags, lone, doc, held), each tag in the source's
     bytes: `tags` holds (name, opening tag, closing tag or "", the opening tag as the page has it);
     `lone`, (closing tag, its node in `doc`) for each closing tag with no opener of its name; `doc`,
-    pandoc's JSON of the block."""
+    pandoc's JSON of the block; `held`, the tags of the HTML blocks nested in it (ticket 183 BU), which the
+    save does not put back: a list item that starts with a comment is one."""
     import json
 
     from .sanitize import ALSO_REMOVED, REMOVE
 
     if "<" not in content:
-        return [], [], None
+        return [], [], None, []
     r = _pandoc.run(["-f", "gfm", "-t", "json"], content)
     if r.returncode != 0:
-        return [], [], None
+        return [], [], None, []
     doc = json.loads(r.stdout)
-    nodes = []
+    nodes, held = [], []
 
     def walk(node, in_table=False):
         if isinstance(node, dict):
             if node.get("t") == "RawInline" and node["c"][0] == "html":
                 nodes.append((node, in_table))
+            elif node.get("t") == "RawBlock":
+                # A comment's words are the comment's: a tag written in them is no tag.
+                held.extend(m.group(0) for m in _HELD_TAG_RE.finditer(RAW_COMMENT_RE.sub("", node["c"][1]))
+                            if m.group(1).lower() not in MARKDOWN_TAGS | REMOVE | ALSO_REMOVED)
             else:
                 walk(node.get("c"), in_table or node.get("t") == "Table")
         elif isinstance(node, list):
             for x in node:
                 walk(x, in_table)
 
-    walk(doc["blocks"])
+    # A block's own HTML block is the block, not one nested in it.
+    for b in doc["blocks"]:
+        walk(b.get("c"), b.get("t") == "Table")
     tags, lone, open_, pos = [], [], {}, 0
     for node, in_table in nodes:
         raw = seen = node["c"][1]
@@ -2025,7 +2033,7 @@ def _raw_tags(content: str):
         tags.append(tag)
         if not empty:
             open_.setdefault(name, []).append(tag)
-    return [tuple(t) for t in tags], lone, doc
+    return [tuple(t) for t in tags], lone, doc, held
 
 
 def _texts(soup) -> list:
@@ -2111,14 +2119,17 @@ def _enclosing(t):
     return up[-1] if up else None
 
 
-def _lone_as_text(soup, lone, doc, token, comment_re) -> dict:
+def _lone_as_text(soup, lone, doc, token, comments: dict) -> dict:
     """Each closing tag of `lone` put in `soup` as a placeholder, after the words it followed in the
     source: {placeholder: the tag's bytes}. The browser drops a closing tag with no opener, so the
     page holds no element for it; its place is found in the page's words, against a render of the
-    source with the tag written as its placeholder, and on the same side of the elements around it."""
+    source with the tag written as its placeholder, and on the same side of the elements around it.
+    `comments` maps each comment placeholder of `soup` to the comment's bytes in the source."""
     import json
 
-    from bs4 import BeautifulSoup, Comment, NavigableString
+    from bs4 import BeautifulSoup, Comment, NavigableString, Tag
+
+    comment_re = _placeholders(comments)[0]
 
     placed = {}
     for raw, node in lone:
@@ -2129,23 +2140,31 @@ def _lone_as_text(soup, lone, doc, token, comment_re) -> dict:
     if r.returncode != 0:
         return {}
     src = BeautifulSoup(r.stdout, "html.parser")
-    # How many comments stand between each tag and the words beside it: before it (a tag after words), or after it (a
+    # The comments that stand between each tag and the words beside it: before it (a tag after words), or after it (a
     # tag at the start of an item or a cell, before its words). The page keeps a placeholder for each, and the tag goes
-    # on its own side of them (ticket 183 BS). Tags side by side share the comments before or after the run of them.
+    # on its own side of them (ticket 183 BS), and of those only: one the reader deleted leaves the comment on the
+    # other side where it was (BX). Tags side by side share the comments before or after the run of them. A comment
+    # at the end of an element closed before the tag, or at the start of one opened after it, counts too (BV).
     lead, trail = {}, {}
 
-    def comments(sib, step):
-        n = 0
-        while isinstance(sib, Comment):
-            n, sib = n + 1, getattr(sib, step)
-        return n
+    def beside(sib, step):
+        found = []
+        while sib is not None:
+            if isinstance(sib, Comment):
+                found.append(f"<!--{sib}-->")
+                sib = getattr(sib, step)
+            elif isinstance(sib, Tag) and sib.contents:
+                sib = sib.contents[-1 if step == "previous_sibling" else 0]
+            else:
+                break
+        return found
 
     for t in src.find_all(string=lambda x: not isinstance(x, Comment)):
         for run, side, count in ((_LEADING_TAGS.match(str(t)), "previous_sibling", lead),
                                  (_TRAILING_TAGS.search(str(t)), "next_sibling", trail)):
             for q in re.findall(_TAG_TOKEN, run.group() if run else ""):
                 if q in placed:
-                    count[q] = comments(getattr(t, side), side)
+                    count[q] = beside(getattr(t, side), side)
     # A comment splits the source's words where the page has none.
     for c in src.find_all(string=lambda x: isinstance(x, Comment)):
         c.extract()
@@ -2207,6 +2226,20 @@ def _lone_as_text(soup, lone, doc, token, comment_re) -> dict:
             k += 1
         return k
 
+    def step_over(s, at, want, back):
+        """Where the tag goes in the text `s` from `at`, past the placeholders of the comments in `want` (which it
+        takes out): forward, or with `back`, backward."""
+        while want:
+            if back:
+                m = next((m for m in comment_re.finditer(s, 0, at) if m.end() == at), None)
+            else:
+                m = comment_re.match(s, at)
+            if m is None or comments.get(m.group()) not in want:
+                break
+            want.remove(comments[m.group()])
+            at = m.start() if back else m.end()
+        return at
+
     # From the end, so that the offsets still to place stay where they were; of two at one place, the
     # second goes first and the first lands before it.
     for o, p, back, climb in reversed(sorted(((between_words(o, back, gap), p, back, climb)
@@ -2220,18 +2253,11 @@ def _lone_as_text(soup, lone, doc, token, comment_re) -> dict:
                 # Right after the words before it, and after the comments that stood between them and it; or
                 # right before the words after it, and before the comments that stood between it and them.
                 if j > 0 and back:
-                    at = kept[j - 1] + 1
-                    for _ in range(lead.get(p, 0)):
-                        if not (m := comment_re.match(str(t), at)):
-                            break
-                        at = m.end()
+                    want = list(lead.get(p, ()))
+                    at = step_over(str(t), kept[j - 1] + 1, want, False)
                 else:
-                    at = kept[j] if j < n else len(t)
-                    for _ in range(trail.get(p, 0)):
-                        ends = [m.start() for m in comment_re.finditer(str(t), 0, at) if m.end() == at]
-                        if not ends:
-                            break
-                        at = ends[0]
+                    want = list(trail.get(p, ()))
+                    at = step_over(str(t), kept[j] if j < n else len(t), want, True)
                 spot = t, at
                 break
             cum += n
@@ -2251,6 +2277,15 @@ def _lone_as_text(soup, lone, doc, token, comment_re) -> dict:
                 if sib is not None or anchor.parent is None or anchor.parent.name == "[document]":
                     break
                 anchor = anchor.parent
+            # Out of the element, past the comments still to step over on its other side.
+            sib = anchor.next_sibling if after_it else anchor.previous_sibling
+            if want and anchor is not t and type(sib) is NavigableString:
+                at = step_over(str(sib), 0 if after_it else len(sib), want, not after_it)
+                if 0 < at < len(sib):
+                    sib.replace_with(NavigableString(sib[:at]), NavigableString(p), NavigableString(sib[at:]))
+                    continue
+                if at != (0 if after_it else len(sib)):
+                    anchor = sib
         if anchor is None:
             anchor = next(x for x in _texts(soup) if str(x) == p)
             out = _enclosing(anchor)
@@ -2272,15 +2307,15 @@ def _html_blocks(md: str) -> int:
     return r.stdout.count('"t":"RawBlock"') if r.returncode == 0 else -1
 
 
-def _tags_as_text(content: str, fragment: str, token, comments):
+def _tags_as_text(content: str, fragment: str, token, comments: dict):
     """(the fragment with each element that stands for a raw tag of `content` written as two
-    placeholders around its words, {placeholder: the source's bytes}). `comments` are the comment
-    placeholders the fragment holds."""
+    placeholders around its words, {placeholder: the source's bytes}). `comments` maps the comment
+    placeholders the fragment holds to the comments' bytes in the source."""
     from bs4 import BeautifulSoup
 
-    tags, lone, doc = _raw_tags(content)
+    tags, lone, doc, held = _raw_tags(content)
     if not tags and not lone:
-        return fragment, {}
+        return fragment, {}, held
 
     def key(el):
         return (el.name, tuple(sorted((k, " ".join(v) if isinstance(v, list) else v) for k, v in el.attrs.items())))
@@ -2293,7 +2328,7 @@ def _tags_as_text(content: str, fragment: str, token, comments):
         if el is not None:
             unused.append((key(el), opening, closing))
     soup = BeautifulSoup(fragment, "html.parser")
-    placed = _lone_as_text(soup, lone, doc, token, _placeholders(comments)[0]) if lone else {}
+    placed = _lone_as_text(soup, lone, doc, token, comments) if lone else {}
     for el in soup.find_all(True):
         # A math span's <sup> is the render's, not a tag of the source; a wrapper the page puts around the
         # source's words, as `div.tblwrap` around a table, is not (#157).
@@ -2313,7 +2348,7 @@ def _tags_as_text(content: str, fragment: str, token, comments):
         el.insert_before(a)
         el.insert_after(b)
         el.unwrap()
-    return (str(soup), placed) if placed else (fragment, {})
+    return (str(soup), placed, held) if placed else (fragment, {}, held)
 
 
 # ─────────────────────────────────────────────────────────────── footnotes ──
@@ -2448,8 +2483,9 @@ def _convert_with_comments(block, fragment: str, strays=None):
         return t
 
     frag = RAW_COMMENT_RE.sub(keep, ANCHOR_RE.sub(swap, fragment))
-    comments = frozenset(tokens.values()) | frozenset(placed.keys())
-    frag, tags = _tags_as_text(block.content, frag, token, comments)
+    said = {t: block.content[by_id[cid].start:by_id[cid].end] for cid, t in tokens.items()} | placed
+    comments = frozenset(said)
+    frag, tags, held = _tags_as_text(block.content, frag, token, said)
     frag, notes = _notes_as_tokens(frag, token)
     new_md = html_block_to_md(frag, block.content, strays, comments, frozenset(notes.keys()))
     for t, cited in notes.items():
@@ -2474,6 +2510,11 @@ def _convert_with_comments(block, fragment: str, strays=None):
             # A tag the edit left alone at the start of a line opens an HTML block, which
             # would take the lines after it as raw text.
             raise EditError("the edit leaves raw HTML at the start of a line; edit it in the .md")
+    # The comments are still placeholders in the new markdown.
+    if any(new_md.count(raw) < RAW_COMMENT_RE.sub("", block.content).count(raw) for raw in held):
+        # The page holds no element for a closing tag with no opener in it, and the conversion writes
+        # the other tags as it reads them: refused, as the file would lose the tag (ticket 183 BU).
+        raise EditError("block holds raw HTML the edit cannot keep; edit it in the .md")
     lost = []
     for cid, c in by_id.items():
         t = tokens.get(cid)

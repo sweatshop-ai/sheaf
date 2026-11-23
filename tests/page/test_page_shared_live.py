@@ -355,17 +355,17 @@ def test_a_shared_stream_refused_409_is_opened_again_under_a_new_id(shared, site
     id is answered 409."""
     sids, refused = [], []
 
-    def route(r):
-        sid = parse_qs(urlparse(r.request.url).query)["shared"][0]
+    def refuse(route):
+        sid = parse_qs(urlparse(route.request.url).query)["shared"][0]
         sids.append(sid)
         if not refused:
             refused.append(sid)
         if sid in refused:
-            r.fulfill(status=409, content_type="application/json",
-                      body='{"ok": false, "error": "that stream belongs to another member"}')
+            route.fulfill(status=409, content_type="application/json",
+                          body='{"ok": false, "error": "that stream belongs to another member"}')
         else:
-            r.continue_()
-    shared.route(re.compile(r"/_/live\?shared="), route)
+            route.continue_()
+    shared.route(re.compile(r"/_/live\?shared="), refuse)
     p, errors = opened(shared, site)
     until(lambda: any(s not in refused for s in sids), timeout=10, what="a connection under a new id")
     until(lambda: site.hub.tabs(DOC) == 1, timeout=10, what="the tab counted on the new connection")

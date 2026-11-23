@@ -29,10 +29,16 @@ def test_a_quoted_value_that_holds_data_is_kept_whole(tag):
     ('<span class="emoji" data-emoji="smile">x</span>', '<span class="emoji">x</span>'),
     ('<span data-a data-b=\'1\' data-c=2 class="k">x</span>', '<span class="k">x</span>'),
     ('<span title="the data-sheet" data-emoji="smile">x</span>', '<span title="the data-sheet">x</span>'),
-    ('<p data-rd-fresh="1" data-x="y">x</p>', '<p data-rd-fresh="1">x</p>'),
     ('<img src="a.png" data-x="y"/>', '<img src="a.png"/>'),
+    # `_sanitize` strips the page's own too: raw HTML in the source carrying one must compare equal.
+    ('<p data-rd-fresh="1" data-x="y" class="k">x</p>', '<p class="k">x</p>'),
+    ('<span DATA-X="1" class="k">x</span>', '<span class="k">x</span>'),
+    # A name straight after a quote or a `/` is one to the page's parser.
+    ('<a b="x"data-y="z">x</a>', '<a b="x">x</a>'),
+    ("<a b='x'data-y='z' c=\"d\">x</a>", "<a b='x' c=\"d\">x</a>"),
+    ('<a/data-x="1">x</a>', '<a/>x</a>'),
 ])
-def test_data_attributes_go_and_the_pages_own_stay(html, want):
+def test_data_attributes_go_whatever_their_name_or_place(html, want):
     assert rde.strip_data_attrs(html) == want
 
 

@@ -813,3 +813,37 @@ def test_the_sweep_keeps_the_marks_of_a_page_its_listing_did_not_see(agents, clo
     monkeypatch.setattr(archive.Archive, "_pages", lambda self, member, root: [])
     sweep(agents)
     assert _marks_of(root, rel) == ALL_MARKS
+
+
+def test_a_mark_file_that_cannot_be_written_leaves_the_sweep_archiving_the_roots_other_pages(agents, clock, monkeypatch):
+    doc, root, rel = _marked_everywhere(agents, clock)
+    os.unlink(agents.hub.file(doc))
+    other = made(agents, "bea-claude", doc="other.md")
+
+    def keep_held(*a, **k):
+        raise loose.Refused("the keep marks of the loose root cannot be written")
+    monkeypatch.setattr(archive.loose, "keep_held", keep_held)
+    sweep(agents)                                   # the other page's first seen
+    clock.now += 31 * DAY
+    sweep(agents)
+    assert docs(agents, view="archived") == [other]
+    assert _marks_of(root, rel) == {**NO_MARKS, "kept": True}
+
+
+def test_a_sweep_during_a_move_leaves_the_moved_page_its_marks(agents, clock, monkeypatch):
+    doc, root, rel = _marked_everywhere(agents, clock)
+    real, sweeps = loose.marks_moved, []
+
+    def marks_moved(root_path, old, new):
+        # the page is at its new address and gone from the old one; its marks are still at the old one
+        t = threading.Thread(target=sweep, args=(agents,))
+        t.start()
+        t.join(1.0)
+        sweeps.append(t)
+        real(root_path, old, new)
+    monkeypatch.setattr(loose, "marks_moved", marks_moved)
+    got = agents.post("/_/move", {"doc": doc, "folder": "elsewhere"}, member=BEA)
+    assert got.status == 200, got.text
+    sweeps[0].join(10)
+    new = got.json()["doc"]
+    assert _marks_of(root, new.split("/", 1)[1]) == ALL_MARKS

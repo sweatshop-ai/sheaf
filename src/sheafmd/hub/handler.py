@@ -853,7 +853,7 @@ class Handler:
             return
         # A caller that closed before the lookup is held by no process, which the lookup reads as "could not
         # tell" (`peer.check`), so only that answer is a "try again". Another user's uid, root's included
-        # (a caller that only half-closed still holds its socket), stays a refusal with its row.
+        # (a caller that only half-closed still holds its socket), stays a refusal with its row (9.6).
         no = conn.refusal
         if conn.closed is not None and conn.closed() and no.kind != peer.OTHER_USER:
             raise Refuse(503, "try again: the connection closed before the hub could tell who sent this",

@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import NamedTuple
 from urllib.parse import quote
 
-from .. import __version__, config, paths, signals
+from .. import __version__, config, diagnostics, paths, signals
 from .auth import Auth
 
 # A hub's start is its imports, 0.75 s of a free core: sixteen starts at once on two cores answer after
@@ -116,6 +116,7 @@ class HubBeingStopped(HubDidNotStart):
 
 BEING_STOPPED = (f"the hub is being stopped; this is {__version__}. "
                  "Run the command again when it has stopped")
+PERSON_STOPS = ("stop", "signal")     # the stops an upgrade stop gives way to (8.4)
 
 
 class HubChanged(Impostor):
@@ -399,7 +400,7 @@ def ask_stop(met: Met, reason: str, force: bool = False, yield_to_stop: bool = F
         raise JobsRunning(res.get("error") or "a Tell is running")
     if status != 200 or not res.get("ok"):
         raise StopRefused(res.get("error") or status)
-    if yield_to_stop and reason == "upgrade" and res.get("reason") in ("stop", "signal"):
+    if yield_to_stop and reason == "upgrade" and res.get("reason") in PERSON_STOPS:
         raise HubBeingStopped(BEING_STOPPED)
     return pid
 
@@ -408,11 +409,12 @@ def exit_reason(boot: str, wait: float = EXIT_ROW_WAIT) -> str | None:
     """The reason the exit row of the hub `boot` gives (`hub-exit`, 8.4), or None when it wrote none
     within `wait` seconds. A hub writes it after it has stopped serving and before its process ends,
     so a command that found the port silent without a pid to wait for may read before it is there."""
-    from .. import diagnostics
+    if not boot:
+        return None
     deadline = time.time() + wait
     while True:
-        for r in reversed(list(diagnostics.read(since_days=1))):
-            if r.get("source") == "hub" and r.get("kind") == "hub-exit" and boot and r.get("boot") == boot:
+        for r in reversed(diagnostics.read(since_days=1)):
+            if r.get("source") == "hub" and r.get("kind") == "hub-exit" and r.get("boot") == boot:
                 return r.get("reason")
         if time.time() >= deadline:
             return None
@@ -508,12 +510,12 @@ def _meet_version(met: Met, warn) -> tuple[Met, bool]:
         return met, False
     if left:
         raise HubDidNotStart(f"the hub did not stop for the upgrade ({left}; see `sheaf diag`)")
+    # The answer to the stop does not say what ended the hub: a hub older than #508 answers no
+    # reason, and a stop or a signal that comes after the upgrade stop wins over it (8.4). The
+    # exit row says it. A hub that left none (killed) was stopped by no person: start the new one.
+    if exit_reason(met.boot) in PERSON_STOPS:
+        raise HubBeingStopped(BEING_STOPPED)
     if not met.got.get("service"):                      # under the service, exit 75 starts the new code
-        # The answer to the stop does not say what ended the hub: a hub older than #508 answers no
-        # reason, and a stop or a signal that comes after the upgrade stop wins over it (8.4). The
-        # exit row says it. A hub that left none (killed) was stopped by no person: start the new one.
-        if exit_reason(met.boot) in ("stop", "signal"):
-            raise HubBeingStopped(BEING_STOPPED)
         spawn_hub("upgrade")
     now = wait_for_start(met.client, UPGRADE_WAIT, lambda now: now.get("version") == __version__)
     if now is None:

@@ -602,7 +602,15 @@ def test_sheaf_stop_waits_as_long_as_every_other_stop_does(port, thread_hub, qui
 
 # ── ticket 182 M, N, U: what ended the hub decides whether the command starts one ──
 
-def stop_that_ends_with(monkeypatch, hub, answer, ended_by):
+@pytest.fixture
+def upgrade_spawns(monkeypatch):
+    """What the command started: `spawn_hub` records its arguments and starts nothing."""
+    made = []
+    monkeypatch.setattr(hubclient, "spawn_hub", lambda *a, **k: made.append(a))
+    return made
+
+
+def patch_the_stop_to_end_with(monkeypatch, hub, answer, ended_by):
     """The hub answers the upgrade stop with `answer`, then ends: its exit row says `ended_by`, and nothing
     answers on the port any more."""
     from sheafmd import diagnostics
@@ -623,41 +631,38 @@ def stop_that_ends_with(monkeypatch, hub, answer, ended_by):
 
 @pytest.mark.parametrize("ended_by", ["stop", "signal"])
 def test_an_older_hub_whose_answer_names_no_reason_is_not_restarted_over_the_stop_that_ended_it(
-        port, thread_hub, quick_stop, monkeypatch, ended_by):
+        port, thread_hub, quick_stop, monkeypatch, upgrade_spawns, ended_by):
     """182 M (#508): a hub of the version before #508 answers the stop with no `reason`. That is not
     the command's own upgrade stop taken: a person's stop may have won, and the exit row says which."""
     hub = thread_hub(OLD)
-    spawned = []
-    monkeypatch.setattr(hubclient, "spawn_hub", lambda *a, **k: spawned.append(a))
-    stop_that_ends_with(monkeypatch, hub, {"ok": True}, ended_by)
+    patch_the_stop_to_end_with(monkeypatch, hub, {"ok": True}, ended_by)
     with pytest.raises(hubclient.HubBeingStopped):
         hubclient.ensure_hub("cli", lambda s: None, lambda s: None)
-    assert spawned == []
+    assert upgrade_spawns == []
 
 
+@pytest.mark.parametrize("service", [False, True])
 @pytest.mark.parametrize("ended_by", ["stop", "signal"])
 def test_a_stop_that_wins_after_the_upgrade_stop_was_taken_starts_no_hub_behind_it(
-        port, thread_hub, quick_stop, monkeypatch, ended_by):
+        port, thread_hub, quick_stop, monkeypatch, upgrade_spawns, ended_by, service):
     """182 N (#508): the hub took the upgrade stop, then a stop or a signal came and won (8.4: only an
-    upgrade stop gives way). The command waited for the hub to end; it must not start one over it."""
+    upgrade stop gives way). The command waited for the hub to end; it must not start one over it,
+    and under the service it says so at once rather than wait for a hub that will not come back."""
     hub = thread_hub(OLD)
-    spawned = []
-    monkeypatch.setattr(hubclient, "spawn_hub", lambda *a, **k: spawned.append(a))
-    stop_that_ends_with(monkeypatch, hub, {"ok": True, "reason": "upgrade"}, ended_by)
+    hub.service = service
+    patch_the_stop_to_end_with(monkeypatch, hub, {"ok": True, "reason": "upgrade"}, ended_by)
     with pytest.raises(hubclient.HubBeingStopped):
         hubclient.ensure_hub("cli", lambda s: None, lambda s: None)
-    assert spawned == []
+    assert upgrade_spawns == []
 
 
-def test_an_upgrade_stop_the_hub_ended_with_starts_the_new_hub(port, thread_hub, quick_stop, monkeypatch):
+def test_an_upgrade_stop_the_hub_ended_with_starts_the_new_hub(port, thread_hub, quick_stop, monkeypatch, upgrade_spawns):
     """The other side of M and N: the exit row says upgrade, so the command starts the new code."""
     hub = thread_hub(OLD)
-    spawned = []
-    monkeypatch.setattr(hubclient, "spawn_hub", lambda *a, **k: spawned.append(a))
     monkeypatch.setattr(hubclient, "wait_for_start", lambda *a, **k: {"boot": "new", "version": __version__})
-    stop_that_ends_with(monkeypatch, hub, {"ok": True}, "upgrade")
+    patch_the_stop_to_end_with(monkeypatch, hub, {"ok": True}, "upgrade")
     hubclient.ensure_hub("cli", lambda s: None, lambda s: None)
-    assert spawned == [("upgrade",)]
+    assert upgrade_spawns == [("upgrade",)]
 
 
 def test_a_stop_decided_after_an_upgrade_stop_is_what_the_tabs_are_told_when_the_upgrade_s_callback_comes_first(

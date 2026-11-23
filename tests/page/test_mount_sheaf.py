@@ -87,7 +87,10 @@ class Mounted:
         return self.js("return Array.from(root.querySelectorAll('.sheaf-row')).filter((r) => !r.hidden).map((r) => r.dataset.doc);")
 
     def click(self, css):
-        until(lambda: self.js("return !!root.querySelector(arg);", css), what=css)
+        # Measured once the root's stylesheet has loaded: a remount puts its rows in the root before its stylesheet, and one
+        # that came in between the measure and the press moved the element away from the point pressed (ticket 184 D).
+        until(lambda: self.js("return !!root.querySelector(arg) && Array.from(root.querySelectorAll('link[rel=stylesheet]'))"
+                              ".every((l) => l.sheet);", css), what=f"{css} with its stylesheet")
         x, y = self.js("const r = root.querySelector(arg).getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2];", css)
         self.page.mouse.click(x, y)
 

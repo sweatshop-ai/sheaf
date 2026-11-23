@@ -2,7 +2,7 @@
 
 **Claimed by:** Nadia
 
-**Status:** A and B done in #620 (merge 4d34e1ad, head 9f21f8df), CI green (run 45178873288), review GO (round 1, provisional: Opus fallback, Codex at its usage limit). C and D open.
+**Status:** A and B done in #620 (merge 4d34e1ad, head 9f21f8df), CI green (run 45178873288), review GO (round 1, provisional: Opus fallback, Codex at its usage limit). C: a product defect of #617's own change, fixed on that PR, nothing to do here. D: a race in the test, fixed in #623.
 
 **Priority:** high: each one turns a CI run red on a change that does not touch it.
 
@@ -47,6 +47,34 @@ The test gives each page only the key-downs of Control+Enter before the instant 
 A first fix started both spins at a fixed time 300 ms before the instant. It raced, but the review of the PR saw that it gave each page some 200 ms to hear the other's write first, so it tried a narrower race; it was replaced before merge.
 
 Four copies of the test at once on the runner host: 160 rounds out of 160 race, B's spin starting at most 18 ms after A's (the same load gave 13 idle rounds before). The keys are now held through the instant in every round, the condition that made 40 rounds out of 40 idle with `press`.
+
+## C. The moved-box tests were the red tests of #617's own change
+
+### Observed
+
+Run 45151298649 is the check run of #617 at 260005d6, a commit of that PR before its fix of ticket 183 X. The two tests are new in that PR (85c997dd, "red tests"); neither is on main.
+
+### Cause
+
+The product, not the test. At 260005d6 a moved box that a smaller window leaves wholly past its new edge was taken for a box the reader had scrolled away, and left there; a box that grew after its last hold was not held in again. #617 fixed both in fed56e68 (its message names this run) and the sub-pixel edge in 0353dcca.
+
+On the runner host: at 260005d6 `test_a_box_moved_to_the_lower_right_is_inside_the_window_after_it_shrinks` fails 3 runs out of 3; at #617's head 82fe828e the whole of `test_page_move_box.py` passes 8 runs out of 8 (88 tests) under a load of 20. Nothing to change on main.
+
+## D. The view switch was pressed where it stood before the stylesheet came
+
+### Observed
+
+`test_the_view_switch_shows_pages_archived_and_trash_each_with_its_own_list` fails in the nightly run 45141939187, job py3.11 only, at "timed out waiting for Archived: alpha only".
+
+### Cause
+
+Each act remounts the Sheaf. `mount.js` puts the rows in the root, then waits for the root's stylesheet (`/_/mount.css`), which under a route the test answers from Python. The test waits for the two counts, which stand as soon as the rows do, then `Mounted.click` measures the Archived button and presses that point. When the stylesheet came in between the measure and the press, the layout moved and the press missed the button: the view stays on Pages, its list empty.
+
+Loop: hold the stylesheet of the delete's remount and let it through 0.5 s later, between the measure and the press. The old helper fails 10 rounds out of 10 with the CI error.
+
+### Fix
+
+`Mounted.click` measures only once every stylesheet of the root has loaded (`link.sheet`). Under the same loop: 10 rounds out of 10 pass. The three files that use the helper (`test_mount_sheaf`, `test_sheaf_buttons`, `test_mount_clients`), with `test_mount_list` and `test_page_work` beside them: 124 passed on the runner host.
 
 ## Acceptance
 

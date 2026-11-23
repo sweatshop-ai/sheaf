@@ -675,8 +675,9 @@ def settle_routes(context=None):
             continue
         try:
             route.fallback()
-        except Exception:       # "Route is already handled!": the test answered it
-            pass
+        except Exception as e:  # the test answered it: the one error fallback() raises (Playwright 1.58)
+            if "Route is already handled!" not in str(e):
+                raise
     _ROUTED[:] = kept
 
 

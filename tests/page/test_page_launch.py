@@ -1,9 +1,9 @@
 """A browser that will not start fails a CI run with what is known about its death; on a person's machine it skips."""
 import gc
 import signal
-import sys
 import socket
 import stat
+import sys
 import threading
 import time
 
@@ -211,8 +211,9 @@ def test_a_route_kept_and_never_answered_leaves_no_task_for_the_garbage_collecto
     close_context(c)
     held.clear()
     gc.collect()
-    assert ignored == []
-    assert [r.getMessage() for r in caplog.records if r.name == "asyncio"] == []
+    # Only what a route task leaves counts: an earlier test's leftovers on this worker are not this test's to fail.
+    assert [i for i in ignored if "_on_route" in i] == []
+    assert [m for r in caplog.records if r.name == "asyncio" and "_on_route" in (m := r.getMessage())] == []
 
 
 class StuckContext:

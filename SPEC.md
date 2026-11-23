@@ -752,7 +752,7 @@ Malformed and foreign comments never count. Status is computed from a per-file c
 
 ### 8.7 Seen (D6)
 
-The hub keeps `seen.json`. Opening a thread on the page sends `POST /_/seen {doc, id, count}` with the number of messages (comment plus replies) now shown. A thread is unread when it is open, its last message is not by the hub's person, and it has more messages than `seen` records. This replaces a per-browser `localStorage` read state.
+The hub keeps `seen.json`. Opening a thread on the page sends `POST /_/seen {doc, id, count}` with the number of messages (comment plus replies) now shown. A thread is unread when it is open, its last message is not by the hub's person (its author as `display` names it, 5.3, on the page, the index and the door alike), and it has more messages than `seen` records. This replaces a per-browser `localStorage` read state.
 
 ### 8.8 Event streams
 
@@ -1661,9 +1661,9 @@ Two transports over one tool set.
 | `threads` | `doc: string`, `status?: "open"|"resolved"|"all" = "open"` | `{doc, url, comments: [{id, by, at, status, quote, body, line, orphan, replies: [{by, display, role, at, text}]}], malformed: [{line, reason}]}`; `role` is the effective role (5.3) |
 | `reply` | `doc`, `id`, `text`, `role?: "answer"|"action" = "answer"`, `resolve?: bool = false` | `{id, status, replies}`; `answer` is a reply that changed nothing, `action` one after the agent acted; an `action` by an agent's token ends the Tell that waits for it on that thread (9.8) |
 | `resolve` | `doc`, `id` | `{id, status: "resolved"}` |
-| `read` | `doc`, `comments?: bool = true` | `{doc, url, hash, text}`, and `moved_from` when `doc` was an address its page moved from (9.11): the file as it is now and its `md_hash` (7.1); with `comments: false` the text without any HTML comment; needs the key or a token made with `--write` (9.7) |
-| `create` | `doc`, `text` | `{doc, url, hash}`; a rectoverso's `doc` is its name wherever its file is made (9.11); needs the key or a token made with `--write` (9.7) |
-| `update` | `doc`, `text`, `expected_hash` | `{doc, url, hash, changed}`, and `moved_from` when `doc` was an address its page moved from (9.11); needs the key or a token made with `--write` (9.7) |
+| `read` | `doc`, `comments?: bool = true` | `{doc, url, hash, text, generated}`, and `moved_from` when `doc` was an address its page moved from (9.11): the file as it is now and its `md_hash` (7.1), and `generated`, `{by, at}` or `null` (8.3); with `comments: false` the text without any HTML comment; needs the key or a token made with `--write` (9.7) |
+| `create` | `doc`, `text`, `folder?: string`, `keep?: bool`, `generated?: bool` | `{doc, url, hash}`; `folder` and `keep` are for a loose page only (9.11); `generated: true` marks the new page generated (8.3, Generated pages below); a rectoverso's `doc` is its name wherever its file is made (9.11); needs the key or a token made with `--write` (9.7) |
+| `update` | `doc`, `text`, `expected_hash`, `generated?: bool` | `{doc, url, hash, changed}`, and `moved_from` when `doc` was an address its page moved from (9.11); `generated` sets or clears the mark, left out it stays (Generated pages below); needs the key or a token made with `--write` (9.7) |
 | `move` | `doc`, `folder` | `{doc, url, hash, moved_from}`: a loose page of the caller's member goes in `folder` of their loose root, the file name staying (9.11, Move and Forward); a caller that acts for no member, a page that is not the member's own, and a page of another kind of root are refused; needs the key or a token made with `--write` (9.7) |
 
 `tools/list` marks `documents`, `threads` and `read`, which only read, with `annotations: {"readOnlyHint": true}`; `reply`, `resolve`, `create`, `update` and `move` carry none. It lists `read`, `create`, `update` and `move` only to a caller that may use them; a token without the right that calls one gets a tool error that says how a token gets it.

@@ -724,8 +724,7 @@ class Door:
         if "comment id=" in text:
             for c in rdc.parse(text).comments:
                 if c.status == "open":
-                    last = c.display(c.replies[-1]) if c.replies else c.by
-                    threads.append((c.id, 1 + len(c.replies), last))
+                    threads.append((c.id, 1 + len(c.replies), c.last_by))
         self._open_threads[address] = (key, threads, visibility.front_matter(text))
         return (*self._open_threads[address][1:], st.st_mtime_ns, private, text if whole else None)
 

@@ -23,10 +23,10 @@ One box per item. Red test first on main for each; an item that cannot be reprod
 
 ## Open, minor
 
-- [ ] **Q** (from #486): `SPEC.md:1663-1667`, the door tool table omits `generated`.
+- [x] **Q** (from #486): `SPEC.md:1663-1667`, the door tool table omits `generated`. Fixed: `read`, `create` and `update` rows name `generated`.
 - [ ] **R** (from #496): the rebuild on entry runs after the hub lock is released, so a `FileNotFoundError` follows only an outside-the-hub delete. The changed-after-gone case is already ticket 91 line 19.
 - [x] **S** (from #492): the cap applies per source, so up to 2 x 100k rows can come back without `more`. Fixed: one limit and one `more` per list root, its private roots counted with it. Red first: `tests/test_private_root_visible.py::test_the_documents_count_limit_is_one_for_a_root_and_the_private_root_listed_under_it` (on main 6 rows came back and no `more`). *(merged: #610, b280b4de; head 6e68a871, CI green, round 2 provisional GO, Codex to re-review)*
-- [ ] **T** (from #504): `index.py:73` and `mcp.py:725` differ on the author name for unread (a person named Claude).
+- [x] **T** (from #504): `index.py:73` and `mcp.py:725` differ on the author name for unread (a person named Claude). Fixed: index and door read `Comment.last_by`, the page's `lastBy` reads `display` (5.3, now said in 8.7); tests in `test_hub_index.py`, `test_mcp_documents.py`, `tests/page/test_page_unread.py`.
 - [x] **U** (from #508): `core.py:1888` `on_stop(reason)` uses the local reason, so the announcement can say upgrade while `stop_requested` is stop. Fixed in the receiver (`server.py` `HubServer.stop`): `hub-stopping` carries `stop_requested` as it stands when the first callback is told. A stop decided after `hub-stopping` went out cannot be told (it was the stream's last event); SPEC 8.4 says so. Red first: `tests/test_hub_upgrade.py::test_a_stop_decided_after_an_upgrade_stop_is_what_the_tabs_are_told_when_the_upgrade_s_callback_comes_first` (on main the tabs were told `upgrade`). *(merged: #606, cfb0513e; head f8c388e0, CI green, round 2 provisional GO, Codex to re-review)*
 
 ## Fixed on main

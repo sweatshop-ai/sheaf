@@ -284,9 +284,9 @@ var create = function (ROOT, CFG, opts) {
     var r = c.replies || [];
     return r.length ? r[r.length - 1] : null;
   }
-  function lastBy(c) {
+  function lastBy(c) {        // the author as the hub names it (SPEC 5.3, its `display`), the one the index and the door read
     var r = lastReply(c);
-    return r ? r.by : c.by;
+    return r ? (r.display || r.by) : c.by;
   }
   function badgeState(c) {
     if (c.status === 'resolved') return 'res';

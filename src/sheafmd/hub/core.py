@@ -974,9 +974,9 @@ class Hub:
                 e, rebuild, existed = self._render_entry(address, md, settings, target)
             # A delete, move or forget between the two parts under the hub's lock has taken the entry: its page is not read
             # again (its file may be gone, and its tabs were told `gone`, after which they hear nothing more).
-            kept = self.entries.get(address) is e
+            kept, gone = self.entries.get(address) is e, RenderError(f"{md} went away while its page was rendered.")
             if not kept and not md.exists():
-                raise RenderError(f"{md} went away while its page was rendered.")
+                raise gone
             try:
                 if existed and kept:
                     # A file written on disk since, seen at this render: its refresh can render the page, so outside the
@@ -987,7 +987,7 @@ class Hub:
                     # the hub would wait with it were the hub's lock still held.
                     e.live.rebuild()
             except FileNotFoundError:          # deleted after the look above
-                raise RenderError(f"{md} went away while its page was rendered.") from None
+                raise gone from None
             with self._lock:
                 warnings = []
                 if self.entries.get(address) is e:      # a forget, move or delete in between has taken the entry: nothing to mark
@@ -1638,8 +1638,10 @@ class Hub:
                 key = (st.st_mtime_ns, st.st_size)
                 if key == e.last_stat:
                     continue
-                if self._refreshed(e) is not RETRY:      # one it could not decide is looked at again next tick
-                    e.last_stat = key        # after: a rebuild that failed is tried again next tick
+                # After the refresh, and only when it decided the file: a rebuild that failed, or a file it could not
+                # decide, is looked at again next tick.
+                if self._refreshed(e) is not RETRY:
+                    e.last_stat = key
             except Exception as ex:
                 self._rebuild_failed(e, ex)
         try:
@@ -1778,7 +1780,8 @@ class Hub:
         """The pull of `files` ended: each open page is known by the text the pull left (`left`: path to hash, read under the
         pull's locks; read now when not given), so the page's next sight of it is the pull's; when the pull went through, a
         line each, `git · <author>`, for each that is a page of a root the hub serves. `named`: what `pulling` returned, the
-        name each window was opened under, so that a look that fails now cannot leave one open; None names each file again."""
+        name each window was opened under, so that a look that fails now cannot leave one open. None (a `pulling` that failed,
+        or a caller that never asked it) names each file again."""
         for path, author in files:
             if named is not None:
                 address = named.get(path)

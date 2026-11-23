@@ -704,27 +704,33 @@ def test_a_slow_clone_never_holds_a_report_and_one_repo_does_not_hold_another(hu
     hub_repos.app.installed.add(OTHER)
     repos = hub_repos.hub.repos
     repos.remote_url = lambda repo: str({REPO: origin, OTHER: twin}[repo])
-    release, real = threading.Event(), Repos._clone
+    # Each clone waits on its own gate, and the test opens a gate only after the reports of that repo have answered: a
+    # report that waited for its clone, or for the other repo's, could not answer before its gate opens, so it is caught
+    # by what it does, not by a clock (SPEC 18). The 30 s on a gate is a real timeout, reached only by such a report.
+    gates, stuck, real = {REPO: threading.Event(), OTHER: threading.Event()}, [], Repos._clone
 
-    def slow(self, repo, token, folder, dest):
-        if repo == REPO:
-            assert release.wait(30)
+    def gated(self, repo, token, folder, dest):
+        if not gates[repo].wait(30):
+            stuck.append(repo)
         return real(self, repo, token, folder, dest)
 
-    monkeypatch.setattr(Repos, "_clone", slow)
+    monkeypatch.setattr(Repos, "_clone", gated)
     try:
         for who, repo in (("bea-claude", REPO), ("cal-claude", REPO), ("cal-claude", OTHER)):
-            began = time.monotonic()
             bad, got = report_once(hub_repos, who=who, repo=repo)
-            assert not bad and got["clone"] == "cloning" and time.monotonic() - began < 0.5, (got, time.monotonic() - began)
-        end = time.monotonic() + 20           # the other repo's clone is made while the first one is still held
+            assert not bad and got["clone"] == "cloning", got
+            assert not stuck, f"a report waited for the clone of {stuck}"
+        gates[OTHER].set()                    # the other repo's clone is made while the first one is still held
+        end = time.monotonic() + 20
         while time.monotonic() < end and not (clones(hub_repos) / "acme-org" / "elsewhere" / ".git").exists():
             time.sleep(0.05)
         assert (clones(hub_repos) / "acme-org" / "elsewhere" / ".git").exists()
         assert not (clones(hub_repos) / "acme-org" / "site" / ".git").exists()
     finally:
-        release.set()
+        for gate in gates.values():
+            gate.set()
         assert repos.settle()
+    assert not stuck, f"a report waited for the clone of {stuck}"
 
 
 def test_a_hundred_made_up_commits_cost_one_fetch(hub_repos, monkeypatch):

@@ -124,3 +124,19 @@ def test_selected_text_in_the_band_is_left_to_the_selection(thread):
     unfocus(p)
     p.touchscreen.tap(*spot(p, ("#rd-popover .rd-quote", "centre")))
     assert focused(p) != "TEXTAREA", "a touch on the band's selected text took the cursor into the field"
+
+
+def test_a_short_drag_of_the_band_by_a_finger_moves_the_box_and_does_not_focus_the_field(thread):
+    # Ticket 183 Y: a drag starts past 4 px, a touch counted as moved only past 8: a 6 px drag was also a tap at its end.
+    p = thread
+    before = p.locator("#rd-popover").bounding_box()
+    x, y = spot(p, ("#rd-popover .rd-quote", "centre"))
+    cdp = p.context.new_cdp_session(p)
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchStart", "touchPoints": [{"x": x, "y": y}]})
+    for dx in (2, 4, 6):
+        cdp.send("Input.dispatchTouchEvent", {"type": "touchMove", "touchPoints": [{"x": x + dx, "y": y}]})
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchEnd", "touchPoints": []})
+    until(lambda: p.evaluate("window.__atTouchEnd") is not None, what="the end of the drag")
+    after = p.locator("#rd-popover").bounding_box()
+    assert after["x"] - before["x"] > 3, ("the band was not dragged", before, after)
+    assert focused(p) != "TEXTAREA", "a drag of the band took the cursor into the field"

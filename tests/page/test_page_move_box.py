@@ -97,3 +97,41 @@ def test_the_next_open_places_the_box_as_usual(tab, site):
     p.wait_for_selector(FIELD)
     again = rect(p)
     assert abs(again["x"] - first["x"]) < 2 and abs(again["y"] - first["y"]) < 2, (first, again)
+
+
+# ── Ticket 183 X: a moved box is held inside the visible area again ─────────────────────────────────────────────────────────
+
+def inside(p, b):
+    size = p.evaluate("({w: document.documentElement.clientWidth, h: window.innerHeight})")
+    return b["x"] >= 0 and b["y"] >= 0 and b["x"] + b["width"] <= size["w"] and b["y"] + b["height"] <= size["h"], (b, size)
+
+
+def test_a_box_moved_to_the_lower_right_is_inside_the_window_after_it_shrinks(tab, site):
+    p = open_thread(tab)
+    drag(p, 5000, 5000)
+    size = p.viewport_size
+    p.set_viewport_size({"width": size["width"] - 200, "height": size["height"] - 200})
+    until(lambda: inside(p, rect(p))[0], what="the moved box back inside the smaller window")
+
+
+def test_a_box_dropped_inside_the_smaller_window_does_not_move_when_it_shrinks(tab, site):
+    p = open_thread(tab)
+    drag(p, -60, 40)
+    before = rect(p)
+    size = p.viewport_size
+    p.set_viewport_size({"width": size["width"] - 20, "height": size["height"] - 20})
+    p.evaluate("new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))")
+    assert inside(p, before)[0], "the test's own premise: the box lies inside the smaller window"
+    after = rect(p)
+    assert abs(after["x"] - before["x"]) < 2 and abs(after["y"] - before["y"]) < 2, (before, after)
+
+
+def test_a_box_moved_to_the_foot_that_grows_with_a_reply_keeps_its_controls_in_view(tab, site):
+    p = open_thread(tab)
+    drag(p, 0, 5000)
+    before = rect(p)
+    p.fill(FIELD, "Because.\n\nAnd a second paragraph.\n\nAnd a third one, so that the box grows.")
+    p.keyboard.press("Enter")
+    until(lambda: p.locator("#rd-popover .rd-msg").count() == 2, what="the reply in the thread")
+    until(lambda: rect(p)["height"] > before["height"], what="the box taller with the reply")
+    until(lambda: inside(p, rect(p))[0], what="the grown box inside the window")

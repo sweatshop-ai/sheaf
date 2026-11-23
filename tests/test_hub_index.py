@@ -464,3 +464,11 @@ def test_index_json_with_nothing_rendered_has_no_roots(world):
 @pytest.mark.parametrize("q", ["?rendered=yes", "?rendered=2", "?rendered="])
 def test_index_json_refuses_a_rendered_that_is_not_0_or_1(world, q):
     assert world.get("/_/index.json" + q).status == 400
+
+
+def test_a_legacy_action_reply_counts_as_claudes_as_the_door_counts_it():
+    """The index and the door's `documents` feed one unread rule (8.7) the same last author: a legacy
+    `"Claude (action)"` reply is Claude's (5.3), so for a person named Claude it is their own on both."""
+    text = with_threads(thread("c1", "Bob", "Claude (action)"))
+    assert index_mod.summarize(text).threads == (("c1", 2, "Claude"),)
+    assert [c.last_by for c in rdc.parse(text).comments] == ["Claude"]

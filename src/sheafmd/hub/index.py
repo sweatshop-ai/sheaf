@@ -70,7 +70,7 @@ class Status(dict):
 def summarize(text: str) -> Summary:
     if not rdc.COMMENT_RE.search(text):             # most documents hold none: no parse for them
         return EMPTY
-    threads = tuple((c.id, 1 + len(c.replies), c.replies[-1].by if c.replies else c.by)
+    threads = tuple((c.id, 1 + len(c.replies), c.last_by)
                     for c in rdc.parse(text).comments if c.status == "open")
     return Summary(len(threads), threads)
 

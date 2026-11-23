@@ -16,8 +16,8 @@ One box per item. Red test first on main for each; an item that cannot be reprod
 - [ ] **J** (from #492): `mcp.py:763-770`, a git failure or timeout leaves a queued Tell on that root undelivered (pending addresses outside the listing are never added).
 - [ ] **K** (from #492): the 100k cap is applied in `list_documents` before `_sees`, so visible or shared pages are skipped.
 - [ ] **L** (from #491): `live.py:542` `forget_texts` by hash (`state.py:305-312`) can delete a version the replacement document stored with the same text.
-- [ ] **M** (from #508): `client.py:397`, an older hub that answers without a `reason` is taken as the client's own upgrade stop, and the client spawns a hub over the user's stop.
-- [ ] **N** (from #508): `client.py:492-493` calls `spawn_hub("upgrade")` after `wait_stopped` without checking why the hub stopped (a stop or a signal won).
+- [x] **M** (from #508): `client.py:397`, an older hub that answers without a `reason` is taken as the client's own upgrade stop, and the client spawns a hub over the user's stop. Fixed with N: a command that starts the new hub itself reads the old hub's exit row and starts none when it says `stop` or `signal` (`client.exit_reason`). Red first: `tests/test_hub_upgrade.py::test_an_older_hub_whose_answer_names_no_reason_is_not_restarted_over_the_stop_that_ended_it` (on main it spawned).
+- [x] **N** (from #508): `client.py:492-493` calls `spawn_hub("upgrade")` after `wait_stopped` without checking why the hub stopped (a stop or a signal won). Fixed by the exit-row check above; a hub that left no row (killed) is replaced as before. Red first: `tests/test_hub_upgrade.py::test_a_stop_that_wins_after_the_upgrade_stop_was_taken_starts_no_hub_behind_it` (on main it spawned).
 - [ ] **O** (from #511): `handler.py:1871`, a rename and a tick to `Share with bob` in one save leaves the box ticked with no shared key, and bob gets a 404 (the names branch at `:1859` is never reached).
 - [ ] **P** (from #496; serious per Codex, minor per triage): `core.py:1012` `_refreshed(e)` takes the document lock inside the hub lock.
 
@@ -27,7 +27,7 @@ One box per item. Red test first on main for each; an item that cannot be reprod
 - [ ] **R** (from #496): the rebuild on entry runs after the hub lock is released, so a `FileNotFoundError` follows only an outside-the-hub delete. The changed-after-gone case is already ticket 91 line 19.
 - [ ] **S** (from #492): the cap applies per source, so up to 2 x 100k rows can come back without `more`.
 - [ ] **T** (from #504): `index.py:73` and `mcp.py:725` differ on the author name for unread (a person named Claude).
-- [ ] **U** (from #508): `core.py:1888` `on_stop(reason)` uses the local reason, so the announcement can say upgrade while `stop_requested` is stop.
+- [x] **U** (from #508): `core.py:1888` `on_stop(reason)` uses the local reason, so the announcement can say upgrade while `stop_requested` is stop. Fixed in the receiver (`server.py` `HubServer.stop`): `hub-stopping` carries `stop_requested` as it stands when the first callback is told. A stop decided after `hub-stopping` went out cannot be told (it was the stream's last event); SPEC 8.4 says so. Red first: `tests/test_hub_upgrade.py::test_a_stop_decided_after_an_upgrade_stop_is_what_the_tabs_are_told_when_the_upgrade_s_callback_comes_first` (on main the tabs were told `upgrade`).
 
 ## Fixed on main
 

@@ -647,12 +647,33 @@ def _marked_everywhere(agents, clock):
     doc = archived_page(agents, clock)
     root, rel = root_of(agents, doc).path, doc.split("/", 1)[1]
     loose.keep(root, rel, True)
-    assert rel in loose.marks(root) and rel in loose.times(root, "archived.json") and rel in loose.times(root, "seen.json")
+    assert _marks_of(root, rel) == ALL_MARKS
     return doc, root, rel
 
 
+ALL_MARKS = {"kept": True, "archived": True, "seen": True}
+NO_MARKS = {"kept": False, "archived": False, "seen": False}
+
+
 def _marks_of(root, rel):
-    return [rel in loose.marks(root), rel in loose.times(root, "archived.json"), rel in loose.times(root, "seen.json")]
+    return {"kept": rel in loose.marks(root), "archived": rel in loose.times(root, loose.ARCHIVED),
+            "seen": rel in loose.times(root, loose.SEEN)}
+
+
+def _folder_swapped_in(path, put_back=True):
+    """An `os.rename` for the delete under test: another process puts a folder at the page's name right before the move, and
+    the move back is refused unless `put_back`."""
+    real, calls = os.rename, []
+
+    def rename(a, b, *args, **k):
+        calls.append(a)
+        if len(calls) == 1:
+            os.unlink(path)
+            os.mkdir(path)
+        elif not put_back:
+            raise OSError(errno.EACCES, os.strerror(errno.EACCES))
+        return real(a, b, *args, **k)
+    return rename
 
 
 def test_a_page_taken_from_the_trash_right_after_the_move_leaves_no_marks_at_its_empty_address(agents, clock, monkeypatch):
@@ -668,41 +689,42 @@ def test_a_page_taken_from_the_trash_right_after_the_move_leaves_no_marks_at_its
     got = delete(agents, doc)
     assert got.status == 409, got.text
     assert not path.exists()
-    assert _marks_of(root, rel) == [False, False, False]
+    assert _marks_of(root, rel) == NO_MARKS
 
 
 def test_a_folder_swapped_in_that_cannot_be_put_back_leaves_no_marks_at_the_empty_address(agents, clock, monkeypatch):
     doc, root, rel = _marked_everywhere(agents, clock)
     path = agents.hub.file(doc)
-    real, calls = os.rename, []
-
-    def rename(a, b, *args, **k):
-        calls.append(a)
-        if len(calls) == 1:
-            os.unlink(path)
-            os.mkdir(path)                          # another process puts a folder at the page's name
-            return real(a, b, *args, **k)
-        raise OSError(errno.EACCES, os.strerror(errno.EACCES))     # and the move back is refused
-    monkeypatch.setattr(archive.os, "rename", rename)
+    monkeypatch.setattr(archive.os, "rename", _folder_swapped_in(path, put_back=False))
     got = delete(agents, doc)
     assert got.status == 409 and "by hand" in got.text, got.text
     assert not os.path.lexists(path)
-    assert _marks_of(root, rel) == [False, False, False]
+    assert _marks_of(root, rel) == NO_MARKS
 
 
 def test_a_folder_swapped_in_and_put_back_keeps_the_marks_of_its_address(agents, clock, monkeypatch):
     doc, root, rel = _marked_everywhere(agents, clock)
     path = agents.hub.file(doc)
-    real, swapped = os.rename, []
-
-    def rename(a, b, *args, **k):
-        if not swapped:
-            swapped.append(a)
-            os.unlink(path)
-            os.mkdir(path)
-        return real(a, b, *args, **k)
-    monkeypatch.setattr(archive.os, "rename", rename)
+    monkeypatch.setattr(archive.os, "rename", _folder_swapped_in(path))
     got = delete(agents, doc)
     assert got.status == 409, got.text
     assert path.is_dir()
-    assert _marks_of(root, rel) == [True, True, True]
+    assert _marks_of(root, rel) == ALL_MARKS
+
+
+@pytest.mark.parametrize("unwritable", ["archived", "seen"])
+def test_a_mark_file_that_cannot_be_written_does_not_keep_the_other_marks_on_the_empty_address(agents, clock, monkeypatch,
+                                                                                               unwritable):
+    doc, root, rel = _marked_everywhere(agents, clock)
+    name = loose.ARCHIVED if unwritable == "archived" else loose.SEEN
+    real = loose.stamp_held
+
+    def stamp_held(root_path, which, changes, **k):
+        if which == name:
+            raise loose.Refused(f"the {unwritable} marks of the loose root cannot be written")
+        return real(root_path, which, changes, **k)
+    monkeypatch.setattr(archive.loose, "stamp_held", stamp_held)
+    got = delete(agents, doc)
+    assert got.status == 409, got.text
+    assert not agents.hub.file(doc).exists()
+    assert _marks_of(root, rel) == {**NO_MARKS, unwritable: True}

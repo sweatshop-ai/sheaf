@@ -268,14 +268,16 @@ class Archive:
                     try:
                         moved = os.stat(dname, dir_fd=dfd, follow_symlinks=False).st_mode
                     except OSError as e:
-                        self._unmark_refused(root, rel)
+                        # 183 BW: refused, but the address is empty all the same: its marks go, or a page made there later
+                        # would be born archived or kept.
+                        self._unmark_quietly(root, rel)
                         raise loose.Refused(f"the page was moved to the trash, then something else took it from there "
                                             f"({e.strerror})") from None
                     if not stat.S_ISREG(moved):
                         try:
                             os.rename(dname, sname, src_dir_fd=dfd, dst_dir_fd=sfd)
                         except OSError as e:
-                            self._unmark_refused(root, rel)
+                            self._unmark_quietly(root, rel)     # 183 BW: the address is empty here too
                             raise loose.Refused(f"what was at the page's address changed during the delete and is in the "
                                                 f"trash now ({e.strerror}): move {TRASH / str(at) / rel} back by hand") from None
                         raise loose.Refused("what is at the page's address changed during the delete: refused, nothing was moved")
@@ -287,17 +289,26 @@ class Archive:
 
     @staticmethod
     def _unmark(root, rel: str) -> None:
-        """Take the archived, seen and keep marks of `rel`. The caller holds `loose-keep.lock`."""
-        loose.stamp_held(root.path, ARCHIVED, {rel: None})
-        loose.stamp_held(root.path, SEEN, {rel: None})
-        loose.keep_held(root.path, rel, False)
+        """Take the archived, seen and keep marks of `rel`, each tried even when one before it cannot be written; then the
+        first refusal is raised (`Refused`). The caller holds `loose-keep.lock`."""
+        failed = None
+        for clear in (lambda: loose.stamp_held(root.path, ARCHIVED, {rel: None}),
+                      lambda: loose.stamp_held(root.path, SEEN, {rel: None}),
+                      lambda: loose.keep_held(root.path, rel, False)):
+            try:
+                clear()
+            except (loose.Refused, OSError) as e:
+                failed = failed or e
+        if isinstance(failed, OSError):
+            raise loose.Refused(f"the page is in the trash, but its marks could not be cleared ({failed.strerror})")
+        if failed:
+            raise failed
 
     @classmethod
-    def _unmark_refused(cls, root, rel: str) -> None:
-        """183 BW: a delete refused after the rename has still emptied the address, so its marks go as well, or a page made
-        there later would be born archived or kept. A mark file that cannot be written does not hide the refusal that says
-        where the page went."""
-        with contextlib.suppress(loose.Refused, OSError):
+    def _unmark_quietly(cls, root, rel: str) -> None:
+        """`_unmark` for a delete that is refused all the same: a mark file that cannot be written does not replace the
+        refusal that says where the page went."""
+        with contextlib.suppress(loose.Refused):
             cls._unmark(root, rel)
 
     def trashed(self, root) -> list:

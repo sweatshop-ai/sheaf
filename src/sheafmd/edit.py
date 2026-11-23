@@ -768,6 +768,26 @@ _EMPTY_SHELL = {"br", "p", "div", "span", "ul", "ol", "li", "blockquote", "b", "
 _BREAK_ENDS = (_EMPTY_SHELL - {"br", "span", "b", "strong", "i", "em", "u"}) | {"td", "th", "dt", "dd"}
 
 
+def _ends_its_cell(br, cell) -> bool:
+    """Whether a break shows nothing after it in its table cell: nothing but white space and breaks follow it there;
+    a comment node is something the cell holds. The page's white space is not Python's: a no-break space shows,
+    except the one Enter leaves at the cut, right after the break (also past the end of a mark the break ends). Two
+    are a typed one."""
+    from bs4 import NavigableString
+
+    first = br.next_element
+    for x in br.next_elements:
+        if cell not in x.parents:
+            return True
+        if type(x) is NavigableString:
+            text = x[1:] if x is first and x.startswith("\xa0") else str(x)
+            if text.strip(" \t\n\r\f"):
+                return False
+        elif x.name != "br":
+            return False
+    return True
+
+
 def _without_placeholder_breaks(fragment: str) -> str:
     """The fragment without the <br> a browser leaves at the end of a block, and "" when
     nothing else is left in it.
@@ -797,12 +817,18 @@ def _without_placeholder_breaks(fragment: str) -> str:
     for br in reversed(soup.find_all("br")):
         block = block_ended_by(br)
         # Python's strip() takes a no-break space for white space and the page does not: one after a break
-        # in a cell is Enter's cut, which _cell_breaks sorts from a typed one: only where it takes the table
-        # (not with a backslash or a shortcode in it) and the break is not the code's.
-        if (block is not None and block.name in ("td", "th") and table_is_taken
-                and type(br.next_sibling) is NavigableString and br.next_sibling.startswith("\xa0")
-                and not br.find_parent(["code", "pre"])):
-            continue
+        # in a cell is Enter's cut, and two are Enter's cut and a typed one. A break in code is the code's.
+        if block is not None and block.name in ("td", "th") and not br.find_parent(["code", "pre"]):
+            if table_is_taken:
+                # _cell_breaks takes the table (no backslash or shortcode in it) and sorts the cut from a typed one.
+                if type(br.next_sibling) is NavigableString and br.next_sibling.startswith("\xa0"):
+                    continue
+            elif not _ends_its_cell(br, block):
+                # The table goes as raw HTML with its breaks: the typed line stays, without Enter's cut.
+                for t, end in ((br.previous_sibling, True), (br.next_sibling, False)):
+                    if type(t) is NavigableString:
+                        _cut(t, end)
+                continue
         if block is not None and not any(block is b for b in cleared):
             cleared.append(block)
             br.decompose()
@@ -845,22 +871,6 @@ def _cell_breaks(fragment: str):
     goes too. A break in code is the code's."""
     from bs4 import BeautifulSoup, NavigableString
 
-    def ends_its_cell(br, cell):
-        # Nothing but white space and breaks after it in its cell; a comment node is something the cell holds.
-        # The page's white space is not Python's: a no-break space shows, except the one Enter leaves at the
-        # cut, right after the break. Two are a typed one.
-        first = br.next_sibling
-        for x in br.next_elements:
-            if cell not in x.parents:
-                return True
-            if type(x) is NavigableString:
-                text = x[1:] if x is first and x.startswith("\xa0") else str(x)
-                if text.strip(" \t\n\r\f"):
-                    return False
-            elif x.name != "br":
-                return False
-        return True
-
     if "<br" not in fragment:
         return fragment, None
     soup = BeautifulSoup(fragment, "html.parser")
@@ -880,7 +890,7 @@ def _cell_breaks(fragment: str):
     if token is None:
         return fragment, None
     for br in breaks:
-        if ends_its_cell(br, br.find_parent(["td", "th"])):
+        if _ends_its_cell(br, br.find_parent(["td", "th"])):
             # The no-break space Enter leaves at the cut ends with the break.
             if type(br.next_sibling) is NavigableString:
                 _cut(br.next_sibling, False)

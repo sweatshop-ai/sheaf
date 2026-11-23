@@ -1380,4 +1380,3 @@ def test_the_documents_count_limit_is_one_for_a_root_and_the_private_root_listed
     is_error, rows = call(w.door, "documents", token=w.tokens["tok-a"], open_only=False)
     assert not is_error
     assert len([r for r in rows if "doc" in r]) == 3 and rows[3:] == [{"root": w.root.name, "more": 3}]
-

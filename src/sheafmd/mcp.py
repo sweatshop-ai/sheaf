@@ -72,7 +72,7 @@ TOOLS = {
                        "whose folder the hub cannot enter comes last, as a row of its own: root and "
                        "closed (why, such as Permission denied, or that git gave no answer for it); a root with "
                        "more documents you may see than the hub lists gets one too: root and more (at least how many were "
-                       "left out: the count stops at 100,000 files); a root the call had no time to finish "
+                       "left out: the count stops at 100,000); a root the call had no time to finish "
                        "gets root and stopped.",
         "annotations": {"readOnlyHint": True},
         "properties": {
@@ -729,14 +729,6 @@ class Door:
         self._open_threads[address] = (key, threads, visibility.front_matter(text))
         return (*self._open_threads[address][1:], st.st_mtime_ns, private, text if whole else None)
 
-    def _source_of(self, address: str, root, privates: list):
-        """The root whose folder holds the file of `address`, a document of the list root `root`: one of the member's
-        `privates` listed under it (rule D), else `root` itself."""
-        if not privates:
-            return root
-        top, _ = self.hub.where(address)
-        return next((p for p in privates if p.path == top), root)
-
     def _documents(self, args: dict, caller: Caller):
         hub = self.hub
         member = self._member(caller)
@@ -782,24 +774,24 @@ class Door:
             # gave no answer, the time ran out): the page was served and told (9.8). Judged as every listed page is.
             files += [(None, None, a) for a in sorted(pending) if Address.parse(a).root == root.name]
             seen, listed, more = 0, set(), 0     # what the caller may see of this root, and how much of it was left out
-            for src, found, address in files:
-                if address is None and time.monotonic() > deadline:
+            for src, found, waiting in files:   # a listed file (src, found), or the address of a waiting Tell
+                if waiting is None and time.monotonic() > deadline:
                     if not giving:
                         late.add(root.name)
                     continue                                   # the Tells after them are still listed
-                if address is not None and address in listed:
+                if waiting is not None and waiting in listed:
                     continue
-                if address is None and more >= roots_mod.COUNT_LIMIT:
+                if waiting is None and more >= roots_mod.COUNT_LIMIT:
                     continue                                   # the count stops at the limit
                 # A rectoverso of the list's root is listed by its name (9.11), wherever its file is; a private path is
                 # none. Each file is read under its name's lock, as every read.
-                if address is not None:
-                    name = address if placed else None
+                if waiting is not None:
+                    name = waiting if placed else None
                 else:
                     logical = place.logical(found) if placed else None
                     name = f"{root.name}/{logical}" if logical else None
                 with place.held(hub, name) if name else contextlib.nullcontext():
-                    if address is None:
+                    if waiting is None:
                         if src is not root:
                             rel = place.named_in(hub, root, src, found)
                         else:
@@ -808,10 +800,9 @@ class Door:
                             continue
                         at = str(Address(root.name, rel))
                     else:
-                        at = address
+                        at = waiting                           # in the root or private root that holds its name
+                        src = got[0] if placed and (got := place.where_is(hub, at)) else root
                     try:
-                        if address is not None:
-                            src = self._source_of(address, root, privates)
                         path = hub.roots.resolve(at)          # never a file outside its root
                         folder = (src.name, path.parent)
                         if folder not in in_git:

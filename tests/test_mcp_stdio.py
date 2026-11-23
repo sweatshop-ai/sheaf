@@ -297,7 +297,7 @@ class StandInHub:
     nothing and keep it open. `on_request` says, for a path, what the hub does with a request that
     reached it: "close" ends the connection with no answer, "hold" keeps it open and answers
     nothing. `ending` is whether the last proof was one that the hub ended without a word. `refusals`
-    is how many of the next messages get a 401. `answers` is what a command's
+    is how many of the next messages get a 401. `boot` is the boot id the next proof names. `answers` is what a command's
     route says (`{"ok": true}` when a path is not in it), and `version` and `service` what the
     proof says the hub runs and whether the service does."""
 
@@ -305,7 +305,7 @@ class StandInHub:
 
     def __init__(self, version=__version__, service=False):
         key, owner = paths.ensure_key(), self
-        self.log, self.headers, self.proofs, self.refusals = [], [], 0, 0
+        self.log, self.headers, self.proofs, self.refusals, self.boot = [], [], 0, 0, "b"
         self.at_proof, self.on_request, self.ending = lambda n: False, {}, False
         self.answers = {"/_/jobs": {"ok": True, "telling": []}}
         numbers = itertools.count(1)            # a connection's number; `id(handler)` is reused once it is freed
@@ -355,7 +355,7 @@ class StandInHub:
                     return
                 if then == "hold":
                     return threading.Event().wait(HOLD)
-                self.reply(json.dumps({"app": "sheaf", "version": version, "boot": "b", "service": service,
+                self.reply(json.dumps({"app": "sheaf", "version": version, "boot": owner.boot, "service": service,
                                        "proof": Auth(key, owner.port).proof(nonce)}).encode(), then is True)
                 if then == "fin":
                     self.close_connection = True
@@ -876,6 +876,31 @@ def test_a_restart_announcement_whose_answer_was_lost_is_taken_back(sheaf, monke
     assert r.code == 1 and controlled == []
     asked = [(m, p) for _, m, p in stand_in.log if p != "/_/health"]
     assert asked == [("POST", "/_/restarting"), ("DELETE", "/_/restarting")]
+
+
+@pytest.mark.parametrize("how", ["answer lost", "manager refused"])
+def test_a_restart_announcement_is_taken_back_only_from_the_hub_that_was_told(sheaf, monkeypatch, how):
+    """Between the announcement and its take-back the hub may be replaced: the new hub's own restart
+    announcement is not cleared by a take-back meant for the one before (ticket 183 AE)."""
+    stand_in = StandInHub(service=True)
+    if how == "answer lost":
+        stand_in.on_request["/_/restarting"] = "close"
+    else:
+        def refuse_the_restart(verb):
+            raise ServiceError("`systemctl --user restart sheaf.service` failed (1)")
+        monkeypatch.setattr("sheafmd.lifecycle.service.control", refuse_the_restart)
+
+    def replaced_after_the_announcement(n):     # 1: the command's meeting, 2: the announcement, 3: the take-back
+        if n >= 3:
+            stand_in.boot = "another"
+        return False
+    stand_in.at_proof = replaced_after_the_announcement
+    monkeypatch.setenv("SHEAF_PORT", str(stand_in.port))
+    monkeypatch.setattr("sheafmd.lifecycle.service.installed", lambda: True)
+    r = sheaf("restart")
+    assert r.code == 1
+    asked = [(m, p) for _, m, p in stand_in.log if p != "/_/health"]
+    assert asked == [("POST", "/_/restarting")]
 
 
 # ── a request that loses the hub after its proof ─────────────────────────────

@@ -841,7 +841,8 @@ def test_a_move_of_a_page_with_no_archive_marks_writes_none(team):
     assert not (root / ".sheaf" / archive.SEEN).exists() and not (root / ".sheaf" / archive.ARCHIVED).exists()
 
 
-def test_the_door_answers_a_move_whose_page_cannot_be_read_after_it_with_a_tool_error(team, monkeypatch):
+def test_a_door_move_whose_page_cannot_be_read_after_it_is_answered_as_made_with_no_hash(team, monkeypatch):
+    """The move is made before the page is read for its hash: it is answered, and logged, as made (ticket 183 AY)."""
     from sheafmd.hub import moves
     old = made(team, "alice", PLAN)["doc"]
     real = moves.move_page
@@ -852,4 +853,8 @@ def test_the_door_answers_a_move_whose_page_cannot_be_read_after_it_with_a_tool_
         return new
     monkeypatch.setattr(moves, "move_page", then_gone)
     bad, out = call(team, "alice", "move", doc=old, folder="b")
-    assert bad and "could not be read" in out
+    assert not bad, out
+    got = json.loads(out)
+    assert got["doc"] == "loose-alice/b/plan.md" and got["moved_from"] == old
+    assert got["hash"] is None and "could not be read" in got["note"]
+    assert team.hub.writes.last(got["doc"]).via == "move"

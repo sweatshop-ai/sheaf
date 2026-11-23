@@ -1,6 +1,9 @@
 """A page a job generates (SPEC 8.3, 9.7, 12): the door's `create` and `update` set the mark, `read` shows it,
 and only the token that set it, or the key, may update the page or clear the mark."""
+import pytest
 from helpers import comment, door, ok, refused, rpc
+
+from sheafmd.beneath import Opened
 from sheafmd.hub.state import Tokens
 
 DOC = "work/plan.md"
@@ -133,3 +136,43 @@ def test_a_mark_set_by_a_token_with_no_id_is_not_inherited_by_a_token_made_since
     made_since = Tokens().add("old", write=True)             # the same name; it has an id, the old row had none
     got = ok(browser, "read", doc=DOC)
     refused(browser, "update", doc=DOC, text=edited(got["text"]), expected_hash=got["hash"], token=made_since)
+
+
+def a_failing_write(monkeypatch):
+    def refuse(self, text):
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(Opened, "write", refuse)
+
+
+@pytest.mark.parametrize("marked", [True, False], ids=["clearing", "setting"])
+def test_an_update_whose_write_fails_leaves_the_mark_as_it_was(browser, plan, monkeypatch, marked):
+    """The mark is set before the text is written, so a page is never changed and unmarked; a write that then fails
+    puts it back (ticket 183 Z)."""
+    setter = Tokens().add("builder", write=True)
+    if marked:
+        generate(browser, setter, generated=True)
+    before = browser.hub.docs.get(DOC).get("generated")
+    a_failing_write(monkeypatch)
+    got = ok(browser, "read", doc=DOC, token=setter)
+    refused(browser, "update", doc=DOC, text=got["text"] + "\nA last line.\n", expected_hash=got["hash"],
+            generated=not marked, token=setter)
+    assert browser.hub.docs.get(DOC).get("generated") == before
+
+
+def test_a_create_whose_mark_cannot_be_written_leaves_no_page_and_may_be_sent_again(browser, plan, work, monkeypatch):
+    """`docs.json` refuses the mark: the create is refused with nothing made, so the same create succeeds once it can
+    be written (ticket 183 AA)."""
+    token = Tokens().add("builder", write=True)
+    change = browser.hub.docs.change
+
+    def refuse_the_mark(address, settle):
+        if "generated" in settle({}):
+            raise OSError(28, "No space left on device")
+        return change(address, settle)
+    monkeypatch.setattr(browser.hub.docs, "change", refuse_the_mark)
+    said = refused(browser, "create", doc="work/made.md", text="# Made\n\nBy a job.\n", generated=True, token=token)
+    assert "not made" in said
+    assert not (work / "made.md").exists()
+    monkeypatch.setattr(browser.hub.docs, "change", change)
+    ok(browser, "create", doc="work/made.md", text="# Made\n\nBy a job.\n", generated=True, token=token)
+    assert browser.hub.docs.get("work/made.md")["generated"]["by"] == "builder"

@@ -17,7 +17,7 @@ import pytest
 
 import sheafmd.comments as rdc
 from agent_fakes import PID, FakeClaude, Peer, write_record
-from helpers import PLAN, browser_on, count_number, page_meta, proc_state, writes_from_outside
+from helpers import PLAN, browser_on, number_places, page_meta, proc_state, writes_from_outside
 from sheafmd import diagnostics, paths
 from sheafmd.agents import prompts
 from sheafmd.agents.base import State
@@ -239,7 +239,8 @@ def test_the_name_the_page_is_given_is_cleaned_by_the_rule_of_a_display_name(bro
 @pytest.mark.parametrize("pid", [PID, 260, 409], ids=["own-pid", "260", "409"])      # 260: a runner's pid; page.js holds "2600", which is not it; 409: a pid the page does hold, as a status code
 def test_the_page_never_holds_the_session_id_the_socket_or_the_command(browser, plan, session, pid):
     """The pid may equal a number the page holds on its own (a container's pids are small: 409 is a status code),
-    so the page with the session must hold it no more often than the same page with none."""
+    so the page with the session must hold it in no place the same page with none does not: by place, not by count,
+    so that one occurrence added cannot hide behind another removed (185 BG)."""
     page_before = browser.get(URL).text
     doc_before = browser.get(f"/_/doc?doc={DOC}").text
     attach(browser, plan, session.target(session="s-secret-1"))
@@ -249,7 +250,7 @@ def test_the_page_never_holds_the_session_id_the_socket_or_the_command(browser, 
     for text, before in ((page, page_before), (doc, doc_before)):
         for private in ("s-secret-1", session.peer.path, str(session.claude.bin), str(session.cfg)):
             assert private not in text.replace('"pid"', ""), private
-        assert count_number(text, pid) <= count_number(before, pid), pid
+        assert number_places(text, pid) <= number_places(before, pid), pid
 
 
 def test_a_page_with_no_session_says_so_under_the_tell_button(browser, plan):

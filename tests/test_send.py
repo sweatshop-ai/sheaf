@@ -305,6 +305,27 @@ def test_pull_never_overwrites_an_edit_made_while_it_asks_the_door(tiroir, scrat
     assert scratch.with_name("notes.tiroir.md").read_text(encoding="utf-8") == theirs
 
 
+def test_pull_never_overwrites_an_edit_saved_while_it_writes_the_file(tiroir, scratch, capsys, monkeypatch):
+    """185 BH: the edit lands after the pull compared the file, while the new text is written and synced."""
+    run(capsys, scratch)
+    address = f"loose-bea/{loose.month()}/notes.md"
+    theirs = TEXT + "\nAdded on the tiroir.\n"
+    changed_there(tiroir, address, theirs)
+    mine = TEXT + "\nSaved while the pull wrote.\n"
+    writes = send.write_text_atomic
+
+    def write(path, text, *a, **k):
+        if Path(path) == scratch and text == theirs:
+            scratch.write_text(mine, encoding="utf-8")
+        return writes(path, text, *a, **k)
+    monkeypatch.setattr(send, "write_text_atomic", write)
+    code, out, err = run(capsys, "pull", scratch)
+    assert code == 1
+    assert scratch.read_text(encoding="utf-8") == mine
+    assert scratch.with_name("notes.tiroir.md").read_text(encoding="utf-8") == theirs
+    assert not list(scratch.parent.glob(".notes.md.*sheaf-tmp"))
+
+
 def test_pull_of_a_page_never_sent_from_here_says_so(tiroir, scratch, capsys):
     code, out, err = run(capsys, "pull", scratch)
     assert code == 1 and "sheaf" in err and "never" in err

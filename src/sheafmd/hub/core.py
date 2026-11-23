@@ -1113,6 +1113,10 @@ class Hub:
                 e.live.forget()
             except Exception:       # one document's failure keeps no other from its forget, and no page from `gone`
                 self.record_exception("forget-failed", address)
+                try:
+                    e.live.unwatch()    # its watch ends all the same, or the record grows for the rest of the hub run
+                except Exception:
+                    self.record_exception("forget-failed", address)
             # After that write's own `changed`, which the page takes in first.
             e.bus.publish("gone", {"doc": address})
 

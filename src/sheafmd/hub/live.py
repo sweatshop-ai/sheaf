@@ -545,8 +545,13 @@ class LiveDocument:
         version aged out."""
         if not self._detached:
             return
-        store, self._detached_store = self._detached_store, None
+        self.unwatch()
         self._detached = False
+
+    def unwatch(self):
+        """The watch `detach` opened ends, and nothing is deleted: for a document that is let go without its forget (one
+        that raised) or taken back (`reattach`). Takes no lock."""
+        store, self._detached_store = self._detached_store, None
         if store is not None and self._address is not None:
             store.forget_texts(self._address, (), writer=self)
 

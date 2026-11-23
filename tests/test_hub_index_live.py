@@ -1315,7 +1315,7 @@ def test_one_documents_forget_that_raises_does_not_keep_the_others_of_the_root_f
     assert list(world.hub.entries).index("work/a.md") < list(world.hub.entries).index("work/b.md")    # a's forget first
     world.hub.forget_root("work")
     assert "gone" in told
-    assert world.hub.versions._folder("work/b.md") not in state.Versions._claims
+    assert not state.Versions._claims                   # a's watch too, though its forget raised
     assert any(r.get("kind") == "forget-failed" for r in diagnostics.read())
 
 

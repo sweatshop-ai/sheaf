@@ -16,7 +16,6 @@ from pathlib import Path
 from .. import mcp, paths
 from . import channel, loose, proxy, root_moves, state, visibility
 from . import repos as repos_mod
-from .roots import NotFound
 from .state import TokenRow
 
 SAYS = {
@@ -173,17 +172,11 @@ def _land_steps(hub, door, b, owner, deadline, peer: str | None, mine) -> tuple:
 
 
 def _made_file(hub, owner, address: str) -> Path | None:
-    """The real path of the file a landing just made at `address`, in the root registered at `owner`'s loose folder, found by
-    that folder and never by the name alone; None when the address names no such root now (its root forgotten, and maybe
-    its name taken, since the create)."""
-    held = hub.loose.known(owner)
-    root = hub.roots.lookup(held / "x.md") if held is not None else None
-    if root is None:
-        return None
-    try:
-        return Path(os.path.realpath(hub.file(address, root_id=root.id)))
-    except NotFound:
-        return None
+    """The real path of the file a landing made at `address`: the path in the root below `owner`'s loose folder, which the
+    loose registry keeps by owner, never by the root's name, so a root forgotten (and its name taken) since the create still
+    leads here and never to another folder (8.11). None when the owner has no loose folder."""
+    folder = hub.loose.known(owner)
+    return Path(os.path.realpath(folder)) / address.split("/", 1)[1] if folder is not None else None
 
 
 def _unkeep(root_path, address: str) -> None:

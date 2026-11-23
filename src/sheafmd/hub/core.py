@@ -62,6 +62,7 @@ SETTING_KEYS = ("title", "toc", "max_image_width", "by", "for", "theme", "credit
 
 _META_RE = re.compile(r'(<script id="rd-edit-meta" type="application/json">)(.*?)(</script>)', re.S)
 _ALIAS_RE = re.compile(r"s-[0-9a-f]{16}\.md")        # the opaque name `Hub.alias` gives a Shared page (9.11)
+SWAPPED = "its root was forgotten, and another took the name, since the write"     # why a commit is refused (8.11)
 
 
 @dataclass(frozen=True)
@@ -444,17 +445,16 @@ class Hub:
         if root is None:
             return
         if root_id and root.id != root_id:
-            self.record("commit-refused", address, why="its root was forgotten, and another took the name, since the write")
+            self.record("commit-refused", address, why=SWAPPED)
             return
         if place.applies(self, a.root):
             try:
                 held = self._bound(address)              # the file an open document was made for, no other
                 got = place.file_at(self, address, held.file_root if held else "", root_id)
             except roots_mod.NotFound:
-                if root_id and self.root_id_of(address) != root_id:     # forgotten, and maybe taken, since the check above
-                    self.record("commit-refused", address, why="its root was forgotten, and another took the name, since the write")
-                else:
-                    self.record("commit-refused", address, why="its file is not where the rectoverso was opened")
+                swapped = root_id and self.root_id_of(address) != root_id     # forgotten, and maybe taken, since the check above
+                self.record("commit-refused", address,
+                            why=SWAPPED if swapped else "its file is not where the rectoverso was opened")
                 return
             root, rel = got if got else (root, place.file_rel(self, root, a.rel))
         else:

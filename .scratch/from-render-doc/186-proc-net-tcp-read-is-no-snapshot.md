@@ -2,7 +2,7 @@
 
 **Claimed by:** Kenji
 
-**Status:** open. Reported by Kenji on 2026-11-23. The test has not been fixed: Kaveh dispatches the fix.
+**Status:** in review (#636). Reported by Kenji on 2026-11-23.
 
 **Priority:** high. The failure turned main's CI red on a change that does not touch it, and the same read sits in the product's /proc path.
 

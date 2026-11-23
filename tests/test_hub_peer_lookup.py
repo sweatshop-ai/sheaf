@@ -214,7 +214,8 @@ def churn(stop):
 def test_the_owner_read_in_proc_while_other_sockets_come_and_go_is_one_uid(ends, monkeypatch):
     """Ticket 186 under the real kernel, beside its red tests (tables that list the row twice or skip
     it, in test_hub_peer.py). The race is rare: this passed on main in five runs of two seconds on a
-    laptop, while main's CI failed once on it at load 33. It holds the fixed reading to exactly [ME]."""
+    laptop, while main's CI failed once on it at load 33. It holds the fixed reading to [ME], or to
+    a refusal ([]) where both reads skip the row, never to a second row or another uid."""
     monkeypatch.setattr(peer, "NETLINK", False)
     cli, acc = pair()
     ends += [cli, acc]
@@ -230,4 +231,5 @@ def test_the_owner_read_in_proc_while_other_sockets_come_and_go_is_one_uid(ends,
         stop.set()
         for t in threads:
             t.join()
-    assert seen and [s for s in seen if s != [ME]] == []
+    # [] is a row both reads skipped: a refusal, which is allowed to happen; a second row or uid is not.
+    assert [ME] in seen and [s for s in seen if s not in ([ME], [])] == []

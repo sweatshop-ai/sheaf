@@ -33,6 +33,7 @@ NETLINK = True                       # a test turns the kernel's socket diagnost
 
 _ENDPOINT_RE = re.compile(r"([0-9A-F]{8}|[0-9A-F]{32}):([0-9A-F]{4})", re.IGNORECASE)
 TABLES = ("tcp", "tcp6")
+_PROC_READS = 2                      # reads of TABLES before "no such socket": one may skip the row (ticket 186)
 OTHER_USER, UNKNOWN = "other-user", "unknown"
 
 
@@ -172,9 +173,6 @@ def _netlink_owners(local, remote) -> list[Socket]:
             owners.append(Socket(*struct.unpack_from("=II", data, _UID_AT)))
             break
     return owners
-
-
-_PROC_READS = 2
 
 
 def _proc_owners(local, remote) -> list[Socket]:

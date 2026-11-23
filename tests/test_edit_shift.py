@@ -15,10 +15,13 @@ def test_an_offset_after_the_change_moves_by_what_the_change_added():
 
 
 def test_an_offset_inside_the_change_goes_after_the_same_words():
-    old, new = "alpha beta gamma", "alpha bet! gamma"
+    old, new = "alpha beta gamma delta", "alpha XbetaY gamma delta"
     shift = rde._Shift(old, new)
-    # After "bet" in "beta": the letters the change kept.
-    assert new[:shift.where(old.index("beta") + 3)] == "alpha bet"
+    o = old.index("beta") + 2
+    assert shift.pre < o < len(old) - shift.suf      # inside the changed part, not before or after it
+    # After "be" in "beta": the letters the change kept, past the X it put before them.
+    assert new[:shift.where(o)] == "alpha Xbe"
+    assert "same" in vars(shift)
 
 
 def test_the_diff_is_made_only_when_an_offset_falls_inside_the_change():

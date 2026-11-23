@@ -556,7 +556,9 @@ def _where(hub, address: str, root_id: str = ""):
     root = hub.roots.get(at.root)
     if root_id and (root is None or root.id != root_id):
         raise NotFound(address)
-    if not at.plain or logical(at.rel) != at.rel or not applies(hub, at.root) or root is None:
+    if root is None or not at.plain or logical(at.rel) != at.rel:
+        return None
+    if not applies(hub, at.root):
         return None
     return root, Path(config.realpath(root.path)), at.rel
 
@@ -759,8 +761,8 @@ def place(hub, address: str, member=None, by: str | None = None, commit: bool = 
     the name since is not moved in."""
     try:
         got = _where(hub, address, root_id)
-    except NotFound:
-        return None
+    except NotFound:            # the root the writer wrote in is gone: its file stays where it was written, and no other
+        return None             # root's file moves (8.11); the writer's commit is refused as its root's is
     if got is None:
         return None
     root, top, name = got

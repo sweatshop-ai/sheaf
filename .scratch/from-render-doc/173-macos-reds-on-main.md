@@ -1,6 +1,6 @@
 # 173: macOS is red on main: xdist workers die and the run ends early
 
-**Claimed by:** Halima 2026-11-22
+**Claimed by:** Elias 2026-11-23
 
 **Status:** in-progress (every box ticked but O and Q: O green in runs 45120326342 and 45133232164, cause of its earlier stall not established; Q fixed in PR 614, waits for a macOS batch)
 

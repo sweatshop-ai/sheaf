@@ -2,7 +2,7 @@
 was dropped while it is open, placed as usual at the next open."""
 import pytest
 
-from pagehelp import until
+from pagehelp import room_under_box, until
 
 pytestmark = pytest.mark.page
 
@@ -11,10 +11,10 @@ BOX = "#rd-popover"
 BAND = "#rd-popover .rd-head .rd-quote"
 
 
-def open_thread(tab):
-    """A comment of Bea's on the page, its thread open."""
+def open_thread(tab, md=None):
+    """A comment of Bea's on the page (`md`, or the site fixture's), its thread open."""
     from pagehelp import open_with_comment
-    open_with_comment(tab, None, "apples", "Why?", "Bea")
+    open_with_comment(tab, md, "apples", "Why?", "Bea")
     tab.page.click(".rd-badge")
     tab.page.wait_for_selector(FIELD)
     return tab.page
@@ -22,6 +22,11 @@ def open_thread(tab):
 
 def rect(p, sel=BOX):
     return p.locator(sel).bounding_box()
+
+
+def frames(p):
+    """Two animation frames: what the page draws after a change has been drawn."""
+    p.evaluate("new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))")
 
 
 def drag(p, dx, dy, sel=BAND):
@@ -121,7 +126,7 @@ def test_a_box_dropped_inside_the_smaller_window_does_not_move_when_it_shrinks(t
     before = rect(p)
     size = p.viewport_size
     p.set_viewport_size({"width": size["width"] - 20, "height": size["height"] - 20})
-    p.evaluate("new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))")
+    frames(p)
     assert inside_window(p, before)[0], "the test's own premise: the box lies inside the smaller window"
     after = rect(p)
     assert abs(after["x"] - before["x"]) < 2 and abs(after["y"] - before["y"]) < 2, (before, after)
@@ -160,52 +165,57 @@ def test_a_box_held_at_the_foot_of_a_short_page_keeps_its_edge_when_the_page_shr
 LONG = "# Plan\n\nA paragraph about apples.\n\n" + "".join(f"Paragraph {i} of the long page, to scroll past.\n\n" for i in range(80))
 
 
-def open_long_thread(tab):
-    """The thread on `apples` open at the head of a page long enough to scroll the box out of view."""
-    from pagehelp import open_with_comment
-    open_with_comment(tab, LONG, "apples", "Why?", "Bea")
-    tab.page.click(".rd-badge")
-    tab.page.wait_for_selector(FIELD)
-    return tab.page
-
-
 def page_place(p):
     """The box's place in the page (not on the screen): what a scroll leaves as it is."""
     return p.evaluate("(() => { const b = document.querySelector('#rd-popover'); return [b.offsetLeft, b.offsetTop]; })()")
 
 
-def frames(p):
-    p.evaluate("new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))")
+LONG_END = "# Plan\n\n" + "".join(f"Paragraph {i} of the long page, to scroll past.\n\n" for i in range(80)) + "A paragraph about apples.\n"
 
 
-def room_under_box(p):
-    """(whether the empty room lies right under the box, what was measured)."""
-    got = p.evaluate("""(() => { const b = document.querySelector('#rd-popover'), r = document.querySelector('.rd-room');
-        return r && { follows: r.previousSibling === b, top: parseFloat(r.style.top), foot: b.offsetTop + b.offsetHeight,
-                      height: parseFloat(r.style.height) }; })()""")
-    return bool(got) and got["follows"] and abs(got["top"] - got["foot"]) < 1 and got["height"] == 8, got
+def settled(p):
+    frames(p)
+    p.wait_for_timeout(100)                 # past the resize event and the box's own size observer, which the frames may not wait for
 
 
 @pytest.mark.parametrize("change", [60, -60], ids=["url-bar-hidden", "url-bar-shown"])
-def test_a_box_scrolled_out_of_view_stays_where_it_was_dropped_when_the_window_height_changes(tab, site, change):
+@pytest.mark.parametrize("side", ["above", "below"])
+def test_a_box_scrolled_out_of_view_stays_where_it_was_dropped_when_the_window_height_changes(tab, site, change, side):
     """183 BN: a phone's URL bar that hides or shows changes the window's height while the reader scrolls. A box the reader
     scrolled out of view with the text was pulled back into view by it."""
-    p = open_long_thread(tab)
-    drag(p, -60, 40)
+    p = open_thread(tab, LONG if side == "above" else LONG_END)
+    drag(p, -60, 40 if side == "above" else -40)
+    before = page_place(p)
+    p.evaluate("window.scrollTo(0, 2000)" if side == "above" else "window.scrollTo(0, 0)")
+    frames(p)
+    b, foot = rect(p), p.evaluate("window.innerHeight")
+    assert (b["y"] + b["height"] <= 0) if side == "above" else (b["y"] >= foot + 60), ("the test's own premise", b, foot)
+    size = p.viewport_size
+    p.set_viewport_size({"width": size["width"], "height": size["height"] + change})
+    settled(p)
+    assert page_place(p) == before
+
+
+def test_a_box_scrolled_out_of_view_is_held_inside_a_narrower_window_and_keeps_its_height(tab, site):
+    """183 BN: a box scrolled away is left at its height in the page, but a window made narrower still holds it inside its
+    width, so it is whole when the reader scrolls back to it."""
+    p = open_thread(tab, LONG)
+    drag(p, 5000, 40)
     before = page_place(p)
     p.evaluate("window.scrollTo(0, 2000)")
     frames(p)
-    assert rect(p)["y"] + rect(p)["height"] <= 0, "the test's own premise: the box lies above the window"
     size = p.viewport_size
-    p.set_viewport_size({"width": size["width"], "height": size["height"] + change})
+    p.set_viewport_size({"width": size["width"] - 300, "height": size["height"]})
+    settled(p)
+    assert page_place(p)[1] == before[1]
+    p.evaluate("window.scrollTo(0, 0)")
     frames(p)
-    p.wait_for_timeout(100)
-    assert page_place(p) == before
+    assert inside_window(p, rect(p))[0], inside_window(p, rect(p))[1]
 
 
 def test_a_box_inside_the_window_is_still_held_inside_when_the_window_shrinks_on_a_long_page(tab, site):
     """183 BN's other side: the box lay inside the window before it shrank, and wholly past its new foot after."""
-    p = open_long_thread(tab)
+    p = open_thread(tab, LONG)
     drag(p, 0, 5000)
     size = p.viewport_size
     p.set_viewport_size({"width": size["width"], "height": size["height"] - 400})
@@ -233,7 +243,7 @@ def test_a_closed_moved_box_is_no_longer_observed(tab, site):
 def test_the_room_follows_a_box_scrolled_out_of_view_that_changes_size(tab, site):
     """183 BP: a box the reader scrolled away is left where it was dropped when it grows, and the room under it moves to its
     new foot. The box grows by a part added to its thread: a reply sent from the field scrolls the page back to it."""
-    p = open_long_thread(tab)
+    p = open_thread(tab, LONG)
     drag(p, -60, 40)
     before = page_place(p)
     height = rect(p)["height"]

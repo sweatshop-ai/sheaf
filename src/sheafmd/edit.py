@@ -1013,33 +1013,35 @@ class _Emoji(list):
     token = None
 
 
-_CODE_SPAN = re.compile(r"(`+)(?!`).*?(?<!`)\1(?!`)", re.S)
-_FENCED_CODE = re.compile(r"^ {0,3}(`{3,}|~{3,})[^\n]*\n.*?(?:^ {0,3}\1[ \t]*$|\Z)", re.M | re.S)
-_SOURCE_EMOJI = re.compile(r'<span\b(?=[^>]*\sclass="emoji")[^>]*?\sdata-emoji="([a-z0-9_+-]+)"|(?<!\\):([a-z0-9_+-]+):')
-
-
-# What the scan reads past: an escaped backslash (it escapes nothing after it), an HTML comment and an HTML tag (its
-# attributes are not text). A backslash before a comment or a tag makes it text, and the scan reads it.
-_ESCAPED_BACKSLASH = re.compile(r"\\\\")
-_HTML_COMMENT = re.compile(r"(?<!\\)<!--.*?-->", re.S)
-_HTML_TAG = re.compile(r"(?<!\\)</?[A-Za-z][^>]*>")
-
-
-def _emoji_tag_only(m) -> str:
-    # An emoji span's opening tag, reduced to its name so no other attribute of it is scanned; any other tag, a space.
-    e = _SOURCE_EMOJI.match(m.group(0))
-    return f'<span class="emoji" data-emoji="{e.group(1)}">' if e and e.group(1) else " "
-
-
+@lru_cache(maxsize=256)
 def _source_emoji(source: str) -> dict:
-    """{name: [True for a `:name:` the source wrote, False for an emoji span it wrote as HTML, in order]}. A
-    shortcode in code, in an HTML comment (a sheaf comment's body or quote), in a tag's attribute or after a backslash
-    draws no emoji, and is not one."""
+    """{name: [True for an emoji the source wrote as `:name:`, False for one it wrote as an HTML span, in order]}, read
+    from pandoc's own parse of the source, the one the page is drawn from: a shortcode it draws is a Span of class
+    `emoji`, an authored span is raw HTML, and code, comments, attributes and escaped text hold none."""
+    import json
+
+    from bs4 import BeautifulSoup
+
+    r = _pandoc.run(["-f", "gfm", "-t", "json"], orderedtask.hide(copyblock.hide(source)))
+    if r.returncode:
+        return {}
     found = {}
-    shown = _ESCAPED_BACKSLASH.sub("  ", _CODE_SPAN.sub(" ", _FENCED_CODE.sub("", source)))
-    shown = _HTML_TAG.sub(_emoji_tag_only, _HTML_COMMENT.sub(" ", shown))
-    for m in _SOURCE_EMOJI.finditer(shown):
-        found.setdefault(m.group(1) or m.group(2), []).append(not m.group(1))
+
+    def walk(x):
+        if isinstance(x, list):
+            for y in x:
+                walk(y)
+        elif isinstance(x, dict):
+            t, c = x.get("t"), x.get("c")
+            if t == "Span" and "emoji" in c[0][1] and (name := dict(c[0][2]).get("data-emoji")):
+                found.setdefault(name, []).append(True)
+            elif t in ("RawInline", "RawBlock") and c[0] == "html":
+                for tag in BeautifulSoup(c[1], "html.parser").find_all("span", class_="emoji"):
+                    if tag.get("data-emoji"):
+                        found.setdefault(tag["data-emoji"], []).append(False)
+            walk(c)
+
+    walk(json.loads(r.stdout).get("blocks", []))
     return found
 
 
@@ -1054,8 +1056,8 @@ def _emoji_as_tokens(fragment: str, source):
     if mark is None:
         return fragment, names
     names.token = re.compile(f"{mark}([0-9]+){mark}")
-    wrote = _source_emoji(source) if source is not None else None
     on_page = Counter(m.group(1) for m in _EMOJI_SPAN.finditer(fragment))
+    wrote = _source_emoji(source) if source is not None and on_page else None
     seen = Counter()
 
     def token(m):

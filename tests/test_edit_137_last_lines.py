@@ -65,6 +65,9 @@ def test_a_shortcode_in_a_comment_of_the_source_is_not_one_of_its_emoji():
     ("a \\<!-- :smile: --> b", {"smile": [True]}),              # an escaped comment is text
     ('<span title=":smile:">x</span> :smile:', {"smile": [True]}),  # an attribute is not text
     ('<span class="emoji" data-emoji="smile" title=":tada:">x</span> :smile:', {"smile": [False, True]}),
+    ('<span class="emoji" data-emoji="smile" title="> :tada:">x</span> :smile:', {"smile": [False, True]}),
+    ('\\<span class="emoji" data-emoji="smile">x</span> :smile:', {"smile": [True]}),  # an escaped tag is text
+    ("`:smile:` and\n\n```\n:smile:\n```\n\n:smile:", {"smile": [True]}),          # code draws none
     ("a \\:smile: b", {}),
 ])
 def test_the_source_emoji_are_the_ones_markdown_draws(source, found):

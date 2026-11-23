@@ -104,12 +104,30 @@ PENDING_S = 300  # how long a session James named waits for the copy before it i
 _clock = time.monotonic
 
 
+def _split_unquoted(value: str, sep: str) -> list:
+    """`value` cut at each `sep` that is outside a quoted string, where a backslash escapes the next character."""
+    parts, start, quoted, escaped = [], 0, False, False
+    for i, ch in enumerate(value):
+        if escaped:
+            escaped = False
+        elif quoted and ch == "\\":
+            escaped = True
+        elif ch == '"':
+            quoted = not quoted
+        elif ch == sep and not quoted:
+            parts.append(value[start:i])
+            start = i + 1
+    parts.append(value[start:])
+    return parts
+
+
 def _asks_for_html(accept: str) -> bool:
     """Whether an `Accept` header names `text/html` with a weight above zero (RFC 9110 12.5.1): the
     media types are compared whatever their case, and `text/html;q=0` is a refusal. A wildcard
-    does not count: a command that sends `*/*` still reads JSON."""
-    for item in accept.split(","):
-        media, *params = (part.strip() for part in item.split(";"))
+    does not count: a command that sends `*/*` still reads JSON. A `,` or `;` inside a quoted parameter value
+    (RFC 9110 5.6.4) ends neither the item nor the parameter."""
+    for item in _split_unquoted(accept, ","):
+        media, *params = (part.strip() for part in _split_unquoted(item, ";"))
         if media.lower() != "text/html":
             continue
         weight = 1.0
@@ -1305,13 +1323,18 @@ class Handler:
                     meta = json.loads(m.group(2))
                 except ValueError:
                     return m.group(0)       # as the doc and mount branches leave a body they cannot read
+                if not isinstance(meta, dict):
+                    return m.group(0)       # valid JSON that is not an object (183 AL): left as one that does not parse
                 return m.group(1) + json.dumps({**meta, "team": team, "team_me": me}).replace("<", "\\u003c") + m.group(3)
             return _META_RE.sub(with_team, body)
         try:
             got = json.loads(body)
         except ValueError:
             return body
-        (got["config"] if op == "mount" else got).update(team=team, team_me=me)
+        into = got.get("config") if op == "mount" and isinstance(got, dict) else got
+        if not isinstance(into, dict):
+            return body                     # valid JSON the list cannot join (183 AL): left as a body that does not parse
+        into.update(team=team, team_me=me)
         return json.dumps(got)
 
     def _relayed(self, req: Req, client: str, op: str, ask, doc: str | None = None) -> Response:
@@ -1423,8 +1446,8 @@ class Handler:
     def _save(self, req: Req) -> Response:
         b = req.body
         e = self._entry_to_write(req, b.get("doc"))
+        self._text_writable(req, e.address, "/_/save")    # the page's own reason first, with its row (183 AV)
         self._writable(e.address)
-        self._text_writable(req, e.address, "/_/save")
         h, edits = b.get("hash"), b.get("edits")
         _shape(isinstance(h, str) and h != "", "hash must be the hash of the version the edits were made against")
         _shape(isinstance(edits, list), "edits must be a list")
@@ -1437,7 +1460,7 @@ class Handler:
         # commit, one operation.
         read_on = self._read_on(e.address, b.get("branch"))
         with place.held(self.hub, e.address):
-            guard, ticked = self._ticks(req, e)
+            guard, ticked = self._ticks(req, e, "/_/save")
             guard = self._on_branch(e.address, read_on, guard)
             move, moved = self._mover(e, ticked)
             with self._moved_committed(e, req.member, "edit", moved):
@@ -1479,8 +1502,8 @@ class Handler:
         page saves a tick, so the file, the commit and the open tabs see what a tick in the page makes them see."""
         b = req.body
         e = self._entry_to_write(req, b.get("doc"))
+        self._text_writable(req, e.address, "/_/tick")    # the page's own reason first, with its row (183 AV)
         self._writable(e.address)
-        self._text_writable(req, e.address, "/_/tick")
         n, word, read, release = b.get("action"), b.get("word"), b.get("hash"), b.get("release", False)
         where = b.get("where", "list")
         _shape(where in ("list", "page"), "where must be list or page")
@@ -1506,7 +1529,7 @@ class Handler:
         if edit is None:
             raise Refuse(409, f"the rectoverso no longer holds that action ({word}): reload the {where}")
         with place.held(self.hub, e.address):
-            guard, ticked = self._ticks(req, e)
+            guard, ticked = self._ticks(req, e, "/_/tick")
 
             def as_read(text, new, toggled):
                 # The row names its action by place and word: on another text than the list read, another
@@ -1578,8 +1601,8 @@ class Handler:
         the page's own. A page with an unticked Share line has it ticked, and no second line is added."""
         b = req.body
         e = self._entry_to_write(req, b.get("doc"))
+        self._text_writable(req, e.address, "/_/share")   # the page's own reason first, with its row (183 AV)
         self._writable(e.address)           # before the first write: the Share line is committed before its tick is saved
-        self._text_writable(req, e.address, "/_/share")
         read, names = b.get("hash"), b.get("with", [])
         _shape(isinstance(read, str) and read != "", "hash must be the hash of the version the row read")
         _shape(names == [] or visibility.valid_names(names), "with must be a list of short names")
@@ -1598,6 +1621,7 @@ class Handler:
                     raise Refuse(404, "no such document")
                 if not self.hub.is_owner(m, e.address, fm):
                     raise Refuse(409, "Only the owner of this rectoverso can share it.")
+                self._text_writable(req, e.address, "/_/share")     # a mark a door write set since the first look (182 G)
                 if md_hash(text) != read:
                     raise Refuse(409, "the page changed since the row read it: reload the Sheaf")
                 if visibility.audience(text) is not None:
@@ -1796,7 +1820,7 @@ class Handler:
             return None
         return place.place(self.hub, e.address, commit=False, root_id=e.root_id)
 
-    def _ticks(self, req: Req, e):
+    def _ticks(self, req: Req, e, endpoint: str):
         """The guard of a save (live.save) for the actions the hub judges: a one-off is never unticked and a rectoverso
         answers Belongs to once (9.10), and the two it acts on (9.11); and the set it fills with the words the save
         ticked. Share is its owner's alone: ticked by anyone else, nothing is written; ticked by the owner, the same
@@ -1815,6 +1839,9 @@ class Handler:
                 # `sessions` would serve any transcript (9.12), its `visibility` open the rectoverso.
                 if visibility.front_matter(new) != fm:
                     raise EditError("A save cannot change the front matter: change it in the file.")
+            # The look before the locks let the write in; a door write that marked the page generated since did so under
+            # this file's lock, so it is seen here (182 G).
+            self._text_writable(req, e.address, endpoint)
             if (word := the_list.unticks_one_off(text, new)) is not None:
                 # A one-off action stays pressed (9.10, #108), for every person and by whatever edit: the deployment's
                 # routine has acted on its tick, and an untick would move nothing back.
@@ -1868,10 +1895,10 @@ class Handler:
                     # Share rewrites the front matter: a line it takes out must not join a skipped one to `sessions`.
                     if visibility.front_matter(new).get("sessions", "") != visibility.front_matter(text).get("sessions", ""):
                         raise EditError("A save cannot change the front matter: change it in the file.")
-            elif (visibility.audience(text) is None and visibility.audience(new) is True
+            elif (visibility.audience(text) is None and visibility.audience(new) is not None
                   and visibility.effective(visibility.front_matter(new)) == "owner" and self.hub.loose_owner(e.address) is None):
-                # A line that became a ticked Share by an edit that is not the owner's tick of it (a box renamed and ticked in
-                # one save) shares nothing on a page of a shared root: it is left unticked, as a door create leaves it, so the
+                # A line that became a ticked Share or `Share with <names>` by an edit that is not the owner's tick of it (a box
+                # renamed and ticked in one save) shares nothing on a page of a shared root: it is left unticked, as a door create leaves it, so the
                 # box does not say the page is shared when it is not (9.11). A loose page is Shared by the line itself.
                 new = visibility.without_ticked_share(new)
             ticked.clear()

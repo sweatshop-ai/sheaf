@@ -1004,3 +1004,17 @@ def swap_the_sibling_at(monkeypatch, name, sibling, put, swap=True):
 
     monkeypatch.setattr(os, name, hook)
     return swapped
+
+
+def marked_after_the_look(hub, monkeypatch, doc: str, by: str = "builder"):
+    """The request's first look at `doc`'s generated mark finds none, and a door write marks the page right after it
+    (182 G): the mark lands between that look and the write, as a door update that holds the file's lock first makes it."""
+    look, looked = hub.generated_line, []
+
+    def look_then_marked(address):
+        line = look(address)
+        if address == doc and not looked:
+            looked.append(address)
+            hub.docs.put(doc, {**hub.docs.get(doc), "generated": {"by": by, "id": "tok1", "at": "2026-11-20T10:00:00+0100"}})
+        return line
+    monkeypatch.setattr(hub, "generated_line", look_then_marked)

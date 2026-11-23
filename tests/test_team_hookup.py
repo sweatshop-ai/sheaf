@@ -181,6 +181,36 @@ def test_the_mount_config_and_the_page_meta_carry_the_same_team_list(agency_and_
     assert [c["body"] for c in meta["team"]] == [NOTE]
 
 
+@pytest.mark.parametrize("meta", ["[1, 2]", '"text"', "7", "null"])
+def test_a_client_page_whose_meta_block_is_json_but_not_an_object_is_sent_on_as_it_came(agency_and_client, monkeypatch, meta):
+    # 183 AL: a meta block that parses but is not an object is left as it is, as one that does not parse is, never a 500.
+    agency, client = agency_and_client
+    mine = client.make("alice", "# Plan\n\nsome words here\n")
+    relay = agency.hub.clients.relay
+
+    def odd_meta(*a, **k):
+        env = relay(*a, **k)
+        body = re.sub(r'(<script id="rd-edit-meta" type="application/json">).*?(</script>)', lambda m: m.group(1) + meta + m.group(2),
+                      env["body"], count=1, flags=re.DOTALL)
+        return {**env, "body": body}
+    monkeypatch.setattr(agency.hub.clients, "relay", odd_meta)
+    page = agency.get(f"/Clients/acme/{mine}", member=AG_ALICE)
+    assert page.status == 200
+    assert f'<script id="rd-edit-meta" type="application/json">{meta}</script>' in page.text
+
+
+@pytest.mark.parametrize("config", ["[1]", '"text"', "null"])
+def test_a_client_mount_whose_config_is_not_an_object_is_sent_on_without_the_team_list(agency_and_client, monkeypatch, config):
+    # 183 AL, the same in the mount branch: a body that is not an object is already a 502 (`_own_build`), but a `config`
+    # the team list cannot join is left as it came, never a 500.
+    agency, client = agency_and_client
+    mine = client.make("alice", "# Plan\n\nsome words here\n")
+    relay = agency.hub.clients.relay
+    monkeypatch.setattr(agency.hub.clients, "relay", lambda *a, **k: {**relay(*a, **k), "body": f'{{"config": {config}}}'})
+    got = _team_state(agency, mine, "mount")
+    assert got.status == 200 and got.json()["config"] == json.loads(config)
+
+
 def test_a_member_who_may_not_open_the_page_is_told_no_team_list(agency_and_client):
     agency, client = agency_and_client
     mine = client.make("alice", "# Plan\n")

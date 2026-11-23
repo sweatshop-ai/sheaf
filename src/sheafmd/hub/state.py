@@ -178,6 +178,14 @@ class Versions:
         root, not the address: another hub, a clone's, names the root otherwise. `name` is the root's."""
         self._root, self._prefix = root, f"{name}/"
 
+    # Between a document's `watch` (its root was forgotten, and the name may be another folder's at once) and its
+    # `forget_texts`, who put each hash in that document's folder, by the folder's path: one file holds a text whatever
+    # document stored it, and the late forget must leave the one another document stored too (ticket 182 L). In memory
+    # only: both documents are of one hub run, and the record is open no longer than that window. Shared by every
+    # store, since the forgotten document's store and the new document's are two objects over one folder.
+    _claims_lock = threading.Lock()
+    _claims: dict = {}          # folder -> [watchers, {hash: {owner, ...}}]
+
     @property
     def dir(self) -> Path:
         if self._root is not None:
@@ -231,15 +239,30 @@ class Versions:
                 pass
         return h
 
-    def put(self, address: str, text: str) -> str:
-        return self._keep(self._make_folder(address), text, VERSIONS_KEPT)
+    def _claimed(self, address: str, keep, owner) -> str:
+        """`keep()`, the write of a text in the folder of `address`, and, when a late forget watches that folder, the
+        record that `owner` put its hash there (None: a writer that is no document, which no forget owns either). Under
+        the claims' lock then, so that a forget never deletes between this write and its record."""
+        folder = self._folder(address)
+        with self._claims_lock:
+            watched = self._claims.get(folder)
+            if watched is None:
+                return keep()
+            h = keep()
+            watched[1].setdefault(h, set()).add(owner)
+            return h
 
-    def pin(self, address: str, text: str, member: str = "") -> str:
+    def put(self, address: str, text: str, owner=None) -> str:
+        return self._claimed(address, lambda: self._keep(self._make_folder(address), text, VERSIONS_KEPT), owner)
+
+    def pin(self, address: str, text: str, member: str = "", owner=None) -> str:
         """Keep `text` as a version a page of `member` keeps (the hub's person's: ""), apart from the newest 60,
         which writes from outside push out, and apart from the pins of every other member."""
-        folder = self._dir(self._make_folder(address) / _PINS_DIR)
-        key = member_key(member)
-        return self._keep(folder if key is None else self._dir(folder / key), text, PINS_KEPT)
+        def keep():
+            folder = self._dir(self._make_folder(address) / _PINS_DIR)
+            key = member_key(member)
+            return self._keep(folder if key is None else self._dir(folder / key), text, PINS_KEPT)
+        return self._claimed(address, keep, owner)
 
     @staticmethod
     def _members(pins: Path) -> list[Path]:
@@ -302,17 +325,34 @@ class Versions:
         if self._root is None or inside:
             shutil.rmtree(self._folder(address), ignore_errors=True)
 
-    def forget_texts(self, address: str, hashes, inside: bool = False):
+    def watch(self, address: str):
+        """The document `owner` of `forget_texts` lost its root: from now until that forget, record who puts each text in
+        the folder of `address`, which the folder that takes the name writes to as well."""
+        with self._claims_lock:
+            self._claims.setdefault(self._folder(address), [0, {}])[0] += 1
+
+    def forget_texts(self, address: str, hashes, inside: bool = False, owner=None):
         """`forget`, for the texts named by `hashes` only, newest and pinned alike: what one document put there, when
-        the folder of `address` may hold another document's by now (a forget that came after the name was taken)."""
-        if self._root is None or inside:
-            folder = self._folder(address)
-            for h in hashes:
-                for f in (folder / f"{h}.md", *self._pinned(folder, h)):
-                    try:
-                        f.unlink()
-                    except OSError:
-                        pass
+        the folder of `address` may hold another document's by now (a forget that came after the name was taken).
+        After a `watch`, a hash that a writer other than `owner` put there since stays, its pins with it: that file is
+        the other document's version too. Ends the `watch`."""
+        folder = self._folder(address)
+        with self._claims_lock:
+            watched = self._claims.get(folder)
+            claims = watched[1] if watched is not None else {}
+            if self._root is None or inside:
+                for h in hashes:
+                    if claims.get(h, set()) - {owner}:
+                        continue
+                    for f in (folder / f"{h}.md", *self._pinned(folder, h)):
+                        try:
+                            f.unlink()
+                        except OSError:
+                            pass
+            if watched is not None:
+                watched[0] -= 1
+                if watched[0] <= 0:
+                    del self._claims[folder]
 
     def rename(self, old: str, new: str):
         """The versions of the document at `old` are those of `new`: a page that moved keeps its history, newest and

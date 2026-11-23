@@ -2,7 +2,7 @@
 
 **Claimed by:** Wanda 2026-11-20 17:44
 
-**Status:** in-progress (box 1 waits on ticket 173, box 3 on a real Mac)
+**Status:** done (box 3, the Mac-only readings, stays unticked: each reading needs a real Mac, reason per item)
 
 **Blocked by:** none
 

@@ -1290,6 +1290,33 @@ def test_a_take_back_whose_token_is_not_a_number_is_refused(browser):
     assert seen == ["upgrade"]                          # a refused take-back forgot nothing
 
 
+def test_a_late_take_back_of_an_older_hub_process_leaves_the_newer_ones_announcement_up(browser):
+    """8.4: the token counts in one hub process, so the run that announced a restart to the hub before this one, whose
+    take-back comes late, must not name this hub's announcement: the token is unique per hub process."""
+    from sheafmd.hub.core import Hub
+    late = Hub(port=browser.hub.port, key=paths.ensure_key(), started_by="test").expect_restart()
+    seen = stops_of(browser.hub)
+    token = browser.post("/_/restarting", cookie=False, key=True).json()["token"]
+    assert token != late
+    r = browser.request("DELETE", f"/_/restarting?token={late}", cookie=False, key=True)
+    assert r.status == 200
+    browser.hub.request_stop("signal")
+    assert seen == ["upgrade"]
+
+
+@pytest.mark.parametrize("token", ["\u00b2", "1\u00b2", "\u0663"])
+def test_a_take_back_whose_token_holds_a_digit_python_reads_but_int_refuses_is_a_400(browser, token):
+    """`'²'.isdigit()` is true and `int('²')` raises; `int('٣')` reads 3. The token is checked as ASCII digits, so
+    each is refused as any other malformed token is: not a 500, and not taken for another number."""
+    from urllib.parse import quote
+    seen = stops_of(browser.hub)
+    browser.post("/_/restarting", cookie=False, key=True)
+    r = browser.request("DELETE", f"/_/restarting?token={quote(token)}", cookie=False, key=True)
+    assert r.status == 400, r.text
+    browser.hub.request_stop("signal")
+    assert seen == ["upgrade"]
+
+
 def test_a_take_back_with_the_current_token_forgets_the_announcement(browser):
     seen = stops_of(browser.hub)
     token = browser.post("/_/restarting", cookie=False, key=True).json()["token"]

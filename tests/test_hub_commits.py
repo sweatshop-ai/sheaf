@@ -2085,3 +2085,51 @@ def test_a_create_never_commits_into_a_root_that_took_the_name_of_the_one_it_wro
     assert box.hub.commits.settle()
     assert git(intruder, "rev-parse", "HEAD") == first
     assert rows("commit-refused")
+
+
+def _an_intruder_after_the_root_id(box, rectoversos, tmp_path, monkeypatch):
+    """A folder that holds the same page, under the same root name; it takes the name of the rectoversos root just
+    after a writer reads its root id (8.11). Gives the intruder's copy of the page, its text and its head."""
+    intruder = tmp_path / "again" / "rectoversos"
+    other = intruder / "acme" / "blog" / "2026-10-28-plan.md"
+    other.parent.mkdir(parents=True)
+    other.write_text((rectoversos / "acme" / "blog" / "2026-10-28-plan.md").read_text(encoding="utf-8"),
+                     encoding="utf-8")
+    (intruder / ".sheaf.toml").write_text("commit = true\n", encoding="utf-8")
+    (intruder / "projects.toml").write_text((rectoversos / "projects.toml").read_text(encoding="utf-8"),
+                                            encoding="utf-8")
+    git_init(intruder)
+    real = box.hub.root_id_of
+
+    def swapped(address):
+        monkeypatch.setattr(box.hub, "root_id_of", real)
+        rid = real(address)
+        box.hub.forget_root("rectoversos")
+        assert box.hub.roots.for_document(other).name == "rectoversos"
+        return rid
+
+    monkeypatch.setattr(box.hub, "root_id_of", swapped)
+    return other, other.read_text(encoding="utf-8"), git(intruder, "rev-parse", "HEAD")
+
+
+@pytest.mark.parametrize("tool", ["reply", "update"])
+def test_a_door_write_never_lands_in_a_root_that_took_the_name_after_its_root_id_was_read(
+        box, browser, rectoversos, tmp_path, monkeypatch, tool):
+    """8.11: a door write reads the id of its root, then writes under the name's lock. A root forgotten and its name
+    taken by another folder in between must not take the write: its file stays as it was, and nothing is left there
+    uncommitted."""
+    from helpers import call
+    _, cid = _first_comment(box, rectoversos)
+    box.hub.entries.clear()         # the door writes the file itself, as the root is forgotten with its entries anyway
+    is_error, got = call(browser, "read", doc=DOC)
+    assert not is_error, got
+    other, before, head = _an_intruder_after_the_root_id(box, rectoversos, tmp_path, monkeypatch)
+    if tool == "reply":
+        is_error, got = call(browser, "reply", as_name="Claude", doc=DOC, id=cid, text="Yes, it is.")
+    else:
+        is_error, got = call(browser, "update", as_name="Claude", doc=DOC, text=got["text"] + "\nA line.\n",
+                             expected_hash=got["hash"])
+    assert box.hub.commits.settle()
+    assert other.read_text(encoding="utf-8") == before, got
+    assert git(other.parents[2], "rev-parse", "HEAD") == head
+    assert is_error, got

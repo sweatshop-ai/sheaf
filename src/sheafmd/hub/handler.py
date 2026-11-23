@@ -2703,7 +2703,8 @@ class Handler:
     def _forget_restart(self, req: Req) -> Response:
         token = req.query.get("token")
         if token is not None:
-            _shape(token.isdigit(), "token must be the number the announcement returned")
+            # ASCII digits only: `str.isdigit` takes '²' (which `int` refuses) and '٣' (which it reads as 3)
+            _shape(re.fullmatch(r"[0-9]+", token) is not None, "token must be the number the announcement returned")
         self.hub.forget_restart(None if token is None else int(token))
         return _ok()
 

@@ -794,6 +794,14 @@ def test_an_action_inside_code_in_a_list_item_is_no_action_and_the_real_one_tick
     assert edit is not None and "checked" in edit["html"]
 
 
+@pytest.mark.parametrize("marker", ["-", "1.", "1)", "12."])
+def test_an_action_inside_an_html_block_that_opens_a_list_item_is_no_action(marker):
+    """SPEC 9.10: an item that opens with markup holds an HTML block, ordered or not, and a task line in it is text."""
+    pad = " " * (len(marker) + 1)
+    s = the_list.read_rectoverso("a.md", f"# T\n\n{marker} <div>\n{pad}- [ ] Approve\n\n- [ ] Done\n")
+    assert [(w, ln) for w, _, ln, _ in s.actions] == [("Done", 5)]
+
+
 def test_a_list_block_that_does_not_render_keeps_its_actions(monkeypatch):
     monkeypatch.setattr(the_list, "_render_source", lambda content, keep=True: None)
     s = the_list.read_rectoverso("a.md", "# T\n\n- item\n  ```\n  - [ ] Approve\n  ```\n- [ ] Done\n")

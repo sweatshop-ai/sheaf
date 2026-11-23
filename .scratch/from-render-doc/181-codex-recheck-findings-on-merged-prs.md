@@ -17,7 +17,7 @@ One box per item. Red test first on main for each; an item that cannot be reprod
 - [x] `place.py:742` `place`: `rid = hub.root_id_of(address)` reads the root by name after `_where` captured it. A root forgotten and its name taken by another folder between the two commits the move into the other repo. Use `root.id`. Red first: `tests/test_hub_place.py::test_a_move_never_commits_into_a_root_that_took_the_name_of_the_one_it_moved_in` (on main the move was committed in the other repo).
 - [x] `mcp.py:1171` `_created`: the same, between `_new_address` and the read of the id. Use `root.id`. Red first: `tests/test_hub_commits.py::test_a_create_never_commits_into_a_root_that_took_the_name_of_the_one_it_wrote_in`.
 - [x] `mcp.py:669` (`_write`) and `mcp.py:1266` (`_update`): check whether they have the same flaw. Checked, no change: neither holds a root before it reads the id, and both read it before the write resolves its root by name. A swap before the read names the new root for both; a swap after it leaves the id of the old one, and `committed` refuses.
-- [ ] Found while checking the box above (spec review of PR #595): the write itself in `_write` (`roots.locate(address)`) and `_updated` resolves the root by name under the lock. A root forgotten and its name taken after the id is read sends the write into the other root's file; only its commit is refused, so that file is changed and left uncommitted. Not fixed in #595: the write path needs the root captured before the lock and checked under it.
+- [x] Found while checking the box above (spec review of PR #595): the write itself in `_write` (`roots.locate(address)`) and `_updated` resolves the root by name under the lock. A root forgotten and its name taken after the id is read sends the write into the other root's file; only its commit is refused, so that file is changed and left uncommitted. Not fixed in #595: the write path needs the root captured before the lock and checked under it. Fixed: `_root_kept` refuses the write under the lock, after the file is found, unless the address still names the root whose id was read. Red first: `tests/test_hub_commits.py::test_a_door_write_never_lands_in_a_root_that_took_the_name_after_its_root_id_was_read` (reply and update; on main both changed the other root's file).
 
 ## B. Pasted styled spans (from #481)
 
@@ -26,8 +26,8 @@ One box per item. Red test first on main for each; an item that cannot be reprod
 
 ## C. Lifecycle restart token (from #489, minor)
 
-- [ ] The token counter restarts at 0 in every hub process (`core.py:200`, `:1897`, `:1908`): a late `DELETE ?token=1` of run A clears run B's announcement.
-- [ ] `'²'.isdigit()` is true, so `int()` raises `ValueError` and the request is a 500 (`handler.py:2706`). Use `fullmatch` on `[0-9]+`.
+- [x] The token counter restarts at 0 in every hub process (`core.py:200`, `:1897`, `:1908`): a late `DELETE ?token=1` of run A clears run B's announcement. Fixed: the counter starts at a random 52-bit number per hub process. Red first: `tests/test_hub_handler.py::test_a_late_take_back_of_an_older_hub_process_leaves_the_newer_ones_announcement_up`.
+- [x] `'²'.isdigit()` is true, so `int()` raises `ValueError` and the request is a 500 (`handler.py:2706`). Use `fullmatch` on `[0-9]+`. Fixed; `'٣'`, which `int` read as 3, is refused too. Red first: `tests/test_hub_handler.py::test_a_take_back_whose_token_holds_a_digit_python_reads_but_int_refuses_is_a_400`.
 
 ## D. Stale `/live/join` after a leader hand-over (from #484, minor)
 
@@ -40,4 +40,4 @@ One box per item. Red test first on main for each; an item that cannot be reprod
 
 ## F. `the_list` code detection (from #477, minor)
 
-- [ ] `the_list.py:358` `_MAY_HOLD_CODE_RE` misses an ordered item that opens with markup, `1. <div>`.
+- [x] `the_list.py:358` `_MAY_HOLD_CODE_RE` misses an ordered item that opens with markup, `1. <div>`. Fixed: `1.` and `1)` markers count before `<`. Red first: `tests/test_hub_list.py::test_an_action_inside_an_html_block_that_opens_a_list_item_is_no_action`.

@@ -643,6 +643,15 @@ class Door:
         if line := self.hub.read_only_line(address):
             raise ToolError(line, "read-only")
 
+    def _root_kept(self, address: str, rid: str):
+        """Refused unless the root named by `address` is still the one whose id `rid` a writer read before it took the
+        name's lock (8.11). A root forgotten and its name taken by another folder in between would send the write into
+        the other folder's file, whose commit `committed` then refuses: that file would be changed and left
+        uncommitted. Called under the name's lock, after the file is found."""
+        if self.hub.root_id_of(address) != rid:
+            raise ToolError(f"{address} was not written: its folder was forgotten or replaced while the write began.",
+                            "not written")
+
     def _write(self, address: str, caller: Caller, doc: str, op: str, fields: dict, role=None):
         """A change to one comment, and the agent of its token made the target (9.8) before the tabs hear
         of it. Through the document's Live Document when the hub has one,
@@ -672,10 +681,12 @@ class Door:
                 # Through `Hub.entry` when the hub holds a page, which drops one bound to a root that no longer holds the file.
                 entry = self.hub.entry(address) if address in self.hub.entries else None
                 if entry is not None:
+                    self._root_kept(address, rid)       # the entry found is of the root the id was read of
                     wrote = entry.live.comment(op, fields, None, by=caller.display, role=role, announce=True,
                                                guard=guard, before_announce=note)["wrote"]
                 else:
                     top, rel = self.hub.roots.locate(address)
+                    self._root_kept(address, rid)       # the root `top` was found in is the one the id was read of
                     old, new = update_beneath(top.path, rel, lambda t, o: rdc.apply_op(
                         guard(t, o) or t, op, fields, caller.display, now(), role))
                     wrote = new != old
@@ -1267,7 +1278,7 @@ class Door:
         with place.held(self.hub, address):
             moved = []
             try:
-                before, text, gone = self._updated(address, args, text, expected, caller, moved)
+                before, text, gone = self._updated(address, args, text, expected, caller, moved, rid)
                 if before != text or gone:          # a text that changed nothing may still have moved the file
                     moved.clear()
                     self.hub.committed(address, by=caller.display, what="update", gone=gone, root_id=rid)
@@ -1293,10 +1304,10 @@ class Door:
             raise ToolError(f"{address} was moved to {new}, and the page could not be read there.", "move") from None
         return {"doc": new, "url": self.hub.url(new), "hash": md_hash(text), "moved_from": address}
 
-    def _updated(self, address: str, args: dict, text: str, expected: str, caller: Caller, moved: list):
+    def _updated(self, address: str, args: dict, text: str, expected: str, caller: Caller, moved: list, rid: str):
         """The write of an update, and the rectoverso's file moved to its home (9.11): (the text before, the text
         written, the path in the root the file left or None). A move `ahead` makes is put in `moved` as it is made,
-        so the caller commits it whatever comes after."""
+        so the caller commits it whatever comes after. `rid`: the id of the root the update was begun in (`_root_kept`)."""
         written = [text]
 
         def change(now_text, opened):
@@ -1329,6 +1340,7 @@ class Door:
             return self.hub.file(address, placed=True)
         try:
             top, rel = self.hub.roots.locate(address)
+            self._root_kept(address, rid)           # the root `top` was found in is the one the id was read of
             try:
                 before, _ = update_beneath(top.path, rel, change, move=move)
             except BaseException:

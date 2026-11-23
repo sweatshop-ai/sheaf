@@ -197,7 +197,9 @@ class Hub:
         self.upgrading = False
         self.told_restart = False                # an upgrade stop that came as a signal, after `expect_restart`
         self._restart_told_at: float | None = None
-        self._restart_token = 0                         # which announcement `_restart_told_at` is (8.4)
+        # Which announcement `_restart_told_at` is (8.4). It starts at a random number, so the tokens of one hub process
+        # are not another's: a late take-back of the run that announced to the hub before this one names none of this one's.
+        self._restart_token = secrets.randbits(52)
         self.tell_wait = config.tell_wait()
         self.versions.prune()
         # Every Tell child, and the address a push says it comes from (SPEC 8.10, 11.4).

@@ -1168,7 +1168,7 @@ class Door:
                     except OSError as e:
                         _unmake(top, made)
                         raise _not_made(address, e) from None
-                rid = self.hub.root_id_of(address)      # before the write: the root its commit goes to (8.11)
+                rid = root.id       # the root written in is the one its commit goes to (8.11), never one that took its name since
                 try:
                     text = self._make(root, top, rel, name, address, text, caller)
                 except BaseException:

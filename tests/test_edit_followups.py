@@ -1367,3 +1367,43 @@ def test_a_split_heading_saves_as_two_headings_with_the_comment_on_its_half():
     assert "\n## A title\n" in new and "\n## here" in new
     [c] = rdc.parse(new).comments
     assert c.id == cid and not c.orphan
+
+
+# ── ticket 181 B: a pasted span that ends a styled mark, and a style read as declarations ─────────────
+
+@pytest.mark.parametrize("html, md", [
+    ('<p><span style="font-weight:700">bold <span style="font-weight:400">plain</span></span> words</p>',
+     "**bold** plain words"),
+    ('<p><span style="font-weight:700">one <span style="font-weight:normal">two</span> three</span></p>',
+     "**one** two **three**"),
+    ('<p><span style="font-style:italic">slant <span style="font-style:normal">upright</span></span> words</p>',
+     "*slant* upright words"),
+    ('<p><span style="font-weight:bold">a <span style="font-weight:400">b <span style="font-weight:700">c</span></span></span></p>',
+     "**a** b **c**"),
+    ('<p><span style="font-weight:700">a <span style="font-weight:400">b</span> c <span style="font-weight:400">d</span> e</span></p>',
+     "**a** b **c** d **e**"),
+    ('<p><span style="font-weight:700">a <span style="font-style:italic">b <span style="font-weight:400">c</span> d</span></span></p>',
+     "**a *b*** *c* ***d***")],
+    ids=["400 in 700", "normal in the middle", "normal in italic", "bold again inside", "two normals in one mark",
+         "normal inside an italic inside bold"])
+def test_a_pasted_span_that_says_normal_ends_the_mark_of_the_span_around_it(html, md):
+    """CSS: the inner span's own weight or style wins, so its words show plain; the saved markdown says so too."""
+    assert rde.html_block_to_md(html, source="Old words") == md
+
+
+@pytest.mark.parametrize("style", ["--font-weight:bold", "x-font-weight: 700", "--font-style:italic",
+                                   "content:'font-weight:700'"])
+def test_a_style_that_only_holds_the_words_of_a_bold_or_italic_declaration_stays_plain(style):
+    html = f'<p>Two <span style="{style}">plain</span> words</p>'
+    assert rde.html_block_to_md(html, source="Two words") == "Two plain words"
+
+
+@pytest.mark.parametrize("style", ["color: red; FONT-WEIGHT: Bold", "font-weight:700 !important"])
+def test_a_bold_declaration_among_others_or_marked_important_is_bold(style):
+    html = f'<p>Two <span style="{style}">bold</span> words</p>'
+    assert rde.html_block_to_md(html, source="Two words") == "Two **bold** words"
+
+
+def test_a_b_whose_style_only_holds_the_words_of_a_normal_weight_stays_bold():
+    html = '<p>Two <b style="--font-weight:normal">bold</b> words</p>'
+    assert rde.html_block_to_md(html, source="Two words") == "Two **bold** words"

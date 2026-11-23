@@ -2,7 +2,7 @@
 
 **Claimed by:** Kenji 2026-11-23 (clusters A and B)
 
-**Status:** open
+**Status:** A and B in a PR on branch `kenji/181-captured-root`; C to F open
 
 **Blocked by:** none
 
@@ -14,14 +14,14 @@ One box per item. Red test first on main for each; an item that cannot be reprod
 
 ## A. A commit's root id comes from the root captured (serious, from #495)
 
-- [ ] `place.py:742` `place`: `rid = hub.root_id_of(address)` reads the root by name after `_where` captured it. A root forgotten and its name taken by another folder between the two commits the move into the other repo. Use `root.id`.
-- [ ] `mcp.py:1171` `_created`: the same, between `_new_address` and the read of the id. Use `root.id`.
-- [ ] `mcp.py:669` (`_write`) and `mcp.py:1266` (`_update`): check whether they have the same flaw.
+- [x] `place.py:742` `place`: `rid = hub.root_id_of(address)` reads the root by name after `_where` captured it. A root forgotten and its name taken by another folder between the two commits the move into the other repo. Use `root.id`. Red first: `tests/test_hub_place.py::test_a_move_never_commits_into_a_root_that_took_the_name_of_the_one_it_moved_in` (on main the move was committed in the other repo).
+- [x] `mcp.py:1171` `_created`: the same, between `_new_address` and the read of the id. Use `root.id`. Red first: `tests/test_hub_commits.py::test_a_create_never_commits_into_a_root_that_took_the_name_of_the_one_it_wrote_in`.
+- [x] `mcp.py:669` (`_write`) and `mcp.py:1266` (`_update`): check whether they have the same flaw. Checked, no change: neither holds a root before it reads the id, and both read it before the write resolves its root by name. A swap before the read names the new root for both; a swap after it leaves the id of the old one, and `committed` refuses.
 
 ## B. Pasted styled spans (from #481)
 
-- [ ] Serious: a nested `font-weight:400` or `font-style:normal` is ignored. `<span style="font-weight:700">bold <span style="font-weight:400">plain</span></span>` saves `**bold plain**` (`edit.py:211-219`). The inner span must end the mark.
-- [ ] Minor: the style regex matches a substring. `--font-weight:bold` saves `**plain**` (`edit.py:213-214`). Parse the style as declarations.
+- [x] Serious: a nested `font-weight:400` or `font-style:normal` is ignored. `<span style="font-weight:700">bold <span style="font-weight:400">plain</span></span>` saves `**bold plain**` (`edit.py:211-219`). The inner span must end the mark. Done: a span that says a normal weight or style ends a mark the paste made from a styled span; an authored `<b>` and a heading stay as they were (the existing test "a span in a mark" keeps `<b><span style="font-weight: 400">` bold). Red first: `tests/test_edit_followups.py::test_a_pasted_span_that_says_normal_ends_the_mark_of_the_span_around_it`.
+- [x] Minor: the style regex matches a substring. `--font-weight:bold` saves `**plain**` (`edit.py:213-214`). Parse the style as declarations. Done, also for the `<b style="font-weight:normal">` check. Red first: `test_a_style_that_only_holds_the_words_of_a_bold_or_italic_declaration_stays_plain`, `test_a_bold_declaration_among_others_or_marked_important_is_bold`, `test_a_b_whose_style_only_holds_the_words_of_a_normal_weight_stays_bold`.
 
 ## C. Lifecycle restart token (from #489, minor)
 

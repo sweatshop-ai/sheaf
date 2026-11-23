@@ -2051,3 +2051,37 @@ def test_a_rename_whose_stores_fail_before_the_move_is_one_row_for_its_pair_and_
     assert row["doc"] == NEW
     assert rows("write-log-failed") == []
     assert DOC not in box.hub.moving
+
+
+# ── ticket 181 A: a create commits to the root it captured, not to the one its name now names ────────
+
+def test_a_create_never_commits_into_a_root_that_took_the_name_of_the_one_it_wrote_in(
+        box, browser, rectoversos, remote, tmp_path, monkeypatch):
+    """8.11: `create` writes into the root it resolved first. Forgotten, and its name taken by another folder, between
+    that and the read of the commit's root id, the commit must not go into the other repo."""
+    from helpers import call
+
+    from sheafmd import mcp as mcp_mod
+    intruder = tmp_path / "again" / "rectoversos"
+    intruder.mkdir(parents=True)
+    (intruder / ".sheaf.toml").write_text("commit = true\n", encoding="utf-8")
+    other = intruder / "acme" / "blog" / "new.md"
+    other.parent.mkdir(parents=True)
+    other.write_text("Not this page.\n", encoding="utf-8")
+    git_init(intruder)
+    other.write_text("Not this page, changed by hand.\n", encoding="utf-8")     # a commit of this path would take it
+    first = git(intruder, "rev-parse", "HEAD")
+    real = mcp_mod._check_comments
+
+    def swapped(*a, **k):
+        monkeypatch.setattr(mcp_mod, "_check_comments", real)
+        box.hub.forget_root("rectoversos")
+        assert box.hub.roots.for_document(other).name == "rectoversos"
+        return real(*a, **k)
+
+    monkeypatch.setattr(mcp_mod, "_check_comments", swapped)
+    is_error, got = call(browser, "create", doc="rectoversos/acme/blog/new.md", text="A new page.\n")
+    assert not is_error, got
+    assert box.hub.commits.settle()
+    assert git(intruder, "rev-parse", "HEAD") == first
+    assert rows("commit-refused")

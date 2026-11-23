@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .. import config
 from ..source import _folder_of, file_lock
-from . import loose, state
+from . import loose, moves, state
 from . import roots as roots_mod
 
 DAY = 86400
@@ -62,6 +62,18 @@ class Archive:
         self._next = 0.0
         self._worker: threading.Thread | None = None    # the sweep, the purge and the clones' sleep: one at a time, off the tick
         self._refused: set = set()                      # roots whose refusal is recorded already, until they are read again
+        self._unpaged: dict = {}                        # per root the last sweep read, the marked addresses it found with no page (183 BY)
+
+    @staticmethod
+    def _holds_a_page(root, rel: str) -> bool:
+        """Whether `rel` may still hold a page: False only when nothing is there, or a folder is. A look that fails another
+        way (a folder unreadable for a moment, a stale network handle) is not taken for an empty address."""
+        try:
+            return not stat.S_ISDIR(os.stat(Path(root.path) / rel).st_mode)
+        except (FileNotFoundError, NotADirectoryError):
+            return False
+        except OSError:
+            return True
 
     def own_root(self, folder):
         """The root of a member's loose `folder` when that folder is the root itself, else None: a folder inside another root
@@ -132,9 +144,11 @@ class Archive:
         """Mark the pages that are due, in each loose root. A root whose marks cannot be read is refused whole
         (`loose.Refused`) before anything of it is written, never read as none, and the other roots are swept all the same."""
         now = self.hub.clock()
+        # 183 BY: a root this sweep does not read (refused, skipped, forgotten) starts its run of misses over
+        missed_before, self._unpaged = self._unpaged, {}
         for member, root in self._loose_roots():
             try:
-                self._sweep_root(member, root, now)
+                self._sweep_root(member, root, now, missed_before.get(root.path, set()))
             except loose.Refused:
                 if root.path not in self._refused:      # told once, until the root is read again
                     self._refused.add(root.path)
@@ -142,10 +156,26 @@ class Archive:
             else:
                 self._refused.discard(root.path)
 
-    def _sweep_root(self, member, root, now: float) -> None:
+    def _sweep_root(self, member, root, now: float, missed_before: frozenset | set = frozenset()) -> None:
         pages = self._pages(member, root)            # the slow part, outside the lock
-        with state.file_locked("loose-keep.lock"):   # the marks are read and the archive written in one hold: a Keep or a Restore comes before or after
+        # The moves' lock first (lockorder.py), then the marks' hold: a Move renames a page and carries its marks in one
+        # hold of the moves' lock, so the sweep never finds a moved page of this hub process gone from its old address with
+        # its marks still there. The lock is the process's own: a Move in another hub process is covered only by the run
+        # of two sweeps.
+        with moves.exclusive(), state.file_locked("loose-keep.lock"):   # the marks are read and the archive written in one hold: a Keep or a Restore comes before or after
             marks = Marks(root.path)
+            # 183 BY: the marks of an address with no page go (emptied from outside the hub, a delete that found it gone or
+            # put a folder back there), or a page made there later is born kept. Two looks: not in the listing, and no file
+            # under the lock, so a page made (and kept) since the listing keeps its marks. And at two sweeps running: a
+            # page a sync tool takes away and puts back between two of them keeps its marks. A mark file that cannot be
+            # written leaves those marks for the next sweep and stops nothing of this one.
+            listed = {rel for rel, _, _ in pages}
+            unpaged = {rel for rel in {*marks.archived, *marks.seen, *marks.kept}
+                       if rel not in listed and not self._holds_a_page(root, rel)}
+            self._unpaged[root.path] = unpaged
+            if unpaged & missed_before:
+                self._unmark_quietly(root, unpaged & missed_before)
+                marks = Marks(root.path)
             loose.stamp_held(root.path, SEEN, {rel: now for rel, _, _ in pages if rel not in marks.seen}, only_new=True)
             seen = {**{rel: now for rel, _, _ in pages}, **marks.seen}
             gone = due(pages, marks.archived, seen, marks.kept, now, self.days(root))
@@ -270,14 +300,14 @@ class Archive:
                     except OSError as e:
                         # 183 BW: refused, but the address is empty all the same: its marks go, or a page made there later
                         # would be born archived or kept.
-                        self._unmark_quietly(root, rel)
+                        self._unmark_quietly(root, [rel])
                         raise loose.Refused(f"the page was moved to the trash, then something else took it from there "
                                             f"({e.strerror})") from None
                     if not stat.S_ISREG(moved):
                         try:
                             os.rename(dname, sname, src_dir_fd=dfd, dst_dir_fd=sfd)
                         except OSError as e:
-                            self._unmark_quietly(root, rel)     # 183 BW: the address is empty here too
+                            self._unmark_quietly(root, [rel])     # 183 BW: the address is empty here too
                             raise loose.Refused(f"what was at the page's address changed during the delete and is in the "
                                                 f"trash now ({e.strerror}): move {TRASH / str(at) / rel} back by hand") from None
                         raise loose.Refused("what is at the page's address changed during the delete: refused, nothing was moved")
@@ -285,16 +315,17 @@ class Archive:
                     os.close(dfd)
             finally:
                 os.close(sfd)
-            self._unmark(root, rel)     # the marks go in the hold of the move: no sweep between
+            self._unmark(root, [rel])   # the marks go in the hold of the move: no sweep between
 
     @staticmethod
-    def _unmark(root, rel: str) -> None:
-        """Take the archived, seen and keep marks of `rel`, each tried even when one before it cannot be written; then the
-        first refusal is raised (`Refused`). The caller holds `loose-keep.lock`."""
+    def _unmark(root, rels) -> None:
+        """Take the archived, seen and keep marks of each address of `rels`, each mark tried even when one before it cannot
+        be written; then the first refusal is raised (`Refused`). The caller holds `loose-keep.lock`."""
         failed = None
-        for clear in (lambda: loose.stamp_held(root.path, ARCHIVED, {rel: None}),
-                      lambda: loose.stamp_held(root.path, SEEN, {rel: None}),
-                      lambda: loose.keep_held(root.path, rel, False)):
+        clears = [lambda: loose.stamp_held(root.path, ARCHIVED, {rel: None for rel in rels}),
+                  lambda: loose.stamp_held(root.path, SEEN, {rel: None for rel in rels})]
+        clears += [lambda rel=rel: loose.keep_held(root.path, rel, False) for rel in rels]
+        for clear in clears:
             try:
                 clear()
             except (loose.Refused, OSError) as e:
@@ -305,11 +336,11 @@ class Archive:
             raise failed
 
     @classmethod
-    def _unmark_quietly(cls, root, rel: str) -> None:
-        """`_unmark` for a delete that is refused all the same: a mark file that cannot be written does not replace the
-        refusal that says where the page went."""
+    def _unmark_quietly(cls, root, rels) -> None:
+        """`_unmark` where a mark file that cannot be written must not stop what comes next: a delete that is refused all the
+        same keeps the refusal that says where the page went, and a sweep archives the root's other pages."""
         with contextlib.suppress(loose.Refused):
-            cls._unmark(root, rel)
+            cls._unmark(root, rels)
 
     def trashed(self, root) -> list:
         """`[{id, rel, deleted_at, days_left}]` of the root's trash, newest first."""

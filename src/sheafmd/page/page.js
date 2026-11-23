@@ -2071,6 +2071,7 @@ var create = function (ROOT, CFG, opts) {
     DOCKED.forEach(function (k) { pop.style[k] = pop._was[k]; });
     pop.classList.remove('rd-docked');
     pop._was = null;
+    if (pop._moved) roomBelow();      // the room dock() took away; clampMoved() finds the sizes held and returns
   }
   if (window.visualViewport) ['resize', 'scroll'].forEach(function (ev) {
     listen(window.visualViewport, ev, function () {
@@ -2160,7 +2161,7 @@ var create = function (ROOT, CFG, opts) {
     var v = viewRect(), held = pop._heldIn || '';
     if (held === sizesOf(v)) return;
     var r = pop.getBoundingClientRect(), sameArea = held.split(',').slice(0, 2).join() === areaOf(v);
-    if (sameArea && (r.bottom <= v.top || r.top >= v.bottom)) { pop._heldIn = sizesOf(v); return; }     // scrolled away with the text: left there
+    if (sameArea && (r.bottom <= v.top || r.top >= v.bottom)) { pop._heldIn = sizesOf(v); roomBelow(); return; }     // scrolled away with the text: left there
     putInside(r.left, r.top);
   }
   function dropped(e) {

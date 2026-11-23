@@ -241,6 +241,7 @@ class _SharedStream(events.Shared):
     def __init__(self, handler, sid: str, owner):
         super().__init__(owner)
         self._handler, self._sid = handler, sid
+        self.seq = 0                     # set when it is listed: a newer stream has a higher one
 
     def close(self):
         super().close()
@@ -310,6 +311,8 @@ class Handler:
         self.codes = codes.Codes()          # the sign-in codes, in memory only: a restart drops them (9.13)
         self._shared: dict = {}             # id -> the events.Shared stream a browser opened under it (ticket 160)
         self._shared_lock = threading.Lock()
+        self._shared_opened = 0             # how many were opened: a stream's `seq`, so the newer of two is known
+        self._join_lock = threading.Lock()  # a key's place is looked up and taken in one step (ticket 181 D)
         # path -> method -> (route name, who may call it, function)
         self.routes: dict = {}
         for method, path, name, who, fn in (
@@ -1005,6 +1008,8 @@ class Handler:
             if old is not None and old.owner != owner:
                 raise Refuse(409, "that stream id is someone else's")   # an id read from a log closes no one's tabs
             self._shared[sid] = stream
+            self._shared_opened += 1
+            stream.seq = self._shared_opened
         if old is not None:
             old.close()                  # the same browser came back before the old connection was seen to close
         return _stream(stream)
@@ -1026,13 +1031,21 @@ class Handler:
             raise Refuse(400, "join needs a key and a doc")
         if key not in stream.keys() and len(stream.keys()) >= self.SHARED_MAX:
             raise Refuse(429, "too many streams on this connection")
-        stream.join(key, self._joined_sub(req, doc))
+        sub = self._joined_sub(req, doc)
         # A key names one tab. After a leader hand-over the tab joins the new connection while the old one, whose tab
         # closed, is still open here until a write to it fails: drop the key there, or the hub counts the tab twice.
-        with self._shared_lock:
-            others = [s for s in self._shared.values() if s is not stream and s.owner == stream.owner]
-        for other in others:
-            other.leave(key)
+        # The old leader's own join of the key can reach the hub after that (ticket 181 D): a newer connection that
+        # holds the key keeps it, and the late join is dropped.
+        with self._join_lock:
+            with self._shared_lock:
+                others = [s for s in self._shared.values() if s is not stream and s.owner == stream.owner]
+            if not any(s.seq > stream.seq and key in s.keys() for s in others):
+                stream.join(key, sub)
+                for other in others:
+                    other.leave(key)
+                return _ok()
+        if not isinstance(sub, int):
+            sub.close()
         return _ok()
 
     def _joined_sub(self, req: Req, doc: str):

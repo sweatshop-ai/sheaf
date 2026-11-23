@@ -26,7 +26,7 @@ from . import _pandoc
 from . import comments as rdc
 from . import copyblock, diagnostics, orderedtask
 from .blocks import LOCKED_KINDS, split_md_blocks
-from .sanitize import sanitize
+from .sanitize import _url_ok, sanitize
 
 
 class EditError(Exception):
@@ -856,6 +856,47 @@ def _bare_urls_as_words(fragment: str):
     return (str(soup), put) if put else (fragment, {})
 
 
+# An address pandoc writes as `<address>` when it is also the link's text (probed with pandoc 3.7). A relative address
+# and `mailto:` it writes as `[text](address)`, where a lone `)` ends the address. The list is the probed schemes, not
+# pandoc's whole one: an address outside it goes as a word, which is right whichever way pandoc would write it.
+_PANDOC_AUTOLINK = re.compile(r"(?:https?|ftp|file)://", re.I)
+
+
+def _restore_dropped_hrefs(fragment: str, source, emoji=()) -> str:
+    """The fragment with the address back on each link of the source the sanitiser took it from: any scheme outside
+    SPEC 9.5's list (`ftp:`, also `javascript:`), so only an address the source already held, never a new one. The
+    page shows such a link as its text and sends it as an `<a>` with no address; the .md keeps the address the
+    source wrote, as it keeps a raw tag. The links are matched by their text, the k-th with the k-th, and only where
+    the page holds as many such links of that text as the source: after one was deleted, which went is unknown, and
+    each stays its text. An `<a>` with a name or an id is an anchor of the source's own, not such a link. `emoji` is
+    `_emoji_as_tokens`' list, so a link's text reads as the source's render shows it."""
+    from bs4 import BeautifulSoup
+
+    if not source or not re.search(r"<a(?:\s[^>]*)?>", fragment):
+        return fragment
+    soup = BeautifulSoup(fragment, "html.parser")
+    bare = [a for a in soup.find_all("a") if not any(a.has_attr(k) for k in ("href", "name", "id"))]
+    html = _render_source(source) if bare else None
+    if not html:
+        return fragment
+
+    def text(a):
+        return _EMOJI_TOKEN.sub(lambda m: emoji[int(m.group(1))][1], a.get_text())
+
+    dropped, shown = {}, Counter(text(a) for a in bare)
+    for a in BeautifulSoup(html, "html.parser").find_all("a", href=True):
+        if not _url_ok(a, "href", a["href"]):
+            dropped.setdefault(a.get_text(), []).append(a["href"])
+    put = False
+    for a in bare:
+        hrefs = dropped.get(text(a))
+        if hrefs and len(hrefs) == shown[text(a)]:
+            a["href"] = hrefs.pop(0)
+            shown[text(a)] -= 1
+            put = True
+    return str(soup) if put else fragment
+
+
 def _hrefs_as_words(fragment: str):
     """(the fragment with each link address pandoc would write wrong as a word, {word: the address}). Pandoc's
     writer leaves an address as it is, so a backslash in it reads back as an escape and a `)` it does not balance
@@ -877,7 +918,7 @@ def _hrefs_as_words(fragment: str):
         href = a["href"]
         if re.search(r"[\s<>]", href) or not ("\\" in href or unbalanced(href)) or a.find_parent(["code", "pre"]):
             continue
-        if "\\" not in href and a.get_text() == href and not a.find(True):
+        if "\\" not in href and a.get_text() == href and not a.find(True) and _PANDOC_AUTOLINK.match(href):
             continue                    # pandoc writes it as `<address>`, which takes no escape and holds the `)`
         word = _fresh_word("RDHREF", fragment, put)
         put[word] = href
@@ -889,12 +930,20 @@ def _hrefs_as_words(fragment: str):
 _BARE_URL_PAREN = re.compile(r"https?://[^|\s<>]*\)")
 
 
+def _gfm_domain(url: str) -> bool:
+    """Whether GFM takes the domain of the bare `url` for one: at least one period, and no underscore in its last two
+    labels. GFM's domain ends at the first character other than a letter, a digit, `_`, `-` or `.`. `url` holds
+    `://`, as every match of `_BARE_URL` does."""
+    labels = re.match(r"[^:]*://([A-Za-z0-9_.-]*)", url).group(1).split(".")
+    return len(labels) > 1 and "_" not in "".join(labels[-2:])
+
+
 def _gfm_links_bare(out: str, start: int, end: int, url: str) -> bool:
     """Whether `url`, written bare at out[start:end], is a link of that address in GFM: only at the start of a
-    line, after white space, `*`, `_`, `~` or `(`, and whole, up to white space or a tag after the marks GFM trims
-    off its end."""
+    line, after white space, `*`, `_`, `~` or `(`, with a domain GFM takes (`_gfm_domain`), and whole, up to white
+    space or a tag after the marks GFM trims off its end."""
     whole = _BARE_URL.fullmatch(url) or (_BARE_URL_PAREN.fullmatch(url) and url.count("(") >= url.count(")"))
-    if not whole or (start and out[start - 1] not in " \t\n*_~("):
+    if not whole or not _gfm_domain(url) or (start and out[start - 1] not in " \t\n*_~("):
         return False
     marks = ".,:!?*_~" if "(" in url else ".,:!?*_~)"
     return re.match(rf"[{re.escape(marks)}]*(?:\s|<|$)", out[end:]) is not None
@@ -1007,9 +1056,9 @@ _TABLE_TAG = re.compile(r"<(?=/?table\b)")
 
 
 def _code_table_tags(fragment: str):
-    """(the fragment with the `<` of each `<table` or `</table` in its code and math as a token, whether it took
-    any). Pandoc writes code and math as they are, so such a `<table` would count as a table in `html_block_to_md`;
-    one in other text it writes as `\\<table`, which does not count."""
+    """(the fragment with the `<` of each `<table` or `</table` in its code and math and in a title as a token,
+    whether it took any). Pandoc writes code, math and a link's title as they are, so such a `<table` would count as
+    a table in `html_block_to_md`; one in other text it writes as `\\<table`, which does not count."""
     from bs4 import BeautifulSoup
 
     if "table" not in fragment or _CODE_LT in fragment:
@@ -1020,6 +1069,9 @@ def _code_table_tags(fragment: str):
                                         for u in t.parents):
             t.replace_with(_TABLE_TAG.sub(_CODE_LT, str(t)))
             found = True
+    for el in soup.find_all(title=_TABLE_TAG):
+        el["title"] = _TABLE_TAG.sub(_CODE_LT, el["title"])
+        found = True
     return (str(soup), True) if found else (fragment, False)
 
 
@@ -1035,6 +1087,7 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     # of its own would show. Task boxes and comments survive it; a paragraph typed as
     # `- [ ] words` becomes a task item (`_typed_tasks`).
     clean = _boxes_as_text(_typed_tasks(sanitize(_sanitize(fragment, source, strays))))
+    clean = _restore_dropped_hrefs(clean, source, emoji)
     # The backslashes go first: `_without_placeholder_breaks` and `_cell_breaks` each decide whether the table is
     # one `_cell_breaks` takes, by a backslash in the fragment, and must see the same one. A bare URL is taken before
     # them, so that its backslashes stay the URL's.
@@ -1045,11 +1098,13 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
     if not clean.strip():
         return ""
     clean, pipe = _cell_code_pipes(clean)
-    code_lt = False
-    if pipe is not None or slash is not None or emoji or literal:
-        clean, code_lt = _code_table_tags(clean)
     cells, token = _cell_breaks(clean)
     cells, hrefs = _hrefs_as_words(cells)
+    # After the words: a URL or href word is one more reason for the raw-table depth count below, which a title's
+    # `<table` must not move.
+    code_lt = False
+    if pipe is not None or slash is not None or emoji or literal or urls or hrefs:
+        cells, code_lt = _code_table_tags(cells)
     r = _pandoc.run(["-f", "html", "-t", "gfm", "--wrap=none"], cells)
     if token is not None and r.returncode == 0 and r.stdout.count(token) != cells.count(token):
         # Pandoc's writer takes a character after a backslash it escapes, here one of the token's: the table goes

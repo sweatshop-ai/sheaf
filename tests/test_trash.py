@@ -878,3 +878,20 @@ def test_a_page_that_cannot_be_looked_at_for_a_moment_keeps_its_marks(agents, cl
     sweep(agents)
     sweep(agents)
     assert _marks_of(root, rel) == ALL_MARKS
+
+
+@pytest.mark.parametrize("between", ["skipped", "refused"])
+def test_a_sweep_that_does_not_read_the_root_breaks_the_run_of_sweeps_that_missed_a_page(agents, clock, monkeypatch, between):
+    doc, root, rel = _marked_everywhere(agents, clock)
+    os.unlink(agents.hub.file(doc))
+    sweep(agents)                                   # a first miss
+    with monkeypatch.context() as m:
+        if between == "skipped":
+            m.setattr(archive.Archive, "_loose_roots", lambda self: iter(()))
+        else:
+            def refused(self, root_path):
+                raise loose.Refused("the marks of the loose root cannot be read")
+            m.setattr(archive.Marks, "__init__", refused)
+        sweep(agents)
+    sweep(agents)                                   # a first miss again, not a second
+    assert _marks_of(root, rel) == ALL_MARKS

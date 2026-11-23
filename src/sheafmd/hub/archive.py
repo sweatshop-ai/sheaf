@@ -62,7 +62,7 @@ class Archive:
         self._next = 0.0
         self._worker: threading.Thread | None = None    # the sweep, the purge and the clones' sleep: one at a time, off the tick
         self._refused: set = set()                      # roots whose refusal is recorded already, until they are read again
-        self._unpaged: dict = {}                        # per root, the marked addresses the last sweep found with no page (183 BY)
+        self._unpaged: dict = {}                        # per root the last sweep read, the marked addresses it found with no page (183 BY)
 
     @staticmethod
     def _holds_a_page(root, rel: str) -> bool:
@@ -144,9 +144,11 @@ class Archive:
         """Mark the pages that are due, in each loose root. A root whose marks cannot be read is refused whole
         (`loose.Refused`) before anything of it is written, never read as none, and the other roots are swept all the same."""
         now = self.hub.clock()
+        # 183 BY: a root this sweep does not read (refused, skipped, forgotten) starts its run of misses over
+        missed_before, self._unpaged = self._unpaged, {}
         for member, root in self._loose_roots():
             try:
-                self._sweep_root(member, root, now)
+                self._sweep_root(member, root, now, missed_before.get(root.path, set()))
             except loose.Refused:
                 if root.path not in self._refused:      # told once, until the root is read again
                     self._refused.add(root.path)
@@ -154,10 +156,12 @@ class Archive:
             else:
                 self._refused.discard(root.path)
 
-    def _sweep_root(self, member, root, now: float) -> None:
+    def _sweep_root(self, member, root, now: float, missed_before: frozenset | set = frozenset()) -> None:
         pages = self._pages(member, root)            # the slow part, outside the lock
         # The moves' lock first (lockorder.py), then the marks' hold: a Move renames a page and carries its marks in one
-        # hold of the moves' lock, so the sweep never finds a moved page gone from its old address with its marks still there.
+        # hold of the moves' lock, so the sweep never finds a moved page of this hub process gone from its old address with
+        # its marks still there. The lock is the process's own: a Move in another hub process is covered only by the run
+        # of two sweeps.
         with moves.exclusive(), state.file_locked("loose-keep.lock"):   # the marks are read and the archive written in one hold: a Keep or a Restore comes before or after
             marks = Marks(root.path)
             # 183 BY: the marks of an address with no page go (emptied from outside the hub, a delete that found it gone or
@@ -168,7 +172,6 @@ class Archive:
             listed = {rel for rel, _, _ in pages}
             unpaged = {rel for rel in {*marks.archived, *marks.seen, *marks.kept}
                        if rel not in listed and not self._holds_a_page(root, rel)}
-            missed_before = self._unpaged.get(root.path, set())
             self._unpaged[root.path] = unpaged
             if unpaged & missed_before:
                 self._unmark_quietly(root, unpaged & missed_before)

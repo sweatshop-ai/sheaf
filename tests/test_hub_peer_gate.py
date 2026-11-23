@@ -148,8 +148,8 @@ def test_sheaf_open_hears_whether_the_hub_checks_and_health_says_it_to_no_one(ha
 
 def test_a_caller_that_closed_before_the_hub_could_say_is_told_to_try_again_and_nothing_is_applied(handler, hub):
     before = len(hub.auth.signins) if hasattr(hub.auth, "signins") else None
-    # A suite run as root cannot make a uid-0 caller that is not its own: there the hub could not tell.
-    closed_caller = seen(0, closed=True) if ME else seen(kind=peer.UNKNOWN, closed=True)
+    # A closed caller's socket is held by no process, so the lookup at accept said the hub could not tell.
+    closed_caller = seen(kind=peer.UNKNOWN, closed=True)
     r = ask(handler, hub, "POST", "/_/signin", closed_caller, "key", body=b"{}")
     assert r.status == 503 and r.headers["Retry-After"] == "1" and "Set-Cookie" not in r.headers
     assert not hub_rows("peer-refused")
@@ -194,6 +194,15 @@ def test_another_user_that_sends_and_closes_is_still_refused_and_leaves_its_row(
     r = ask(handler, hub, "GET", "/_/index.json", seen(THEM, closed=True), "key")
     assert r.status == 403 and "Set-Cookie" not in r.headers
     assert [row["peer_uid"] for row in hub_rows("peer-refused")] == [THEM]
+
+
+@pytest.mark.skipif(ME == 0, reason="a hub run as root has no root caller that is another user")
+def test_a_root_caller_that_only_half_closed_is_refused_with_its_row_not_told_to_try_again(handler, hub):
+    # Its socket is still held (`nc -N`), so the lookup at accept read root as its owner: that is another
+    # user of this machine, judged as any other (9.6), not a caller the hub could not tell.
+    r = ask(handler, hub, "GET", "/_/index.json", seen(0, closed=True), "key")
+    assert r.status == 403 and "Set-Cookie" not in r.headers
+    assert [row["peer_uid"] for row in hub_rows("peer-refused")] == [0]
 
 
 def test_a_caller_still_connected_is_refused_not_told_to_try_again(handler, hub):

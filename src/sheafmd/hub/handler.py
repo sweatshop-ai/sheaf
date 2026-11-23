@@ -851,10 +851,11 @@ class Handler:
         conn = req.conn
         if self.peer_off or not getattr(conn, "looked", False) or self._judged(conn) is None:
             return
-        # A closed caller reads as no one's (uid 0), so only an answer that could be that is a "try again";
-        # another user's uid stays a refusal, with its row, whether or not the caller has closed since.
+        # A caller that closed before the lookup is held by no process, which the lookup reads as "could not
+        # tell" (`peer.check`), so only that answer is a "try again". Another user's uid, root's included
+        # (a caller that only half-closed still holds its socket), stays a refusal with its row (9.6).
         no = conn.refusal
-        if conn.closed is not None and conn.closed() and (no.kind != peer.OTHER_USER or no.uid == 0):
+        if conn.closed is not None and conn.closed() and no.kind != peer.OTHER_USER:
             raise Refuse(503, "try again: the connection closed before the hub could tell who sent this",
                          {"Retry-After": "1"}, row=False)
         if self.peer_selftest_raised and no.kind != peer.OTHER_USER:

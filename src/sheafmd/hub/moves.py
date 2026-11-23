@@ -25,19 +25,24 @@ def exclusive():
 
 
 @contextlib.contextmanager
-def page_held(hub, address: str):
+def page_held(hub, address: str, look=None):
     """The moves' lock, the name's lock of `address` and the page's writer lock (`Hub.page_lock`), held together. The page's
     lock is held by a render for up to 120 s, and a cancel, a move, a loose create and a forget all wait on the moves' lock:
     so it is never waited for under it. Taken only when it is free; else the moves' lock is let go, the page's lock waited
     for alone, and all three taken again (lockorder.py: let go, take it, look again). Not fair: on a page saved without a
     pause it goes round once per write, never under the moves' lock and never past a save it waited for. Its callers (a
-    move to another tiroir, a restore from the trash) act on a loose page, whose name the hub does not place, so the name's
-    lock holds nothing there; for a page placed by name a render holds that lock too, and it is waited for under the moves'."""
+    move to another tiroir, a restore from the trash, a Delete) act on a loose page, whose name the hub does not place, so
+    the name's lock holds nothing there; for a page placed by name a render holds that lock too, and it is waited for under
+    the moves'. `look`, when given, runs under the moves' and the name's lock before the page's lock is tried, again at each
+    round (what it read may have changed while the locks were let go), and what it returns is yielded: a Delete's owner
+    check, which reads through the hub and so is never made under the page's lock."""
     while True:
-        with _LOCK, place.held(hub, address), hub.page_lock_now(address) as got:
-            if got:
-                yield
-                return
+        with _LOCK, place.held(hub, address):
+            seen = look() if look is not None else None
+            with hub.page_lock_now(address) as got:
+                if got:
+                    yield seen
+                    return
         with hub.page_lock(address):    # the wait, under none of the three: over when the render is
             pass
 

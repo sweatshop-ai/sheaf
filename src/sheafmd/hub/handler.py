@@ -1704,13 +1704,13 @@ class Handler:
         doc = req.body.get("doc")
         self._own_loose(req, doc)
         # The moves' lock first (the hub's lock order): a move is between its link and its unlink or it is not, never under the
-        # trash's move. Then the name, the page's lock, and the file's lock in `trash`.
-        with moves._LOCK, place.held(self.hub, doc):
+        # trash's move. Then the name, the page's lock (a save in the middle of its write finishes first, one after it finds the
+        # page gone), and the file's lock in `trash`. The page's lock is taken only when free, else waited for with the moves'
+        # lock let go (`moves.page_held`), so a cancel never waits behind a render of the page. The owner check runs again at
+        # each round, under the moves' lock and outside the page's: a throughput cost that is accepted.
+        with moves.page_held(self.hub, doc, look=lambda: self._own_loose(req, doc)) as (root, rel, _):
             try:
-                # _own_loose runs under the moves' lock here: a throughput cost that is accepted.
-                root, rel, _ = self._own_loose(req, doc)
-                with self.hub.page_lock(doc):       # a save in the middle of its write finishes first, one after it finds the page gone
-                    self.hub.archive.trash(root, rel)
+                self.hub.archive.trash(root, rel)
             except archive_mod.Gone:
                 raise Refuse(404, "no such document") from None    # gone since the look of _own_loose (183 BK)
             except (loose.Refused, OSError) as e:

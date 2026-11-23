@@ -166,6 +166,10 @@ jobs:
         if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'
         # The page tests take 4 to 8 minutes; the install is bounded below. A step that runs past 40 is stuck.
         timeout-minutes: 40
+        # A page test that stalls (PageStalled, or a timeout in the Playwright driver) leaves its evidence here:
+        # tests/page/stall_evidence.py, ticket 173 O. Set, it also gives the session's Chromium a DevTools port on the loopback.
+        env:
+          SHEAF_STALL_EVIDENCE: ${{ runner.temp }}/stall-evidence
         shell: bash
         run: |
           set -o pipefail
@@ -197,6 +201,17 @@ jobs:
             echo "::error::page tests were skipped, so a browser (Chromium, Firefox or WebKit) did not start"
             exit 1
           fi
+
+      # The page journal, the hub's side, every stack and the process table of each page test that stalled: read
+      # through Chromium's own DevTools port, so they are there even when the driver froze, as on macOS (ticket 173 O).
+      - name: Keep the evidence of a stalled page test
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stall-evidence-${{ runner.os }}-py${{ matrix.python }}-${{ strategy.job-index }}
+          path: ${{ runner.temp }}/stall-evidence
+          if-no-files-found: ignore
+          retention-days: 14
 
       # A Chromium has closed with no word on a runner. The runner is a container
       # with no dmesg (kernel.dmesg_restrict) and a memory cap of its own, so this reads what it can: the cgroup's

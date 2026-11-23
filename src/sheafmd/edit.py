@@ -1103,13 +1103,25 @@ def _hrefs_as_words(fragment: str):
     return (str(soup), put) if put else (fragment, {})
 
 
-# A bare URL GFM links whole: `_BARE_URL`, or one ending in a `)` its own `(` balance, which GFM keeps.
+# A bare URL that may end in a `)` GFM keeps.
 _BARE_URL_PAREN = re.compile(r"https?://[^|\s<>]*\)")
 
 
 def _bare_url_whole(url: str) -> bool:
-    """Whether GFM links all of `url` when it is written bare: `_BARE_URL`, or one ending in a `)` its own `(` balance."""
-    return bool(_BARE_URL.fullmatch(url) or (_BARE_URL_PAREN.fullmatch(url) and url.count("(") >= url.count(")")))
+    """Whether GFM links all of `url` when it is written bare. With a parenthesis in it, pandoc is asked: which `)` it
+    keeps is not a count of parentheses (after `(*` it keeps one no `(` balances, after `)*(` it ends the URL before
+    the `)`; ticket 183 BB, probed with pandoc 3.7)."""
+    if "(" not in url and ")" not in url:
+        return bool(_BARE_URL.fullmatch(url))
+    return bool((_BARE_URL.fullmatch(url) or _BARE_URL_PAREN.fullmatch(url)) and _pandoc_links_bare(url))
+
+
+@lru_cache(maxsize=256)
+def _pandoc_links_bare(url: str) -> bool:
+    """Whether pandoc's GFM reader makes all of `url`, written bare at the end of a line, one link of that address."""
+    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--wrap=none"], f"x {url}\n")
+    m = re.fullmatch(r'<p>x <a href="([^"]*)">([^<]*)</a></p>\s*', r.stdout) if r.returncode == 0 else None
+    return m is not None and html_unescape(m.group(1)) == url == html_unescape(m.group(2))
 
 
 def _gfm_domain(url: str) -> bool:
@@ -2071,14 +2083,12 @@ class _Shift:
 
 
 _ENCLOSED = ("code", "pre")
-# A comment's placeholder (`_convert_with_comments`) is text on the page side only. It is matched by its shape here,
-# unlike in `html_block_to_md`, which is handed the placeholders issued for the block (ticket 183 AD, AH).
-_COMMENT_TOKEN = re.compile("(?<!\u27e6)RDCMT[0-9A-F]{10}(?!\u27e7)")
 
 
-def _kept(s: str) -> list:
-    """The indices of the characters of `s` that are words, not a comment's placeholder."""
-    drop = {i for m in _COMMENT_TOKEN.finditer(s) for i in range(m.start(), m.end())}
+def _kept(s: str, comment_re) -> list:
+    """The indices of the characters of `s` that are words, not a comment's placeholder. `comment_re` matches only
+    the placeholders issued for the block: words of their shape are words (ticket 183 BC)."""
+    drop = {i for m in comment_re.finditer(s) for i in range(m.start(), m.end())}
     return [i for i in range(len(s)) if i not in drop]
 
 
@@ -2088,7 +2098,7 @@ def _enclosing(t):
     return up[-1] if up else None
 
 
-def _lone_as_text(soup, lone, doc, token) -> dict:
+def _lone_as_text(soup, lone, doc, token, comment_re) -> dict:
     """Each closing tag of `lone` put in `soup` as a placeholder, after the words it followed in the
     source: {placeholder: the tag's bytes}. The browser drops a closing tag with no opener, so the
     page holds no element for it; its place is found in the page's words, against a render of the
@@ -2135,7 +2145,7 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
         sites.append((len(old), str(t), before is not None, climb, gap))
     # A line break of the render and of the page is a space to the diff.
     old = re.sub(r"\s", " ", old)
-    words = [_COMMENT_TOKEN.sub("", t) for t in _texts(soup)]
+    words = [comment_re.sub("", t) for t in _texts(soup)]
     raw = "".join(words)
     new = re.sub(r"\s", " ", raw)
     # Where one text of the page ends and the next begins: Enter puts a new item or line right after
@@ -2173,7 +2183,7 @@ def _lone_as_text(soup, lone, doc, token) -> dict:
                                               for o, p, back, climb, gap in sites), key=lambda x: x[0])):
         cum, spot = 0, None
         for t in _texts(soup):
-            kept = _kept(str(t))
+            kept = _kept(str(t), comment_re)
             n = len(kept)
             if back and o > 0 and cum < o <= cum + n or not (back and o > 0) and cum <= o < cum + n:
                 j = o - cum
@@ -2218,9 +2228,10 @@ def _html_blocks(md: str) -> int:
     return r.stdout.count('"t":"RawBlock"') if r.returncode == 0 else -1
 
 
-def _tags_as_text(content: str, fragment: str, token):
+def _tags_as_text(content: str, fragment: str, token, comments):
     """(the fragment with each element that stands for a raw tag of `content` written as two
-    placeholders around its words, {placeholder: the source's bytes})."""
+    placeholders around its words, {placeholder: the source's bytes}). `comments` are the comment
+    placeholders the fragment holds."""
     from bs4 import BeautifulSoup
 
     tags, lone, doc = _raw_tags(content)
@@ -2238,7 +2249,7 @@ def _tags_as_text(content: str, fragment: str, token):
         if el is not None:
             unused.append((key(el), opening, closing))
     soup = BeautifulSoup(fragment, "html.parser")
-    placed = _lone_as_text(soup, lone, doc, token) if lone else {}
+    placed = _lone_as_text(soup, lone, doc, token, _placeholders(comments)[0]) if lone else {}
     for el in soup.find_all(True):
         # A math span's <sup> is the render's, not a tag of the source; a wrapper the page puts around the
         # source's words, as `div.tblwrap` around a table, is not (#157).
@@ -2393,9 +2404,10 @@ def _convert_with_comments(block, fragment: str, strays=None):
         return t
 
     frag = RAW_COMMENT_RE.sub(keep, ANCHOR_RE.sub(swap, fragment))
-    frag, tags = _tags_as_text(block.content, frag, token)
+    comments = frozenset(tokens.values()) | frozenset(placed.keys())
+    frag, tags = _tags_as_text(block.content, frag, token, comments)
     frag, notes = _notes_as_tokens(frag, token)
-    new_md = html_block_to_md(frag, block.content, strays, frozenset(tokens.values()) | frozenset(placed.keys()), frozenset(notes.keys()))
+    new_md = html_block_to_md(frag, block.content, strays, comments, frozenset(notes.keys()))
     for t, cited in notes.items():
         if new_md.count(t) != 1:
             raise EditError("block cites a footnote the edit cannot keep; edit it in the .md")

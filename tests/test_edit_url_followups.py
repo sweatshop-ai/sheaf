@@ -97,10 +97,21 @@ def test_a_table_sent_back_to_pandoc_whole_still_drops_the_break_that_ends_a_cel
     assert re.findall(r"<td>(.*?)</td>", re.sub(r"\s*\n\s*", "", out)) == ["a<br />b", "c"]
 
 
-# Ticket 183 AI: GFM keeps a `)` its own `(` balances in a bare URL, so the URL with a backslash goes as a word too.
+# Ticket 183 AI: GFM keeps a `)` at the end of a bare URL its own `(` balances, so the URL with a backslash goes as a
+# word too.
 @pytest.mark.parametrize("src", [r"see http://x.com/a(\*b) here", r"see http://x.com/a(\\b) here",
                                  r"see http://x.com/a\b(c) here"])
 def test_a_bare_url_with_a_backslash_ending_in_a_balanced_parenthesis_stays_a_link(src):
+    out = saved(src)
+    same_page(src, out)
+    assert anchors(page_fragment(out)) == anchors(page_fragment(src)) != []
+
+
+# Ticket 183 BB: which `)` GFM keeps at the end of a bare URL is pandoc's own reading, not a count of parentheses: after
+# `(*` or `(\*` it keeps a `)` no `(` balances, and after `)*(` it ends the URL before the `)`.
+@pytest.mark.parametrize("src", [r"see http://x.com/a(\*b)) here", r"see http://x.com/a(x\*b)) here",
+                                 r"see http://x.com/a\b)*(c) here"])
+def test_a_bare_url_with_a_backslash_whose_parentheses_do_not_balance_keeps_its_text(src):
     out = saved(src)
     same_page(src, out)
     assert anchors(page_fragment(out)) == anchors(page_fragment(src)) != []

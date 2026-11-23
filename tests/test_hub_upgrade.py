@@ -667,6 +667,33 @@ def test_a_stray_signal_that_wins_under_the_service_waits_for_the_hub_the_unit_s
     assert started and upgrade_spawns == []
 
 
+def test_a_service_hub_that_answers_a_signal_in_force_is_waited_for_as_the_unit_starts_it_again(
+        port, thread_hub, quick_stop, monkeypatch, upgrade_spawns):
+    """182 follow-up of #606: the upgrade stop meets a signal already under way, and the hub answers `signal` as
+    the reason in force. Under the service the unit starts a signalled hub again (14.3), on the new code: the
+    command waits for it, as it does when the exit row says `signal`, and does not give up at once."""
+    hub = thread_hub(OLD)
+    hub.service = True
+    monkeypatch.setattr(hubclient, "wait_for_start", lambda *a, **k: {"boot": "new", "version": __version__})
+    patch_the_stop_to_end_with(monkeypatch, hub, {"ok": True, "reason": "signal"}, "signal")
+    _, started = hubclient.ensure_hub("cli", lambda s: None, lambda s: None)
+    assert started and upgrade_spawns == []
+
+
+@pytest.mark.parametrize("service, in_force", [(False, "stop"), (False, "signal"), (True, "stop")])
+def test_a_hub_that_answers_a_person_s_stop_in_force_is_not_waited_for(
+        port, thread_hub, quick_stop, monkeypatch, upgrade_spawns, service, in_force):
+    """The other side: a stop, or a signal with no service to start the hub again, starts no hub (8.4)."""
+    hub = thread_hub(OLD)
+    hub.service = service
+    waited = []
+    monkeypatch.setattr(hubclient, "wait_stopped", lambda *a, **k: waited.append(a) or "")
+    patch_the_stop_to_end_with(monkeypatch, hub, {"ok": True, "reason": in_force}, in_force)
+    with pytest.raises(hubclient.HubBeingStopped):
+        hubclient.ensure_hub("cli", lambda s: None, lambda s: None)
+    assert upgrade_spawns == [] and waited == []
+
+
 def test_an_upgrade_stop_the_hub_ended_with_starts_the_new_hub(port, thread_hub, quick_stop, monkeypatch, upgrade_spawns):
     """The other side of M and N: the exit row says upgrade, so the command starts the new code."""
     hub = thread_hub(OLD)

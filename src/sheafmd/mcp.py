@@ -1335,14 +1335,14 @@ class Door:
             # A text that opens or closes the rectoverso moves its file to its home before it is written there (9.11); one
             # that cannot go there is not written.
             try:
-                gone = place.ahead(self.hub, address, now_text, new)
+                gone = place.ahead(self.hub, address, now_text, new, root_id=rid)
             except place.Refused as ex:
                 raise ToolError(f"{address} was not written: {ex.why}, so it could not go to its home.",
                                 "not written") from None
             if gone is None:
                 return None
             moved.append(gone)
-            return self.hub.file(address, placed=True)
+            return self.hub.file(address, placed=True, root_id=rid)
         try:
             top, rel = self._located_in(address, rid)
             try:
@@ -1357,7 +1357,7 @@ class Door:
             self._agent_wrote(address, caller)          # before the tabs hear of it (9.8)
             self.hub.wrote(address)
         # A text that changed nothing may still move the file to its home; its address stays.
-        return before, text, moved[0] if moved else place.place(self.hub, address, commit=False)
+        return before, text, moved[0] if moved else place.place(self.hub, address, commit=False, root_id=rid)
 
     def _door_text(self, text: str, old: str | None, address: str, caller: Caller) -> str:
         """The text a door write puts on disk: `_visible`'s, with the `owner` `_owned` gives it. `_owned` rewrites

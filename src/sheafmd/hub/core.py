@@ -470,20 +470,21 @@ class Hub:
         root = self.roots.get(roots_mod.Address.parse(address).root)
         return root.id if root is not None else ""
 
-    def file(self, address: str, placed: bool | None = None, bound: str = "") -> Path:
+    def file(self, address: str, placed: bool | None = None, bound: str = "", root_id: str = "") -> Path:
         """The path of the file the document at `address` names, there or not, unchecked: in the list's root the one
         file that holds a rectoverso's name, wherever it lives (9.11), else the address's own path. `placed` is whether
         the hub places the root's rectoversos (`place.applies`), when the caller knows it. `bound`: the private root an
-        open document was made for; its file is never found anywhere else (`place.file_at`)."""
+        open document was made for; its file is never found anywhere else (`place.file_at`). `root_id`: the root a
+        writer located the file in (8.11); NotFound when the address names another root now."""
         at = roots_mod.Address.parse(address)
         root = self.roots.get(at.root)
-        if root is None:
+        if root is None or (root_id and root.id != root_id):
             raise roots_mod.NotFound(address)
         if placed is None:
             placed = place.applies(self, at.root)
         if not placed:
             return root.path / at.rel
-        got = place.file_at(self, address, bound)       # raises where the file cannot be decided: never the list's path
+        got = place.file_at(self, address, bound, root_id)  # raises where the file cannot be decided: never the list's path
         return got[0].path / got[1] if got else root.path / place.file_rel(self, root, at.rel)
 
     def _where_of(self, e, name: str) -> tuple:

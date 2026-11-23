@@ -1383,8 +1383,8 @@ def test_a_move_never_commits_into_a_root_that_took_the_name_of_the_one_it_moved
     (intruder / SHARED).write_text("Not the contract, changed by hand.\n", encoding="utf-8")   # a commit of the address would take it
     real = place._where
 
-    def swapped(hub_, address):
-        got = real(hub_, address)
+    def swapped(hub_, address, root_id=""):
+        got = real(hub_, address, root_id)
         monkeypatch.setattr(place, "_where", real)
         hub_.forget_root("rectoversos")
         assert hub_.roots.for_document(intruder / SHARED).name == "rectoversos"
@@ -1395,3 +1395,61 @@ def test_a_move_never_commits_into_a_root_that_took_the_name_of_the_one_it_moved
     assert hub.commits.settle()
     assert subjects(intruder) == ["first"]
     assert hub_rows("commit-refused")
+
+
+@pytest.mark.parametrize("moves", ["ahead", "after", "written"])
+def test_a_door_update_never_moves_a_file_of_a_root_that_took_the_name_after_the_write_was_located(
+        hub, browser, tmp_path, monkeypatch, moves):
+    """8.11 and 9.11: a door update finds its file in the root whose id it read, then moves the file to the home of
+    the new text (`place.ahead`) or, for a text that changes no home, to its home after the write (`place.place`). A
+    root forgotten, and its name taken by another folder that the list's path now leads to, after the write was located
+    must not have its own file moved: that move would be left uncommitted in the other repo. Nor, the root replaced once
+    the file is written ("written"), is the write's commit made or failed: it is refused."""
+    from sheafmd import mcp as mcp_mod
+    closed = PRIVATE.replace("sources: [library:doc-123]\n", "sources: [library:doc-123]\nvisibility: owner\n")
+    # "ahead": the update closes the page, so its file goes home before it is written. "after": the page is at home
+    # and stays there, and the other folder's copy is not at its home, which the trailing `place` would mend.
+    first, at, text = (OPEN, SHARED, PRIVATE) if moves == "ahead" else (closed, HOME, closed + "More.\n")
+    swap_at = "_agent_wrote" if moves == "written" else "_check_comments"     # after the write, or inside its change
+    _, repo = committing(hub, browser, tmp_path, first=first, at=at)
+    link = tmp_path / "list"
+    link.symlink_to(repo)
+    the_list_on(hub, link, tmp_path)                    # the list's root, by a path that can lead elsewhere
+    intruder = tmp_path / "again" / "rectoversos"
+    (intruder / SHARED).parent.mkdir(parents=True)
+    git(intruder, "init", "-q", "-b", "main")
+    git(intruder, "config", "user.name", "the box")
+    git(intruder, "config", "user.email", "box@example.com")
+    (intruder / ".sheaf.toml").write_text("commit = true\n", encoding="utf-8")
+    (intruder / "projects.toml").write_text((repo / "projects.toml").read_text(encoding="utf-8"), encoding="utf-8")
+    (intruder / SHARED).write_text(first if moves == "ahead" else closed, encoding="utf-8")
+    git(intruder, "add", "-A")
+    git(intruder, "commit", "-q", "-m", "first")
+    owner = mcp_mod.Door if swap_at == "_agent_wrote" else mcp_mod
+    real = getattr(owner, swap_at)
+
+    def swapped(*a, **k):                   # the file was found, under the name's lock
+        monkeypatch.setattr(owner, swap_at, real)
+
+        def swap():                         # another request's, which holds none of the writer's locks
+            hub.forget_root("rectoversos")
+            link.unlink()
+            link.symlink_to(intruder)
+            hub.roots.for_document(intruder / SHARED)
+            hub.proxy = members(intruder)   # the other folder is Alice's root now
+        t = threading.Thread(target=swap)
+        t.start()
+        t.join(10)
+        assert not t.is_alive() and hub.the_list.serves("rectoversos")
+        return real(*a, **k)
+
+    monkeypatch.setattr(owner, swap_at, swapped)
+    _, got = call(browser, "update", token=Tokens().add("james-alice", write=True), doc=f"rectoversos/{SHARED}",
+                  text=text, expected_hash=md_hash(first))
+    assert "The hub failed" not in str(got)          # a second name lock, or a commit outside the lock, fails the call
+    assert hub.commits.settle()
+    assert (intruder / SHARED).exists() and not (intruder / HOME).exists()
+    assert git(intruder, "status", "--porcelain") == ""
+    assert subjects(intruder) == ["first"]
+    if moves == "written":
+        assert hub_rows("commit-refused")

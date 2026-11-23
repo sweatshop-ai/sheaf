@@ -144,6 +144,45 @@ def test_a_key_that_joins_a_new_connection_leaves_the_old_one(world, docs):
     new.close()
 
 
+def test_a_late_join_on_the_old_connection_leaves_the_new_one_its_stream(world, docs):
+    """Ticket 181 D: the old leader's join of a key reaches the hub after the tab joined the new connection. It must
+    not take the key from the newer connection; the old one, which is going away, does not get it either."""
+    old = shared(world)
+    new = shared(world, sid="n" * 24)
+    assert join(world, "t1:1", docs[0], sid="n" * 24).status == 200
+    assert join(world, "t1:1", docs[0]).status == 200          # the late one, on the older connection
+    assert new.keys() == ["t1:1"] and old.keys() == [] and world.hub.tabs(docs[0]) == 1
+    old.close()
+    assert new.keys() == ["t1:1"] and world.hub.tabs(docs[0]) == 1
+    new.close()
+
+
+def test_a_late_join_on_the_old_connection_after_the_tab_left_the_new_one_is_dropped(world, docs):
+    """The tab joined the new connection and closed, and its leave arrived there first: the old leader's late join must
+    not give the closed tab a stream on the old connection, which the hub would count until that connection ends."""
+    old = shared(world)
+    new = shared(world, sid="n" * 24)
+    assert join(world, "t1:1", docs[0], sid="n" * 24).status == 200
+    assert world.post("/_/live/leave", {"stream": "n" * 24, "key": "t1:1"}).status == 200
+    assert join(world, "t1:1", docs[0]).status == 200          # the late one, on the older connection
+    assert old.keys() == [] and new.keys() == [] and world.hub.tabs(docs[0]) == 0
+    old.close()
+    new.close()
+
+
+def test_a_connection_opened_again_under_its_id_is_the_newest(world, docs):
+    """The same browser comes back under the same id: the stream that replaced the old one takes its keys."""
+    other = shared(world, sid="n" * 24)
+    first = shared(world)
+    first.close()
+    again = shared(world)
+    assert join(world, "t1:1", docs[0]).status == 200
+    assert join(world, "t1:1", docs[0], sid="n" * 24).status == 200   # late, on the older of the two still open
+    assert again.keys() == ["t1:1"] and other.keys() == []
+    again.close()
+    other.close()
+
+
 @pytest.mark.parametrize("key", [None, 7, ["a"], ""])
 def test_a_leave_with_no_stream_of_ours_is_refused_whatever_its_key(world, key):
     assert world.post("/_/live/leave", {"stream": "nope", "key": key}).status == 404

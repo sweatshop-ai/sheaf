@@ -525,10 +525,17 @@ _SPLIT = "data-rd-split"     # the page's mark on a line Enter split off inside 
 # The shape of a shortcode that GFM's emoji extension reads as its emoji (`:b:`, `:+1:`); a lone colon is none.
 SHORTCODE_RE = re.compile(r":[a-z0-9_+-]+:")
 # A start tag, whose quoted values may hold a `>`; text never holds a `<` (it is `&lt;`), so no text is taken for one.
-_START_TAG_RE = re.compile(r'<[A-Za-z][^\s>/]*(?:"[^"]*"|\'[^\']*\'|[^>"\'])*>')
+# It is read attribute by attribute, as the page's parser reads it (`locatestarttagend_tolerant`): a quote opens a
+# quoted value only straight after an attribute name's `=`; elsewhere (`href=a'b`, `b'c`, `href=a="x>y"`) it is a plain
+# character of a name or a bare value, and the tag ends at the first `>`. The loops are possessive, so a tag that never
+# closes is given up in linear time.
+_START_TAG_RE = re.compile(
+    r'<[A-Za-z][^\s>/]*'
+    r'(?:[\s/]|(?<=["\'\s/])[^\s/>][^\s/=>]*(?:\s*=+\s*(?:"[^"]*"|\'[^\']*\'|(?!["\'])[^\s>]*))?+)*+>')
 # One attribute of a start tag, name and optional value, a quoted value taken whole; or a lone `/` between them. A name
-# follows white space, or straight after a quote or a `/`, as the page's parser reads `<a b="x"data-y="z">`.
-_ATTR_RE = re.compile(r'(?:\s+|(?<=["\'/]))([^\s=>/"\']+)(?:\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>"\']+))?|\s*/')
+# follows white space, or straight after a quote or a `/`, as the page's parser reads `<a b="x"data-y="z">`. A name
+# and a bare value may hold a quote, as they do to that parser (`attrfind_tolerant`).
+_ATTR_RE = re.compile(r'(?:\s+|(?<=["\'/]))([^\s/>][^\s/=>]*)(?:\s*=+\s*(?:"[^"]*"|\'[^\']*\'|(?!["\'])[^\s>]*))?|\s*/')
 # The name a start tag opens with; its attributes follow it.
 _TAG_NAME_RE = re.compile(r"<[A-Za-z][^\s>/]*")
 # A name `_sanitize` strips from the page fragment: every `data-` one, the page's own (`data-rd-`) too. The page's

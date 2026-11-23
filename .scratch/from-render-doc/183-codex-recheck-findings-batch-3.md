@@ -1,0 +1,65 @@
+# 183: Codex recheck findings, batch 3
+
+**Status:** open
+
+**Blocked by:** none
+
+**From:** the third re-check of Codex NO-GO findings on merged PRs (2026-11-23, morning). It covers 19 PRs (#499 #501 #503 #514 #515 #517 #518 #520 #521 #523 #524 #525 #526 #527 #529 #531 #534 #535 #536) and the highest review round of each. Triaged against main 68f63f6e. The briefs hold 30 findings, not the 31 first counted. Letters continue from 182 (G to U), in PR order: V to Z, then AA to AY.
+
+**Counts:** 30 findings:
+
+- 20 still present: 1 serious, 19 minor.
+- 7 already fixed on main.
+- 2 already filed: 182 G and ticket 137.
+- 1 not a defect.
+
+Codex marked all 30 serious; the ratings below are the triage's own. Serious means a wrong result in ordinary use, a crash, data loss, or a security or privacy breach. Minor means the defect needs a narrow race, a malformed answer from a peer, or an unusual name, or it changes only a status code, a log row or the form of the source.
+
+**Where (open items):** `src/sheafmd/edit.py` (AD, AF, AH, AI), `src/sheafmd/mcp.py` (Z, AA, AY), `src/sheafmd/send.py` (AJ), `src/sheafmd/lifecycle.py` (AE), `src/sheafmd/hub/handler.py` (AL, AT, AV), `src/sheafmd/hub/core.py` (AM), `src/sheafmd/hub/live.py` with `core.py` (AO), `src/sheafmd/hub/archive.py` (AN, AX), `src/sheafmd/hub/sheaf_view.py` (AK), `src/sheafmd/page/page.js` (X, Y), `src/sheafmd/page/sheaf.js` (AP). Of these files, `core.py` and `handler.py` are also touched by the open #608.
+
+Each open item has one box. Write a red test on main first for each. If an item cannot be reproduced, leave its box unticked and give the reason.
+
+## Open, serious
+
+- [ ] **AI** (from #524): `_BARE_URL` (`edit.py:953`) ends on a character class that excludes `)`, so a bare URL that ends in a balanced `)` (GFM keeps it in the link) is not protected. Probed on main: `see http://x.com/a(\*b) here` with one word edited saves `see [http://x.com/a(\\\*b)](http://x.com/a\(\\*b\)) there`, which renders as literal brackets with no link. The link is lost and the markdown shows as text.
+
+## Open, minor
+
+- [ ] **X** (from #501): a moved box is never clamped again. `replace()` skips `place()` once `_moved` is set (`page.js:2027`), and the `resize` listener (`:2081`) only re-wraps the thread. The resize and rotation case is already box 1 of `.scratch/follow-ups/comment-box-drag-gaps.md`. That box does not cover a box that grows taller, for example when a reply arrives, and pushes its controls below the visible area. Add that case to the same fix.
+- [ ] **Y** (from #501): with touch, a drag starts after `MOVE_SLOP = 4` px (`page.js:2092`), but a touch counts as moved only past 8 px (`page.js:3394`). A 4 to 8 px drag on the band is therefore also an unmoved tap on `touchend` (`page.js:3397-3407`). The tap focuses the field, which raises the keyboard and docks the box that was just dragged. Use one threshold, or make the touchend skip a band press that started a drag. No touch test exists yet; see box 2 of the same follow-up file.
+- [ ] **Z** (from #503): `update` sets or clears the `generated` mark inside `change()` (`mcp.py:1364-1365`), before `move` and before the atomic write of `update_beneath`. If either of those fails, the update is refused but the mark has already changed. Only the setter or the key gets this far (`_check_generated` runs first), so no other token gains anything. The failed request still leaves a mark it should not have. Restore the mark when the write fails.
+- [ ] **AA** (from #503): `create` with `generated: true` writes, publishes and commits the page, and marks it only afterwards (`mcp.py:1240-1243`). If the `docs.json` change fails, the create errors but the page stays unmarked, and a retry fails because the name is now taken. The caller can recover with `update` and `generated: true`.
+- [ ] **AD** (from #517): `_BACKSLASH_ESCAPES` (`edit.py:929`) treats any literal `RDCMT` followed by ten upper-case hex digits as a placeholder. Probed: `a\RDCMT0123456789 here` saves `a\\RDCMT0123456789 there`. The rendered text is unchanged (`a\RDCMT0123456789`); only the source changes. Match only the tokens issued for this block.
+- [ ] **AE** (from #518): `_take_back_restart(c)` (`lifecycle.py:134`, defined at `:90-98`) sends its `DELETE /_/restarting` on the unpinned client `c`, while the `POST` that announced the restart went through `before.call`, which is pinned to the boot. On the `HubLost` path no token was read, and a DELETE without a token clears whatever is announced. If the hub was replaced in between, this clears the new hub's restart announcement, and its next service stop shows the stop banner. A DELETE that carries a token is safe since 181 C (random token per process). Send the take-back through `before`. Related: ticket 99 line 26.
+- [ ] **AF** (from #520): Enter at the end of inline code in a table cell still writes the whole table as raw HTML. Probed on main: a cell `` `red` here `` edited to `<code>red<br></code> now` saves a `<table>` with `<td><code>red</code><br />now</td>`. `<code>red<br>&nbsp;</code> now` and `<code>red&nbsp;<br></code> now` give the same result; `<code>red<br>on</code> now` stays a pipe table. Nothing is lost and the page renders the same, but the table can no longer be edited on the page (ticket 137 line 20). The fix belongs in `_cell_breaks` and `_ends_its_cell` (`edit.py:866`, `:771`): a break that ends the code but not the cell counts as a break in the cell.
+- [ ] **AH** (from #523): `_LEADING_TOKENS` and `_COMMENT_TOKEN` (`edit.py:695-696`) also match footnote-citation placeholders, which `token()` draws from the same `RDCMT…` space (`edit.py:2337-2341`). The task code uses both (`edit.py:447`, `:454`, `:729`, `:732`). A citation before a typed `- [ ] milk` is skipped as if it were a comment and ends up inside the new task. A typed task whose only content is a citation is left as literal box characters. Pass only the comment tokens, or keep the two token sets apart.
+- [ ] **AJ** (from #525): `_RESULT_TEXT` (`send.py:217`) checks only `hash` on a successful `read`, but the callers use `now["text"]` (`send.py:398`, `:645-646`). A door answer with no `text`, or a `text` that is not a string, raises `KeyError` or `TypeError` instead of `SendError`. Nothing is written before the error. Add `text` to the `read` tuple.
+- [ ] **AK** (from #525): `Titles.read` (`hub/sheaf_view.py:38-46`) checks `key not in self._kept`, then reads `self._kept[key]`. Another thread's `clear()` between the two raises `KeyError`, and the Sheaf listing answers 500. Read with one `.get()`.
+- [ ] **AL** (from #525): `_with_team` (`hub/handler.py:1304-1308`) catches only `ValueError` from `json.loads`, then expands `{**meta}`. A meta block that is valid JSON but not an object (a list, a string, a number, `null`) raises `TypeError`, and the relayed page answers 500. Leave such a block as it is, as the code already does for one that does not parse.
+- [ ] **AM** (from #526): `pulling` and `pulled` each call `_page_of` (`hub/core.py:1740`, `:1755`). If the first call succeeds and the second raises, `pulled` moves on without ending the pull. `WriteLog._pulling` (`hub/writelog.py:209-216`) then keeps the address for the rest of the hub run, and every later disk write to that page is logged as the pull's. Name each address once in `pulling` and hand the names to `pulled`.
+- [ ] **AN** (from #526): `restore_trash` (`hub/archive.py:254`) calls `os.path.lexists(src)` and then `os.lstat(src)` outside the lock, so a purge between the two leaks `FileNotFoundError` (500). A purge after the second `lstat` (`:266`) makes `os.link` fail with `FileNotFoundError`, which becomes `loose.Refused` (409). Both should be `KeyError` (404).
+- [ ] **AO** (from #526): `LiveDocument.refresh` (`hub/live.py:684-690`) keeps the old page and returns None when `_stamp()` gives None (a stat that fails, a file the hub cannot decide), even when the file did not move. The callers then store the stat key they took before the refresh (`hub/core.py:1615-1618`, `:1686-1689`, `:1821-1822`). The unchanged file is never refreshed again, and the open tabs stay stale until the file next changes. In that case, have `refresh` report a retry and leave `last_stat` unchanged.
+- [ ] **AP** (from #527): the folder rename form (`page/sheaf.js:576`) compares `input.value.trim()` with the untrimmed `at`. If the form is submitted untouched for a folder whose name starts or ends with white space, the folder is renamed to the trimmed name instead of nothing happening. Compare like with like.
+- [ ] **AT** (from #531): `_asks_for_html` (`hub/handler.py:111-112`) splits `Accept` on raw `,` and `;`, so a quoted parameter that holds either character (`text/html;foo="a,b";q=0`) is cut early and read as HTML with weight 1. The only effect is an HTML refusal page instead of JSON on `/_/open`.
+- [ ] **AV** (from #534): `_writable` runs before `_text_writable` at all three sites: save (`hub/handler.py:1426-1427`), tick (`:1482-1483`) and share (`:1581-1582`). A generated page that is also a read-only clone is refused with the clone's line, and the `generated-refused` diagnostics row (`:1393-1397`) is never written. The write is refused either way; only the row and the sentence are wrong.
+- [ ] **AX** (from #535): `trash` (`hub/archive.py:204-219`) checks containment with `realpath`, then calls `os.replace(src, dest)` by name. If an ancestor folder is replaced by a link between the two, the hub moves a same-named file from outside the root into the root's trash. This is a TOCTOU of the security class. It is rated minor because its precondition is outside the trust line of SPEC 9.1: another account that can write a folder inside the user's root. Close it with a descriptor walk (`beneath`) if that is cheap.
+- [ ] **AY** (from #536): `_move` (`mcp.py:1341-1344`) raises `ToolError` when the read after a successful `move_page` fails. `_logged` then records the door call as refused (`mcp.py:1032-1033`) and skips `_logged_write`. The page has moved, but its `move` Write-log row is missing and the diagnostics say refused. Answer the move without the hash, or log it before raising.
+
+## Already filed
+
+- **V** (from #499): `source._open_lock` (`source.py:69-88`) uses `O_NOFOLLOW`, `O_CLOEXEC` and `getuid` without a guard, so `comment`, `reply`, `resolve` and `reopen` fail on native Windows. Filed as ticket 137 line 44 (native Windows lock path; open, needs a Windows machine).
+- **AU** (from #534): the generated check runs before `place.held` (`hub/handler.py:1427`), so a concurrent generator can mark the page between the check and the write. Tick and share have the same race. Duplicate of **182 G**.
+
+## Already fixed on main
+
+- **W** (from #499): the index page never asked for a new stream after a refused join. Fixed in 578454ee (#568, ticket 171): `connect()` in `index.js` reopens with back-off when `readyState` is 2.
+- **AB** (from #514): `beneath._walk` used `os.O_PATH` on macOS. Fixed in 1fc393e8 (#563, ticket 173 cause C). The only remaining `O_PATH` (`beneath.py:320`) sits behind `_openat2`, which raises `NotImplementedError` off Linux before that line is reached.
+- **AC** (from #515): in full Chromium a follower's join overtook its own lock request. Fixed in f151880f (#588, ticket 180): a tab joins only once its `sheaf-tab` lock is granted (`live.js:39`).
+- **AQ** (from #529): an escaped shortcode was matched by name, not by occurrence. Fixed in b65e6599 (#576): literals are kept by place. Probed: in `x \:smile: here` with `:smile:` typed, the save is `x \:smile: :smile: there`, and the typed shortcode renders as an emoji.
+- **AR** (from #529): `\\\:smile:` lost its escape. Fixed in b65e6599 (#576, typed escape). Probed: `x \\\:smile: here` saves unchanged and renders `\:smile:`.
+- **AS** (from #531): the 403 refusal on `/_/open` used a case-sensitive substring check. Fixed in a95283e4 (ticket 99): both `/_/open` sites call `_asks_for_html` (`hub/handler.py:438`, `:443`).
+- **AW** (from #534): the generated-page notice showed only after Ctrl+S. Fixed in 4c6da379 (ticket 156): the page shows it on load (`page.js:448-454`).
+
+## Not a defect
+
+- **AG** (from #521): `.github/workflows/ci.yml:15`, "HEAD has diverged from origin/main". This describes the state of the PR branch at review time, not the code. The PR was merged as b76ff6d9.

@@ -354,8 +354,9 @@ def read_rectoverso(rel: str, text: str) -> Rectoverso:
                  fm_text(fm, "owner"), fm_text(fm, "shared"), md_hash(text), "moved_to" in fm, tuple(pressed))
 
 
-# a fence, a comment, an HTML block (a line that starts with `<`), or indented code (an indented line after a blank one)
-_MAY_HOLD_CODE_RE = re.compile(r"```|~~~|<!--|^[ \t>*+-]*<|\n[ \t]*\n(?: {4,}|\t)", re.M)
+# a fence, a comment, an HTML block (a line that starts with `<`, after quote and list markers, `1.` and `1)` too), or
+# indented code (an indented line after a blank one)
+_MAY_HOLD_CODE_RE = re.compile(r"```|~~~|<!--|^(?:[ \t>*+-]|[0-9]{1,9}[.)])*<|\n[ \t]*\n(?: {4,}|\t)", re.M)
 
 
 def _drawn_actions(b):

@@ -537,8 +537,7 @@ class Tell:
                     # goes out either way, and only once that delivery has ended: a delivery cannot be
                     # taken back, and the stop must not arrive before the Tell it cancels.
                     self._emit(e, "tell-cancelled", {"id": cid, "sent": True})
-                    v = self._stop_view(e)
-                    if v is not None and self._send_stop(e, cid, deliveries, held, v):
+                    if self._send_stop(e, cid, deliveries, held):
                         return                              # the stop message's job ends the cancel
             except BaseException:
                 self.hub.runner.release(held)               # failed: the wait stays, to cancel again
@@ -557,20 +556,19 @@ class Tell:
         finally:
             self.hub.runner.release(held)
 
-    def _stop_view(self, e) -> View | None:
-        """The session a stop for `e` goes to, found by its address under the moves' lock and only while `e` is still that
-        address's entry: a forget, and a folder that takes the name, during the cancel's wait would make it the other
-        folder's session (182 H). None for an entry a forget took: the forget stopped its jobs. Read only when a stop is
-        to go: it reads files and asks the adapter."""
+    def _send_stop(self, e, cid: str, deliveries: list[threading.Thread], held) -> bool:
+        """Start the stop message as a job. True when its job has the cancel from here on and ends it."""
+        v = self.view(e.address, session=True)  # reads files and asks the adapter: under no lock
+        # The session was found by the address, which a forget and a folder that takes the name could have handed to
+        # another root meanwhile (182 H). Under the moves' lock, which a forget takes, `e` still being the address's entry
+        # means the view read was this entry's root's: a forget pops the entry, and the other folder's is a new one.
         with moves.exclusive():
             if self.hub.entries.get(e.address) is not e:
-                diagnostics.record("hub", "tell-stop-skipped", e.address, reason="the folder was forgotten")
-                return None
-            return self.view(e.address, session=True)
+                diagnostics.record("hub", "tell-stop-skipped", e.address, id=cid, reason="the folder was forgotten")
+                return False
+            return self._start_stop(e, cid, deliveries, held, v)
 
-    def _send_stop(self, e, cid: str, deliveries: list[threading.Thread], held, v: View) -> bool:
-        """Start the stop message as a job, to the session of `v` (read by `cancel`). True when its job has the cancel from
-        here on and ends it."""
+    def _start_stop(self, e, cid: str, deliveries: list[threading.Thread], held, v: View) -> bool:
         if v.target is None or "stop" not in v.caps:
             diagnostics.record("hub", "tell-stop-skipped", e.address, id=cid,
                                reason="the session cannot be reached")

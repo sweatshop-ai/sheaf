@@ -353,6 +353,20 @@ def test_a_member_tells_through_the_tell_route_only_their_own_agent_and_cannot_c
     assert front.post("/_/cancel", {"doc": "other/theirs.md", "id": "c1"}).status == 404
 
 
+def test_a_members_cancel_from_a_page_of_a_root_they_reach_but_do_not_own_ends_their_tell(front, browser, talk, work, other, monkeypatch):
+    """7.3, 182 H: a page a member reaches in a root that is not theirs (a clone the tiroir serves, a loose page Shared
+    with them) sends that root's id, which the member is never told back. Its cancel still ends their own Tell: only a
+    root that holds no name any more is a forgotten page's."""
+    bea, cal, loose = bea_tells(front, browser, work, other)
+    root_id = front.hub.roots.get("work").id
+    assert documents(browser, bea)[0]["tells"]
+    monkeypatch.setattr(front.hub, "owns", lambda member, root: False)          # reached as a clone root, not owned
+    monkeypatch.setattr(front.hub, "member_owns", lambda member, address: True)
+    assert front.post("/_/cancel", {"doc": DOC, "id": "c1", "root": root_id}).json() == {"ok": True}
+    monkeypatch.undo()
+    assert documents(browser, bea)[0]["tells"] == []
+
+
 def test_a_cancel_from_a_page_of_a_forgotten_root_never_ends_the_same_id_tell_of_the_folder_that_took_the_name(browser, talk, tmp_path, monkeypatch):
     """7.3, 182 H: the cancel compares the page's root with the one that holds the name, and ends the Tell, in one step. A
     forget, and another folder that takes the name and Tells its own thread c1, while the cancel runs, waits for the

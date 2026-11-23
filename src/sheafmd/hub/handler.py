@@ -2547,7 +2547,9 @@ class Handler:
             held_root = self._root_id(req, doc)
             if isinstance(sent_root, str) and held_root is not None and held_root != sent_root:
                 raise Refuse(409, "another folder now holds this document's name: reload the page", answer={"root": held_root})
-            if isinstance(sent_root, str) and held_root is None:
+            # No root holds the name, looked up in the registry: `_root_id`'s None also stands for a root the member does
+            # not own (a clone the tiroir serves, a loose page Shared with them), whose cancel ends their Tell as before.
+            if isinstance(sent_root, str) and self.hub.roots.get(Address.parse(doc).root) is None:
                 # The page's root was forgotten, and its forget ended its Tells and stopped its jobs. A folder that takes
                 # the name (a root is added under no lock of the cancel's) is not this page's to stop: nothing to do. A job
                 # registered on a popped entry after the forget's `cancel_under` never runs its work (`_is_current`), and

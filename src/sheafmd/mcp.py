@@ -40,7 +40,7 @@ from .hub import waiting as waiting_mod
 from .hub.state import TokenRow
 from .render import COMMENT_RE as HTML_COMMENT_RE, strip_comments
 from .beneath import Private
-from .source import check_create, create_file, md_hash, now, update_beneath
+from .source import _folder_of, check_create, create_file, md_hash, now, update_beneath
 
 PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = (
@@ -1172,7 +1172,10 @@ class Door:
         try:
             # A loose root's names have no lock of their own (`place.held` holds nothing there): a create of one takes the
             # moves' lock, so it is not made between a move's checks and its rename, nor reads a Forward half written.
-            with moves.exclusive() if self._in_loose_root(args, caller) else contextlib.nullcontext():
+            # A create with `generated` takes it too: it marks the page before its file, and where the name's lock holds
+            # nothing a second create of the name could take the mark back from the page the other made (ticket 183 BD).
+            with moves.exclusive() if args.get("generated") or self._in_loose_root(args, caller) \
+                    else contextlib.nullcontext():
                 return self._created(given, args, caller)
         except BaseException:
             if fresh is not None:       # a refused create leaves no loose root it made behind
@@ -1226,45 +1229,32 @@ class Door:
         # move, that comes meanwhile waits, and then finds the name taken.
         with place.held(self.hub, address):
             try:
-                made = []
+                made, loose_judge = [], None
                 if args is not given:       # a loose page's folders are made, each opened without following a link
                     made = _missing_folders(top, rel)
+                    loose_judge = place.judge_for(self.hub, root)
                     try:
-                        os.close(place.make_folders(top, rel, place.judge_for(self.hub, root))[0])
+                        os.close(place.make_folders(top, rel, loose_judge)[0])
                     except Private:
-                        _unmake(top, made)
+                        _unmake(top, made, loose_judge)
                         raise
                     except OSError as e:
-                        _unmake(top, made)
+                        _unmake(top, made, loose_judge)
                         raise _not_made(address, e) from None
                 rid = root.id       # the root written in is the one its commit goes to (8.11), never one that took its name since
                 try:
-                    text, at = self._make(root, top, rel, name, address, text, caller)
+                    page = self._make(root, top, rel, name, address, text, caller, bool(args.get("generated")))
                 except BaseException:
-                    _unmake(top, made)      # the folders this create made go with it
+                    _unmake(top, made, loose_judge)     # the folders this create made go with it
                     raise
+                text = page.text
                 if args.get("keep"):        # under the name's lock with the write: the page is never there unmarked
                     try:
-                        loose.keep(root.path, rel)
+                        loose.keep(page.root.path, page.rel)    # where the file was written (ticket 183 BA); `rid` is the same root
                     except loose.Refused as e:
-                        with contextlib.suppress(OSError):
-                            os.unlink(top / rel)        # made a moment ago under this name's lock: take it back
-                        self.hub.writes.told(address)
-                        _unmake(top, made)
+                        self._take_back(address, page)      # made a moment ago under this name's lock
+                        _unmake(top, made, loose_judge)
                         raise ToolError(f"{address} was not made: {e}.", "keep") from None
-                if args.get("generated"):   # under the name's lock with the write, before a tab or a commit hears of it
-                    try:
-                        self._mark_generated(address, True, caller)
-                    except OSError:         # a page refused is not left made and unmarked, its name taken (ticket 183 AA)
-                        with contextlib.suppress(OSError):
-                            os.unlink(at)           # where `_make` wrote it: a rectoverso's home, not its name
-                        if args.get("keep"):
-                            with contextlib.suppress(loose.Refused):
-                                loose.keep(root.path, rel, on=False)
-                        self.hub.writes.told(address)
-                        _unmake(top, made)
-                        raise ToolError(f"{address} was not made: its generated mark could not be written.",
-                                        "not written") from None
             except Private:         # the root's folder, as opened, is a private root's: answered as a path in no root
                 raise ToolError(f"{_named(args['doc'])} {NOT_IN_A_ROOT}", "path") from None
             self._agent_wrote(address, caller)          # before the tabs and indexes hear of it
@@ -1276,9 +1266,11 @@ class Door:
                            "Its owner shares it from the page or the Sheaf.")
         return out
 
-    def _make(self, root, top: Path, rel: str, name: str | None, address: str, text: str, caller: Caller):
-        """The file of a create, at its home when the hub places it (9.11): (the text written, the file's path). The
-        rectoverso's address is its name wherever its file is."""
+    def _make(self, root, top: Path, rel: str, name: str | None, address: str, text: str, caller: Caller,
+              generated: bool) -> "_Made":
+        """The file of a create, at its home when the hub places it (9.11), and its `generated` mark when asked. The
+        rectoverso's address is its name wherever its file is. A file refused takes back the mark and the folders made
+        for it here; a refusal after this returns goes through `_take_back`."""
         judge = place.judge_for(self.hub, root)
         try:
             # The owner is judged by the list's row for the address, which a rectoverso already there may have: what
@@ -1317,20 +1309,45 @@ class Door:
                 # Made there, it would be untracked and leave the listing (8.6): refused as a move there is.
                 raise ToolError(f"{address} cannot be made: {place.IGNORED}, so it would have no home.", "path")
             rel = home
+        marked = None
+        if generated:
+            # Before the file and once its name is found free: a page save that reads the new file finds it marked,
+            # also where the name's lock holds nothing (a page the hub does not place) (ticket 183 BD).
+            try:
+                marked = self._mark_generated(address, True, caller)
+            except OSError:
+                raise ToolError(f"{address} was not made: its generated mark could not be written.",
+                                "not written") from None
+        made = _Made(text, root, top, rel, name, judge, [], marked)
         self.hub.writes.expect_own(address, md_hash(text))     # a look at the file before `wrote()` is not a disk write
         try:
             if name is not None and (rel != name or private_home):    # the folders, walked as create_file walks
                 with place.folders_lock(top, name):     # so no move's tidying takes them before the file is in
+                    made.folders = _missing_folders(top, rel)
                     os.close(place.make_folders(top, rel, judge)[0])
                     create_file(top, rel, text, judge)
             else:
                 create_file(top, rel, text, judge)
         except BaseException as e:
-            self.hub.writes.told(address)       # a page that was not made leaves nothing to expect
+            self._take_back(address, made, written=False)      # a page that was not made leaves nothing behind
             if isinstance(e, Private) or not isinstance(e, OSError):
                 raise
             raise _not_made(address, e) from None
-        return text, top / rel
+        return made
+
+    def _take_back(self, address: str, made: "_Made", written: bool = True):
+        """Undo a create refused once `_make` is under way: the file where it was written, the folders `_make` made at its
+        home, the mark it set. The list's row that `assignees` dropped stays dropped: it was of a file no longer there,
+        which is what the address holds again."""
+        if written:
+            with contextlib.suppress(OSError):
+                os.unlink(made.top / made.rel)
+        self.hub.writes.told(address)
+        if made.folders:
+            with place.folders_lock(made.top, made.name):
+                _unmake(made.top, made.folders, made.judge)
+        if made.marked is not None:
+            self._put_back_mark(address, made.marked)
 
     def _update(self, args: dict, caller: Caller):
         followed: list = []
@@ -1557,11 +1574,36 @@ def _missing_folders(top: Path, rel: str) -> list:
     return out
 
 
-def _unmake(top: Path, made: list):
-    """Take back the folders `_missing_folders` named, innermost first, each only if it is empty."""
+@dataclass
+class _Made:
+    """What `_make` made: the text written, the root, folder and path it was written at (a rectoverso's home), its name,
+    the judge its folders were walked with, the folders made at the home, and the mark set (`_mark_generated`'s answer,
+    None when none was asked)."""
+    text: str
+    root: object
+    top: Path
+    rel: str
+    name: str | None
+    judge: object
+    folders: list
+    marked: tuple[dict, dict] | None
+
+
+def _unmake(top: Path, made: list, judge=None):
+    """Take back the folders `_missing_folders` named, innermost first, each only if it is empty. Each is reached as
+    `make_folders` reached it, from `top` without following a link and judged by `judge`, so a folder swapped for a link
+    since never takes the removal elsewhere (a link's target, another root's empty folder)."""
     for folder in reversed(made):
-        with contextlib.suppress(OSError):
-            os.rmdir(folder)
+        try:
+            fd, name = _folder_of(top, Path(folder).relative_to(top).as_posix(), judge=judge)
+        except (OSError, ValueError):       # `Private` is an OSError: a folder judged elsewhere is left as it is
+            continue
+        try:
+            os.rmdir(name, dir_fd=fd)
+        except OSError:
+            pass
+        finally:
+            os.close(fd)
 
 
 def _not_made(address: str, e: OSError) -> ToolError:

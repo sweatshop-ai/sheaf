@@ -176,3 +176,72 @@ def test_a_create_whose_mark_cannot_be_written_leaves_no_page_and_may_be_sent_ag
     monkeypatch.setattr(browser.hub.docs, "change", change)
     ok(browser, "create", doc="work/made.md", text="# Made\n\nBy a job.\n", generated=True, token=token)
     assert browser.hub.docs.get("work/made.md")["generated"]["by"] == "builder"
+
+
+def test_a_create_with_generated_has_its_mark_before_its_file_is_written(browser, plan, work, monkeypatch):
+    """The mark lands before the file, so a page save that reads the new file finds it marked (ticket 183 BD). Here
+    the hub does not place the page, so the name's lock holds nothing that a save would wait on."""
+    from sheafmd import mcp
+    token, real, seen = Tokens().add("builder", write=True), mcp.create_file, []
+
+    def write(top, rel, text, judge=None):
+        seen.append(browser.hub.docs.get("work/made.md").get("generated"))
+        return real(top, rel, text, judge)
+    monkeypatch.setattr(mcp, "create_file", write)
+    ok(browser, "create", doc="work/made.md", text="# Made\n\nBy a job.\n", generated=True, token=token)
+    assert seen and seen[0] is not None and seen[0]["by"] == "builder"
+
+
+def test_a_create_with_generated_whose_file_cannot_be_written_leaves_no_mark(browser, plan, work, monkeypatch):
+    """The mark set before the file is taken back when the file is then refused (ticket 183 BD)."""
+    from sheafmd import mcp
+    token = Tokens().add("builder", write=True)
+
+    def full(top, rel, text, judge=None):
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(mcp, "create_file", full)
+    refused(browser, "create", doc="work/made.md", text="# Made\n\nBy a job.\n", generated=True, token=token)
+    assert not (work / "made.md").exists()
+    assert "generated" not in browser.hub.docs.get("work/made.md")
+
+
+def test_a_create_with_generated_of_a_name_taken_leaves_that_pages_mark_alone(browser, plan, monkeypatch):
+    """The mark is set only once the name is found free: a create refused as `exists` never marks the page there."""
+    token = Tokens().add("builder", write=True)
+    refused(browser, "create", doc=DOC, text="# Made\n\nBy a job.\n", generated=True, token=token)
+    assert "generated" not in browser.hub.docs.get(DOC)
+
+
+def test_two_creates_with_generated_of_one_name_leave_the_page_made_marked(browser, plan, work, monkeypatch):
+    """The second create comes while the first has set its mark and not yet written its file. Both marks are the
+    same token's in the same minute, so the loser's take-back cannot tell them apart: the two are made one after the
+    other, and the page made keeps its mark (ticket 183 BD)."""
+    import threading
+
+    from sheafmd import mcp
+    token, real, answers, threads = Tokens().add("builder", write=True), mcp.create_file, [], []
+    send = {"doc": "work/made.md", "text": "# Made\n\nBy a job.\n", "generated": True, "token": token}
+
+    def create():
+        try:
+            answers.append(ok(browser, "create", **send))
+        except AssertionError as e:     # refused: the name is taken by the other
+            answers.append(e)
+
+    def second():
+        create()
+
+    def first_writes(top, rel, text, judge=None):
+        monkeypatch.setattr(mcp, "create_file", real)
+        t = threading.Thread(target=second)
+        t.start()
+        t.join(1)
+        threads.append(t)
+        return real(top, rel, text, judge)
+    monkeypatch.setattr(mcp, "create_file", first_writes)
+    create()
+    threads[0].join(10)
+    assert not threads[0].is_alive(), "the second create did not finish"
+    assert sorted(isinstance(a, AssertionError) for a in answers) == [False, True], answers
+    assert (work / "made.md").exists()
+    assert browser.hub.docs.get("work/made.md")["generated"]["by"] == "builder"

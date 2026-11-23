@@ -151,6 +151,38 @@ def test_a_door_create_at_home_whose_generated_mark_cannot_be_written_leaves_no_
     assert not is_error, got
     assert (work / HOME).exists()
 
+
+def test_a_door_create_at_home_whose_generated_mark_cannot_be_written_makes_no_folder_there(team, work, browser,
+                                                                                             tokens, monkeypatch):
+    """The mark is refused before anything is made, so the private folders of the home are not left behind
+    (ticket 183 AZ)."""
+    change = browser.hub.docs.change
+
+    def refuse_the_mark(address, settle):
+        if "generated" in settle({}):
+            raise OSError(28, "No space left on device")
+        return change(address, settle)
+    monkeypatch.setattr(browser.hub.docs, "change", refuse_the_mark)
+    is_error, got = call(browser, "create", token=tokens["alice"], doc=f"work/{SHARED}", text=PRIVATE, generated=True)
+    assert is_error and "not made" in got
+    assert not (work / "acme/tiroir/private").exists()
+
+
+def test_a_door_create_at_home_whose_file_cannot_be_written_takes_back_the_folders_it_made(team, work, browser,
+                                                                                         tokens, monkeypatch):
+    """The folders made at a rectoverso's home go with a file that is then refused, as a loose page's do (ticket 183
+    AZ); a mark set for it goes too."""
+    from sheafmd import mcp
+
+    def full(top, rel, text, judge=None):
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(mcp, "create_file", full)
+    is_error, got = call(browser, "create", token=tokens["alice"], doc=f"work/{SHARED}", text=PRIVATE, generated=True)
+    assert is_error, got
+    assert not (work / "acme/tiroir/private").exists()
+    assert "generated" not in browser.hub.docs.get(f"work/{SHARED}")
+
+
 def test_a_door_create_of_an_open_sheaf_lands_at_the_project(team, work, browser, tokens):
     is_error, got = call(browser, "create", token=tokens["alice"], doc=f"work/{SHARED}", text=OPEN)
     assert not is_error, got

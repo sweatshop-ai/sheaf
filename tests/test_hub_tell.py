@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+import warnings
 
 import pytest
 
@@ -1178,6 +1179,24 @@ def test_finish_names_a_job_that_outlives_it_instead_of_returning(hub):
     finish(hub)
 
 
+def _group(leader: int) -> list[str]:
+    """The processes of the group `leader` started (a delivery's child leads its own group, so its
+    pid is the group's id), as `ps` lists them: pid, group, state and command."""
+    ps = subprocess.run(["ps", "-A", "-o", "pid=,pgid=,stat=,command="], capture_output=True, text=True)
+    return [ln.strip() for ln in ps.stdout.splitlines() if ln.split()[1:2] == [str(leader)]]
+
+
+def _slow_stop(hub, group: list[str], took: float) -> str:
+    """What a stop message that came late, or not at all, waited on: the processes left in the
+    cancelled delivery's group a second after the cancel, the jobs still on the thread and the
+    hub's diagnostics."""
+    rows = [(r["kind"], {k: v for k, v in r.items() if k not in ("at", "source", "kind", "pid", "session")})
+            for r in diagnostics.read()]
+    return (f"the stop message came {took:.2f} s after the cancel; the delivery's group {group}; "
+            f"jobs still there {[(k, len(hub.runner.worker_threads(k, DOC, 'c1'))) for k in ('tell', 'stop')]}; "
+            f"diagnostics {rows}")
+
+
 def _arrived(hub, peer, n):
     """`peer.wait_for(n)`, and when too few arrive, a failure that says where the stop went: the
     hub's diagnostics (a skipped or failed stop records itself there), the jobs still on the thread
@@ -1212,11 +1231,18 @@ def test_cancelling_a_delivery_still_running_kills_it_and_sends_the_stop_message
     assert names == ["tell-cancelled"]                         # not "sent", not "failed"
     assert hub.entry(DOC).live.waiting() == []
     # The stop goes out once the delivery has ended. A child of the delivery that outlives SIGTERM holds
-    # its pipe open until the SIGKILL after the grace, so the stop may come only then (173 Q, red on
-    # macOS): the wait covers the grace, as the hub's own wait does.
-    assert wait_until(lambda: len(session.claude.calls()) == 2
-                      and session.claude.calls()[1]["stdin"],
-                      hub.runner.term_grace + 5.0)                 # the stop went by the courier too
+    # its pipe open until the SIGKILL after the grace, so the stop may come only then: the wait covers
+    # that grace, plus the 5 s it allowed before. Why the stop came late on macOS is not established
+    # (173 Q), so a stop that takes more than a second says what was still there.
+    def stopped():
+        return len(session.claude.calls()) == 2 and session.claude.calls()[1]["stdin"]
+    asked = time.monotonic()
+    if not wait_until(stopped, 1.0):
+        group = _group(first)                                   # read while it still holds the stop up
+        came = wait_until(stopped, hub.runner.term_grace + 4.0)  # the stop went by the courier too
+        seen = _slow_stop(hub, group, time.monotonic() - asked)
+        assert came, seen
+        warnings.warn(seen)
     assert "pressed Cancel on comment c1" in session.claude.calls()[1]["stdin"]
 
 

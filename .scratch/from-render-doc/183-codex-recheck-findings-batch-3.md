@@ -6,13 +6,13 @@
 
 **From:** the third re-check of Codex NO-GO findings on merged PRs (2026-11-23, morning). It covers 19 PRs (#499 #501 #503 #514 #515 #517 #518 #520 #521 #523 #524 #525 #526 #527 #529 #531 #534 #535 #536) and the highest review round of each. Triaged against main 68f63f6e. The briefs hold 30 findings, not the 31 first counted. Letters continue from 182 (G to U), in PR order: V to Z, then AA to AY.
 
-**Counts:** 32 findings:
+**Counts:** 33 findings:
 
 - 20 still present: 1 serious, 19 minor.
 - 7 already fixed on main.
 - 2 already filed: 182 G and ticket 137.
 - 1 not a defect.
-- 2 filed later: BU and BV, seen in BS's review.
+- 3 filed later: BU and BV, seen in BS's review; BX, from #631's review.
 
 Codex marked all 30 serious; the ratings below are the triage's own. Serious means a wrong result in ordinary use, a crash, data loss, or a security or privacy breach. Minor means the defect needs a narrow race, a malformed answer from a peer, or an unusual name, or it changes only a status code, a log row or the form of the source.
 
@@ -65,6 +65,7 @@ Each open item has one box. Write a red test on main first for each. If an item 
 - [ ] **BU** (seen in BS's review, 2026-11-23; the same on main; minor): a foreign comment right before a closing tag with no opener at the start of a list item loses the tag on save. Probed: `- a\n- <!-- f --></x1>Start b here.` with one word edited saves as `- a\n- <!-- f -->Start b there.`; without the comment the tag stays. The save is not refused, so the tag's bytes are gone silently. With a sheaf comment in place of the foreign one the save is refused ("block holds raw HTML the edit cannot keep"), which loses nothing.
 - [ ] **BV** (seen in BS's review, 2026-11-23; the same on main; minor): a comment at the end of an emphasis, followed by a closing tag with no opener outside it, saves with the tag moved inside the emphasis and before the comment. Probed: `*Start<comment>*</x1> b here.` saves as `*Start</x1><comment>* b there.`. BS counts only the comments beside the tag in the same parent, so a comment one level down is not counted.
 - [ ] **BW** (from #627, review round 2, minor): in `trash` (`hub/archive.py`), when the look at what the rename moved fails (something outside the hub took the entry from the trash in that instant), the delete is refused with 409 before the page's marks are cleared: its archived, seen and keep marks stay for an address that is now empty, and a page later made at that address inherits them. Clear the marks whenever the page has left its address, refused or not.
+- [ ] **BX** (from #631, review round 1, minor): BS's `lead` and `trail` in `_lone_as_text` (`src/sheafmd/edit.py`) count how many comments stood beside a closing tag with no opener, not which ones, and on the page `comment_re` matches any comment placeholder. When the user deletes the comment on one side of the tag and keeps the one on the other side, the tag steps over the wrong one: source `Start<c1></x1><c2> b here.`, page with c1 removed `Start<c2> b there.`, saves as `Start<c2></x1> b there.` instead of `Start</x1><c2> b there.`. The mirror holds for `trail` at the start of an item or cell. Direction: record the comments' ids (or raw text for foreign ones) and step only over those.
 
 ## Already filed
 

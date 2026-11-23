@@ -7,7 +7,7 @@ are drawn by the system; the test leaves ACCESSORY px for them), and whether iOS
 test shows the cause the page controls: a 14px font, and a page wider than the screen). Only a real iPhone shows it."""
 import pytest
 
-from pagehelp import at, open_with_comment, select, select_by_touch, rewrite
+from pagehelp import at, open_with_comment, room_under_box, select, select_by_touch, rewrite
 
 pytestmark = pytest.mark.page
 
@@ -261,3 +261,15 @@ def test_the_dragged_place_comes_back_when_the_keyboard_closes(phone):
     keyboard(page, 844 - KEYBOARD)
     keyboard(page, 844)
     assert rects(page)["pop"] == pytest.approx(dragged, abs=1 / 64 + 1e-6)
+
+
+def test_the_room_under_a_dragged_box_goes_while_it_is_docked_and_comes_back_with_its_place(phone):
+    """183 BP: dock() takes the room under a moved box away (a fixed box lengthens no page) and undock() puts it back, under
+    the box at its dragged place."""
+    page = composer(phone)
+    drag_band(page, -20, 60)
+    keyboard(page, 844 - KEYBOARD)
+    assert page.evaluate("document.querySelectorAll('.rd-room').length") == 0
+    keyboard(page, 844)
+    ok, got = room_under_box(page)
+    assert ok, got

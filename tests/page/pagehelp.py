@@ -244,6 +244,15 @@ def open_with_comment(tab, md, quote, text, author="Ada", when="2026-10-14T10:00
     return tab.open().page
 
 
+def room_under_box(page):
+    """(whether the empty room a moved comment box keeps under itself, `.rd-room`, lies right under it and is 8 px tall, what
+    was measured). Ticket 183 BP."""
+    got = page.evaluate("""(() => { const b = document.querySelector('#rd-popover'), r = document.querySelector('.rd-room');
+        return r && { follows: r.previousSibling === b, top: parseFloat(r.style.top), foot: b.offsetTop + b.offsetHeight,
+                      height: parseFloat(r.style.height) }; })()""")
+    return bool(got) and got["follows"] and abs(got["top"] - got["foot"]) < 1 and got["height"] == 8, got
+
+
 def comment_on(tab, start, end, body):
     """Select, type and send; returns the comment once it is in the file. A mouse selection opens the box by
     itself; a touch screen offers the Comment bar first."""

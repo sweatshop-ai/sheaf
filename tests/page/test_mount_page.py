@@ -240,6 +240,34 @@ def test_the_mounted_page_keeps_the_mode_switch_and_a_selection_only_opens_the_b
     assert f.js("return root.activeElement && root.activeElement.tagName;") == "TEXTAREA"
 
 
+def test_on_the_mounted_page_a_box_the_front_scrolled_out_of_view_stays_where_it_was_dropped(front):
+    """183 BN: on the mounted page the visible area is the host clipped to the window, so it changes height as the front
+    scrolls. A moved box the front scrolled out of view below that area was pulled back into it when the box next changed
+    size."""
+    f = front.open()
+    f.page.evaluate("document.getElementById('pane').style.height = '1400px'")       # a host taller than the window
+    f.drag(f.point("main", "about", end=False), f.point("main", "apples", end=True))
+    until(lambda: f.has("#rd-popover textarea"), what="the box, opened by the selection")
+    box = "const b = root.querySelector('#rd-popover'); "
+    h = f.js(box + "return b.getBoundingClientRect().height;")
+    f.page.evaluate("(y) => window.scrollTo(0, y)", h + 38)           # the host's head above the window: the area is the window
+    x, y = f.centre("#rd-popover .rd-head .rd-quote")
+    m = f.page.mouse
+    m.move(x, y)
+    m.down()
+    m.move(x, y + 2500, steps=8)
+    m.up()
+    before = f.js(box + "return [b.offsetLeft, b.offsetTop];")
+    f.page.evaluate("window.scrollTo(0, 0)")                          # the box goes down with the host, past the window's foot
+    f.page.evaluate("new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))")
+    top = f.js(box + "return b.getBoundingClientRect().top;")
+    assert top >= 760, ("the test's own premise: the box lies below the window", top)
+    f.js(box + "const d = document.createElement('div'); d.style.height = '40px'; b.querySelector('.rd-head').after(d);")
+    f.page.evaluate("new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))")
+    f.page.wait_for_timeout(100)            # past the box's own size observer
+    assert f.js(box + "return [b.offsetLeft, b.offsetTop];") == before
+
+
 def test_a_real_ctrl_c_in_the_mounted_boxs_empty_field_puts_the_passage_on_the_clipboard(any_front):
     f = any_front.open()
     f.drag(f.point("main", "about", end=False), f.point("main", "apples", end=True))

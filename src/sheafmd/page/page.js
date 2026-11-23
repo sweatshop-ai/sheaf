@@ -74,9 +74,9 @@ var create = function (ROOT, CFG, opts) {
     };
   }
   // What can be seen, in the client coordinates a rectangle is measured in: the window, or the part of it the
-  // mounted page's scroller shows.
-  function viewRect() {
-    var w = document.documentElement.clientWidth, h = window.innerHeight;
+  // mounted page's scroller shows. `winW` and `winH` measure it in a window of that size instead of the window as it is.
+  function viewRect(winW, winH) {
+    var w = winW === undefined ? document.documentElement.clientWidth : winW, h = winH === undefined ? window.innerHeight : winH;
     if (!MOUNTED) return { left: 0, top: 0, right: w, bottom: h };
     var b = BODY.getBoundingClientRect();
     return { left: Math.max(0, b.left), top: Math.max(0, b.top),
@@ -1384,6 +1384,7 @@ var create = function (ROOT, CFG, opts) {
       stopDictation(true);
       unpaintWidened();
       if (pop._room) pop._room.remove();
+      if (pop._sizeWatch) pop._sizeWatch.disconnect();     // the observer of a moved box would keep the closed box in memory (183 BO)
       pop.remove(); pop = null; popId = null; drag = null; paint(null); setTimeout(flushHold, 0);
       setTimeout(function () { if (mouseDown) keptDue = true; else drawKept(); }, 0);
     }
@@ -2122,21 +2123,23 @@ var create = function (ROOT, CFG, opts) {
     if (!pop._moved && window.ResizeObserver) {
       // A box that grows after its last draw (the line "being sent" goes, the form comes back) is held inside again too.
       var moved = pop;
-      new ResizeObserver(function () { if (pop === moved) clampMoved(); }).observe(moved);
+      moved._sizeWatch = new ResizeObserver(function () { if (pop === moved) clampMoved(); });
+      moved._sizeWatch.observe(moved);
     }
     pop._moved = true;
   });
   // The box at (left, top) in client coordinates, held MOVE_EDGE inside the visible area (a box taller than the area keeps its
-  // head), and the size of the area and of the box it was held against, which clampMoved() compares with.
-  function putInside(left, top) {
+  // head), and the sizes it was held against, which clampMoved() compares with. With `keepTop` only its left is held: a box
+  // scrolled out of view keeps its height in the page.
+  function putInside(left, top, keepTop) {
     var v = viewRect(), w = pop.offsetWidth, h = pop.offsetHeight, o = pageOrigin();
     var x = Math.max(v.left + MOVE_EDGE, Math.min(left, v.right - w - MOVE_EDGE));
-    var y = Math.max(v.top + MOVE_EDGE, Math.min(top, v.bottom - h - MOVE_EDGE));
+    var y = keepTop ? top : Math.max(v.top + MOVE_EDGE, Math.min(top, v.bottom - h - MOVE_EDGE));
     var fixed = pop.style.position === 'fixed';
     pop.style.left = (fixed ? x : o.x + x) + 'px';
     pop.style.top = (fixed ? y : o.y + y) + 'px';
     pop.style.right = '';
-    pop._heldIn = sizesOf(v);
+    pop._held = sizesOf(v);
     roomBelow();
   }
   // A box held at the foot of a short page is the page's lowest part: the page ends at the box, and when the box shrinks
@@ -2150,19 +2153,28 @@ var create = function (ROOT, CFG, opts) {
     room.style.height = MOVE_EDGE + 'px';
     if (room.previousSibling !== pop) pop.parentNode.insertBefore(room, pop.nextSibling);
   }
-  function areaOf(v) { return [v.right - v.left, v.bottom - v.top].join(); }
-  function sizesOf(v) { return areaOf(v) + ',' + [pop.offsetWidth, pop.offsetHeight].join(); }
-  // A moved box is held inside the visible area again only when the area or the box changed size since it was last held
-  // (a window made smaller, a reply that made the box taller), and one that lies inside the new area does not move. A box
-  // the reader scrolled out of view with the text stays where it was dropped when only the box changed size; a smaller
-  // area brings it back even when the box now lies wholly past the area's new edge.
+  // The sizes a moved box was held against: the window's, the visible area's and the box's own.
+  function sizesOf(v) {
+    return { winW: document.documentElement.clientWidth, winH: window.innerHeight, w: v.right - v.left, h: v.bottom - v.top,
+             boxW: pop.offsetWidth, boxH: pop.offsetHeight };
+  }
+  function sameSizes(a, b) {
+    return !!a && a.winW === b.winW && a.winH === b.winH && a.w === b.w && a.h === b.h && a.boxW === b.boxW && a.boxH === b.boxH;
+  }
+  function meets(r, v) { return r.bottom > v.top && r.top < v.bottom; }
+  // A moved box is held inside the visible area again only when the window, the area or the box changed size since it was last
+  // held (a window made smaller, a reply that made the box taller), and one that lies inside the new area does not move. A box
+  // the reader scrolled out of view with the text keeps its height in the page, also when the area changes size on its own (a
+  // phone's URL bar that hides or shows, the mounted page's host clipped to the window as the page scrolls; 183 BN); it is
+  // only held inside the area's width. It is out of view when it meets neither the area now nor the area measured, where the
+  // text is now, in the window it was held in. A window made smaller brings back a box that lay inside the larger one, even
+  // when it now lies wholly past the area's new edge.
   function clampMoved() {
     if (!pop || !pop._moved || pop.classList.contains('rd-docked')) return;
-    var v = viewRect(), held = pop._heldIn || '';
-    if (held === sizesOf(v)) return;
-    var r = pop.getBoundingClientRect(), sameArea = held.split(',').slice(0, 2).join() === areaOf(v);
-    if (sameArea && (r.bottom <= v.top || r.top >= v.bottom)) { pop._heldIn = sizesOf(v); roomBelow(); return; }     // scrolled away with the text: left there
-    putInside(r.left, r.top);
+    var v = viewRect(), held = pop._held, now = sizesOf(v);
+    if (sameSizes(held, now)) return;
+    var r = pop.getBoundingClientRect(), was = held ? viewRect(held.winW, held.winH) : v;
+    putInside(r.left, r.top, !meets(r, v) && !meets(r, was));
   }
   function dropped(e) {
     if (!drag || e.pointerId !== drag.id) return;

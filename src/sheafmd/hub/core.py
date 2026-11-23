@@ -760,7 +760,9 @@ class Hub:
         if line := self.read_only_line(e.address, waking=bool(self.may_wake(e.address, key))):
             meta["readonly"], meta["why_readonly"] = True, line
         if line := self.generated_line(e.address):
-            meta["edit"], meta["why"], meta["generated"], meta["actions"] = False, line, True, []     # no button is drawn that a 403 answers
+            meta["edit"], meta["why"], meta["generated"] = False, line, True
+            # No button is drawn that a 403 answers; a pressed one-off stays, locked, as on the row (9.10): it writes nothing.
+            meta["actions"] = [a for a in meta["actions"] if a["pressed"] and not a["toggle"]]
         if "branch" in meta and meta.get("readonly"):
             del meta["branch"]                  # a read-only page saves nowhere: it carries no branch to save on
         if member is None:

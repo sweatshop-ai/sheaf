@@ -1017,7 +1017,9 @@ def test_a_job_registered_when_a_forget_comes_is_refused_and_its_work_never_runs
 
     def forgotten_first(e):
         # Another request's forget, which takes the moves' lock before anything of the Tell's: its body is what comes here.
-        forgotten.append(hub._forget_root("work").name)
+        root, popped = hub._let_go_root("work")
+        hub._forget_entries(popped)
+        forgotten.append(root.name)
         return real(e)
     monkeypatch.setattr(hub.tell, "_is_current", forgotten_first)
     r = post(browser, "/_/tell", hash=held)

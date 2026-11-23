@@ -448,7 +448,7 @@ def test_a_move_never_reads_or_drops_the_page_of_a_folder_that_took_the_loose_ro
 
 
 def test_a_forget_waits_for_a_move_that_drops_the_page_and_leaves_the_folder_that_takes_the_name_its_own(two, tmp_path):
-    """181 A box 24, the part left by name: `moved_remote` finds the root, and forgets the stores, by the root's name. A
+    """8.2, 9.11 (181 A box 24, the part left by name): `moved_remote` finds the root, and forgets the stores, by the root's name. A
     forget that comes while the page is dropped waits for the move (it takes the moves' lock): the move drops the moving
     root's file and what the hub keeps of it, and the folder that takes the name afterwards keeps its page and its keep
     mark."""

@@ -354,7 +354,7 @@ def test_a_member_tells_through_the_tell_route_only_their_own_agent_and_cannot_c
 
 
 def test_a_cancel_from_a_page_of_a_forgotten_root_never_ends_the_same_id_tell_of_the_folder_that_took_the_name(browser, talk, tmp_path, monkeypatch):
-    """182 H: the cancel compares the page's root with the one that holds the name, and ends the Tell, in one step. A
+    """7.3, 182 H: the cancel compares the page's root with the one that holds the name, and ends the Tell, in one step. A
     forget, and another folder that takes the name and Tells its own thread c1, while the cancel runs, waits for the
     cancel: the other folder's Tell is never ended by a page of the forgotten root."""
     from sheafmd.hub.handler import Handler
@@ -365,7 +365,7 @@ def test_a_cancel_from_a_page_of_a_forgotten_root_never_ends_the_same_id_tell_of
     again = tmp_path / "again" / "work"
     again.mkdir(parents=True)
     (again / "plan.md").write_text(talk.read_text(encoding="utf-8"), encoding="utf-8")
-    real, taken = Handler._root_id, []
+    real, taken, swapping = Handler._root_id, [], []
 
     def take():                             # another request's, which holds nothing of the cancel's
         browser.hub.forget_root("work")
@@ -382,7 +382,6 @@ def test_a_cancel_from_a_page_of_a_forgotten_root_never_ends_the_same_id_tell_of
         t.join(2)
         swapping.append(t)
         return held
-    swapping = []
     monkeypatch.setattr(Handler, "_root_id", compared)
     assert browser.post("/_/cancel", {"doc": DOC, "id": "c1", "root": old}).status == 200
     swapping[0].join(10)

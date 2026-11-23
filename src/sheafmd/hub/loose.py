@@ -300,7 +300,7 @@ class Loose:
         """Take back a loose root a refused create had just made, if nothing has been put in it: its hub root, its entry
         in `loose.json`, its folder, and the root it added to the member. A root that holds anything stays. The moves'
         lock first: the forget takes it, and a create in a loose root holds it before it asks this registry."""
-        from . import moves
+        from . import moves         # here, not at the top: moves imports this module
         with moves.exclusive(), self._lock, state.file_locked("loose.lock"):
             folder = self._read().get(member.id)
             if folder is None or os.path.realpath(folder) != os.path.realpath(root.path):

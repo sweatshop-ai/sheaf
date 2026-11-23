@@ -258,12 +258,19 @@ class Archive:
                     try:
                         os.rename(sname, dname, src_dir_fd=sfd, dst_dir_fd=dfd)
                     except FileNotFoundError:
+                        if os.path.lexists(src):        # the trash folder went, not the page
+                            raise loose.Refused("the trash of the loose root went away during the delete: try again") from None
                         raise Gone(rel) from None
                     except OSError as e:
                         raise loose.Refused(f"the page could not be moved to the trash ({e.strerror})") from None
                     # A rename takes whatever is at the name, where the link it replaces refused a folder: a folder another
                     # process put there since the look goes back, and the delete is refused.
-                    if not stat.S_ISREG(os.stat(dname, dir_fd=dfd, follow_symlinks=False).st_mode):
+                    try:
+                        moved = os.stat(dname, dir_fd=dfd, follow_symlinks=False).st_mode
+                    except OSError as e:
+                        raise loose.Refused(f"the page was moved to the trash, then something else took it from there "
+                                            f"({e.strerror})") from None
+                    if not stat.S_ISREG(moved):
                         try:
                             os.rename(dname, sname, src_dir_fd=dfd, dst_dir_fd=sfd)
                         except OSError as e:

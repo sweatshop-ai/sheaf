@@ -2115,7 +2115,7 @@ def _an_intruder_after_the_root_id(box, rectoversos, tmp_path, monkeypatch):
 @pytest.mark.parametrize("tool", ["reply", "update"])
 def test_a_door_write_never_lands_in_a_root_that_took_the_name_after_its_root_id_was_read(
         box, browser, rectoversos, tmp_path, monkeypatch, tool):
-    """8.11: a door write reads the id of its root, then writes under the name's lock. A root forgotten and its name
+    """8.2, 8.11: a door write reads the id of its root, then writes under the name's lock. A root forgotten and its name
     taken by another folder in between must not take the write: its file stays as it was, and nothing is left there
     uncommitted."""
     from helpers import call

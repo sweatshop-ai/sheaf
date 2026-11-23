@@ -33,6 +33,7 @@ One box per item. Red test first on main for each; an item that cannot be reprod
 ## D. Stale `/live/join` after a leader hand-over (from #484, minor)
 
 - [ ] `handler.py:1021-1036` calls `leave(key)` on a newer stream when an old join arrives late. Either the handler ignores it, or `Leader.stop` (`live.js:168`) aborts the request with an `AbortController`. Needs a page test with a delayed old join.
+  - In review in #601 (Gilles), head `6562f2fb`: handler fix (a key a newer connection of the same member has had is never taken by an older one), three handler tests red on main, green there; CI run 45097292575 green; boss_review round 1 GO (fallback, provisional, Codex at its limit). No page test: the defect is the handler's order of requests, which the handler tests drive directly. Tick with the merge sha. Handoff `.scratch/handoffs/2026-11-23-181-D-stale-join.md`.
 
 ## E. Emoji token provenance (from #479, minor)
 

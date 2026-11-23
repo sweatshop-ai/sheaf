@@ -1,6 +1,6 @@
 # Handoff: ticket 183 BU, BV and BX merged in #634 (2026-11-23)
 
-**Status:** merged in #634 (merge `899a25cf`, head `10fcc4e5`). Review: Matt's code-review (standards and spec), boss_review round 1 GO on `9b677f3a` and round 2 (fix pass, `--since 9b677f3a`) GO on `10fcc4e5`, both provisional: Opus fallback, Codex at its usage limit until 2026-11-24 12:39 UTC. CI green on `10fcc4e5`. Worktree and branch `imani/183-bu-bv-bx` removed; nothing on t-compute.
+**Status:** merged in #634 (merge `899a25cf`, head `10fcc4e5`). Review: Matt's code-review (standards and spec), boss_review round 1 GO on `9b677f3a` and round 2 (fix pass, `--since 9b677f3a`) GO on `10fcc4e5`, both provisional: Opus fallback, Codex at its usage limit until 2026-11-24 12:39 UTC. CI green on `10fcc4e5`. Worktree and branch `imani/183-bu-bv-bx` removed; nothing on the CI runner host.
 
 ## What changed (`src/sheafmd/edit.py`, `_raw_tags`, `_lone_as_text`, `_convert_with_comments`)
 

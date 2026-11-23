@@ -7,7 +7,7 @@
 - #618 (core.py batch: 182 P, R; 183 AM, AO) merged as 2f8620d3, ticked in 25341e51.
 - #617 (archive and the moved comment box: 183 AN, AX, AK, X, Y, AP) merged as b96f36bb. Head 82fe828e, CI green, full review round 6 provisional GO (Opus fallback; Codex was at its limit and still has to re-review).
 - Ticked in e7005373. The same commit files the open minors from #617's review rounds as 183 BJ to BQ: archive.py BJ to BM, page.js BN to BP, sheaf.js BQ. It also adds a partial-done note to box 1 of `.scratch/follow-ups/comment-box-drag-gaps.md` and opens `.scratch/follow-ups/restore-trash-by-path.md`.
-- Cleaned up: the worktree `/tmp/worktree-elke-183`, the branch (local; the remote was deleted at the merge) and `~/vikram-617` on t-compute.
+- Cleaned up: the worktree `/tmp/worktree-elke-183`, the branch (local; the remote was deleted at the merge) and `~/vikram-617` on the CI runner host.
 
 ## Fix in #617 worth knowing
 

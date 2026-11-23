@@ -39,7 +39,7 @@
 
 - **Follow-ups from #573's review (minor, not in #573):**
   - [x] A page both read-only (a clone, SPEC 14) and generated shows only the read-only note (`page.js:448`); SPEC 10.1 wants the generated notice too.
-    Done in PR #639: both notes, the read-only line first; SPEC 10.1 says so. Page test `test_a_read_only_page_that_is_generated_shows_both_notices` (red with the old page.js on t-compute). Merged as 57833f96.
+    Done in PR #639: both notes, the read-only line first; SPEC 10.1 says so. Page test `test_a_read_only_page_that_is_generated_shows_both_notices` (red with the old page.js on the CI runner host). Merged as 57833f96.
   - [x] The List hides a generated rectoverso's locked pressed one-offs too ("Approve ✓ by, date"); they write nothing and could stay drawn.
     Done in PR #639: a pressed one-off stays drawn, locked, with no action number; nothing pressable is drawn; SPEC 9.10. Test `test_a_generated_rectoverso_still_draws_its_locked_pressed_one_offs` (red on main). Merged as 57833f96.
   - [ ] `/_/sessions` on a generated page answers 403 before the 400 shape checks; harmless, SPEC 8.5 row order says otherwise.

@@ -21,7 +21,7 @@ assert peer.owners(conn_of(cli)) == [ME]
 E  assert [20301, 20301] == [20301]
 ```
 
-The test turns the netlink answer into "nothing", so `sockets` reads `/proc/net/tcp`. That table held the client's end of the connection twice. Host state at the end of the job: load average 32.95 / 27.70 / 18.00 on the t-compute runner, which has 32 cores shared by three runners and one network namespace.
+The test turns the netlink answer into "nothing", so `sockets` reads `/proc/net/tcp`. That table held the client's end of the connection twice. Host state at the end of the job: load average 32.95 / 27.70 / 18.00 on the CI runner host, which has 32 cores shared by three runners and one network namespace.
 
 ## Cause
 

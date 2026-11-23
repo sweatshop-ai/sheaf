@@ -175,6 +175,90 @@ def test_two_rows_for_one_connection_that_name_one_user_are_that_user(handler, h
     assert r.status == 303
 
 
+# ── a read of /proc/net/tcp is no snapshot (ticket 186) ──────────────────────
+# The kernel prints the table one read() at a time and resumes by position in its hash table, so a
+# socket opened or closed elsewhere between two reads shifts the rows: one is listed again, or skipped.
+
+def test_a_socket_the_table_lists_twice_is_one_socket(proc):
+    proc.write(v4=[the_row(ME), the_row(ME)])
+    assert peer.sockets(conn()) == [peer.Socket(ME, 12345)]
+    assert peer.owners(conn()) == [ME]
+
+
+def test_two_rows_of_one_inode_that_name_two_users_stay_two_and_refuse(proc):
+    # One inode is one socket, so two uids for it is a table that cannot be trusted: never collapsed.
+    proc.write(v4=[the_row(ME), the_row(THEM)])
+    assert peer.owners(conn()) == [ME, THEM]
+    assert peer.check(conn()).kind == peer.UNKNOWN
+
+
+def test_sockets_no_process_holds_are_not_collapsed(proc):
+    # Inode 0 names no socket, so two such rows carry no identity to collapse on.
+    proc.write(v4=[row(CLIENT, HUB, ME, state="04", inode=0), row(CLIENT, HUB, ME, state="04", inode=0)])
+    assert peer.sockets(conn()) == [peer.Socket(ME, 0), peer.Socket(ME, 0)]
+
+
+def test_the_rows_keep_the_order_they_were_first_seen_in(proc):
+    proc.write(v4=[the_row(THEM), the_row(ME), the_row(THEM)])
+    assert peer.owners(conn()) == [THEM, ME]
+
+
+def reads_that_skip(monkeypatch, skipped):
+    """`_owners` that finds nothing in its first `skipped` reads of a table, then reads it: the row
+    skipped by a read that a socket elsewhere shifted. Returns the list of tables read, in order."""
+    real, read = peer._owners, []
+
+    def owners(table, local, remote):
+        read.append(table.name)
+        return [] if len(read) <= skipped else real(table, local, remote)
+    monkeypatch.setattr(peer, "_owners", owners)
+    return read
+
+
+def test_a_row_one_read_skipped_is_found_by_the_read_after_it(proc, monkeypatch):
+    proc.write(v4=[the_row(ME)])
+    read = reads_that_skip(monkeypatch, skipped=2)          # tcp and tcp6 of the first read
+    assert peer.check(conn()) is None
+    assert read == ["tcp", "tcp6", "tcp", "tcp6"]
+
+
+def test_a_row_two_reads_skipped_refuses(proc, monkeypatch):
+    proc.write(v4=[the_row(ME)])
+    read = reads_that_skip(monkeypatch, skipped=4)
+    assert peer.check(conn()).kind == peer.UNKNOWN
+    assert read == ["tcp", "tcp6", "tcp", "tcp6"]
+
+
+def test_a_connection_that_is_not_there_is_read_twice_and_refused(proc, monkeypatch):
+    read = reads_that_skip(monkeypatch, skipped=0)
+    assert peer.check(conn()).kind == peer.UNKNOWN
+    assert read == ["tcp", "tcp6", "tcp", "tcp6"]
+
+
+def test_a_row_found_in_the_first_read_is_not_read_again(proc, monkeypatch):
+    proc.write(v4=[the_row(THEM)])
+    read = reads_that_skip(monkeypatch, skipped=0)
+    assert peer.check(conn()).kind == peer.OTHER_USER
+    assert read == ["tcp", "tcp6"]
+
+
+def test_the_second_read_lets_no_other_user_in(proc, monkeypatch):
+    proc.write(v4=[the_row(THEM)])
+    reads_that_skip(monkeypatch, skipped=2)
+    assert peer.check(conn()).kind == peer.OTHER_USER
+
+
+def test_a_table_that_cannot_be_read_is_not_read_again(proc, monkeypatch):
+    calls = []
+
+    def broken(table, local, remote):
+        calls.append(table.name)
+        raise PermissionError(13, "Permission denied")
+    monkeypatch.setattr(peer, "_owners", broken)
+    assert peer.check(conn()).kind == peer.UNKNOWN
+    assert calls == ["tcp"]
+
+
 # ── IPv4 and IPv6 ────────────────────────────────────────────────────────────
 
 def test_a_browser_on_an_ipv6_socket_to_the_ipv4_address_is_found_in_tcp6(handler, hub, proc):

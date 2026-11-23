@@ -1,6 +1,6 @@
 # 186: A read of /proc/net/tcp is no snapshot, so the peer lookup can list one socket twice
 
-**Claimed by:** none
+**Claimed by:** Kenji
 
 **Status:** open. Reported by Kenji on 2026-11-23. The test has not been fixed: Kaveh dispatches the fix.
 

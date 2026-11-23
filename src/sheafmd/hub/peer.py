@@ -95,14 +95,23 @@ def _address(pair):
 
 
 def _owners(table: Path, local, remote) -> list[Socket]:
-    """(uid, inode) of every row of `table` whose local and remote ends are these. OSError when the
-    file cannot be read; a line that is no row (the header, a damaged one) is skipped."""
+    """(uid, inode) of every socket `table` lists with these local and remote ends, in the order first
+    listed. OSError when the file cannot be read; a line that is no row (the header, a damaged one) is
+    skipped.
+
+    A read of the file is no snapshot (ticket 186): the kernel prints it one read() at a time and
+    resumes by position in its hash table, so a socket opened or closed elsewhere in between lists one
+    row twice, or skips one. A row that repeats both uid and inode is the same socket and counts once.
+    Rows of one inode with two uids stay two, so that `check` refuses them; rows of inode 0 (held by no
+    process) stay as listed, for inode 0 names no socket."""
     owners = []
     for line in table.read_bytes().decode("ascii", "replace").splitlines():
         f = line.split()
         try:
             if len(f) >= 10 and _endpoint(f[1]) == local and _endpoint(f[2]) == remote:
-                owners.append(Socket(int(f[7]), int(f[9])))
+                found = Socket(int(f[7]), int(f[9]))
+                if not (found.inode and found in owners):
+                    owners.append(found)
         except ValueError:
             continue
     return owners
@@ -165,15 +174,27 @@ def _netlink_owners(local, remote) -> list[Socket]:
     return owners
 
 
+_PROC_READS = 2
+
+
 def _proc_owners(local, remote) -> list[Socket]:
-    """The same from /proc/net/tcp and /proc/net/tcp6. OSError when a file cannot be read."""
-    owners = []
-    for name in TABLES:
-        try:
-            owners += _owners(PROC_NET / name, local, remote)
-        except FileNotFoundError:
-            if name == TABLES[0]:        # a machine with IPv6 off has no tcp6; a Linux with no tcp cannot say
-                raise OSError(0, f"{PROC_NET / name} is not there")
+    """The same from /proc/net/tcp and /proc/net/tcp6. OSError when a file cannot be read.
+
+    Where neither lists the socket, both are read once more (`_PROC_READS`): a read that a socket
+    elsewhere shifted can skip the row (see `_owners`). Two reads, not more: a skip needs a shift at
+    the very place of the row while it is read, so two in a row are rare, and a socket missed by both
+    is refused as unknown, never let in, so the cost of a miss is one sign-in link to follow again.
+    A connection that is not there costs one more read of two small files."""
+    for _ in range(_PROC_READS):
+        owners = []
+        for name in TABLES:
+            try:
+                owners += _owners(PROC_NET / name, local, remote)
+            except FileNotFoundError:
+                if name == TABLES[0]:        # a machine with IPv6 off has no tcp6; a Linux with no tcp cannot say
+                    raise OSError(0, f"{PROC_NET / name} is not there")
+        if owners:
+            break
     return owners
 
 
@@ -224,7 +245,7 @@ def _selftest() -> "Startup":
                 found = owners(Conn(cli.getsockname()[:2], cli.getpeername()[:2]))
     except (OSError, ValueError, TypeError) as e:
         return Startup(raised=f"the owner of a loopback connection could not be read ({getattr(e, 'strerror', None) or e})")
-    if found != [os.geteuid()]:
+    if {*found} != {os.geteuid()}:                     # judged as `check` judges it: the set of uids
         return Startup(off=f"the owner of a loopback connection read as {found}, not the hub's own uid {os.geteuid()}")
     return Startup()
 

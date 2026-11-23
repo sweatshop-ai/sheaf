@@ -5078,10 +5078,11 @@ def test_typing_while_a_change_from_outside_settles_is_refused_and_said(tab):
 # Two pages of one document write the store. Both sends fail at the same instant, each page's renderer in its own
 # process, so neither may have heard of the other's write when it writes: the store must still hold both (each entry
 # has a key of its own, SPEC 10.4).
-# Each page starts to spin at the same fixed time, 300 ms before the instant, never right after its own send: a key
-# press waits for its page to take the key-up, so a page that spun from its send on held the press of the other page
-# until the instant had passed, and the two sends no longer raced (all three jobs of nightly run 45141939187: a key-up
-# that reaches page A after its spin began, forced with a key held 30 ms, made 40 rounds out of 40 idle).
+# Each page spins from its own send on, so it cannot hear the other's write before its own fails. The test gives
+# each page only the key-downs before the instant (the send is on keydown) and the key-ups after it. A whole
+# `press` waits for its page to take the key-up: when page A's spin began first, the press held page B's send
+# past the instant, and the round did not race. That happened in all three jobs of nightly run 45141939187, and
+# in 40 rounds out of 40 when the key was held 30 ms.
 FAIL_TOGETHER = """(at) => {
   const real = window.fetch;
   window.fetch = function (url, init) {
@@ -5090,7 +5091,7 @@ FAIL_TOGETHER = """(at) => {
       (window.__spins = window.__spins || []).push([Date.now(), at]);
       while (Date.now() < at) { }
       done(new Response(JSON.stringify({ok: false, error: 'the hub broke off'}), {status: 500, headers: {'Content-Type': 'application/json'}}));
-    }, Math.max(0, at - 300 - Date.now())));
+    }, 0));
   };
 }"""
 
@@ -5101,16 +5102,20 @@ def test_two_sends_that_fail_at_the_same_instant_on_two_pages_are_both_kept(thre
     b.wait_for_selector("#rd-popover textarea")
     lost, idle = [], []
     for i in range(40):
-        at_ms = int(time.time() * 1000) + 1000
+        at_ms = int(time.time() * 1000) + 700
         for p, who in ((a, "A"), (b, "B")):
             p.evaluate(FAIL_TOGETHER, at_ms)
             p.fill("#rd-popover textarea", f"words from page {who} round {i}")
-        if time.time() * 1000 > at_ms - 500:        # the setup ran into the spins: the round would not race
+        if time.time() * 1000 > at_ms - 300:        # the setup ran into the instant: the round would not race
             idle.append(i)
             continue
-        a.keyboard.press("Control+Enter")
-        b.keyboard.press("Control+Enter")
+        for p in (a, b):
+            p.keyboard.down("Control")
+            p.keyboard.down("Enter")
         a.wait_for_timeout(1300)
+        for p in (a, b):
+            p.keyboard.up("Enter")
+            p.keyboard.up("Control")
         # Both pages were spinning at once, so they ran on two threads: on one, the second spin starts when the first ends.
         (sa, ea), (sb, eb) = (p.evaluate("window.__spins.pop()") for p in (a, b))
         if not (sa < eb and sb < ea):

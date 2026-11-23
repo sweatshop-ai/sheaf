@@ -42,7 +42,11 @@ Loop: press with the keys held 30 ms (`press(..., delay=30)`), so the key-up alw
 
 ### Fix
 
-Each page starts to spin at the same fixed time, 300 ms before the instant, whatever the time of its own send; a round now starts 1000 ms ahead of the instant and counts as idle when its setup runs past 500 ms before it. The two failures still come back at the same instant on two renderers, so the test tries the same race. Under the held-key loop: 40 rounds out of 40 race, both spins starting within 1 ms of each other. Four copies of the real test at once: all pass.
+The test gives each page only the key-downs of Control+Enter before the instant (the send is on keydown, `page.js`) and both key-ups after it. A key-down is taken while its event is handled, before the spin's timer fires, so page B's send no longer waits for page A. Each page still spins from its own send on, so neither hears the other's send-time write before its own send fails: the variant the test's comment names (the store seen without the other's entry) is still the one tried.
+
+A first fix started both spins at a fixed time 300 ms before the instant. It raced, but the review of the PR saw that it gave each page some 200 ms to hear the other's write first, so it tried a narrower race; it was replaced before merge.
+
+Four copies of the test at once on the runner host: 160 rounds out of 160 race, B's spin starting at most 18 ms after A's (the same load gave 13 idle rounds before). The keys are now held through the instant in every round, the condition that made 40 rounds out of 40 idle with `press`.
 
 ## Acceptance
 

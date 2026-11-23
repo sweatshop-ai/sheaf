@@ -520,24 +520,43 @@ def held(hub, address: str):
     of it comes in while it is held, so a writer that finds the file under it writes where the file is, one that
     judges the name's homes finds them as it judged, and a reader reads the file it found, in the folder its text
     says. Nothing to hold where the hub does not place the rectoverso. Gives whether it holds a lock. Re-entrant:
-    `place` and a document's write take it again. Taken first: before the hub's lock (`Hub.entry`), the document's
+    `place` and a document's write take it again. Taken again by a thread that holds it, it is the lock that thread
+    took, never the name found anew: a root forgotten and its name taken by another folder meanwhile would give the
+    other folder's name, a second name lock. Taken first: before the hub's lock (`Hub.entry`), the document's
     own lock (live.py), a file lock and the repo's commit lock (commits.py). Held for disk work only: nothing under
     it waits on the network."""
+    holding = _held_here()
+    if address in holding:
+        yield True
+        return
     got = _where(hub, address)
     if got is None:
         yield False
         return
     with _name_lock(got[1], got[2]):
-        yield True
+        holding.add(address)
+        try:
+            yield True
+        finally:
+            holding.discard(address)
 
 
-def _where(hub, address: str):
-    """(its root, the real path of the root, its name) of a rectoverso's name that the hub places, else None."""
+def _held_here() -> set:
+    """The addresses whose name this thread holds through `held`."""
+    if not hasattr(_THREAD, "holding"):
+        _THREAD.holding = set()
+    return _THREAD.holding
+
+
+def _where(hub, address: str, root_id: str = ""):
+    """(its root, the real path of the root, its name) of a rectoverso's name that the hub places, else None. With
+    `root_id`, the id of the root a writer located its file in (8.11): raises NotFound unless the root the address names
+    now is that one, so a root forgotten and its name taken meanwhile is never the one moved or written in."""
     at = Address.parse(address)
-    if not at.plain or logical(at.rel) != at.rel or not applies(hub, at.root):
-        return None
     root = hub.roots.get(at.root)
-    if root is None:
+    if root_id and (root is None or root.id != root_id):
+        raise NotFound(address)
+    if not at.plain or logical(at.rel) != at.rel or not applies(hub, at.root) or root is None:
         return None
     return root, Path(config.realpath(root.path)), at.rel
 
@@ -667,15 +686,15 @@ def undecided(hub, name: str) -> bool:
     return False
 
 
-def file_at(hub, address: str, bound: str = ""):
+def file_at(hub, address: str, bound: str = "", root_id: str = ""):
     """(the root, the path in it) of the file to read or write for the rectoverso named `address`, or None for a name the
     hub does not place. The one file that holds the name, in the list's root or a private root; a name no file
     holds is the list's root and the name. Raises `Undecided` (a NotFound), so the write goes nowhere and never to
     the list's root under the name, when a name is held by a private root and any other, or the file is not in
     `bound` (the id of the root an open document was made for), whether or not that root is still registered or can
     be looked at. A private root that cannot be looked at (`undecided`) is judged where a name's home is decided:
-    `ahead`, the poll's move and a create."""
-    got = _where(hub, address)
+    `ahead`, the poll's move and a create. `root_id` as in `_where`."""
+    got = _where(hub, address, root_id)
     if got is None:
         return None
     root, top, name = got
@@ -690,7 +709,7 @@ def file_at(hub, address: str, bound: str = ""):
     return root, name
 
 
-def ahead(hub, address: str, old: str, new: str) -> str | None:
+def ahead(hub, address: str, old: str, new: str, root_id: str = "") -> str | None:
     """A writer that is about to write `new` over `old`, the text of the file of the rectoverso named `address`, holding
     the name's lock and the file's lock, moves the file to the home of `new` first (9.11), so the new text is
     written, and rendered, in the folder it says: a reader never meets a visibility with the folder of the other.
@@ -698,8 +717,9 @@ def ahead(hub, address: str, old: str, new: str) -> str | None:
     the writer then finds the file again and writes it there, and commits the write and the move as one. The one
     judge of whether the write may go: a file at the home of `old` that cannot go to the home of `new`, for any
     reason (no owner with a short, the home taken or ignored, a folder or a link that cannot be made), raises
-    `Refused`, and the writer writes nothing; a file that was not at the home of `old` is written as before."""
-    got = _where(hub, address)
+    `Refused`, and the writer writes nothing; a file that was not at the home of `old` is written as before. `root_id`:
+    the root the writer located the file in; a root that took the name since raises NotFound, and nothing moves."""
+    got = _where(hub, address, root_id)
     if got is None:
         return None
     root, top, name = got
@@ -726,7 +746,8 @@ def ahead(hub, address: str, old: str, new: str) -> str | None:
     return gone
 
 
-def place(hub, address: str, member=None, by: str | None = None, commit: bool = True) -> str | None:
+def place(hub, address: str, member=None, by: str | None = None, commit: bool = True,
+          root_id: str = "") -> str | None:
     """Move the file of the rectoverso named `address` to its home, under the lock of its name and its file lock, and
     return the path in the root it left; None when it did not move: home already, a name the hub does not place,
     a file that is a link (which stays where it is written), or a move refused (a `place-refused` row says why: no
@@ -734,8 +755,12 @@ def place(hub, address: str, member=None, by: str | None = None, commit: bool = 
     anything, and only then unlinked where it was. Nothing else moves: the hub keys the rectoverso by its name. With
     `commit`, the root commits `move: <old> -> <new>` as `member`, `by` (a door caller's display name) or else the
     hub (the poll). A writer that moves the file it just wrote passes `commit=False` and commits the write and the
-    move as one (`Hub.committed` with `gone`)."""
-    got = _where(hub, address)
+    move as one (`Hub.committed` with `gone`). `root_id`: the root that writer located the file in; a root that took
+    the name since is not moved in."""
+    try:
+        got = _where(hub, address, root_id)
+    except NotFound:
+        return None
     if got is None:
         return None
     root, top, name = got

@@ -268,7 +268,7 @@ def test_a_late_forget_leaves_the_history_of_a_page_that_moved_to_the_address_me
     history, whose texts may hash as the forgotten document's did. The forget leaves them: they are that page's."""
     v, old_doc = state.Versions(), object()
     shared = v.put(ADDR, "same text\n", writer=old_doc)
-    v.watch(ADDR)
+    v.watch(ADDR, old_doc)
     moved = v.put("proj/elsewhere.md", "same text\n")
     pinned = v.pin("proj/elsewhere.md", "pinned\n", "bob")
     v.rename("proj/elsewhere.md", ADDR)
@@ -280,7 +280,7 @@ def test_a_late_forget_leaves_the_history_of_a_page_that_moved_to_the_address_me
 def test_a_forget_whose_delete_fails_still_ends_its_watch(monkeypatch):
     v, old_doc = state.Versions(), object()
     h = v.put(ADDR, "old\n", writer=old_doc)
-    v.watch(ADDR)
+    v.watch(ADDR, old_doc)
     monkeypatch.setattr(state.Versions, "_pinned", lambda self, folder, h: 1 / 0)
     with pytest.raises(ZeroDivisionError):
         v.forget_texts(ADDR, {h}, writer=old_doc)

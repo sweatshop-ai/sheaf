@@ -665,6 +665,95 @@ def test_a_late_forget_still_takes_the_text_a_write_under_way_put_after_the_deta
     assert store.get(ADDR, new) == "the folder that took the name\n"
 
 
+def _late(doc, text):
+    """`doc`, detached, stores `text` all the same: a write of it was under way at the detach, past its look for a store."""
+    doc._detached = False
+    try:
+        doc._remember(text)
+    finally:
+        doc._detached = True
+
+
+def _live(tmp_path, name, text=DOC, versions=None):
+    """A document of `ADDR` whose file is `name` in `tmp_path`, holding `text`, storing in `versions` (the state folder's)."""
+    md = tmp_path / name
+    md.write_text(text, encoding="utf-8")
+    return rdl.LiveDocument(md, render=lambda t: None, publish=lambda n, d: None, by="Ada",
+                            versions=state.Versions() if versions is None else versions, address=ADDR)
+
+
+def test_a_text_two_forgotten_documents_of_one_address_stored_goes_once_both_have_forgotten(tmp_path):
+    """Ticket 182, follow-up of #611: the root is forgotten, another folder takes the name and is forgotten too before the
+    first forget comes, and both stored one text after their watch. The text is neither's to keep once both are gone."""
+    old = _live(tmp_path, "old.md")
+    old.detach()
+    text = "stored by both\n"
+    _late(old, text)
+    new = _live(tmp_path, "new.md", text)
+    new.detach()
+    old.forget()
+    assert state.Versions().get(ADDR, rds.md_hash(text)) == text       # still the second document's
+    new.forget()
+    assert state.Versions().get(ADDR, rds.md_hash(text)) is None
+
+
+def test_a_second_detach_keeps_the_store_whose_folder_the_first_one_watches(tmp_path):
+    """Ticket 182, follow-up of #611: a document whose store follows its file is detached twice, and by the second its store
+    resolves to another folder. Its forget ends the watch it opened, on the folder it opened it on."""
+    first, second = state.Versions(), state.Versions(tmp_path / "r", "proj")
+    box = {"store": first}
+    doc = _live(tmp_path, "d.md", versions=lambda: box["store"])
+    doc.detach()
+    box["store"] = second
+    doc.detach()
+    doc.forget()
+    assert first._folder(ADDR) not in state.Versions._claims
+
+
+def test_a_forget_that_failed_ends_no_other_documents_watch_when_it_runs_again(tmp_path, monkeypatch):
+    """Ticket 182, follow-up of #611: a late forget that raised has ended its watch; run again, it must not end the watch of
+    the next document of the address, which would then lose the record of what it stores."""
+    old = _live(tmp_path, "old.md")
+    old.detach()
+    pinned = state.Versions._pinned
+    monkeypatch.setattr(state.Versions, "_pinned", lambda self, folder, h: 1 / 0)
+    with pytest.raises(ZeroDivisionError):
+        old.forget()
+    monkeypatch.setattr(state.Versions, "_pinned", pinned)
+    new = _live(tmp_path, "new.md", "the next document\n")
+    new.detach()
+    old.forget()
+    assert state.Versions()._folder(ADDR) in state.Versions._claims
+    new.forget()
+    assert not state.Versions._claims
+
+
+def test_a_late_text_of_a_forgotten_document_does_not_move_with_the_page_that_leaves_its_address(tmp_path):
+    """Ticket 182, follow-up of #611: the forgotten document stored a text late, and a page of the folder that took the name
+    moves away before the forget comes. The text is the forgotten document's alone: it does not go with the page."""
+    old = _live(tmp_path, "old.md")
+    old.detach()
+    text = "written while the root was forgotten\n"
+    _late(old, text)
+    kept = state.Versions().put(ADDR, "the folder that took the name\n")
+    state.Versions().rename(ADDR, "proj/moved.md")
+    old.forget()
+    assert state.Versions().get("proj/moved.md", rds.md_hash(text)) is None
+    assert state.Versions().get("proj/moved.md", kept) == "the folder that took the name\n"
+    assert not state.Versions._claims
+
+
+def test_a_text_stored_at_the_address_after_the_page_moved_away_stays_when_the_late_forget_comes(tmp_path):
+    """The record of the address starts again once the page moved away: what is put there from then on, the very text the
+    forgotten document wrote among it, is another document's, and the late forget leaves it."""
+    old = _live(tmp_path, "old.md")
+    old.detach()
+    state.Versions().rename(ADDR, "proj/moved.md")
+    again = state.Versions().put(ADDR, DOC)
+    old.forget()
+    assert again == rds.md_hash(DOC) and state.Versions().get(ADDR, again) == DOC
+
+
 def test_every_text_handed_to_a_page_is_written_to_disk(stored):
     doc, md, *_ = stored()
     assert state.Versions().get(ADDR, rds.md_hash(DOC)) == DOC

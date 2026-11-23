@@ -166,7 +166,7 @@ def doc_key(address: str) -> str:
 @dataclass
 class _Claims:
     """Who put each hash in one document's versions folder while a late forget watches it (`Versions.watch`)."""
-    watchers: int = 0
+    watchers: set = field(default_factory=set)      # the forgotten documents whose `forget_texts` is still to come
     by_hash: dict = field(default_factory=dict)     # hash -> {writer, ...}; None is a writer that is no document
 
 
@@ -190,7 +190,9 @@ class Versions:
     # document stored it, and the late forget takes out only the texts the old document wrote (SPEC 8.2; ticket 182 L).
     # In memory only, the stored format is unchanged: both documents are of one hub run, and the record is open no
     # longer than that window. Shared by every store, since the forgotten document's store and the new document's are
-    # two objects over one folder.
+    # two objects over one folder. No other process needs recording: one hub runs per OS user (8.1) and only it writes
+    # the state folder's versions (`roots.forget_offline` runs when none does), and in a root's own store, which another
+    # hub or a pull may write, `forget_texts` deletes nothing.
     _claims_lock = threading.Lock()
     _claims: dict = {}          # folder -> _Claims
 
@@ -335,19 +337,20 @@ class Versions:
         if self._root is None or inside:
             shutil.rmtree(self._folder(address), ignore_errors=True)
 
-    def watch(self, address: str):
-        """A document at `address` lost its root (SPEC 8.2), and its `forget_texts` comes later: from now until then,
-        record who puts each text in the folder of `address`, which the folder that takes the name writes to as well.
-        Each `watch` is ended by one `forget_texts`."""
+    def watch(self, address: str, writer):
+        """The document `writer` at `address` lost its root (SPEC 8.2), and its `forget_texts` comes later: from now until
+        then, record who puts each text in the folder of `address`, which the folder that takes the name writes to as well.
+        The watch is `writer`'s, and its `forget_texts` ends it, whatever other document of the address watches too."""
         with self._claims_lock:
-            self._claims.setdefault(self._folder(address), _Claims()).watchers += 1
+            self._claims.setdefault(self._folder(address), _Claims()).watchers.add(writer)
 
     def forget_texts(self, address: str, hashes, inside: bool = False, writer=None):
         """`forget`, for the texts named by `hashes` only, newest and pinned alike: what one document put there, when
         the folder of `address` may hold another document's by now (a forget that came after the name was taken).
         After a `watch`, a hash that a writer other than `writer` put there since stays, and its pins with it, the old
-        document's among them (the same text): that file is the other document's version too. Ends the `watch`, also
-        when a delete fails."""
+        document's among them (the same text): that file is the other document's version too. Ends `writer`'s `watch`,
+        also when a delete fails, and takes `writer` out of the record: a hash it put there with another forgotten
+        document goes with that one's forget."""
         folder = self._folder(address)
         with self._claims_lock:
             watched = self._claims.get(folder)
@@ -357,16 +360,24 @@ class Versions:
                     for h in hashes:
                         if by_hash.get(h, set()) - {writer}:
                             continue
-                        for f in (folder / f"{h}.md", *self._pinned(folder, h)):
-                            try:
-                                f.unlink()
-                            except OSError:
-                                pass
+                        self._unlink(folder, h)
             finally:
                 if watched is not None:
-                    watched.watchers -= 1
-                    if watched.watchers <= 0:
+                    watched.watchers.discard(writer)
+                    for h in [h for h, writers in watched.by_hash.items() if writers == {writer}]:
+                        del watched.by_hash[h]
+                    for writers in watched.by_hash.values():
+                        writers.discard(writer)
+                    if not watched.watchers:
                         del self._claims[folder]
+
+    def _unlink(self, folder: Path, h: str):
+        """The version `h` in the document folder `folder`, newest and pinned alike, gone."""
+        for f in (folder / f"{h}.md", *self._pinned(folder, h)):
+            try:
+                f.unlink()
+            except OSError:
+                pass
 
     def rename(self, old: str, new: str):
         """The versions of the document at `old` are those of `new`: a page that moved keeps its history, newest and
@@ -375,6 +386,17 @@ class Versions:
         src = self._folder(old)
         dst = self._dir(self.dir) / doc_key(self._key(new))
         with self._claims_lock:     # a late forget that watches `new` leaves what moved there: another page's history
+            left = self._claims.get(src)
+            if left is not None:
+                # A late forget watches `old`, and would find none of what moves out of its reach: a text only forgotten
+                # documents put there since the watch is theirs, not the history of the page that moves, so it stays
+                # behind and goes now, as their forget would take it (`forget_texts`). What is put at `old` from now on is
+                # recorded afresh.
+                if self._root is None:
+                    for h, writers in left.by_hash.items():
+                        if writers and writers <= left.watchers:
+                            self._unlink(src, h)
+                left.by_hash.clear()
             if not src.is_dir():
                 shutil.rmtree(dst, ignore_errors=True)      # nothing moved there, so what `new` held is the history of a page that is gone
                 return

@@ -32,3 +32,8 @@ One box per item. Red test first on main for each; an item that cannot be reprod
 ## Fixed on main
 
 Checked on bd3a9333, not repeated above: #486 share 403 (`handler.py:1582`), #486 hub-key mark (`mcp.py:965`), #486 README Ask, #510 typed task offset (`edit.py:447`).
+
+## Follow-ups from PR 606 (fix-pass review round 2, minor)
+
+- [ ] `client.py:403-404` `ask_stop`: a hub that already answers `signal` as the reason in force makes the command fail at once, even under the service, which starts a signalled hub again (14.3). The exit-row check applies the service rule; this early exit does not. SPEC 8.4's "answered `stop` or `signal` … starts no hub" would follow.
+- [ ] Under the service, a `signal` exit row reads the same for a stray SIGTERM (restarted) and a `systemctl stop` or logout (not restarted): the second now waits UPGRADE_WAIT and says "did not come back on the new version". Say so in the code comment and SPEC 8.4, or tell the two apart.

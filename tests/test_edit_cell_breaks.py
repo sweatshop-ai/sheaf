@@ -148,3 +148,12 @@ def test_the_raw_table_a_save_wrote_before_stays_as_it_is_when_another_block_is_
     out, rep = rde.apply_edits(doc, [{"i": 2, "html": "<p>words there</p>"}])
     assert rep["skipped"] == []
     assert out == doc.replace("here", "there")
+
+
+def test_enter_twice_at_the_end_of_code_among_words_in_a_cell_leaves_the_words_out_of_the_code():
+    src = "| a |\n|---|\n| x |"
+    html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", "><code>red<br><br></code> now<")
+    out = saved_table(html, src)
+    assert "<table" not in out
+    row = out.splitlines()[-1]
+    assert re.search(r"`red`<br><br>\s*now\s*\|$", row), row

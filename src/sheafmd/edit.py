@@ -873,6 +873,7 @@ def _split_code_at_breaks(soup):
                 if not _ends_its_cell(br, br.find_parent(["td", "th"])):
                     for x in reversed([br, *after]):
                         code.insert_after(x.extract())
+                    break              # the breaks after it went out with it: none is the code's any more
                 continue
             tail = soup.new_tag("code", attrs=code.attrs)
             for x in after:

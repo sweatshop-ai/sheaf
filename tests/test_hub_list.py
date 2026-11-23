@@ -1775,6 +1775,25 @@ def test_the_page_of_a_sheaf_names_the_rows_buttons_with_who_pressed_a_one_off_a
         ("Share", "", 1, False, [i, 2])]
 
 
+def test_the_page_of_a_generated_rectoverso_draws_its_locked_pressed_one_offs_and_nothing_to_press(
+        committing, box, rectoversos, github):
+    # Ticket 156: the page draws the row's buttons (10.11), so a generated rectoverso's page keeps its locked pressed
+    # one-offs, as its row does (9.10), and draws no button whose tick the mark refuses (7.2).
+    path = rectoversos / JOEY[5:]
+    path.write_text(path.read_text(encoding="utf-8").replace("- [ ] Approve\n", "- [ ] Approve\n- [ ] Done\n- [ ] Share\n"),
+                    encoding="utf-8")
+    git(rectoversos, "commit", "-q", "-am", "Done and Share too")
+    box.hub.the_list.poll()
+    r = box.post("/_/tick", row_press(box.get("/list", member=NELL), JOEY, "Approve"), member=NELL)
+    assert r.status == 200, r.text
+    box.hub.docs.put(JOEY, {**box.hub.docs.get(JOEY),
+                            "generated": {"by": "builder", "id": "tok1", "at": "2026-11-22T10:00:00+0100"}})
+    text = path.read_text(encoding="utf-8")
+    i = next(k for k, b in enumerate(split_md_blocks(text)) if "- [x] Approve" in b.content)
+    assert page_buttons(box.get(f"/{JOEY}", member=NELL)) == [("Approve", "you, 27 Oct", None, False, [i, 0])]
+    assert page_buttons(box.get(f"/{JOEY}", member=DORA)) == [("Approve", "@nell, 27 Oct", None, False, [i, 0])]
+
+
 def test_a_press_from_the_page_that_went_stale_says_to_reload_the_page(box, rectoversos):
     tick = {**row_press(box.get("/list", member=NELL), JOEY), "where": "page"}
     path = rectoversos / JOEY[5:]

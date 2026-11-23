@@ -1383,6 +1383,7 @@ var create = function (ROOT, CFG, opts) {
       if (!stashAll()) return false;
       stopDictation(true);
       unpaintWidened();
+      if (pop._room) pop._room.remove();
       pop.remove(); pop = null; popId = null; drag = null; paint(null); setTimeout(flushHold, 0);
       setTimeout(function () { if (mouseDown) keptDue = true; else drawKept(); }, 0);
     }
@@ -2054,6 +2055,7 @@ var create = function (ROOT, CFG, opts) {
     var st = pop.style;
     if (!pop._was) { pop._was = {}; DOCKED.forEach(function (k) { pop._was[k] = st[k]; }); }
     pop.classList.add('rd-docked');
+    if (pop._room) pop._room.remove();      // a docked box is fixed: it lengthens no page
     st.position = 'fixed';
     st.top = (v.offsetTop + DOCK_GAP) + 'px';
     st.bottom = 'auto';
@@ -2134,6 +2136,18 @@ var create = function (ROOT, CFG, opts) {
     pop.style.top = (fixed ? y : o.y + y) + 'px';
     pop.style.right = '';
     pop._heldIn = sizesOf(v);
+    roomBelow();
+  }
+  // A box held at the foot of a short page is the page's lowest part: the page ends at the box, and when the box shrinks
+  // again the browser scrolls up to the new end, so the box ends flush with the window's foot and a fraction of a pixel
+  // puts it outside (a margin does not lengthen the page). An empty part MOVE_EDGE tall under the box keeps its edge.
+  function roomBelow() {
+    var room = pop._room;
+    if (pop.style.position === 'fixed' || pop.classList.contains('rd-docked')) { if (room) room.remove(); return; }
+    if (!room) room = pop._room = el('div', { 'class': 'rd-room', 'aria-hidden': 'true' });
+    room.style.top = (pop.offsetTop + pop.offsetHeight) + 'px';
+    room.style.height = MOVE_EDGE + 'px';
+    if (room.previousSibling !== pop) pop.parentNode.insertBefore(room, pop.nextSibling);
   }
   function areaOf(v) { return [v.right - v.left, v.bottom - v.top].join(); }
   function sizesOf(v) { return areaOf(v) + ',' + [pop.offsetWidth, pop.offsetHeight].join(); }

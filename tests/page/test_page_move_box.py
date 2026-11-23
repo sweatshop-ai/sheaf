@@ -136,3 +136,20 @@ def test_a_box_moved_to_the_foot_that_grows_with_a_reply_keeps_its_controls_in_v
     until(lambda: p.locator("#rd-popover .rd-msg").count() == 2, what="the reply in the thread")
     until(lambda: rect(p)["height"] > before["height"], what="the box taller with the reply")
     until(lambda: inside_window(p, rect(p))[0], what="the grown box inside the window")
+
+
+def test_a_box_held_at_the_foot_of_a_short_page_keeps_its_edge_when_the_page_shrinks_again(tab, site):
+    """The box is the lowest part of the fixture's short page: when it shrinks again (the line "being sent" goes), the page
+    ends higher and the browser scrolls up to that end. The box keeps its edge (MOVE_EDGE, 8 px) above the window's foot
+    instead of ending flush with it, where a fraction of a pixel puts it outside."""
+    p = open_thread(tab)
+    drag(p, 0, 5000)
+    before = rect(p)
+    p.fill(FIELD, "Because.\n\nAnd a second paragraph.\n\nAnd a third one, so that the box grows.")
+    p.keyboard.press("Enter")
+    until(lambda: p.locator("#rd-popover .rd-msg").count() == 2, what="the reply in the thread")
+    until(lambda: rect(p)["height"] > before["height"], what="the box taller with the reply")
+    p.wait_for_timeout(500)                 # the line "being sent" gone, the page scrolled to its new end
+    foot = p.evaluate("window.innerHeight")
+    b = rect(p)
+    assert b["y"] + b["height"] <= foot - 8 + 0.5, (b, foot)

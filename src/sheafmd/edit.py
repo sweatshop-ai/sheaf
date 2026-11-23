@@ -2003,29 +2003,32 @@ class _Shift:
         return [m for m in difflib.SequenceMatcher(None, old[pre:len(old) - suf], new[pre:len(new) - suf],
                                                    autojunk=False).get_matching_blocks() if m.size]
 
-    def where(self, o: int) -> int:
+    def where(self, offset: int) -> int:
+        """Where `offset`, a place in `old`, lands in `new`."""
         old, new, pre, suf = self.old, self.new, self.pre, self.suf
-        if o <= pre:
-            return o
-        if o >= len(old) - suf:
-            return o + len(new) - len(old)
+        if offset <= pre:
+            return offset
+        if offset >= len(old) - suf:
+            return offset + len(new) - len(old)
         a0, b0, a1, b1 = pre, pre, len(old) - suf, len(new) - suf
         if max(a1 - a0, b1 - b0) > LONE_DIFF_MAX:
             # Two edits far apart: the words around it, if they are there once.
-            left, right = old[max(a0, o - LONE_CONTEXT):o], old[o:o + LONE_CONTEXT]
+            left, right = old[max(a0, offset - LONE_CONTEXT):offset], old[offset:offset + LONE_CONTEXT]
             for ctx, off in ((left + right, len(left)), (left, len(left)), (right, 0)):
                 if ctx and new.count(ctx, b0, b1) == 1:
                     return new.index(ctx, b0, b1) + off
             return pre
         # After the same words when they are still there, else before the words after it when those
         # are, else after the last words before it that are.
-        o, k = o - a0, b0
+        offset, k = offset - a0, b0
         for a, b, n in self.same:
-            if a < o <= a + n:
-                return b0 + b + o - a
-            if a + n <= o:
+            if a < offset <= a + n:
+                return b0 + b + offset - a
+            if a + n <= offset:
                 k = b0 + b + n
-        return next((b0 + b for a, b, n in self.same if a == o), k)
+        return next((b0 + b for a, b, n in self.same if a == offset), k)
+
+
 _ENCLOSED = ("code", "pre")
 # A comment's placeholder (`_convert_with_comments`) is text on the page side only.
 _COMMENT_TOKEN = re.compile("(?<!\u27e6)RDCMT[0-9A-F]{10}(?!\u27e7)")
@@ -2437,7 +2440,7 @@ def _close_up(blocks, touched, dropped) -> None:
                 a.gap = "\n" + LIST_BREAK + "\n\n"
 
 
-def _span_text(blocks, i: int, n: int) -> str:
+def _width_text(blocks, i: int, n: int) -> str:
     """Blocks i to i + n - 1 as the content of one: their text, without the blank lines after the last."""
     return "".join(x.text for x in blocks[i:i + n - 1]) + blocks[i + n - 1].content
 
@@ -2445,7 +2448,7 @@ def _span_text(blocks, i: int, n: int) -> str:
 def _join(blocks, i: int, n: int) -> None:
     """Blocks i to i + n - 1 as one, in block i, the others left empty so that every index holds."""
     b, last = blocks[i], blocks[i + n - 1]
-    b.content = _span_text(blocks, i, n)
+    b.content = _width_text(blocks, i, n)
     b.gap = last.gap
     for x in blocks[i + 1:i + n]:
         x.content = x.gap = ""
@@ -3368,7 +3371,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
         # the id of a comment the file deleted is new, and the page's anchor for the old one
         # must not be bound to it.
         held = {_identity(c) for c in rdc.parse(bb[i].content).comments}
-        current = _span_text(blocks, j, width)
+        current = _width_text(blocks, j, width)
         # A box counts as ticked by this save (SPEC 9.11) only when the file's block is still the one the
         # page held: else the page's boxes are compared with boxes someone else changed since.
         as_held = width == 1 and current == bb[i].content

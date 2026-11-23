@@ -42,7 +42,7 @@ class Titles:
                     self._kept.clear()
                 kept = (the_list.read_rectoverso(rel, text).title, shared_by(text),
                         md_hash(text) if visibility.audience(text) is None else "")
-                self._kept[key] = kept      # another thread's clear() may come before a read of it: the local is the answer
+                self._kept[key] = kept
             return kept
         except OSError:
             return rel.rsplit("/", 1)[-1][:-3], "", ""

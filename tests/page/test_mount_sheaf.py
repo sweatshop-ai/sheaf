@@ -460,6 +460,14 @@ def test_rename_folder_submitted_unchanged_sends_nothing_and_closes_the_form(mou
     assert sent == [] and (root.path / folder / "a.md").exists()
 
 
+def test_rename_folder_that_only_takes_the_white_space_off_its_name_moves_it(mounted, pages):
+    # Ticket 183 AP: an untouched form renames nothing, but a name typed without the folder's trailing space is a rename.
+    root = own_pages(mounted, pages, "old /a.md")
+    rename_form(mounted, f"{root.name}/old ", "old")
+    until(lambda: (root.path / "old" / "a.md").exists(), what="the page in the folder without the space")
+    assert not (root.path / "old ").exists()
+
+
 def test_rename_folder_onto_a_taken_name_says_which_page_and_moves_nothing(mounted, pages):
     root = own_pages(mounted, pages, "old/a.md", "other/a.md")
     rename_form(mounted, f"{root.name}/old", "other")

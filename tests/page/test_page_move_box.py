@@ -101,7 +101,8 @@ def test_the_next_open_places_the_box_as_usual(tab, site):
 
 # ── Ticket 183 X: a moved box is held inside the visible area again ─────────────────────────────────────────────────────────
 
-def inside(p, b):
+def inside_window(p, b):
+    """(whether the box `b` lies inside the window, what was compared): the second part is for the failure message."""
     size = p.evaluate("({w: document.documentElement.clientWidth, h: window.innerHeight})")
     return b["x"] >= 0 and b["y"] >= 0 and b["x"] + b["width"] <= size["w"] and b["y"] + b["height"] <= size["h"], (b, size)
 
@@ -111,7 +112,7 @@ def test_a_box_moved_to_the_lower_right_is_inside_the_window_after_it_shrinks(ta
     drag(p, 5000, 5000)
     size = p.viewport_size
     p.set_viewport_size({"width": size["width"] - 200, "height": size["height"] - 200})
-    until(lambda: inside(p, rect(p))[0], what="the moved box back inside the smaller window")
+    until(lambda: inside_window(p, rect(p))[0], what="the moved box back inside the smaller window")
 
 
 def test_a_box_dropped_inside_the_smaller_window_does_not_move_when_it_shrinks(tab, site):
@@ -121,7 +122,7 @@ def test_a_box_dropped_inside_the_smaller_window_does_not_move_when_it_shrinks(t
     size = p.viewport_size
     p.set_viewport_size({"width": size["width"] - 20, "height": size["height"] - 20})
     p.evaluate("new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))")
-    assert inside(p, before)[0], "the test's own premise: the box lies inside the smaller window"
+    assert inside_window(p, before)[0], "the test's own premise: the box lies inside the smaller window"
     after = rect(p)
     assert abs(after["x"] - before["x"]) < 2 and abs(after["y"] - before["y"]) < 2, (before, after)
 
@@ -134,4 +135,4 @@ def test_a_box_moved_to_the_foot_that_grows_with_a_reply_keeps_its_controls_in_v
     p.keyboard.press("Enter")
     until(lambda: p.locator("#rd-popover .rd-msg").count() == 2, what="the reply in the thread")
     until(lambda: rect(p)["height"] > before["height"], what="the box taller with the reply")
-    until(lambda: inside(p, rect(p))[0], what="the grown box inside the window")
+    until(lambda: inside_window(p, rect(p))[0], what="the grown box inside the window")

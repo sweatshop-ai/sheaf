@@ -232,6 +232,8 @@ class Archive:
                     os.link(sname, dname, src_dir_fd=sfd, dst_dir_fd=dfd, follow_symlinks=False)
                 except FileExistsError:
                     raise loose.Refused("a page of that name was deleted in the same second: try again") from None
+                except OSError as e:
+                    raise loose.Refused(f"the page could not be moved to the trash ({e.strerror})") from None
                 finally:
                     os.close(dfd)
                 os.unlink(sname, dir_fd=sfd)

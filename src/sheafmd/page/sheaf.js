@@ -574,9 +574,9 @@ function create(ROOT, opts) {
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       var to = input.value.trim();
-      // Nothing to move: the hub would answer 409 "into itself". The name as given against the name as it is, and the trimmed
-      // name against the trimmed one: a folder whose name has white space at an end is not renamed by a form sent untouched.
-      if (input.value === at || to === at.trim()) { form.remove(); return; }
+      // Nothing to move: the hub would answer 409 "into itself". The field as given against the name as it is (a folder whose
+      // name has white space at an end, sent untouched), and the name sent against the name as it is (white space typed around it).
+      if (input.value === at || to === at) { form.remove(); return; }
       go.disabled = true;
       say('');
       fetch('/_/move-folder', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },

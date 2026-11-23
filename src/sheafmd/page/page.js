@@ -2025,7 +2025,7 @@ var create = function (ROOT, CFG, opts) {
     if (!dock()) {
       undock();
       if (pop._target && pop._target.isConnected && pop.style.position !== 'fixed' && !pop._moved) place(pop, pop._target);
-      clampMoved();       // a moved box that grew (a reply came in) or was handed back by undock() outside a turned screen
+      clampMoved();       // a moved box that grew (a reply came in), or a visible area that changed size
     }
     if (atEnd) sc.scrollTop = sc.scrollHeight;       // a thread that was at its last message stays there when the box changes size
   }
@@ -2110,30 +2110,36 @@ var create = function (ROOT, CFG, opts) {
     if (!drag.on) {
       if (Math.abs(dx) < MOVE_SLOP && Math.abs(dy) < MOVE_SLOP) return;
       drag.on = true;
-      if (emptyTouch) emptyTouch.moved = true;      // a finger that drags the band is not a tap on it: no cursor in the field at its end
+      // A finger that drags the band is not a tap on it: the touch-end handler of the box's empty area (below, `emptyTouch`)
+      // would otherwise put the cursor in the field, and the keyboard would dock the box that was just dragged.
+      if (emptyTouch) emptyTouch.moved = true;
       try { drag.head.setPointerCapture(e.pointerId); } catch (_) { /* a pointer that is gone */ }
     }
-    var v = viewRect(), w = pop.offsetWidth, h = pop.offsetHeight, o = pageOrigin();
-    var x = Math.max(v.left + MOVE_EDGE, Math.min(drag.left + dx, v.right - w - MOVE_EDGE));
-    var y = Math.max(v.top + MOVE_EDGE, Math.min(drag.top + dy, v.bottom - h - MOVE_EDGE));
-    var fixed = pop.style.position === 'fixed';
-    pop.style.left = (fixed ? x : o.x + x) + 'px';
-    pop.style.top = (fixed ? y : o.y + y) + 'px';
-    pop.style.right = '';
+    putInside(drag.left + dx, drag.top + dy);
     pop._moved = true;
   });
-  // A moved box is held inside the visible area again after the area or the box changed size: only the part that lies outside
-  // is taken back, so a box that still lies inside where it was dropped does not move. A box taller than the area keeps its head.
-  function clampMoved() {
-    if (!pop || !pop._moved || pop.classList.contains('rd-docked')) return;
-    var r = pop.getBoundingClientRect(), v = viewRect(), o = pageOrigin(), w = pop.offsetWidth, h = pop.offsetHeight;
-    var x = Math.max(v.left + MOVE_EDGE, Math.min(r.left, v.right - w - MOVE_EDGE));
-    var y = Math.max(v.top + MOVE_EDGE, Math.min(r.top, v.bottom - h - MOVE_EDGE));
-    if (Math.abs(x - r.left) < 0.5 && Math.abs(y - r.top) < 0.5) return;
+  // The box at (left, top) in client coordinates, held MOVE_EDGE inside the visible area (a box taller than the area keeps its
+  // head), and the size of the area and of the box it was held against, which clampMoved() compares with.
+  function putInside(left, top) {
+    var v = viewRect(), w = pop.offsetWidth, h = pop.offsetHeight, o = pageOrigin();
+    var x = Math.max(v.left + MOVE_EDGE, Math.min(left, v.right - w - MOVE_EDGE));
+    var y = Math.max(v.top + MOVE_EDGE, Math.min(top, v.bottom - h - MOVE_EDGE));
     var fixed = pop.style.position === 'fixed';
     pop.style.left = (fixed ? x : o.x + x) + 'px';
     pop.style.top = (fixed ? y : o.y + y) + 'px';
     pop.style.right = '';
+    pop._heldIn = sizesOf(v);
+  }
+  function sizesOf(v) { return [v.right - v.left, v.bottom - v.top, pop.offsetWidth, pop.offsetHeight].join(); }
+  // A moved box is held inside the visible area again only when the area or the box changed size since it was last held
+  // (a window made smaller, a reply that made the box taller): a box the reader scrolled out of view with the text stays
+  // where it was dropped, and one that lies inside the new area does not move.
+  function clampMoved() {
+    var v = viewRect();
+    if (!pop || !pop._moved || pop.classList.contains('rd-docked') || pop._heldIn === sizesOf(v)) return;
+    var r = pop.getBoundingClientRect();
+    if (r.bottom <= v.top || r.top >= v.bottom) { pop._heldIn = sizesOf(v); return; }     // scrolled away with the text: left there
+    putInside(r.left, r.top);
   }
   function dropped(e) {
     if (!drag || e.pointerId !== drag.id) return;

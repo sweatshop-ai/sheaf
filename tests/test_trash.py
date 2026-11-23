@@ -488,7 +488,7 @@ def test_a_folder_swapped_for_a_link_after_the_check_does_not_bring_an_outside_f
         with real(p):
             yield
     monkeypatch.setattr(archive, "file_lock", swapping)
-    with pytest.raises((loose.Refused, OSError)):
+    with pytest.raises(loose.Refused):
         agents.hub.archive.trash(root, "sub/x.md")
     assert (outside / "x.md").read_text(encoding="utf-8") == "# Not the root's\n"
     assert not list((root.path / ".sheaf").rglob("x.md"))

@@ -12,6 +12,8 @@ import queue
 import threading
 import time
 
+from .. import diagnostics
+
 RETRY_MS = 2000
 KEEPALIVE_SECONDS = 25
 
@@ -48,8 +50,9 @@ class Subscription:
     def put(self, name: str, data):
         if not self.closed:
             self._q.put((name, data))
-            if self.on_put is not None:
-                self.on_put()
+            on_put = self.on_put     # read once: a leave on another thread can clear it between a check and a call
+            if on_put is not None:
+                on_put()
 
     def get(self, timeout: float | None = 0):
         """The next (name, data) this stream is sent, or None when none arrived within `timeout`
@@ -107,7 +110,10 @@ class Bus:
         with self._lock:
             subs = list(self._subs)
         for s in subs:
-            s.put(name, data)
+            try:
+                s.put(name, data)
+            except Exception as e:   # one stream's failure is that stream's: the others still get the event
+                diagnostics.record("hub", "publish-failed", event=name, error=str(e)[:300] or type(e).__name__)
 
     def _drop(self, sub: Subscription):
         with self._lock:

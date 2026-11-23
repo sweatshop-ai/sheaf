@@ -1384,6 +1384,7 @@ var create = function (ROOT, CFG, opts) {
       stopDictation(true);
       unpaintWidened();
       if (pop._room) pop._room.remove();
+      if (pop._seen) pop._seen.disconnect();      // the observer of a moved box would keep the closed box in memory (183 BO)
       pop.remove(); pop = null; popId = null; drag = null; paint(null); setTimeout(flushHold, 0);
       setTimeout(function () { if (mouseDown) keptDue = true; else drawKept(); }, 0);
     }
@@ -2122,7 +2123,7 @@ var create = function (ROOT, CFG, opts) {
     if (!pop._moved && window.ResizeObserver) {
       // A box that grows after its last draw (the line "being sent" goes, the form comes back) is held inside again too.
       var moved = pop;
-      new ResizeObserver(function () { if (pop === moved) clampMoved(); }).observe(moved);
+      (moved._seen = new ResizeObserver(function () { if (pop === moved) clampMoved(); })).observe(moved);
     }
     pop._moved = true;
   });
@@ -2154,14 +2155,16 @@ var create = function (ROOT, CFG, opts) {
   function sizesOf(v) { return areaOf(v) + ',' + [pop.offsetWidth, pop.offsetHeight].join(); }
   // A moved box is held inside the visible area again only when the area or the box changed size since it was last held
   // (a window made smaller, a reply that made the box taller), and one that lies inside the new area does not move. A box
-  // the reader scrolled out of view with the text stays where it was dropped when only the box changed size; a smaller
-  // area brings it back even when the box now lies wholly past the area's new edge.
+  // the reader scrolled out of view with the text stays where it was dropped, also when the area changes height on its own (a
+  // phone's URL bar that hides or shows, the mounted page's host clipped to the window as the page scrolls; 183 BN). It
+  // lies out of view when it lies above the area, or below it at either height, the one it was held at and the one now. A
+  // smaller area brings back a box that lay inside the larger one, even when it now lies wholly past the area's new edge.
   function clampMoved() {
     if (!pop || !pop._moved || pop.classList.contains('rd-docked')) return;
     var v = viewRect(), held = pop._heldIn || '';
     if (held === sizesOf(v)) return;
-    var r = pop.getBoundingClientRect(), sameArea = held.split(',').slice(0, 2).join() === areaOf(v);
-    if (sameArea && (r.bottom <= v.top || r.top >= v.bottom)) { pop._heldIn = sizesOf(v); roomBelow(); return; }     // scrolled away with the text: left there
+    var r = pop.getBoundingClientRect(), heldH = +held.split(',')[1] || 0;
+    if (r.bottom <= v.top || r.top >= v.top + Math.max(heldH, v.bottom - v.top)) { pop._heldIn = sizesOf(v); roomBelow(); return; }     // scrolled away with the text: left there
     putInside(r.left, r.top);
   }
   function dropped(e) {

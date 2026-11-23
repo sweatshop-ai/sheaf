@@ -471,6 +471,17 @@ def test_rename_folder_that_only_takes_the_white_space_off_its_name_moves_it(mou
     assert not (root.path / "old ").exists()
 
 
+def test_rename_folder_typed_with_more_white_space_around_its_name_sends_nothing(mounted, pages):
+    # Ticket 183 BQ: "old  " typed for the folder "old " is the same name with white space around it, which the form trims away;
+    # it was sent as "old", a rename that took the folder's own space off.
+    root = own_pages(mounted, pages, "old /a.md")
+    sent = []
+    mounted.page.route("**/_/move-folder", lambda route: (sent.append(route.request.post_data), route.continue_()))
+    rename_form(mounted, f"{root.name}/old ", "old  ")
+    until(lambda: mounted.js("return !root.querySelector('.sheaf-rename-form');"), what="the form closed")
+    assert sent == [] and (root.path / "old " / "a.md").exists()
+
+
 def test_rename_folder_onto_a_taken_name_says_which_page_and_moves_nothing(mounted, pages):
     root = own_pages(mounted, pages, "old/a.md", "other/a.md")
     rename_form(mounted, f"{root.name}/old", "other")

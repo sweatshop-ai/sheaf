@@ -153,3 +153,97 @@ def test_a_box_held_at_the_foot_of_a_short_page_keeps_its_edge_when_the_page_shr
     foot = p.evaluate("window.innerHeight")
     b = rect(p)
     assert b["y"] + b["height"] <= foot - 8 + 0.5, (b, foot)
+
+
+# ── Ticket 183 BN, BO, BP: a box scrolled out of view, the observer of a closed box, the room under a moved box ──────────────
+
+LONG = "# Plan\n\nA paragraph about apples.\n\n" + "".join(f"Paragraph {i} of the long page, to scroll past.\n\n" for i in range(80))
+
+
+def open_long_thread(tab):
+    """The thread on `apples` open at the head of a page long enough to scroll the box out of view."""
+    from pagehelp import open_with_comment
+    open_with_comment(tab, LONG, "apples", "Why?", "Bea")
+    tab.page.click(".rd-badge")
+    tab.page.wait_for_selector(FIELD)
+    return tab.page
+
+
+def page_place(p):
+    """The box's place in the page (not on the screen): what a scroll leaves as it is."""
+    return p.evaluate("(() => { const b = document.querySelector('#rd-popover'); return [b.offsetLeft, b.offsetTop]; })()")
+
+
+def frames(p):
+    p.evaluate("new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))")
+
+
+def room_under_box(p):
+    """(whether the empty room lies right under the box, what was measured)."""
+    got = p.evaluate("""(() => { const b = document.querySelector('#rd-popover'), r = document.querySelector('.rd-room');
+        return r && { follows: r.previousSibling === b, top: parseFloat(r.style.top), foot: b.offsetTop + b.offsetHeight,
+                      height: parseFloat(r.style.height) }; })()""")
+    return bool(got) and got["follows"] and abs(got["top"] - got["foot"]) < 1 and got["height"] == 8, got
+
+
+@pytest.mark.parametrize("change", [60, -60], ids=["url-bar-hidden", "url-bar-shown"])
+def test_a_box_scrolled_out_of_view_stays_where_it_was_dropped_when_the_window_height_changes(tab, site, change):
+    """183 BN: a phone's URL bar that hides or shows changes the window's height while the reader scrolls. A box the reader
+    scrolled out of view with the text was pulled back into view by it."""
+    p = open_long_thread(tab)
+    drag(p, -60, 40)
+    before = page_place(p)
+    p.evaluate("window.scrollTo(0, 2000)")
+    frames(p)
+    assert rect(p)["y"] + rect(p)["height"] <= 0, "the test's own premise: the box lies above the window"
+    size = p.viewport_size
+    p.set_viewport_size({"width": size["width"], "height": size["height"] + change})
+    frames(p)
+    p.wait_for_timeout(100)
+    assert page_place(p) == before
+
+
+def test_a_box_inside_the_window_is_still_held_inside_when_the_window_shrinks_on_a_long_page(tab, site):
+    """183 BN's other side: the box lay inside the window before it shrank, and wholly past its new foot after."""
+    p = open_long_thread(tab)
+    drag(p, 0, 5000)
+    size = p.viewport_size
+    p.set_viewport_size({"width": size["width"], "height": size["height"] - 400})
+    until(lambda: inside_window(p, rect(p))[0], what="the moved box back inside the smaller window")
+
+
+def test_a_closed_moved_box_is_no_longer_observed(tab, site):
+    """183 BO: the observer set on the first drag is let go with the box, which it otherwise keeps in memory."""
+    tab.page.add_init_script("""(() => {
+      const RO = window.ResizeObserver;
+      window.__boxObservers = [];
+      window.ResizeObserver = class extends RO {
+        observe(el, o) { if (el.id === 'rd-popover') window.__boxObservers.push(this); this.__on = true; return super.observe(el, o); }
+        disconnect() { this.__on = false; return super.disconnect(); }
+      };
+    })()""")
+    p = open_thread(tab)
+    drag(p, -60, 40)
+    assert p.evaluate("window.__boxObservers.length") == 1
+    p.click(".rd-head button[title=Close]")
+    until(lambda: p.locator(BOX).count() == 0, what="the box closed by its button")
+    assert p.evaluate("window.__boxObservers.map((o) => o.__on)") == [False]
+
+
+def test_the_room_follows_a_box_scrolled_out_of_view_that_changes_size(tab, site):
+    """183 BP: a box the reader scrolled away is left where it was dropped when it grows, and the room under it moves to its
+    new foot. The box grows by a part added to its thread: a reply sent from the field scrolls the page back to it."""
+    p = open_long_thread(tab)
+    drag(p, -60, 40)
+    before = page_place(p)
+    height = rect(p)["height"]
+    p.evaluate("window.scrollTo(0, 2000)")
+    frames(p)
+    p.evaluate("""(() => { const d = document.createElement('div'); d.style.height = '120px';
+        document.querySelector('#rd-popover .rd-msg').append(d); })()""")
+    until(lambda: rect(p)["height"] > height, what="the box taller")
+    frames(p)
+    assert p.evaluate("window.scrollY") == 2000, "the test's own premise: the box is still scrolled away"
+    assert page_place(p) == before
+    ok, got = room_under_box(p)
+    assert ok, got

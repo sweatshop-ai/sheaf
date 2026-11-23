@@ -575,8 +575,9 @@ function create(ROOT, opts) {
       e.preventDefault();
       var to = input.value.trim();
       // Nothing to move: the hub would answer 409 "into itself". The field as given against the name as it is (a folder whose
-      // name has white space at an end, sent untouched), and the name sent against the name as it is (white space typed around it).
-      if (input.value === at || to === at) { form.remove(); return; }
+      // name has white space at an end, sent untouched), and a field with white space typed around it against the name with
+      // none: "old  " for the folder "old " is that name, not a rename to "old" (183 BQ). "old" typed bare is that rename.
+      if (input.value === at || (to !== input.value && to === at.trim())) { form.remove(); return; }
       go.disabled = true;
       say('');
       fetch('/_/move-folder', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json' },

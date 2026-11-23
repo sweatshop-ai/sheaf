@@ -884,6 +884,11 @@ def test_a_recipient_is_not_told_how_many_pages_the_owner_has_beyond_the_listing
     assert doc_of(team, BOB)                                                # Bob's root is listed, with his page in it
     assert team.get("/_/index.json", member=BOB).json()["more"] == {}
     assert shared_rows(team, BOB)["more"] == {}
+    second = made(team, "alice", SHARED, doc="a-second.md")["doc"]
+    assert tick(team, ALICE, second, "Share").status == 200
+    monkeypatch.setattr(roots, "COUNT_LIMIT", 1)          # the door's limit, spent on what Bob sees: one of his two pages
+    bad, listing = call(team, "bob", "documents", open_only=False)
+    assert not bad and len(json.loads(listing)) == 1      # nor is he told by the door what lies beyond it
 
 
 def test_a_row_and_the_write_log_of_a_shared_page_hold_nothing_of_the_owners_machine_or_session(team):

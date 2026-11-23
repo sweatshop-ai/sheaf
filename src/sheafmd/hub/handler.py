@@ -2279,7 +2279,7 @@ class Handler:
         e = self._entry(req, b.get("doc"))
         h = b.get("hash")
         _shape(isinstance(h, str) and h != "", "hash must be the hash of the version the page holds")
-        if not e.live.pin(h):
+        if not e.live.pin(h, req.member_id):           # the cap is per member (7.4); the hub's person's id is ""
             raise Refuse(409, UNKNOWN)
         return _ok()
 

@@ -1207,7 +1207,7 @@ def test_while_a_reply_holds_the_reload_the_edit_and_the_reply_are_taken_after_m
     p, f = frozen.page, frozen.site.file
     # The hub answers the pin late, as a slow runner does: the request is still out when the hold note is drawn.
     real_pin = hub_live.LiveDocument.pin
-    monkeypatch.setattr(hub_live.LiveDocument, "pin", lambda self, h: (time.sleep(0.4), real_pin(self, h))[1])
+    monkeypatch.setattr(hub_live.LiveDocument, "pin", lambda self, h, member="": (time.sleep(0.4), real_pin(self, h, member))[1])
     pins = []
     p.on("requestfinished", lambda r: pins.append(r.post_data) if r.url.endswith("/_/pin") else None)
     type_at_end(p, P2, " and plums")
@@ -1275,7 +1275,7 @@ def test_a_page_asks_the_hub_to_keep_its_version_once_and_again_only_after_a_req
     p, f = thread.page, thread.site.file
     live = thread.site.hub.entry(DOC).live
     asked, out, sent, heard = [], [], [], []
-    monkeypatch.setattr(hub_live.LiveDocument, "pin", lambda self, h: asked.append(h) or (
+    monkeypatch.setattr(hub_live.LiveDocument, "pin", lambda self, h, member="": asked.append(h) or (
         False if answer == "refused" else fails(RuntimeError("the disk went away"))))
     p.on("request", lambda r: sent.append(json.loads(r.post_data)["hash"]) if r.url.endswith("/_/pin") else None)
     p.route("**/_/pin", lambda route: out.append(route))

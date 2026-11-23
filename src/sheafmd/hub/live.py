@@ -23,7 +23,7 @@ from .place import NotFound
 from .state import PINS_MAX_AGE
 
 VERSIONS = 60
-# The versions pages keep past a change of the file, beside the newest VERSIONS: the PINS pinned last (`pin`).
+# The versions pages keep past a change of the file, beside the newest VERSIONS: the PINS each member pinned last (`pin`).
 PINS = 16
 # The request ids of the last comment writes and saves a document remembers (`comment`, `save`, `rid`).
 RIDS = 256
@@ -75,9 +75,10 @@ class LiveDocument:
         # one can be merged onto the file as it is now instead of refused. The disk copy
         # (state.Versions) answers for a hash from before a restart.
         self._versions = {}
-        # The versions pages said they keep (`pin`), the last pinned last: apart from `_versions`, so
-        # that writes from outside, however many, never push them out. Each is `(text, when pinned)`: it goes
-        # after PINS_MAX_AGE, as it does on disk.
+        # The versions pages said they keep (`pin`), by member (the hub's person: ""), each member's last pinned
+        # last: apart from `_versions`, so that writes from outside, however many, never push them out, and one
+        # member's pins never push out another's. Each is `(text, when pinned)`: it goes after PINS_MAX_AGE, as
+        # it does on disk.
         self._pins = {}
         self._remember(text)
         # Threads told to a live session: the count of its action replies each had when it was
@@ -179,7 +180,8 @@ class LiveDocument:
         text = self._versions.get(h)
         if text is None:
             self._expire_pins()
-            text = (self._pins.get(h) or (None,))[0]
+            # `get`, never `in` then `[h]`: a pin or an expiry on another thread can take `h` out in between
+            text = next((e[0] for p in list(self._pins.values()) if (e := p.get(h)) is not None), None)
         store = self._stored() if text is None else None
         if store is not None and self._address is not None:
             text = store.get(self._address, h)
@@ -188,9 +190,12 @@ class LiveDocument:
     def _expire_pins(self):
         """Drop the pins no page has pinned for PINS_MAX_AGE (`state.Versions.prune` does it on disk)."""
         cutoff = self._clock() - PINS_MAX_AGE
-        for h, (_, at) in list(self._pins.items()):     # a copy: `_known` is read without the lock
-            if at < cutoff:
-                self._pins.pop(h, None)
+        for member, pins in list(self._pins.items()):   # copies: `_known` is read without the lock
+            for h, (_, at) in list(pins.items()):
+                if at < cutoff:
+                    pins.pop(h, None)
+            if not pins:
+                self._pins.pop(member, None)
 
     def _stamp(self):
         """`(mtime_ns, size)` of the file now, or None where it cannot be stat-ed: what a write in flight moves."""
@@ -539,26 +544,31 @@ class LiveDocument:
                     store.forget(self._address)
             self._store = None
 
-    def pin(self, h):
+    def pin(self, h, member=""):
         """A page keeps the version `h` past a change of the file: a form holds the reload that change
         needs, a merged save's reload among them (SPEC 7.4, 10.4). Keep it beside the newest VERSIONS,
         so that what the page sends with it once the form is done (a save, a reply, a Tell) is
-        still taken however much was written meanwhile. The PINS pinned last are kept, in memory and on
-        disk; pinned again, a version counts from then. False when the document does not know `h`."""
+        still taken however much was written meanwhile. The PINS each member (`member`, the hub's person "") pinned
+        last are kept, in memory and on disk; pinned again, a version counts from then. False when the document
+        does not know `h`."""
         with self._held():
             text = self._known(h)
             if text is None:
                 return False
-            self._pins.pop(h, None)
-            self._pins[h] = (text, self._clock())
-            self._expire_pins()
-            while len(self._pins) > PINS:
-                self._pins.pop(next(iter(self._pins)))
+            # Filled before it is put back: `_expire_pins`, also run by `_known` without the lock, drops a member whose
+            # dict it finds empty, and a dict it dropped must not be the one this pin goes into.
+            pins = dict(self._pins.get(member, {}))
+            pins.pop(h, None)
+            pins[h] = (text, self._clock())
+            self._pins[member] = pins
+            self._expire_pins()                         # leaves `pins`: it holds one pinned now
+            while len(pins) > PINS:
+                pins.pop(next(iter(pins)))
             store = self._stored()
             if store is not None and self._address is not None:
                 self._written.add(rds.md_hash(text))
                 try:
-                    store.pin(self._address, text)
+                    store.pin(self._address, text, member)
                 except OSError:
                     pass        # a full disk costs the pin after a restart, never the one in memory
             return True

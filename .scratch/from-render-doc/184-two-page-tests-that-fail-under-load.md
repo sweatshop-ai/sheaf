@@ -2,7 +2,7 @@
 
 **Claimed by:** Nadia
 
-**Status:** A and B done in #620 (merge 4d34e1ad, head 9f21f8df), CI green (run 45178873288), review GO (round 1, provisional: Opus fallback, Codex at its usage limit). C: a product defect of #617's own change, fixed on that PR, nothing to do here. D: fix in its PR.
+**Status:** A and B done in #620 (merge 4d34e1ad, head 9f21f8df), CI green (run 45178873288), review GO (round 1, provisional: Opus fallback, Codex at its usage limit). C: a product defect of #617's own change, fixed on that PR, nothing to do here. D: a race in the test, fixed in #623.
 
 **Priority:** high: each one turns a CI run red on a change that does not touch it.
 

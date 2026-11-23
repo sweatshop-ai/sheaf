@@ -867,26 +867,30 @@ def _restore_dropped_hrefs(fragment: str, source, emoji=()) -> str:
     SPEC 9.5's list (`ftp:`, also `javascript:`), so only an address the source already held, never a new one. The
     page shows such a link as its text and sends it as an `<a>` with no address; the .md keeps the address the
     source wrote, as it keeps a raw tag. The links are matched by their text, the k-th with the k-th, and only where
-    the page holds as many `<a>` with no address of that text as the source, these links and its anchors together:
-    after one was deleted, which went is unknown, and each stays its text. An anchor of the source's own (`<a name>`,
-    `<a id>`, an `<a>` with no address) takes none: the page sends it with its name or, on a mounted page, which
-    drops `name` (`sanitize.py`, mount mode), as a bare `<a>` in its place among them. `emoji` is
-    `_emoji_as_tokens`' list, so a link's text reads as the source's render shows it."""
+    the page's `<a>`s of that text line up with the source's: after one was deleted, which went is unknown, and
+    each stays its text. An anchor of the source's own (`<a name>`, `<a id>`, an `<a>` with no address) takes none.
+    The page sends it with its name, so that only the `<a>`s with neither line up with the links; a mounted page,
+    which drops `name` (`sanitize.py`, mount mode), sends it as one of them, so that all the `<a>`s with no
+    address line up with the links and anchors together. The save does not know which page sent it: an address
+    goes back where one reading lines up, or both do and agree. Where only the first does on a mounted page (a
+    link deleted beside a bare anchor of its text), the anchor takes the address, as before #591. `emoji` is `_emoji_as_tokens`' list, so a link's
+    text reads as the source's render shows it."""
     from bs4 import BeautifulSoup
 
     if not source or not re.search(r"<a(?:\s[^>]*)?>", fragment):
         return fragment
     soup = BeautifulSoup(fragment, "html.parser")
     loose = [a for a in soup.find_all("a") if not a.has_attr("href")]
-    bare = {id(a) for a in loose if not any(a.has_attr(k) for k in ("name", "id"))}
-    html = _render_source(source) if bare else None
+    unnamed = {id(a) for a in loose if not any(a.has_attr(k) for k in ("name", "id"))}
+    html = _render_source(source) if unnamed else None
     if not html:
         return fragment
 
     def text(a):
         return _EMOJI_TOKEN.sub(lambda m: emoji[int(m.group(1))][1], a.get_text())
 
-    want, shown = {}, {}    # by text, in order: the source's dropped address, or None for an anchor; the page's `<a>`s
+    # By text, in order: the source's dropped address, or None for an anchor of its own; the page's `<a>`s.
+    want, shown = {}, {}
     for a in BeautifulSoup(html, "html.parser").find_all("a"):
         if not a.has_attr("href"):
             want.setdefault(a.get_text(), []).append(None)
@@ -894,15 +898,30 @@ def _restore_dropped_hrefs(fragment: str, source, emoji=()) -> str:
             want.setdefault(a.get_text(), []).append(a["href"])
     for a in loose:
         shown.setdefault(text(a), []).append(a)
+
+    def named_kept(links, hrefs):
+        """{page `<a>`: address} where the page kept its anchors' names, or None where that does not line up. An
+        anchor deleted there takes no address, so only the unnamed `<a>`s and the links are counted."""
+        bare, dropped = [a for a in links if id(a) in unnamed], [h for h in hrefs if h is not None]
+        if len(bare) != len(dropped):
+            return None
+        return {id(a): h for a, h in zip(bare, dropped)}
+
+    def names_dropped(links, hrefs):
+        """{page `<a>`: address} where a mounted page sent its anchors bare, or None where that does not line up."""
+        if len(links) != len(hrefs) or any(h is not None and id(a) not in unnamed for a, h in zip(links, hrefs)):
+            return None
+        return {id(a): h for a, h in zip(links, hrefs) if h is not None}
+
     put = False
     for words, links in shown.items():
         hrefs = want.get(words, [])
-        # A page anchor that kept its name in the place of a dropped link: the two do not line up.
-        if len(hrefs) != len(links) or any(h is not None and id(a) not in bare for a, h in zip(links, hrefs)):
+        readings = [r for r in (named_kept(links, hrefs), names_dropped(links, hrefs)) if r is not None]
+        if not readings or any(r != readings[0] for r in readings):
             continue
-        for a, href in zip(links, hrefs):
-            if href is not None:
-                a["href"] = href
+        for a in links:
+            if id(a) in readings[0]:
+                a["href"] = readings[0][id(a)]
                 put = True
     return str(soup) if put else fragment
 
@@ -1008,10 +1027,14 @@ _SHORTCODE_TEXT = re.compile(r":([a-z0-9_+-]+):")
 _LITERAL_COLON = "\uF8FD"
 
 
+def _in_code(t) -> bool:
+    """Whether the text node t is in code or math, where GFM draws no shortcode and a backslash escapes nothing."""
+    return any(u.name in ("code", "pre", "script", "style") or "math" in (u.get("class") or []) for u in t.parents)
+
+
 def _shortcode_texts(soup) -> list:
     """The text nodes of soup in which GFM would draw a shortcode: not code, not math."""
-    return [t for t in _texts(soup) if ":" in t and not any(
-        u.name in ("code", "pre", "script", "style") or "math" in (u.get("class") or []) for u in t.parents)]
+    return [t for t in _texts(soup) if ":" in t and not _in_code(t)]
 
 
 # A shortcode the source writes as text, `\:name:`.
@@ -1068,14 +1091,14 @@ def _source_literals(source: str, new: str) -> set:
             head = m.start()
         if m.start() < len(old) - tail < m.end():
             tail = len(old) - m.end()
-    lo, ln = len(old) - tail, len(new) - tail
-    blocks, places = [(0, 0, head), (lo, ln, tail)], set()
-    if (lo - head) * (ln - head) <= _DIFF_BOUND:
-        blocks += [(a + head, b + head, size) for a, b, size in
-                   difflib.SequenceMatcher(None, old[head:lo], new[head:ln], autojunk=False).get_matching_blocks()]
+    old_end, new_end = len(old) - tail, len(new) - tail     # the changed part is old[head:old_end], new[head:new_end]
+    blocks, places = [(0, 0, head), (old_end, new_end, tail)], set()
+    if (old_end - head) * (new_end - head) <= _DIFF_BOUND:
+        blocks += [(a + head, b + head, size) for a, b, size in difflib.SequenceMatcher(
+            None, old[head:old_end], new[head:new_end], autojunk=False).get_matching_blocks()]
     else:
-        places = {head + x for x in _places_by_order(old[head:lo], new[head:ln], [
-            (m.start() - head, m.group(1)) for m in olds if head <= m.start() and m.end() <= lo])}
+        places = {head + x for x in _places_by_order(old[head:old_end], new[head:new_end], [
+            (m.start() - head, m.group(1)) for m in olds if head <= m.start() and m.end() <= old_end])}
     for a, b, size in blocks:
         places.update(b + m.start() - a for m in olds if a <= m.start() and m.end() <= a + size)
     return places
@@ -1096,8 +1119,7 @@ def _typed_slash_before(t, slash: str) -> bool:
             if el.name not in _INLINE_TAGS:
                 return False
         elif isinstance(el, NavigableString) and not isinstance(el, Comment) and str(el):
-            return str(el).endswith(slash) and not any(
-                u.name in ("code", "pre", "script", "style") or "math" in (u.get("class") or []) for u in el.parents)
+            return str(el).endswith(slash) and not _in_code(el)
     return False
 
 
@@ -1121,7 +1143,7 @@ def _literal_shortcodes(fragment: str, source, slash):
     places = _source_literals(source, "".join(texts)) if escaped else set()
     found, at = False, 0
     for t in texts:
-        glued = after_slash and _typed_slash_before(t, slash)
+        glued = after_slash and _typed_slash_before(t, slash)     # a typed backslash ends the text before t
 
         def mark(m, at=at, glued=glued):
             typed = slash is not None and (m.string.endswith(slash, 0, m.start()) or (glued and m.start() == 0))

@@ -4,7 +4,6 @@ shortcode, the cost of placing the source's literal shortcodes, and a dropped ad
 The cost tests count pandoc renders, which run in a child process, and time the diff with `time.process_time()`
 and gc disabled, so that the other workers of a parallel run do not count.
 """
-import gc
 import time
 
 import pytest
@@ -89,11 +88,16 @@ def test_a_backslash_typed_in_another_paragraph_leaves_its_emoji():
 
 
 # 89: the source holds `\:` but no `\:name:`.
+@pytest.fixture
+def renders(monkeypatch):
+    """The sources `_render_source` was asked to render during the test."""
+    seen, real = [], rde._render_source
+    monkeypatch.setattr(rde, "_render_source", lambda s: seen.append(s) or real(s))
+    return seen
+
+
 @pytest.mark.parametrize("src", ["a\\: b here", "a `x\\:` b here", "a \\:no shortcode: here"])
-def test_a_source_without_an_escaped_shortcode_is_not_rendered_to_place_one(monkeypatch, src):
-    renders = []
-    real = rde._render_source
-    monkeypatch.setattr(rde, "_render_source", lambda s: renders.append(s) or real(s))
+def test_a_source_without_an_escaped_shortcode_is_not_rendered_to_place_one(renders, src):
     html = page_fragment(src).replace("here", ":smile: there")
     rde.html_block_to_md(html, src, [])
     assert renders == []
@@ -106,10 +110,7 @@ def test_a_failed_render_does_not_refuse_an_edit_with_no_escaped_shortcode(monke
     assert out == "a: b :smile: there"      # the page shows `a: b`; the source's own `\\:` escaped nothing
 
 
-def test_an_escaped_shortcode_the_page_no_longer_holds_is_not_rendered(monkeypatch):
-    renders = []
-    real = rde._render_source
-    monkeypatch.setattr(rde, "_render_source", lambda s: renders.append(s) or real(s))
+def test_an_escaped_shortcode_the_page_no_longer_holds_is_not_rendered(renders):
     rde.html_block_to_md("<p>a :tada: there</p>", "a \\:smile: here", [])
     assert renders == []
 
@@ -120,18 +121,13 @@ def _colon_list(n):
 
 
 def _cpu(fn):
-    gc.collect()
-    gc.disable()
-    try:
-        t = time.process_time()
-        out = fn()
-        return out, time.process_time() - t
-    finally:
-        gc.enable()
+    """(fn's result, the CPU seconds it took); the caller holds `no_gc`."""
+    t = time.process_time()
+    return fn(), time.process_time() - t
 
 
 @pytest.mark.parametrize("change", ["item 0:", "item 300:"])
-def test_placing_a_literal_shortcode_in_a_long_block_does_not_grow_with_its_square(change):
+def test_placing_a_literal_shortcode_in_a_long_block_does_not_grow_with_its_square(no_gc, change):
     # 600 items with a colon each, about 24,000 characters of shortcode text: on main the diff took seconds.
     src = _colon_list(600)
     html = page_fragment(src).replace(change, change.replace("item", "entry"))
@@ -140,7 +136,7 @@ def test_placing_a_literal_shortcode_in_a_long_block_does_not_grow_with_its_squa
     assert cpu < 1.0, cpu
 
 
-def test_a_long_block_changed_at_both_ends_keeps_its_literal_shortcode():
+def test_a_long_block_changed_at_both_ends_keeps_its_literal_shortcode(no_gc):
     # The changed middle is the whole block: past the bound, the literal is placed by its name's order.
     src = _colon_list(600)
     html = page_fragment(src).replace("item 0:", "entry 0:").replace("item 599:", "entry 599:")
@@ -187,8 +183,21 @@ def test_an_anchor_that_lost_its_name_after_the_link_gets_no_address():
     assert out == "[x](ftp://a.com/b) and x there"
 
 
-def test_a_deleted_link_beside_an_anchor_that_lost_its_name_leaves_both_text():
-    # Which went is unknown, so neither takes the address.
+def test_a_deleted_named_anchor_leaves_the_link_its_address():
+    # A page that keeps names sends the link alone; as on main, the link keeps its address.
     src = '<a name="x">x</a> and [x](ftp://a.com/b) here'
+    out = rde.html_block_to_md("<p>and <a>x</a> there</p>", src, [])
+    assert out == "and [x](ftp://a.com/b) there"
+
+
+def test_a_named_anchor_kept_beside_its_link_keeps_both():
+    src = '<a name="x">x</a> and [x](ftp://a.com/b) here'
+    out = rde.html_block_to_md('<p><a name="x">x</a> and <a>x</a> there</p>', src, [])
+    assert out.endswith(" and [x](ftp://a.com/b) there")
+
+
+def test_two_links_of_one_text_with_one_deleted_leave_both_text():
+    # Which went is unknown, so neither takes an address.
+    src = "[x](ftp://a.com/b) and [x](ftp://c.com/d) here"
     out = rde.html_block_to_md("<p>and <a>x</a> there</p>", src, [])
     assert out == "and x there"

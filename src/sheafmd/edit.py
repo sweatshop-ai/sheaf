@@ -1110,17 +1110,26 @@ _BARE_URL_PAREN = re.compile(r"https?://[^|\s<>]*\)")
 def _bare_url_whole(url: str) -> bool:
     """Whether GFM links all of `url` when it is written bare. With a parenthesis in it, pandoc is asked: which `)` it
     keeps is not a count of parentheses (after `(*` it keeps one no `(` balances, after `)*(` it ends the URL before
-    the `)`; ticket 183 BB, probed with pandoc 3.7)."""
+    the `)`; ticket 183 BB, probed with pandoc 3.7). A failed run refuses the save (EditError) and is not remembered."""
     if "(" not in url and ")" not in url:
         return bool(_BARE_URL.fullmatch(url))
-    return bool((_BARE_URL.fullmatch(url) or _BARE_URL_PAREN.fullmatch(url)) and _pandoc_links_bare(url))
+    if not (_BARE_URL.fullmatch(url) or _BARE_URL_PAREN.fullmatch(url)):
+        return False
+    try:
+        return _pandoc_links_bare(url)
+    except _Unread:
+        raise EditError(f"pandoc: whether {url} is one link could not be looked up") from None
 
 
 @lru_cache(maxsize=256)
 def _pandoc_links_bare(url: str) -> bool:
-    """Whether pandoc's GFM reader makes all of `url`, written bare at the end of a line, one link of that address."""
+    """Whether pandoc's GFM reader makes all of `url`, written bare at the end of a line, one link of that address.
+    A failed run raises `_Unread`, which is not cached (ticket 183 BT): a guess would let the save rewrite the
+    URL's text, and remembering it would do so for every later save."""
     r = _pandoc.run(["-f", "gfm", "-t", "html5", "--wrap=none"], f"x {url}\n")
-    m = re.fullmatch(r'<p>x <a href="([^"]*)">([^<]*)</a></p>\s*', r.stdout) if r.returncode == 0 else None
+    if r.returncode != 0:
+        raise _Unread
+    m = re.fullmatch(r'<p>x <a href="([^"]*)">([^<]*)</a></p>\s*', r.stdout)
     return m is not None and html_unescape(m.group(1)) == url == html_unescape(m.group(2))
 
 

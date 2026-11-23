@@ -982,7 +982,7 @@ def _gfm_links_bare(out: str, start: int, end: int, url: str) -> bool:
 # A shortcode drawn as its emoji: the name is in `data-emoji`, the emoji itself is the span's text.
 _EMOJI_SPAN = re.compile(r'<span\b(?=[^>]*\sclass="emoji")[^>]*?\sdata-emoji="([a-z0-9_+-]+)"[^>]*>([^<]*)</span>')
 # The characters an emoji token is written between, the first the fragment does not hold: the others of the private
-# area the save uses are `_CODE_LT`, `_LITERAL_COLON` and `_LINE_MARK`.
+# area the save uses are `_CODE_LT`, `_LITERAL_COLON` and `_LINE_MARKS`.
 _EMOJI_MARKS = ("\uF8FE", "\uF8FF", *(chr(c) for c in range(0xF8FA, 0xF8EF, -1)))
 
 
@@ -1044,10 +1044,12 @@ def _emoji_as_tokens(fragment: str, source):
 
     def token(m):
         name = m.group(1)
-        k, seen[name] = seen[name], seen[name] + 1
+        nth, seen[name] = seen[name], seen[name] + 1
         if wrote is not None:
-            mine = wrote.get(name, [])
-            if not any(mine) or not all(mine) and (len(mine) != on_page[name] or not mine[k]):
+            shortcode = wrote.get(name, [])            # per emoji of this name in the source: written as :name:?
+            mixed = any(shortcode) and not all(shortcode)
+            aligned = len(shortcode) == on_page[name]  # the page's nth emoji of the name is the source's nth
+            if not any(shortcode) or mixed and not (aligned and shortcode[nth]):
                 return m.group(0)
         if m.group(2) != _emoji_drawn(name):
             return m.group(0)
@@ -1216,8 +1218,8 @@ def _code_table_tags(fragment: str):
     return (str(soup), True) if found else (fragment, False)
 
 
-_LINE_MARK = ""
-_HEADINGS = ("h1", "h2", "h3", "h4", "h5", "h6")
+# The character a line's backslash is written as, the first the fragment does not hold (as `_EMOJI_MARKS`).
+_LINE_MARKS = ("\uF8FC", *(chr(c) for c in range(0xF8EF, 0xF8E3, -1)))
 # A line of text markdown reads as a block. Pandoc's gfm writer escapes `***`, `# x`, `> x` and a list marker at the
 # start of a paragraph, but not a line of dashes (a rule, or under a line a heading), a line of `=` under a line (a
 # heading), nor a list marker on a line after a break, where it starts a list (an ordered one only from 1).
@@ -1246,13 +1248,14 @@ def _line_edge(t, forward: bool):
 
 
 def _line_marks(fragment: str):
-    """(the fragment with a token before each line of text markdown would read as a block of its own, whether it put
-    any). The token becomes the backslash that keeps the line its text (`html_block_to_md`): a line of dashes typed
+    """(the fragment with a token before each line of text markdown would read as a block of its own, the token or
+    None when it put none). The token becomes the backslash that keeps the line its text (`html_block_to_md`): a line of dashes typed
     after Enter is not a rule, nor one after Shift+Enter a heading, nor `- x` there a list."""
     from bs4 import BeautifulSoup
 
-    if _LINE_MARK in fragment or not re.search(r"[-+=1]", fragment):
-        return fragment, False
+    mark = next((c for c in _LINE_MARKS if c not in fragment), None)
+    if mark is None or not re.search(r"[-+=1]", fragment):
+        return fragment, None
     soup, found = BeautifulSoup(fragment, "html.parser"), False
     for t in _texts(soup):
         words = str(t)
@@ -1273,9 +1276,9 @@ def _line_marks(fragment: str):
         elif start == "br" and (m := _ITEM_START.match(line)):
             at = m.end() if m.group(0)[0].isdigit() else 0
         if at is not None:
-            t.replace_with(words[:lead + at] + _LINE_MARK + words[lead + at:])
+            t.replace_with(words[:lead + at] + mark + words[lead + at:])
             found = True
-    return (str(soup), True) if found else (fragment, False)
+    return (str(soup), mark) if found else (fragment, None)
 
 
 def html_block_to_md(fragment: str, source=None, strays=None) -> str:
@@ -1334,7 +1337,7 @@ def html_block_to_md(fragment: str, source=None, strays=None) -> str:
             if literal:
                 part = part.replace(_LITERAL_COLON, "" if depth else "\\")
             if marked:
-                part = part.replace(_LINE_MARK, "" if depth else "\\")
+                part = part.replace(marked, "" if depth else "\\")
             if emoji:
                 def shown(m, depth=depth):
                     name, drawn = emoji[int(m.group(1))]
@@ -2651,6 +2654,20 @@ def _written_block(blocks, j: int, grown: int, quote: str, nth: int = 0):
     return last, (None if q else 0)
 
 
+def _put_lifted(text: str, lifted, j: int, grown: int):
+    """Put each lifted comment back on the block of j..j+grown that holds its words. Returns the text and the
+    comments whose words none of them holds, each with the block to follow: the caller makes them orphans (5.4).
+    A merge's own note is never one: it stays at the end of its block."""
+    lost = []
+    for raw, quote, c, nth in lifted:
+        k, nth = _written_block(split_md_blocks(text), j, grown, quote, nth)
+        if nth is None and c.by != MERGE_BY:
+            lost.append((k, c))
+        else:
+            text = _insert_comment(text, k, raw, quote, nth or 0)
+    return text, lost
+
+
 def _put_orphans(text: str, j: int, comments) -> str:
     """Comments whose paragraph the page deleted, as orphans on lines of their own
     where it was (what `apply_edits` does for a deleted block): after block j, which
@@ -2969,15 +2986,8 @@ def _own_merge(region, first: int, rows, own, j: int, html: str, held):
     for x in mine:
         starts.append((offset, x))
         offset += len(region[x].text)
-    lost = []
-    for raw, quote, c, nth in lifted:
-        if [x for at, x in starts if at <= c.start][-1] in kept:
-            continue
-        k, nth = _written_block(split_md_blocks(text), 0, len(pieces) - 1, quote, nth)
-        if nth is None and c.by != MERGE_BY:
-            lost.append((k, c))
-        else:
-            text = _insert_comment(text, k, raw, quote, nth or 0)
+    text, lost = _put_lifted(text, [x for x in lifted if [y for at, y in starts if at <= x[2].start][-1] not in kept],
+                             0, len(pieces) - 1)
     if len(split_md_blocks(text)) != len(pieces):
         return None
     if lost:
@@ -3241,13 +3251,7 @@ def merge_edits(base_text: str, cur_text: str, edits, at: str = ""):
             continue
         if rep["changed"]:
             changed.append(i)
-        lost = []
-        for raw, quote, c, nth in lifted:
-            k, nth = _written_block(split_md_blocks(text), j, grown, quote, nth)
-            if nth is None and c.by != MERGE_BY:
-                lost.append((k, c))
-            else:
-                text = _insert_comment(text, k, raw, quote, nth or 0)
+        text, lost = _put_lifted(text, lifted, j, grown)
         if lost:
             text = _put_orphans(text, lost[0][0], [c for _, c in lost])
         if mode == "both" and rep["changed"]:

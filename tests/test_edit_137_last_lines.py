@@ -50,6 +50,11 @@ def test_a_typed_line_that_markdown_reads_as_a_block_stays_its_text(scene):
     assert line in out and "\\" not in out, out
 
 
+def test_a_private_use_character_in_the_text_leaves_the_typed_line_its_text():
+    # The token is picked among characters the text does not hold, as an emoji token is (ticket 181, E).
+    out = save("Ab \uF8FC", "<p>Ab \uF8FC<br>---</p>")
+    assert "\uF8FC" in out and "<hr" not in rendered(out) and "<h2" not in rendered(out), out
+
 @pytest.mark.parametrize("source, html, md", [
     ("Ab", "<p>Ab</p><hr><p>cd</p>", "Ab\n\n" + "-" * 72 + "\n\ncd\n"),
     ("Ab", "<p>Ab<code>---</code></p>", "Ab`---`\n"),

@@ -307,13 +307,26 @@ def test_a_closing_tag_with_no_opener_steps_over_only_the_comments_that_stood_be
     assert want in saved(src, html=page)
 
 
-# Ticket 183 BU: a closing tag with no opener inside an HTML block nested in the block (pandoc reads a list item
-# that starts with a comment as one) is not kept by the save, which is refused rather than drop it.
+def test_a_comment_in_a_crlf_file_keeps_its_side_of_a_closing_tag_with_no_opener():
+    c1 = C1.replace("\n", "\r\n")
+    doc = "# Title\r\n\r\nStart" + c1 + "</x1> b here.\r\n"
+    out, rep = rde.apply_edits(doc, [{"i": 1, "html": "<p>Start" + A1 + " b there.</p>"}])
+    assert "Start" + c1 + "</x1> b there." in out
 
-def test_a_closing_tag_with_no_opener_in_a_nested_html_block_refuses_the_save():
-    doc = "# Title\n\n- a\n- <!-- f --></x1>Start b here.\n"
-    page = "<ul>\n<li>a</li>\n<li><!-- f -->Start b there.</li>\n</ul>"
-    out, rep = rde.apply_edits(doc, [{"i": 1, "html": page}])
+
+# Ticket 183 BU: a tag inside an HTML block nested in the block (pandoc reads a list item that starts with a comment
+# as one) is not kept by the save: a closing tag with no opener is not on the page, and the others are written as
+# the page has them, or dropped. The save is refused rather than lose or change it.
+
+@pytest.mark.parametrize("block,page", [
+    ("- a\n- <!-- f --></x1>Start b here.", "<ul>\n<li>a</li>\n<li><!-- f -->Start b there.</li>\n</ul>"),
+    ("- a\n- <!-- f --><kbd>x</kbd> here.", "<ul>\n<li>a</li>\n<li><!-- f --><kbd>x</kbd> there.</li>\n</ul>"),
+    ("> <!-- f -->\n> <details>\n> words here\n> </details>", None),
+], ids=["lone-closing-tag", "kbd", "details-in-quote"])
+def test_a_tag_in_a_nested_html_block_refuses_the_save(block, page):
+    doc = "# Title\n\n" + block + "\n"
+    frag = page if page is not None else page_fragment(block).replace("here", "there")
+    out, rep = rde.apply_edits(doc, [{"i": 1, "html": frag}])
     assert out == doc and rep["skipped"] == [(1, "block holds raw HTML the edit cannot keep; edit it in the .md")]
 
 

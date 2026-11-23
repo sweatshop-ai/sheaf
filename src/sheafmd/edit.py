@@ -1970,15 +1970,16 @@ MARKDOWN_TAGS = frozenset({
     "th", "thead", "tr", "ul",
 })
 TAG_RE = re.compile(r"^<(/?)([A-Za-z][A-Za-z0-9-]*)\b[^>]*?(/?)>$")
-_HELD_TAG_RE = re.compile(r"</?([A-Za-z][A-Za-z0-9-]*)\b[^>]*>")
+# A tag anywhere in a text: TAG_RE's, not anchored to the whole text.
+_NESTED_TAG_RE = re.compile(r"</?([A-Za-z][A-Za-z0-9-]*)\b[^>]*>")
 
 
 def _raw_tags(content: str):
-    """The raw inline tags of a block's source, in order, as (tags, lone, doc, held), each tag in the source's
+    """The raw inline tags of a block's source, in order, as (tags, lone, doc, unkept), each tag in the source's
     bytes: `tags` holds (name, opening tag, closing tag or "", the opening tag as the page has it);
     `lone`, (closing tag, its node in `doc`) for each closing tag with no opener of its name; `doc`,
-    pandoc's JSON of the block; `held`, the tags of the HTML blocks nested in it (ticket 183 BU), which the
-    save does not put back: a list item that starts with a comment is one."""
+    pandoc's JSON of the block; `unkept`, every tag other than markdown's in the HTML blocks nested in it (a
+    list item that starts with a comment is one), which the save does not put back (ticket 183 BU)."""
     import json
 
     from .sanitize import ALSO_REMOVED, REMOVE
@@ -1989,7 +1990,7 @@ def _raw_tags(content: str):
     if r.returncode != 0:
         return [], [], None, []
     doc = json.loads(r.stdout)
-    nodes, held = [], []
+    nodes, unkept = [], []
 
     def walk(node, in_table=False):
         if isinstance(node, dict):
@@ -1997,7 +1998,7 @@ def _raw_tags(content: str):
                 nodes.append((node, in_table))
             elif node.get("t") == "RawBlock":
                 # A comment's words are the comment's: a tag written in them is no tag.
-                held.extend(m.group(0) for m in _HELD_TAG_RE.finditer(RAW_COMMENT_RE.sub("", node["c"][1]))
+                unkept.extend(m.group(0) for m in _NESTED_TAG_RE.finditer(RAW_COMMENT_RE.sub("", node["c"][1]))
                             if m.group(1).lower() not in MARKDOWN_TAGS | REMOVE | ALSO_REMOVED)
             else:
                 walk(node.get("c"), in_table or node.get("t") == "Table")
@@ -2033,7 +2034,7 @@ def _raw_tags(content: str):
         tags.append(tag)
         if not empty:
             open_.setdefault(name, []).append(tag)
-    return [tuple(t) for t in tags], lone, doc, held
+    return [tuple(t) for t in tags], lone, doc, unkept
 
 
 def _texts(soup) -> list:
@@ -2130,6 +2131,8 @@ def _lone_as_text(soup, lone, doc, token, comments: dict) -> dict:
     from bs4 import BeautifulSoup, Comment, NavigableString, Tag
 
     comment_re = _placeholders(comments)[0]
+    # The render of the source gives a comment without the carriage returns of a CRLF file.
+    comments = {t: raw.replace("\r", "") for t, raw in comments.items()}
 
     placed = {}
     for raw, node in lone:
@@ -2151,7 +2154,7 @@ def _lone_as_text(soup, lone, doc, token, comments: dict) -> dict:
         found = []
         while sib is not None:
             if isinstance(sib, Comment):
-                found.append(f"<!--{sib}-->")
+                found.append(f"<!--{sib}-->".replace("\r", ""))
                 sib = getattr(sib, step)
             elif isinstance(sib, Tag) and sib.contents:
                 sib = sib.contents[-1 if step == "previous_sibling" else 0]
@@ -2313,9 +2316,9 @@ def _tags_as_text(content: str, fragment: str, token, comments: dict):
     placeholders the fragment holds to the comments' bytes in the source."""
     from bs4 import BeautifulSoup
 
-    tags, lone, doc, held = _raw_tags(content)
+    tags, lone, doc, unkept = _raw_tags(content)
     if not tags and not lone:
-        return fragment, {}, held
+        return fragment, {}, unkept
 
     def key(el):
         return (el.name, tuple(sorted((k, " ".join(v) if isinstance(v, list) else v) for k, v in el.attrs.items())))
@@ -2348,7 +2351,7 @@ def _tags_as_text(content: str, fragment: str, token, comments: dict):
         el.insert_before(a)
         el.insert_after(b)
         el.unwrap()
-    return (str(soup), placed, held) if placed else (fragment, {}, held)
+    return (str(soup), placed, unkept) if placed else (fragment, {}, unkept)
 
 
 # ─────────────────────────────────────────────────────────────── footnotes ──
@@ -2483,9 +2486,9 @@ def _convert_with_comments(block, fragment: str, strays=None):
         return t
 
     frag = RAW_COMMENT_RE.sub(keep, ANCHOR_RE.sub(swap, fragment))
-    said = {t: block.content[by_id[cid].start:by_id[cid].end] for cid, t in tokens.items()} | placed
-    comments = frozenset(said)
-    frag, tags, held = _tags_as_text(block.content, frag, token, said)
+    comment_bytes = {t: block.content[by_id[cid].start:by_id[cid].end] for cid, t in tokens.items()} | placed
+    comments = frozenset(comment_bytes)
+    frag, tags, unkept = _tags_as_text(block.content, frag, token, comment_bytes)
     frag, notes = _notes_as_tokens(frag, token)
     new_md = html_block_to_md(frag, block.content, strays, comments, frozenset(notes.keys()))
     for t, cited in notes.items():
@@ -2510,11 +2513,14 @@ def _convert_with_comments(block, fragment: str, strays=None):
             # A tag the edit left alone at the start of a line opens an HTML block, which
             # would take the lines after it as raw text.
             raise EditError("the edit leaves raw HTML at the start of a line; edit it in the .md")
-    # The comments are still placeholders in the new markdown.
-    if any(new_md.count(raw) < RAW_COMMENT_RE.sub("", block.content).count(raw) for raw in held):
-        # The page holds no element for a closing tag with no opener in it, and the conversion writes
-        # the other tags as it reads them: refused, as the file would lose the tag (ticket 183 BU).
-        raise EditError("block holds raw HTML the edit cannot keep; edit it in the .md")
+    if unkept:
+        # The page holds no element for a closing tag with no opener in an HTML block nested in the block, and
+        # the conversion writes its other tags as it reads them, or drops them: refused, as the file would lose
+        # or change the tag (ticket 183 BU). The source is counted without its comments, as the new markdown
+        # still holds placeholders in their place: a tag written in a comment's words is not lost.
+        bare = RAW_COMMENT_RE.sub("", block.content)
+        if any(new_md.count(raw) < bare.count(raw) for raw in unkept):
+            raise EditError("block holds raw HTML the edit cannot keep; edit it in the .md")
     lost = []
     for cid, c in by_id.items():
         t = tokens.get(cid)

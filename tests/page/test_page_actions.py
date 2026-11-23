@@ -56,10 +56,12 @@ def bar(page):
 HEARD = """(() => {
   const ES = window.EventSource;
   window.__heard = {};
+  window.__versions = [];
   window.EventSource = class extends ES {
     constructor(...a) {
       super(...a);
       for (const k of ['changed', 'hello']) this.addEventListener(k, () => { window.__heard[k] = (window.__heard[k] || 0) + 1; });
+      this.addEventListener('hello', (e) => { let v = null; try { v = JSON.parse(e.data).version; } catch (_) {} window.__versions.push(v); });
     }
   };
 })()"""
@@ -68,6 +70,19 @@ HEARD = """(() => {
 def heard(page, event):
     """How many `event`s the page's stream has brought; the page's own listener has run on each."""
     return page.evaluate(f"window.__heard[{event!r}] || 0")
+
+
+NEW_VERSION = "99.0.0"
+
+
+def upgrade(page, site, what="the upgrade"):
+    """Tell the page (HEARD in it) that the hub was upgraded, and wait until its stream has brought that hello.
+    The hub queues a stream's first hello when it subscribes it, so a hello on the page proves the page's stream is
+    on the bus. Published earlier, after a reload, the upgrade went only to the stream of the load before, which was
+    going away; the old wait took any hello and passed on the new stream's first (ticket 173 O, CI run 45081970648)."""
+    until(lambda: heard(page, "hello"), what="the page's stream, open")
+    site.hub.entry(DOC).bus.publish("hello", {"version": NEW_VERSION})
+    until(lambda: NEW_VERSION in page.evaluate("window.__versions"), what=what)
 
 
 def stand_still(page):
@@ -565,8 +580,7 @@ def test_every_reload_asked_during_a_press_counts_and_the_settle_still_saves_the
     rewrite(f, SHEAF.replace("# Plan", "# Plan, outside"))
     until(lambda: heard(p, "changed"), what="the change, whose reload waits for the press")
     p.route("**/_/doc?*", lambda r: r.abort())          # the hello's look at the text finds nothing to add
-    site.hub.entry(DOC).bus.publish("hello", {"version": "99.0.0"})
-    until(lambda: heard(p, "hello"), what="the upgrade, whose reload waits too")
+    upgrade(p, site, "the upgrade, whose reload waits too")
     p.clock.run_for(4000)
     type_at_end(p, "main p:has-text('Body')", " typed")
     until(lambda: "typed" in p.inner_text("main p:has-text('Body')"), what="the edit on screen")
@@ -682,8 +696,7 @@ def test_an_upgrade_while_a_press_is_out_says_its_refusal_again_on_the_page_it_b
     until(lambda: held or p.wait_for_timeout(20), what="the tick, held")
     p.route("**/_/doc?*", lambda r: r.abort())          # the hello's look at the text finds nothing to add
     mark(p)
-    site.hub.entry(DOC).bus.publish("hello", {"version": "99.0.0"})
-    until(lambda: heard(p, "hello"), what="the upgrade")
+    upgrade(p, site)
     held[0].fulfill(status=409, content_type="application/json", body=REFUSED)
     p.wait_for_timeout(200)
     p.clock.run_for(100)                                # the wait for the page's writes ends after 50 ms
@@ -702,8 +715,7 @@ def test_a_reload_asked_only_by_an_upgrade_saves_what_was_typed_during_the_press
     p.route("**/_/doc?*", lambda r: r.abort())
     stand_still(p)
     bar(p).nth(0).click()
-    site.hub.entry(DOC).bus.publish("hello", {"version": "99.0.0"})
-    until(lambda: heard(p, "hello"), what="the upgrade, whose reload waits for the press")
+    upgrade(p, site, "the upgrade, whose reload waits for the press")
     p.clock.run_for(4000)
     type_at_end(p, "main p:has-text('Body')", " typed")
     until(lambda: "typed" in p.inner_text("main p:has-text('Body')"), what="the edit on screen")
@@ -996,8 +1008,7 @@ def test_an_upgrade_while_a_comment_waits_for_the_tick_does_not_ask_to_send_it(s
     p.click("#rd-popover button[data-f=ok]")
     p.wait_for_timeout(300)
     p.route("**/_/doc?*", lambda r: r.abort())
-    site.hub.entry(DOC).bus.publish("hello", {"version": "99.0.0"})
-    until(lambda: heard(p, "hello"), what="the upgrade")
+    upgrade(p, site)
     p.wait_for_timeout(300)
     assert "Send or cancel" not in p.inner_text("#rd-notice")
     mark(p)
@@ -1052,8 +1063,7 @@ def test_an_upgrade_while_a_save_waits_for_the_tick_does_not_ask_to_save(sheaf, 
     p.clock.run_for(2600)                               # the autosave is due and waits for the tick
     until(lambda: p.evaluate("document.querySelector('#rd-state').textContent") == "Saving…", what="Saving…")
     p.route("**/_/doc?*", lambda r: r.abort())
-    site.hub.entry(DOC).bus.publish("hello", {"version": "99.0.0"})
-    until(lambda: heard(p, "hello"), what="the upgrade")
+    upgrade(p, site)
     p.wait_for_timeout(300)
     assert "Save your edits" not in p.inner_text("#rd-notice")
     held[0].continue_()
@@ -1071,8 +1081,7 @@ def test_an_upgrade_held_by_a_comment_form_during_a_press_does_not_say_the_text_
     p.route("**/_/doc?*", lambda r: r.abort())
     stand_still(p)
     bar(p).nth(0).click()
-    site.hub.entry(DOC).bus.publish("hello", {"version": "99.0.0"})
-    until(lambda: heard(p, "hello"), what="the upgrade, whose reload waits for the press")
+    upgrade(p, site, "the upgrade, whose reload waits for the press")
     select(p, at("main", "Body"), at("main", "Body", None))
     p.clock.run_for(500)                                # the Comment button shows after the selection settles
     open_box(p)
@@ -1201,8 +1210,7 @@ def test_an_upgrade_during_the_press_does_not_reload_before_a_restore_waiting_fo
     p.route("**/_/tick", lambda r: held.append(r))
     stand_still(p)
     bar(p).nth(0).click()
-    site.hub.entry(DOC).bus.publish("hello", {"version": "99.0.0"})
-    until(lambda: heard(p, "hello"), what="the upgrade, whose reload waits for the press")
+    upgrade(p, site, "the upgrade, whose reload waits for the press")
     p.clock.run_for(5100)
     until(lambda: held or p.wait_for_timeout(20), what="the tick, held")
     saves = []

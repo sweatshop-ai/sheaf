@@ -2284,8 +2284,8 @@ class Handler:
             address, fm, _ = self._code_rectoverso(req, b.get("doc"))
         else:
             address, fm, _ = self._sheaf(req, b.get("doc"))
-        self._writable(address)
         self._text_writable(req, address, "/_/sessions")    # a rebuild would drop the session line (SPEC 7.2)
+        self._writable(address)                             # after the page's own reason, as save, tick and share (183 BE)
         sid, machine = b.get("id"), b.get("machine")
         _shape(isinstance(sid, str) and work.UUID_RE.fullmatch(sid), "id must be a session id (a lowercase UUID)")
         _shape(isinstance(machine, str) and work.MACHINE_RE.fullmatch(machine),
@@ -2300,6 +2300,8 @@ class Handler:
             fm = visibility.front_matter(text)
             if not self.hub.may_open(req.member, e.address, fm):
                 raise Refuse(404, "no such document")
+            # A door write that marked the page generated since the first look did so under this file's lock (183 BE).
+            self._text_writable(req, e.address, "/_/sessions")
             if code is not None:
                 # Under the lock, where the fork is written: the code's session still the forkable one, an id
                 # that is no box session's to push out, and one fork of two racing POSTs.

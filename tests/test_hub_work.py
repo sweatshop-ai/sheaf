@@ -2074,3 +2074,24 @@ def test_a_fork_reported_on_a_generated_rectoverso_is_refused_and_writes_nothing
     assert (work / DOC).read_text(encoding="utf-8") == before
     row = hub_rows("generated-refused")[-1]
     assert row["doc"] == ADDRESS and row["endpoint"] == "/_/sessions" and FORK not in str(row)
+
+
+def test_a_fork_on_a_generated_rectoverso_that_is_also_read_only_is_refused_as_generated(team, box, work, monkeypatch):
+    # 183 BE (AV for the fork): the page's own reason comes before the clone's, so the row is written.
+    generated(team)
+    monkeypatch.setattr(team.hub, "read_only_line", lambda address: "Read-only: set `save` in .sheaf.toml.")
+    got = fork(team)
+    assert got.status == 403 and GENERATED in got.text and ".sheaf.toml" not in got.text
+    assert hub_rows("generated-refused")[-1]["endpoint"] == "/_/sessions"
+
+def test_a_fork_on_a_rectoverso_marked_generated_after_the_first_look_is_refused_and_writes_nothing(team, box, work,
+                                                                                                    monkeypatch):
+    # 183 BE: a door write marks the page between the fork's first look and its write; the look under the file's lock
+    # sees it (182 G for the fork).
+    from helpers import marked_after_the_look
+    marked_after_the_look(team.hub, monkeypatch, ADDRESS)
+    before = (work / DOC).read_text(encoding="utf-8")
+    got = fork(team)
+    assert got.status == 403 and GENERATED in got.text
+    assert (work / DOC).read_text(encoding="utf-8") == before
+    assert hub_rows("generated-refused")[-1]["endpoint"] == "/_/sessions"

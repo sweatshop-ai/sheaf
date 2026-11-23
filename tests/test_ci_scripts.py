@@ -145,6 +145,44 @@ def test_the_names_say_what_the_functions_do(monkeypatch):
     assert hasattr(linux, "hub_back") and hasattr(macos, "hub_back") and not hasattr(macos, "back")
 
 
+# launchd names the code after the number. The upgrade-stop line of run 45120326342 (macOS, every
+# Python) was read as "75:" with the colon, so the check took a correct exit 75 for a wrong one.
+LAUNCHCTL_PRINT = """io.github.sweatshop-ai.sheaf = {
+\tactive count = 1
+\tpath = /Users/runner/Library/LaunchAgents/io.github.sweatshop-ai.sheaf.plist
+\tstate = running
+\tpid = 55803
+\tlast exit code = {code}
+}
+"""
+
+
+def test_the_last_exit_code_of_launchctl_print_is_the_number_without_its_name(monkeypatch):
+    macos = load_service_script("service_macos", monkeypatch)
+    job = macos.parse_print(LAUNCHCTL_PRINT.replace("{code}", "75: EX_TEMPFAIL"))
+    assert job == {"pid": "55803", "state": "running", "last_exit": "75",
+                   "last_exit_line": "last exit code = 75: EX_TEMPFAIL"}
+    assert macos.parse_print(LAUNCHCTL_PRINT.replace("{code}", "75:"))["last_exit"] == "75"
+    assert macos.parse_print(LAUNCHCTL_PRINT.replace("{code}", "-9"))["last_exit"] == "-9"
+    assert "last_exit" not in macos.parse_print(LAUNCHCTL_PRINT.replace("{code}", "(never exited)"))
+
+
+def test_an_upgrade_stop_that_launchd_saw_end_in_75_passes(monkeypatch, capsys):
+    macos = load_service_script("service_macos", monkeypatch)
+    macos.check_the_upgrade_exit(macos.parse_print(LAUNCHCTL_PRINT.replace("{code}", "75: EX_TEMPFAIL")))
+    out = capsys.readouterr().out
+    assert "ok    launchctl print: last exit code = 75" in out and "::notice::" not in out
+
+
+@pytest.mark.parametrize("code", ["0", "1: Operation not permitted", "-9: Killed: 9", "(never exited)"])
+def test_an_upgrade_stop_that_launchd_saw_end_otherwise_fails_ci_and_quotes_the_line(code, monkeypatch, capsys):
+    macos = load_service_script("service_macos", monkeypatch)
+    with pytest.raises(SystemExit) as end:
+        macos.check_the_upgrade_exit(macos.parse_print(LAUNCHCTL_PRINT.replace("{code}", code)))
+    assert end.value.code == 1
+    assert f"::error::launchctl print: last exit code = 75: launchctl print says 'last exit code = {code}'" in capsys.readouterr().out
+
+
 # ── the helpers the two scripts share ────────────────────────────────────────
 
 def test_show_output_becomes_a_mapping():

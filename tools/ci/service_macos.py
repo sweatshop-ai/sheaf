@@ -33,17 +33,34 @@ def launchd_job() -> dict:
     done = _ci.quiet(["launchctl", "print", f"{domain()}/{service.LABEL}"])
     if done.returncode != 0:
         return {}
+    return parse_print(done.stdout)
+
+
+def parse_print(text: str) -> dict:
+    """The process id, the state and the last exit code out of `launchctl print` of one job.
+
+    launchd follows the code with its name (`last exit code = 75: EX_TEMPFAIL`), so only the
+    number is taken; `last_exit_line` keeps the whole line for a failure to quote."""
     out = {}
-    pid = re.search(r"^\s*pid = (\d+)", done.stdout, flags=re.M)
-    last = re.search(r"^\s*last exit code = (\S+)", done.stdout, flags=re.M)
-    state = re.search(r"^\s*state = (\S+)", done.stdout, flags=re.M)
+    pid = re.search(r"^\s*pid = (\d+)", text, flags=re.M)
+    last = re.search(r"^\s*last exit code = (-?\d+)", text, flags=re.M)
+    line = re.search(r"^\s*(last exit code = .*)$", text, flags=re.M)
+    state = re.search(r"^\s*state = (\S+)", text, flags=re.M)
     if pid:
         out["pid"] = pid.group(1)
     if last:
         out["last_exit"] = last.group(1)
+    if line:
+        out["last_exit_line"] = line.group(1).strip()
     if state:
         out["state"] = state.group(1)
     return out
+
+
+def check_the_upgrade_exit(job: dict):
+    """An upgrade stop exits 75 (SPEC 14.3); launchd must have seen that code, or CI fails."""
+    _ci.check(job.get("last_exit") == "75", "launchctl print: last exit code = 75",
+              f"launchctl print says {job.get('last_exit_line', 'no last exit code')!r}")
 
 
 def lint_the_plist(port: int, tmp: Path):
@@ -90,11 +107,7 @@ def checks(port: int):
     _ci.upgrade_command()
     _ci.check(hub_back(before["pid"]), "launchd restarted the hub after the upgrade stop")
     _ci.check(_ci.has_row(_ci.diag(), "hub-exit", reason="upgrade"), "the hub wrote hub-exit reason=upgrade")
-    last = launchd_job().get("last_exit")
-    if last == "75":
-        _ci.say("  ok    launchctl print: last exit code = 75")
-    else:
-        _ci.notice(f"launchctl print says last exit code = {last}: exit 75 is shown by the hub-exit row only")
+    check_the_upgrade_exit(launchd_job())
 
     _ci.say("4. uninstall")
     _ci.check(_ci.sh(["sheaf", "service", "uninstall"]).returncode == 0, "sheaf service uninstall exits 0")

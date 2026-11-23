@@ -439,6 +439,20 @@ def clock_at(ms):
     return datetime.datetime.fromtimestamp(ms / 1000, tz=datetime.timezone.utc)
 
 
+def stand_still(page):
+    """The installed clock runs at the real pace: from now on it moves only when the test runs it. Called before a
+    press, so the half second it jumps is not the Undo's. A page that read the clock past that time meanwhile makes
+    `pause_at` refuse ("fast-forward to the past"): the time is read again."""
+    for _ in range(5):
+        try:
+            page.clock.pause_at((page.evaluate("Date.now()") + 500) / 1000)       # seconds, in Playwright's Python
+            return
+        except Exception as e:
+            if "past" not in str(e):
+                raise
+    raise AssertionError("the page clock would not pause")
+
+
 def reload_on_clock(page, start=T0, *, pause=False):
     """Put a clock the test drives under the open page, from `start` (ms), and reload it; with
     `pause` the clock stands still 5 s later."""

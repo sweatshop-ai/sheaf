@@ -4,7 +4,7 @@ hub's own, through the proxy handler of tests/test_hub_list.py; the page's clock
 import json
 
 import pytest
-from pagehelp import close_context, new_context, until, rewrite
+from pagehelp import close_context, new_context, stand_still, until, rewrite
 from test_hub_list import JOEY, NELL, ago, box, github, rectoversos  # noqa: F401  (the hub with its list, as there)
 
 pytestmark = pytest.mark.page
@@ -114,6 +114,9 @@ def test_a_refused_press_is_said_above_the_rows_and_the_button_comes_back(listed
 
 def test_a_press_on_another_row_in_the_five_seconds_is_sent_too_and_the_list_reloads_after_both(listed, rectoversos):  # noqa: F811
     page, ticks = listed
+    # The clock stands still from here: running at the real pace too, it closed GA4's window while the test waited
+    # for Joey's tick on a slow runner, and the reload had come before the Undo was read (ticket 173 N).
+    stand_still(page)
     joey(page).click()
     page.clock.run_for(2000)
     ga4(page).click()

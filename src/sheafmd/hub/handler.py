@@ -1741,7 +1741,7 @@ class Handler:
         try:
             # The moves' lock first, as a delete takes it: a move adds its Forward under it, so the look at `forwards.json` and the
             # put back are one step against a move.
-            with moves._LOCK, place.held(self.hub, doc), self.hub.page_lock(doc):
+            with moves.page_held(self.hub, doc):     # the page's lock is waited for outside the moves' lock (lockorder.py)
                 if self.hub.forwards.follow(doc) is not None:
                     raise Refuse(409, "that address is taken: a page that was there moved away, and its old address leads to it, so "
                                       "this page is not put back there")

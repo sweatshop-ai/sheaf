@@ -666,3 +666,36 @@ def test_an_edit_made_on_the_old_tiroir_before_the_move_is_not_hidden_by_the_lan
     assert code != 0 and md.with_name("plan.tiroir.md").exists()
     assert "Edited in the browser." in md.with_name("plan.tiroir.md").read_text(encoding="utf-8")
     assert md.read_text(encoding="utf-8") == "# Plan\n\nLaptop's own edit.\n"
+
+
+def test_a_move_lets_go_of_the_moves_lock_while_it_waits_for_a_render_of_its_page(two):
+    """Ticket 182 line 55: the drop here waits for the page's lock, which a render holds for up to 120 s. It waits with the
+    moves' lock let go, so a cancel (`/_/cancel`), another move or a forget does not wait behind that render."""
+    import threading
+
+    from sheafmd.hub import moves
+    with two.active():
+        e = two.hub.entry(OLD)
+    held, release, got = threading.Event(), threading.Event(), []
+
+    def render():
+        with e.live.exclusive():
+            held.set()
+            release.wait(15)
+
+    def other():
+        ok = moves._LOCK.acquire(timeout=3)
+        if ok:
+            moves._LOCK.release()
+        got.append(ok)
+        release.set()
+
+    def between(verb, res):
+        two.link.between = None
+        threading.Thread(target=render, daemon=True).start()
+        assert held.wait(5)
+        threading.Timer(0.3, other).start()
+    two.link.between = between
+    out = moved(two)
+    assert got == [True], "the moves' lock is held while the move waits for a render of its page"
+    assert out["doc"] == NEW

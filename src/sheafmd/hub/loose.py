@@ -299,7 +299,20 @@ class Loose:
     def drop(self, member, root) -> None:
         """Take back a loose root a refused create had just made, if nothing has been put in it: its hub root, its entry
         in `loose.json`, its folder, and the root it added to the member. A root that holds anything stays. The moves'
-        lock first: the forget takes it, and a create in a loose root holds it before it asks this registry."""
+        lock first: the forget takes it, and a create in a loose root holds it before it asks this registry. The forget's
+        wait for each document's lock comes after all three are let go, as in `Hub.forget_root` (SPEC 8.2)."""
+        pending: list = []
+        try:
+            self._drop(member, root, pending)
+        finally:            # also when a step after the forget's first half failed: its documents are let go all the same
+            for finish in pending:
+                try:
+                    finish()
+                except Exception:       # never in place of `_drop`'s own failure, nor before another root's forget
+                    self.hub.record_exception("forget-failed", root.name)
+
+    def _drop(self, member, root, pending: list) -> None:
+        """The part of `drop` under its locks; the forget's second half goes into `pending`."""
         from . import moves         # here, not at the top: moves imports this module
         with moves.exclusive(), self._lock, state.file_locked("loose.lock"):
             folder = self._read().get(member.id)
@@ -311,7 +324,8 @@ class Loose:
                 os.rmdir(folder)            # first: a folder that cannot go leaves the root and its entry as they were
             except OSError:
                 return
-            self.hub.forget_root(root.name)
+            _, finish = self.hub.let_go_root(root.name)
+            pending.append(finish)
             state.write_json(_file(), {k: v for k, v in self._read().items() if k != member.id})
             proxy = getattr(self.hub, "proxy", None)
             m = proxy.members.get(member.id) if proxy is not None else None

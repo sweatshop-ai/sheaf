@@ -1038,6 +1038,17 @@ class Hub:
         with e.live.exclusive() if e is not None and e.live is not None else nullcontext():
             yield
 
+    @contextmanager
+    def page_lock_now(self, address: str):
+        """`page_lock` when it is free now, never a wait for it: yields whether it is held (True for a page the hub has no
+        entry of)."""
+        e = self.entries.get(address)
+        if e is None or e.live is None:
+            yield True
+            return
+        with e.live.exclusive_now() as got:
+            yield got
+
     def forget_document(self, address: str):
         """A page left its address (deleted into the trash): the entry goes and the pages open on it are told `gone`. Its
         versions stay, and come back with it when it does (8.6)."""
@@ -1055,9 +1066,16 @@ class Hub:
         compares the page's root and then ends a Tell by address (`/_/cancel`), are over before the name is let go. The
         wait for the documents' locks comes after the moves' lock is let go too, as after the hub's."""
         with moves_mod.exclusive():
-            root, popped = self._let_go_root(name)
-        self._forget_entries(popped)
+            root, finish = self.let_go_root(name)
+        finish()
         return root
+
+    def let_go_root(self, name: str):
+        """`forget_root` in two halves, for a caller that already holds the moves' lock (`loose.Loose.drop`): the root is let
+        go now, and (the root, `finish`) is returned. `finish()` waits for each document's lock and tells its pages `gone`;
+        the caller calls it once it has let go of the moves' lock and of any lock of its own."""
+        root, popped = self._let_go_root(name)
+        return root, lambda: self._forget_entries(popped)
 
     def _let_go_root(self, name: str):
         """(the root, the entries popped) of `forget_root`: the name let go, under the moves' lock and the hub's."""

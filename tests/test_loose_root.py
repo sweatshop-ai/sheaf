@@ -419,3 +419,46 @@ def test_a_refused_create_whose_drop_fails_still_raises_its_own_refusal(agents, 
     monkeypatch.setattr(agents.hub.loose, "drop", fail)
     bad, why = call(agents, "cal-claude", "create", doc="notes.md", text=TEXT, keep=True)
     assert bad and "no marks today" in why and "disk says no" not in why, why
+
+
+def test_a_drop_lets_go_of_the_moves_lock_before_it_waits_for_a_document_of_the_root(agents):
+    """Ticket 182 line 54: `drop` forgets the root it took back, and the forget waits for each document's lock, which a
+    render holds for up to 120 s. That wait comes after the moves' lock is let go, as in `forget_root` (SPEC 8.2)."""
+    import threading
+    import time
+
+    from sheafmd.hub import moves
+    member = agents.hub.proxy.members[CAL]
+    root, fresh = agents.hub.loose.root_for(member)
+    assert fresh
+    page = root.path / "a.md"
+    page.write_text("# A\n", encoding="utf-8")
+    e = agents.hub.entry(f"{root.name}/a.md")
+    page.unlink()                       # the root is empty again; the hub still holds the page's entry
+    held, release = threading.Event(), threading.Event()
+
+    def render():
+        with e.live.exclusive():
+            held.set()
+            release.wait(15)
+    renderer = threading.Thread(target=render, daemon=True)
+    renderer.start()
+    assert held.wait(5)
+    dropping = threading.Thread(target=lambda: agents.hub.loose.drop(member, root), daemon=True)
+    dropping.start()
+    try:
+        end = time.monotonic() + 5
+        while time.monotonic() < end and f"{root.name}/a.md" in agents.hub.entries:
+            time.sleep(0.01)
+        assert f"{root.name}/a.md" not in agents.hub.entries
+        got = moves._LOCK.acquire(timeout=3)
+        if got:
+            moves._LOCK.release()
+        assert got, "the moves' lock is held while the drop waits for a render"
+        assert dropping.is_alive()      # the drop itself still waits for the document
+    finally:
+        release.set()
+        renderer.join(5)
+        dropping.join(5)
+    assert not dropping.is_alive()
+    assert agents.hub.roots.get(root.name) is None

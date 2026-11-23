@@ -146,6 +146,23 @@ class LiveDocument:
         with self._hold(), self._held():
             yield
 
+    @contextlib.contextmanager
+    def exclusive_now(self):
+        """`exclusive` when the writer lock is free now, never a wait for it: yields whether it was taken. For a caller that
+        holds a lock a render must not keep (the moves' lock: `moves.page_held`)."""
+        with self._hold():
+            if self._owner == threading.get_ident():
+                raise RuntimeError("Live Document re-entered from its own callback")
+            if not self._lock.acquire(blocking=False):
+                yield False
+                return
+            self._owner = threading.get_ident()
+            try:
+                yield True
+            finally:
+                self._owner = None
+                self._lock.release()
+
     def _after_write(self):
         """Test seam, a no-op: a save or a comment calls it after its write and before its
         render, with the lock held and the file lock released."""

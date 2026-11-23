@@ -2,7 +2,7 @@
 
 **Claimed by:** Aziz 2026-11-20 20:05
 
-**Status:** done, merged as 995dc30a (PR #515); two items not verified, see below
+**Status:** done, merged as 995dc30a (PR #515); meets the CI rule (verified 2026-11-23, see the end); the two items below cannot be reproduced in CI and are closed by reading the code
 
 **Blocked by:** 169 (same file, page/live.js)
 
@@ -19,3 +19,7 @@
 **Not verified:**
 - A real renderer crash. Playwright's `Page.crash` hangs the driver and `chrome://crash` does not crash the tab. The test drops the follower's `leave` post and closes the tab, which frees the lock as a crash does.
 - The leader hidden for more than five minutes (the ticket's "leader hidden or not"), and the timing of the old behaviour in that state. Never measured, so "does anything act on the tab count within a minute" is also unanswered. A manual check in a real browser remains open.
+
+**Verified 2026-11-23 (Thandi), meets the rule.** Rule checked: an item about a freeze or crash counts as done only if a browser reproduction runs in CI. `test_a_tab_that_leaves_without_a_leave_is_dropped_when_its_lock_frees` is that reproduction: the tab dies without a `leave` and its `sheaf-tab-*` lock frees, which is what a crash does to the leader. It passed in main's CI on e6b762ec (push run 45133187436, nightly run 45141939187). The two items above:
+- A real renderer crash: not reachable in CI (`Page.crash` hangs the driver). The leader sees only the lock being freed, which the test does, so nothing on the leader's side goes untested.
+- The leader hidden for more than five minutes: not reachable in CI, since every page Playwright drives reports `visible` (ticket 176). It no longer matters for the fix: Chrome throttles timers in a long-hidden tab, and the drop path in `Leader.prototype.watching` (`live.js`) uses none. The lock grant, `navigator.locks.query()` and `take` run from promise callbacks; only the 2 s backstop `sweep` is a timer. So "does anything act on the tab count within a minute" no longer needs an answer.

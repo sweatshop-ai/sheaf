@@ -2,7 +2,9 @@
 into the root's `.sheaf/trash/` for thirty days, and no agent or door path can delete. Through the handler in proxy mode
 and the door, in memory, with the hub's clock under test control."""
 import contextlib
+import errno
 import os
+import shutil
 import threading
 
 import pytest
@@ -543,7 +545,7 @@ def test_a_page_deleted_between_the_first_look_and_the_lock_is_not_found(agents,
     assert got.status == 404, got.text
 
 
-@pytest.mark.parametrize("err", [1, 95], ids=["EPERM", "EOPNOTSUPP"])
+@pytest.mark.parametrize("err", [errno.EPERM, errno.EOPNOTSUPP], ids=["EPERM", "EOPNOTSUPP"])
 def test_delete_works_where_the_file_system_refuses_hard_links(agents, clock, monkeypatch, err):
     doc = made(agents, "bea-claude")
     path = agents.hub.file(doc)
@@ -559,20 +561,58 @@ def test_delete_works_where_the_file_system_refuses_hard_links(agents, clock, mo
     assert held.read_text(encoding="utf-8") == text
 
 
-def test_a_delete_never_leaves_the_page_in_two_places(agents, clock, monkeypatch):
+def test_a_delete_never_has_the_page_in_two_places_at_any_step(agents, clock, monkeypatch):
     doc = made(agents, "bea-claude")
     path = agents.hub.file(doc)
-    real = os.unlink
+    trash = root_of(agents, doc).path / ".sheaf" / "trash"
+    counts = []
 
-    def unlink(p, *a, dir_fd=None, **k):
-        if dir_fd is not None:
-            raise PermissionError(1, "Operation not permitted")     # no entry can be taken off, the undo's neither
-        return real(p, *a, dir_fd=dir_fd, **k)
-    monkeypatch.setattr(archive.os, "unlink", unlink)
+    def counted(real):
+        def step(*a, **k):
+            got = real(*a, **k)
+            if k.get("dst_dir_fd") is not None:     # the step that puts the page in the trash: a crash right after it
+                counts.append(path.exists() + len(list(trash.rglob(path.name))))
+            return got
+        return step
+    monkeypatch.setattr(archive.os, "link", counted(os.link))
+    monkeypatch.setattr(archive.os, "rename", counted(os.rename))
+    assert delete(agents, doc).status == 200
+    assert counts and all(n == 1 for n in counts), counts
+
+
+def test_a_folder_on_the_way_that_goes_away_before_the_lock_is_not_found(agents, clock, monkeypatch):
+    doc = made(agents, "bea-claude")
+    root = root_of(agents, doc)
+    folder = agents.hub.file(doc).parent
+    real = archive.file_lock
+
+    @contextlib.contextmanager
+    def removing(p):
+        shutil.rmtree(folder)                       # the page's folder goes, with the page, between the look and the lock
+        with real(p):
+            yield
+    monkeypatch.setattr(archive, "file_lock", removing)
+    with pytest.raises(archive.Gone):
+        agents.hub.archive.trash(root, doc.split("/", 1)[1])
+
+
+def test_a_page_swapped_for_a_folder_right_before_the_move_is_not_moved(agents, clock, monkeypatch):
+    doc = made(agents, "bea-claude")
+    path = agents.hub.file(doc)
+    real, swapped = os.rename, []
+
+    def rename(a, b, *args, **k):
+        if k.get("dst_dir_fd") is not None and not swapped:
+            swapped.append(a)
+            os.unlink(path)
+            os.mkdir(path)                          # another process puts a folder at the page's name
+            (path / "inside.md").write_text("# Not the page\n", encoding="utf-8")
+        return real(a, b, *args, **k)
+    monkeypatch.setattr(archive.os, "rename", rename)
     got = delete(agents, doc)
-    assert got.status in (200, 409), got.text
-    held = list((root_of(agents, doc).path / ".sheaf" / "trash").rglob(path.name))
-    assert path.exists() + len(held) == 1
+    assert got.status == 409, got.text
+    assert (path / "inside.md").read_text(encoding="utf-8") == "# Not the page\n"
+    assert not list((root_of(agents, doc).path / ".sheaf" / "trash").rglob("inside.md"))
 
 
 def test_a_delete_does_not_overwrite_a_page_in_the_trash_under_the_same_second_and_name(agents, clock):
@@ -594,7 +634,7 @@ def test_a_restore_where_the_file_system_refuses_hard_links_says_so_and_moves_no
     [row] = trash_rows(agents)
 
     def link(*a, **k):
-        raise OSError(95, os.strerror(95))
+        raise OSError(errno.EOPNOTSUPP, os.strerror(errno.EOPNOTSUPP))
     monkeypatch.setattr(archive.os, "link", link)
     got = agents.post("/_/restore-trash", {"id": row["id"]}, member=BEA)
     assert got.status == 409, got.text

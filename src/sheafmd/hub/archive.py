@@ -23,8 +23,8 @@ SWEEP_EVERY = 600           # seconds between two sweeps on the hub's tick
 TRASH_DAYS = 30
 ARCHIVED, SEEN = loose.ARCHIVED, loose.SEEN
 TRASH = Path(".sheaf") / "trash"
-# what os.link answers where a file system or a policy (fs.protected_hardlinks) allows no hard link
-NO_HARD_LINKS = frozenset({errno.EPERM, errno.EOPNOTSUPP, errno.ENOTSUP, errno.EMLINK, errno.ENOSYS, errno.EXDEV})
+# what os.link answers where a file system allows no hard link, or a policy (fs.protected_hardlinks) refuses this one
+NO_HARD_LINKS = frozenset({errno.EPERM, errno.EOPNOTSUPP, errno.ENOTSUP, errno.ENOSYS})
 
 
 def is_archived(archived: dict, rel: str, mtime: float) -> bool:
@@ -206,7 +206,7 @@ class Archive:
             if not stat.S_ISREG(os.lstat(src).st_mode):
                 raise loose.Refused("the page is not a plain file: refused")
         except FileNotFoundError:
-            raise KeyError(rel) from None
+            raise Gone(rel) from None
         base = os.path.realpath(root.path)
         real = os.path.realpath(src)
         if os.path.commonpath([real, base]) != base:      # lstat looks at the last part of the path only
@@ -231,7 +231,7 @@ class Archive:
             try:
                 sfd, sname = _folder_of(root.path, rel)
             except FileNotFoundError:
-                raise KeyError(rel) from None       # 183 BK: a folder on the way went away since the look: the page is not there
+                raise Gone(rel) from None       # 183 BK: a folder on the way went away since the look: the page is not there
             except OSError:
                 raise loose.Refused("the page is in a folder that is a link or went away: refused") from None
             try:
@@ -239,7 +239,7 @@ class Archive:
                     if not stat.S_ISREG(os.stat(sname, dir_fd=sfd, follow_symlinks=False).st_mode):
                         raise loose.Refused("the page is not a plain file: refused")
                 except FileNotFoundError:
-                    raise KeyError(rel) from None   # 183 BK: deleted between the first look and the lock
+                    raise Gone(rel) from None   # 183 BK: deleted between the first look and the lock
                 try:
                     dfd, dname = _folder_of(root.path, str(dest.relative_to(root.path)))
                 except OSError:
@@ -258,9 +258,18 @@ class Archive:
                     try:
                         os.rename(sname, dname, src_dir_fd=sfd, dst_dir_fd=dfd)
                     except FileNotFoundError:
-                        raise KeyError(rel) from None
+                        raise Gone(rel) from None
                     except OSError as e:
                         raise loose.Refused(f"the page could not be moved to the trash ({e.strerror})") from None
+                    # A rename takes whatever is at the name, where the link it replaces refused a folder: a folder another
+                    # process put there since the look goes back, and the delete is refused.
+                    if not stat.S_ISREG(os.stat(dname, dir_fd=dfd, follow_symlinks=False).st_mode):
+                        try:
+                            os.rename(dname, sname, src_dir_fd=dfd, dst_dir_fd=sfd)
+                        except OSError as e:
+                            raise loose.Refused(f"what was at the page's address changed during the delete and is in the "
+                                                f"trash now ({e.strerror}): move {TRASH / str(at) / rel} back by hand") from None
+                        raise loose.Refused("what is at the page's address changed during the delete: refused, nothing was moved")
                 finally:
                     os.close(dfd)
             finally:
@@ -330,8 +339,8 @@ class Archive:
                 if e.errno in NO_HARD_LINKS:
                     # 183 BL: a restore links, never renames, so a page a door create puts at the address meanwhile is never
                     # replaced; a file system without hard links cannot do that, and the owner moves the page back by hand.
-                    raise loose.Refused(f"the page could not be put back: this file system does not allow the hard link a "
-                                        f"restore needs so it never overwrites a page ({e.strerror}). Move "
+                    raise loose.Refused(f"the page could not be put back: the file system, or its policy on hard links, refused "
+                                        f"the hard link a restore needs so it never overwrites a page ({e.strerror}). Move "
                                         f"{TRASH / ident} back to {rel} by hand") from None
                 raise loose.Refused(f"the page could not be put back ({e.strerror})") from None
             try:
@@ -370,6 +379,10 @@ class Archive:
 
 class Taken(Exception):
     """A page is at the old address already."""
+
+
+class Gone(Exception):
+    """The page to delete went away before it was moved: a page that is not there (183 BK)."""
 
 
 def sweep(hub) -> None:

@@ -1711,7 +1711,7 @@ class Handler:
                 root, rel, _ = self._own_loose(req, doc)
                 with self.hub.page_lock(doc):       # a save in the middle of its write finishes first, one after it finds the page gone
                     self.hub.archive.trash(root, rel)
-            except KeyError:
+            except archive_mod.Gone:
                 raise Refuse(404, "no such document") from None    # gone since the look of _own_loose (183 BK)
             except (loose.Refused, OSError) as e:
                 raise Refuse(409, str(e) if isinstance(e, loose.Refused) else "the page could not be moved to the trash") from None

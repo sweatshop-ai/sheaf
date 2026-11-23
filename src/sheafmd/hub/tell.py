@@ -506,13 +506,16 @@ class Tell:
 
     # ── Cancel ───────────────────────────────────────────────────────────────
     def cancel(self, address: str, cid: str):
+        """Stop the thread's Tell: what runs, and the wait on the document. The caller holds the moves' lock (`/_/cancel`),
+        so the root it compared is the one whose job is stopped here; the rest, which waits for the document's lock, is the
+        returned `finish`, for the caller to run once it has let the moves' lock go (None when nothing is left)."""
         # The entry as it is held, not looked up in the file: a cancel of a job on a file that has
         # gone must still stop it. No entry means a forget took the document; a job that started on
         # its entry after the forget counted the jobs is still stopped, with no page left to tell.
         e = self.hub.entries.get(address)
         if e is None:
             self.hub.runner.cancel("tell", address, cid)
-            return
+            return None
         # Under the admission lock only what an upgrade stop must not come between: the end of the
         # delivery's job and the hold that says the stop message is on its way (8.4). The wait ends
         # after, outside the lock, because it needs the document's lock and the name's (9.11), which a
@@ -523,19 +526,24 @@ class Tell:
             deliveries = self.hub.runner.worker_threads("tell", address, cid)
             running = self.hub.runner.cancel("tell", address, cid)
             held = self.hub.runner.hold("stop", address, cid)
-        try:
-            waiting = e.live.stop_waiting(cid)
-            if running or waiting:
-                # A delivery killed half-way may still have reached the session, so the stop message
-                # goes out either way, and only once that delivery has ended: a delivery cannot be
-                # taken back, and the stop must not arrive before the Tell it cancels.
-                self._emit(e, "tell-cancelled", {"id": cid, "sent": True})
-                if self._send_stop(e, cid, deliveries, held):
-                    return                                  # the stop message's job ends the cancel
-        except BaseException:
-            self.hub.runner.release(held)                   # failed: the wait stays, to cancel again
-            raise
-        self._cancel_over(e, cid, held)
+
+        def finish():
+            # Outside the moves' lock: the document's lock is held by a render or a write for up to 120 s, and every
+            # move, Tell queued for an agent and loose create waits on the moves' lock (182 H).
+            try:
+                waiting = e.live.stop_waiting(cid)
+                if running or waiting:
+                    # A delivery killed half-way may still have reached the session, so the stop message
+                    # goes out either way, and only once that delivery has ended: a delivery cannot be
+                    # taken back, and the stop must not arrive before the Tell it cancels.
+                    self._emit(e, "tell-cancelled", {"id": cid, "sent": True})
+                    if self._send_stop(e, cid, deliveries, held):
+                        return                              # the stop message's job ends the cancel
+            except BaseException:
+                self.hub.runner.release(held)               # failed: the wait stays, to cancel again
+                raise
+            self._cancel_over(e, cid, held)
+        return finish
 
     def _cancel_over(self, e, cid: str, held):
         """The cancel is over, and Tells are accepted again. No Tell of the thread started meanwhile, so
@@ -550,7 +558,17 @@ class Tell:
 
     def _send_stop(self, e, cid: str, deliveries: list[threading.Thread], held) -> bool:
         """Start the stop message as a job. True when its job has the cancel from here on and ends it."""
-        v = self.view(e.address, session=True)  # reads files and asks the adapter: not under the lock
+        v = self.view(e.address, session=True)  # reads files and asks the adapter: under no lock
+        # The session was found by the address, which a forget and a folder that takes the name could have handed to
+        # another root meanwhile (182 H). Under the moves' lock, which a forget takes, `e` still being the address's entry
+        # means the view read was this entry's root's: a forget pops the entry, and the other folder's is a new one.
+        with moves.exclusive():
+            if self.hub.entries.get(e.address) is not e:
+                diagnostics.record("hub", "tell-stop-skipped", e.address, id=cid, reason="the folder was forgotten")
+                return False
+            return self._start_stop(e, cid, deliveries, held, v)
+
+    def _start_stop(self, e, cid: str, deliveries: list[threading.Thread], held, v: View) -> bool:
         if v.target is None or "stop" not in v.caps:
             diagnostics.record("hub", "tell-stop-skipped", e.address, id=cid,
                                reason="the session cannot be reached")

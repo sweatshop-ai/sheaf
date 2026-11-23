@@ -1039,7 +1039,17 @@ class Hub:
         """`sheaf roots forget`: take the root out, and its documents' entries with it (their
         render settings and read state, and the pages the hub holds). The documents themselves
         are files and stay where they are. Each page open on one of them is told `gone`, the last
-        event of its stream (SPEC 8.8). Returns the root, or None when there was none."""
+        event of its stream (SPEC 8.8). Returns the root, or None when there was none. Under the moves' lock, taken
+        before the hub's: a move, which checks its root by id and then drops by name (`moved_remote`), and a cancel, which
+        compares the page's root and then ends a Tell by address (`/_/cancel`), are over before the name is let go. The
+        wait for the documents' locks comes after the moves' lock is let go too, as after the hub's."""
+        with moves_mod.exclusive():
+            root, popped = self._let_go_root(name)
+        self._forget_entries(popped)
+        return root
+
+    def _let_go_root(self, name: str):
+        """(the root, the entries popped) of `forget_root`: the name let go, under the moves' lock and the hub's."""
         with self._lock:
             root = roots_mod.forget(self.roots, self.docs, self.seen, self.versions, name,
                                     members=self.member_seen)
@@ -1066,14 +1076,17 @@ class Hub:
             self.runner.cancel_under(roots_mod.Address.prefix(name))
             if root is not None:
                 self.index.forgot(name)
-        # Outside the hub's lock: each waits for its document's, which a render holds for a long while, and a request
-        # that needs the hub in that time (any page, any entry) would wait with it. What each document wrote goes from
-        # the store (`LiveDocument.detach`), never the versions of the folder that takes the name meanwhile.
+        return root, popped
+
+    def _forget_entries(self, popped: list):
+        """The rest of `forget_root`, outside the moves' lock and the hub's: each entry waits for its document's lock, which
+        a render holds for a long while, and a request that needs the hub (any page, any entry) or the moves' lock (a move,
+        a cancel) in that time would wait with it. What each document wrote goes from the store (`LiveDocument.detach`),
+        never the versions of the folder that takes the name meanwhile."""
         for address, e in popped:
             e.live.forget()
             # After that write's own `changed`, which the page takes in first.
             e.bus.publish("gone", {"doc": address})
-        return root
 
     def moved_page(self, old: str, new: str, by: str):
         """The page at `old` is now at `new`, its file moved (9.11): the Forward is written, and every store that is keyed by

@@ -331,7 +331,7 @@ def run_clock(page, ms):
             raise
 
 
-# ms of the page's clock per look: shorter than any toast (2.6 s), so none goes by unseen. Measured on t-compute (2026-11-14,
+# ms of the page's clock per look: shorter than any toast (2.6 s), so none goes by unseen. Measured on the organisation's runners (2026-11-14,
 # test_page_actions.py, the three tests that queue behind a red toast, twice): 7.5 s at 250 ms, 7.0 s at 1000 and 2000. No gain, so not larger.
 TOAST_STEP = 250
 

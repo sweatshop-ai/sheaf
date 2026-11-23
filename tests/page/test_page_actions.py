@@ -61,7 +61,7 @@ HEARD = """(() => {
     constructor(...a) {
       super(...a);
       for (const k of ['changed', 'hello']) this.addEventListener(k, () => { window.__heard[k] = (window.__heard[k] || 0) + 1; });
-      this.addEventListener('hello', (e) => { try { window.__versions.push(JSON.parse(e.data).version); } catch (_) {} });
+      this.addEventListener('hello', (e) => { let v = null; try { v = JSON.parse(e.data).version; } catch (_) {} window.__versions.push(v); });
     }
   };
 })()"""
@@ -72,17 +72,17 @@ def heard(page, event):
     return page.evaluate(f"window.__heard[{event!r}] || 0")
 
 
-UPGRADE = "99.0.0"
+NEW_VERSION = "99.0.0"
 
 
 def upgrade(page, site, what="the upgrade"):
     """Tell the page (HEARD in it) that the hub was upgraded, and wait until its stream has brought that hello.
-    The hub holds a page's stream once it has sent that stream its first hello. Published before then, after a
-    reload, the upgrade went to the stream of the load before, which was going away, and never reached the page;
-    the wait, which took any hello for it, passed on the stream's first (ticket 173 O, CI run 45081970648)."""
+    The hub queues a stream's first hello when it subscribes it, so a hello on the page proves the page's stream is
+    on the bus. Published earlier, after a reload, the upgrade went only to the stream of the load before, which was
+    going away; the old wait took any hello and passed on the new stream's first (ticket 173 O, CI run 45081970648)."""
     until(lambda: heard(page, "hello"), what="the page's stream, open")
-    site.hub.entry(DOC).bus.publish("hello", {"version": UPGRADE})
-    until(lambda: UPGRADE in page.evaluate("window.__versions"), what=what)
+    site.hub.entry(DOC).bus.publish("hello", {"version": NEW_VERSION})
+    until(lambda: NEW_VERSION in page.evaluate("window.__versions"), what=what)
 
 
 def stand_still(page):

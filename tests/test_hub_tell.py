@@ -1211,8 +1211,12 @@ def test_cancelling_a_delivery_still_running_kills_it_and_sends_the_stop_message
     names = [n for n, _ in events(sub)]
     assert names == ["tell-cancelled"]                         # not "sent", not "failed"
     assert hub.entry(DOC).live.waiting() == []
+    # The stop goes out once the delivery has ended. A child of the delivery that outlives SIGTERM holds
+    # its pipe open until the SIGKILL after the grace, so the stop may come only then (173 Q, red on
+    # macOS): the wait covers the grace, as the hub's own wait does.
     assert wait_until(lambda: len(session.claude.calls()) == 2
-                      and session.claude.calls()[1]["stdin"])     # the stop went by the courier too
+                      and session.claude.calls()[1]["stdin"],
+                      hub.runner.term_grace + 5.0)                 # the stop went by the courier too
     assert "pressed Cancel on comment c1" in session.claude.calls()[1]["stdin"]
 
 

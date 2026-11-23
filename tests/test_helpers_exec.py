@@ -58,7 +58,7 @@ def test_fakes_written_while_sibling_threads_fork_run_every_time(tmp_path):
 
     def forker():
         while not stop.is_set():
-            subprocess.run(["/bin/true"])
+            subprocess.run(["true"])        # from PATH: the macOS image has no /bin/true
 
     threads = [threading.Thread(target=forker) for _ in range(4)]
     for t in threads:

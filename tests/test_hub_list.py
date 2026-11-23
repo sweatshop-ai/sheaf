@@ -2449,7 +2449,7 @@ def test_a_tick_in_a_list_the_text_reading_guesses_wrong_still_lands_on_the_righ
 
 
 def test_a_generated_rectoverso_still_draws_its_locked_pressed_one_offs(box, rectoversos, github):
-    # A pressed one-off is drawn locked, names no action and writes nothing (#107), so the mark of ticket 156,
+    # A pressed one-off is drawn locked, names no action and writes nothing (#110), so the generated mark (ticket 156),
     # which hides the buttons whose tick it refuses, leaves it on the row with who pressed it.
     assert box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL).status == 200
     github.issues[5].update(status="In progress at TT", updated=ago(60))   # the record routine moved it

@@ -1016,11 +1016,11 @@ class TheList:
         # A pressed one-off is drawn locked, with who pressed it, and names no action and no text.
         # A generated rectoverso draws no button it could press: its tick is refused with 403 (SPEC 7.2, 8.3), as on its
         # page. Its locked pressed one-offs stay, since they write nothing.
-        drawn = buttons(s, self._pressers(self.root(), s), self.hub, member, is_owner)
-        if self.hub.generated_line(doc):
-            drawn = [x for x in drawn if not x["toggle"] and x["pressed"]]
-        for x in drawn:
+        generated = bool(self.hub.generated_line(doc))
+        for x in buttons(s, self._pressers(self.root(), s), self.hub, member, is_owner):
             locked = not x["toggle"] and x["pressed"]
+            if generated and not locked:
+                continue
             label = f'{x["label"]} ✓' + (f' {x["by"]}' if x["by"] else "") if locked else x["label"]
             acts.append({"doc": doc, "word": x["word"], "label": label, "toggle": x["toggle"], "pressed": x["pressed"],
                          "disabled": locked or (x["toggle"] and not x["may"]), "release": bool(x["toggle"] and x["release"]),

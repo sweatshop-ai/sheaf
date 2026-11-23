@@ -306,7 +306,10 @@ class Loose:
             self._drop(member, root, pending)
         finally:            # also when a step after the forget's first half failed: its documents are let go all the same
             for finish in pending:
-                finish()
+                try:
+                    finish()
+                except Exception:       # never in place of `_drop`'s own failure, nor before another root's forget
+                    self.hub.record_exception("forget-failed", root.name)
 
     def _drop(self, member, root, pending: list) -> None:
         """The part of `drop` under its locks; the forget's second half goes into `pending`."""

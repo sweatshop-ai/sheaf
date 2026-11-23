@@ -30,7 +30,9 @@ def page_held(hub, address: str):
     lock is held by a render for up to 120 s, and a cancel, a move, a loose create and a forget all wait on the moves' lock:
     so it is never waited for under it. Taken only when it is free; else the moves' lock is let go, the page's lock waited
     for alone, and all three taken again (lockorder.py: let go, take it, look again). Not fair: on a page saved without a
-    pause it goes round once per write, never under the moves' lock and never past a save it waited for."""
+    pause it goes round once per write, never under the moves' lock and never past a save it waited for. Its callers (a
+    move to another tiroir, a restore from the trash) act on a loose page, whose name the hub does not place, so the name's
+    lock holds nothing there; for a page placed by name a render holds that lock too, and it is waited for under the moves'."""
     while True:
         with _LOCK, place.held(hub, address), hub.page_lock_now(address) as got:
             if got:

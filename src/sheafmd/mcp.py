@@ -1347,7 +1347,7 @@ class Door:
                 return entry
             try:
                 self.hub.docs.change(address, clear)
-            except OSError:
+            except Exception:       # any failure: the page is never left made with that mark
                 self._take_back(address, made)
                 raise ToolError(f"{address} was not made: a generated mark left on its address could not be cleared.",
                                 "not written") from None

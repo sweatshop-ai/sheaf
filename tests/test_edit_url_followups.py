@@ -134,7 +134,9 @@ def test_a_failed_look_at_a_bare_url_is_not_kept_for_the_next_save(monkeypatch):
     doc = "# Title\n\n" + src + "\n"
     try:
         out, rep = rde.apply_edits(doc, [{"i": 1, "html": page_fragment(src).replace("here", "there")}])
-        assert failed and out == doc and [i for i, _ in rep["skipped"]] == [1]
+        assert failed
+        assert out == doc
+        assert [i for i, _ in rep["skipped"]] == [1]
         same_page(src, saved(src))
     finally:
         rde._pandoc_links_bare.cache_clear()

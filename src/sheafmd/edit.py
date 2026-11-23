@@ -1018,11 +1018,16 @@ _FENCED_CODE = re.compile(r"^ {0,3}(`{3,}|~{3,})[^\n]*\n.*?(?:^ {0,3}\1[ \t]*$|\
 _SOURCE_EMOJI = re.compile(r'<span\b(?=[^>]*\sclass="emoji")[^>]*?\sdata-emoji="([a-z0-9_+-]+)"|(?<!\\):([a-z0-9_+-]+):')
 
 
+_HTML_COMMENT = re.compile(r"<!--.*?-->", re.S)
+
+
 def _source_emoji(source: str) -> dict:
     """{name: [True for a `:name:` the source wrote, False for an emoji span it wrote as HTML, in order]}. A
-    shortcode in code or after a backslash draws no emoji, and is not one."""
+    shortcode in code, in an HTML comment (a sheaf comment's body or quote) or after a backslash draws no emoji, and
+    is not one."""
     found = {}
-    for m in _SOURCE_EMOJI.finditer(_CODE_SPAN.sub(" ", _FENCED_CODE.sub("", source))):
+    shown = _HTML_COMMENT.sub(" ", _CODE_SPAN.sub(" ", _FENCED_CODE.sub("", source)))
+    for m in _SOURCE_EMOJI.finditer(shown):
         found.setdefault(m.group(1) or m.group(2), []).append(not m.group(1))
     return found
 
@@ -1223,8 +1228,8 @@ _LINE_MARKS = ("\uF8FC", *(chr(c) for c in range(0xF8EF, 0xF8E3, -1)))
 # A line of text markdown reads as a block. Pandoc's gfm writer escapes `***`, `# x`, `> x` and a list marker at the
 # start of a paragraph, but not a line of dashes (a rule, or under a line a heading), a line of `=` under a line (a
 # heading), nor a list marker on a line after a break, where it starts a list (an ordered one only from 1).
-_RULE_LINE = re.compile(r"-[ \t]*-[ \t]*-[- \t]*$")
-_UNDER_LINE = re.compile(r"(?:-[ \t]*)+$|=+[ \t]*$")
+_RULE_LINE = re.compile(r"-\s*-\s*-[-\s]*$")          # \s: a newline in the HTML's text is a space to pandoc
+_UNDER_LINE = re.compile(r"(?:-\s*)+$|=+\s*$")
 _ITEM_START = re.compile(r"[-+](?=[ \t])|0*1(?=[.)](?:[ \t]|$))")
 
 

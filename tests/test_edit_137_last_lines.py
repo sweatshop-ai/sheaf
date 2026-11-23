@@ -50,6 +50,14 @@ def test_a_typed_line_that_markdown_reads_as_a_block_stays_its_text(scene):
     assert line in out and "\\" not in out, out
 
 
+@pytest.mark.parametrize("html", ["<p>Ab<br>-\n-\n-</p>", "<p>Ab<br>--\n-</p>"])
+def test_a_line_of_dashes_broken_over_lines_in_the_html_stays_its_text(html):
+    out = rendered(save("Ab", html))
+    assert "<hr" not in out and "<h2" not in out, out
+
+
+def test_a_shortcode_in_a_comment_of_the_source_is_not_one_of_its_emoji():
+    assert rde._source_emoji('a :smile: <!-- c1 quote=":tada: :smile:" -->') == {"smile": [True]}
 def test_a_private_use_character_in_the_text_leaves_the_typed_line_its_text():
     # The token is picked among characters the text does not hold, as an emoji token is (ticket 181, E).
     out = save("Ab \uF8FC", "<p>Ab \uF8FC<br>---</p>")

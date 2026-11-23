@@ -22,3 +22,15 @@ def test_a_generated_page_shows_its_notice_and_has_no_edit(tab):
 def test_a_page_that_is_not_generated_shows_no_notice(tab):
     tab.open()
     assert tab.page.locator("main p.rd-readonly").count() == 0
+
+
+def test_a_read_only_page_that_is_generated_shows_both_notices(tab):
+    # A clone page that may not be saved (SPEC 14) and is generated (8.3) says both: which line would let it
+    # be saved, and that its text is generated, so comments are the way to change it (10.1).
+    hub = tab.site.hub
+    tab.open()
+    hub.docs.put(DOC, {**hub.docs.get(DOC), "generated": {"by": "builder", "id": "tok1", "at": "2026-11-22T10:00:00+0100"}})
+    line = "Read-only: this page is not saved here."
+    hub.read_only_line = lambda address, waking=False: line
+    tab.open()
+    assert tab.page.locator("main p.rd-readonly[role=note]").all_inner_texts() == [line, WHY]

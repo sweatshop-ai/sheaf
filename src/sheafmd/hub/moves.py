@@ -24,6 +24,21 @@ def exclusive():
         yield
 
 
+@contextlib.contextmanager
+def page_held(hub, address: str):
+    """The moves' lock, the name's lock of `address` and the page's writer lock (`Hub.page_lock`), held together. The page's
+    lock is held by a render for up to 120 s, and a cancel, a move, a loose create and a forget all wait on the moves' lock:
+    so it is never waited for under it. Taken only when it is free; else the moves' lock is let go, the page's lock waited
+    for alone, and all three taken again (lockorder.py: let go, take it, look again)."""
+    while True:
+        with _LOCK, place.held(hub, address), hub.page_lock_now(address) as got:
+            if got:
+                yield
+                return
+        with hub.page_lock(address):    # the wait, under none of the three: over when the render is
+            pass
+
+
 class Refused(Exception):
     """A move the hub will not make: the status the route answers with, and the sentence."""
 

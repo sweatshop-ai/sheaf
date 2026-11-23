@@ -162,7 +162,7 @@ def _transfer(hub, member, root, rel: str, address: str, origin: str, email: str
         raise Refusal(409, why, str(answer.get("say") or incoming.SAYS.get(why) or "the other shared Sheaf refused the page"))
     if status != 200 or not isinstance(answer.get("address"), str) or not isinstance(answer.get("hash"), str):
         raise Refusal(502, "failed", f"{origin} could not take the page ({status}): it is where it was, and sending it again lands it once")
-    with moves._LOCK, place.held(hub, address), hub.page_lock(address), contextlib.ExitStack() as locked:
+    with moves.page_held(hub, address), contextlib.ExitStack() as locked:
         try:
             # The moving root's file, found once: its root forgotten, and the name taken by another folder, during the
             # transfer, is a page that changed, and the other folder's file is neither read nor dropped (8.11).

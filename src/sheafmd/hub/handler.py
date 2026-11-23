@@ -1619,9 +1619,9 @@ class Handler:
                     raise Refuse(403, "Only a signed-in member can share a page.")
                 if not self.hub.may_open(m, e.address, fm):
                     raise Refuse(404, "no such document")
+                self._text_writable(req, e.address, "/_/share")     # a mark a door write set since the first look (182 G)
                 if not self.hub.is_owner(m, e.address, fm):
                     raise Refuse(409, "Only the owner of this rectoverso can share it.")
-                self._text_writable(req, e.address, "/_/share")     # a mark a door write set since the first look (182 G)
                 if md_hash(text) != read:
                     raise Refuse(409, "the page changed since the row read it: reload the Sheaf")
                 if visibility.audience(text) is not None:

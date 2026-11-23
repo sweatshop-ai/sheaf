@@ -35,8 +35,8 @@ Checked on bd3a9333, not repeated above: #486 share 403 (`handler.py:1582`), #48
 
 ## Follow-ups from PR 606 (fix-pass review round 2, minor)
 
-- [ ] `client.py:403-404` `ask_stop`: a hub that already answers `signal` as the reason in force makes the command fail at once, even under the service, which starts a signalled hub again (14.3). The exit-row check applies the service rule; this early exit does not. SPEC 8.4's "answered `stop` or `signal` … starts no hub" would follow.
-- [ ] Under the service, a `signal` exit row reads the same for a stray SIGTERM (restarted) and a `systemctl stop` or logout (not restarted): the second now waits UPGRADE_WAIT and says "did not come back on the new version". Say so in the code comment and SPEC 8.4, or tell the two apart.
+- [x] `client.py:403-404` `ask_stop`: a hub that already answers `signal` as the reason in force makes the command fail at once, even under the service, which starts a signalled hub again (14.3). The exit-row check applies the service rule; this early exit does not. SPEC 8.4's "answered `stop` or `signal` … starts no hub" would follow. Fixed in #621 (merge 953368ee): `stays_down(reason, service)` is the one rule for `ask_stop` and the exit-row check; a service hub answering `signal` is waited for.
+- [x] Under the service, a `signal` exit row reads the same for a stray SIGTERM (restarted) and a `systemctl stop` or logout (not restarted): the second now waits UPGRADE_WAIT and says "did not come back on the new version". Say so in the code comment and SPEC 8.4, or tell the two apart. Fixed in #621 (merge 953368ee) the first way: said in the `stays_down` docstring and SPEC 8.4 (the two cannot be told apart from the hub's side).
 
 ## Follow-ups from PR 611 (box L, review rounds 3 and 4, minor; core.py limits)
 

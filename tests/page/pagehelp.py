@@ -668,17 +668,14 @@ def settle_routes(context=None):
     destroyed but it is pending!". `fallback` answers the route on this side alone, so the task ends in the loop;
     what it then sends to a page that is gone, or whose routes are off, Playwright drops. An abort would not do:
     once the routes are off, the driver takes the route as handled and refuses it, and the task still waits."""
-    kept = []
-    for c, route in _ROUTED:
-        if context is not None and c is not context:
-            kept.append((c, route))
-            continue
+    mine = [(c, route) for c, route in _ROUTED if context is None or c is context]
+    _ROUTED[:] = [(c, route) for c, route in _ROUTED if not (context is None or c is context)]
+    for c, route in mine:   # taken off the list first: an error here is this test's, not every later test's
         try:
             route.fallback()
         except Exception as e:  # the test answered it: the one error fallback() raises (Playwright 1.58)
             if "Route is already handled!" not in str(e):
                 raise
-    _ROUTED[:] = kept
 
 
 def close_context(context):
@@ -716,8 +713,8 @@ def _close_context(context):
             for page in context.pages:
                 page.unroute_all(behavior="ignoreErrors")
             context.unroute_all(behavior="ignoreErrors")
-            settle_routes(context)
     except PageStalled:     # a handler that does not end (CI, PR 227: 360 s): closing the context ends it
         pass
+    settle_routes(context)  # also after a stall: fallback() asks nothing of the driver
     with stalls_after(CLOSE_BOUND, "the context to close"):
         context.close()

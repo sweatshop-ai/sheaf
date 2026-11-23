@@ -1409,6 +1409,44 @@ def test_a_move_never_commits_into_a_root_that_took_the_name_of_the_one_it_moved
     assert hub_rows("commit-refused")
 
 
+def test_a_commit_never_lands_in_a_root_that_took_the_name_after_it_checked_the_root_id(hub, browser, tmp_path, monkeypatch):
+    """8.11: `committed` checks the root id the writer read, then finds the file the commit takes. A root forgotten, and
+    its name taken by another folder, between the two must not have the commit made in the other repo."""
+    _, repo = committing(hub, browser, tmp_path)
+    link = tmp_path / "list"
+    link.symlink_to(repo)
+    the_list_on(hub, link, tmp_path)                    # the list's root, by a path that can lead elsewhere
+    intruder = intruder_repo(tmp_path, {SHARED: "Not the contract.\n"}, projects=repo)
+    (intruder / SHARED).write_text("Not the contract, changed by hand.\n", encoding="utf-8")   # a commit of the address would take it
+    address = f"rectoversos/{SHARED}"
+    rid = hub.root_id_of(address)
+    real = hub._bound
+
+    def swapped(at):                        # after the check, before the file is found
+        monkeypatch.setattr(hub, "_bound", real)
+
+        def swap():                         # another request's, which holds none of the writer's locks
+            hub.forget_root("rectoversos")
+            link.unlink()
+            link.symlink_to(intruder)
+            hub.roots.for_document(intruder / SHARED)
+            hub.proxy = members(intruder)   # the other folder is Alice's root now
+        t = threading.Thread(target=swap)
+        t.start()
+        t.join(10)
+        assert not t.is_alive() and hub.the_list.serves("rectoversos") and hub.roots.get("rectoversos").id != rid
+        return real(at)
+
+    monkeypatch.setattr(hub, "_bound", swapped)
+    with place.held(hub, address):
+        (repo / SHARED).write_text(PRIVATE + "More.\n", encoding="utf-8")
+        hub.committed(address, by="Alice", root_id=rid)
+    assert hub.commits.settle()
+    assert subjects(intruder) == ["first"]
+    assert git(intruder, "status", "--porcelain").strip() == f"M {SHARED}"
+    assert hub_rows("commit-refused")
+
+
 @pytest.mark.parametrize("moves", ["ahead", "after", "written"])
 def test_a_door_update_never_moves_a_file_of_a_root_that_took_the_name_after_the_write_was_located(
         hub, browser, tmp_path, monkeypatch, moves):

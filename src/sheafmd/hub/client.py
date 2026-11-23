@@ -118,12 +118,12 @@ BEING_STOPPED = (f"the hub is being stopped; this is {__version__}. "
                  "Run the command again when it has stopped")
 
 
-def stays_down(reason, met: "Met") -> bool:
+def stays_down(reason, service: bool) -> bool:
     """Whether a hub ended by `reason` stays down, so a newer command starts none behind it (8.4): a stop does, a
     signal too unless the hub runs under the service, whose unit starts a signalled hub again on the new code
     (14.3). A `systemctl stop` or a logout is a signal the unit does not restart, and reads the same: the
     command then waits UPGRADE_WAIT for a hub that does not come and says it did not come back."""
-    return reason == "stop" or (reason == "signal" and not met.got.get("service"))
+    return reason == "stop" or (reason == "signal" and not service)
 
 
 class HubChanged(Impostor):
@@ -407,7 +407,7 @@ def ask_stop(met: Met, reason: str, force: bool = False, yield_to_stop: bool = F
         raise JobsRunning(res.get("error") or "a Tell is running")
     if status != 200 or not res.get("ok"):
         raise StopRefused(res.get("error") or status)
-    if yield_to_stop and reason == "upgrade" and stays_down(res.get("reason"), met):
+    if yield_to_stop and reason == "upgrade" and stays_down(res.get("reason"), bool(met.got.get("service"))):
         raise HubBeingStopped(BEING_STOPPED)
     return pid
 
@@ -521,7 +521,7 @@ def _meet_version(met: Met, warn) -> tuple[Met, bool]:
     # reason, and a stop or a signal that comes after the upgrade stop wins over it (8.4). The
     # exit row says it. A hub that left none (killed) was stopped by no person: start the new one.
     ended_by = exit_reason(met.boot)
-    if stays_down(ended_by, met):
+    if stays_down(ended_by, bool(met.got.get("service"))):
         raise HubBeingStopped(BEING_STOPPED)
     if not met.got.get("service"):                      # under the service, exit 75 starts the new code
         spawn_hub("upgrade")

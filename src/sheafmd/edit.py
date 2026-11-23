@@ -2085,10 +2085,10 @@ class _Shift:
 _ENCLOSED = ("code", "pre")
 
 
-def _kept(s: str, comment) -> list:
-    """The indices of the characters of `s` that are words, not a comment's placeholder (`comment`, the pattern of
-    the placeholders issued for the block: words of their shape are words; ticket 183 BC)."""
-    drop = {i for m in comment.finditer(s) for i in range(m.start(), m.end())}
+def _kept(s: str, comment_re) -> list:
+    """The indices of the characters of `s` that are words, not a comment's placeholder. `comment_re` matches only
+    the placeholders issued for the block: words of their shape are words (ticket 183 BC)."""
+    drop = {i for m in comment_re.finditer(s) for i in range(m.start(), m.end())}
     return [i for i in range(len(s)) if i not in drop]
 
 
@@ -2098,7 +2098,7 @@ def _enclosing(t):
     return up[-1] if up else None
 
 
-def _lone_as_text(soup, lone, doc, token, comment) -> dict:
+def _lone_as_text(soup, lone, doc, token, comment_re) -> dict:
     """Each closing tag of `lone` put in `soup` as a placeholder, after the words it followed in the
     source: {placeholder: the tag's bytes}. The browser drops a closing tag with no opener, so the
     page holds no element for it; its place is found in the page's words, against a render of the
@@ -2145,7 +2145,7 @@ def _lone_as_text(soup, lone, doc, token, comment) -> dict:
         sites.append((len(old), str(t), before is not None, climb, gap))
     # A line break of the render and of the page is a space to the diff.
     old = re.sub(r"\s", " ", old)
-    words = [comment.sub("", t) for t in _texts(soup)]
+    words = [comment_re.sub("", t) for t in _texts(soup)]
     raw = "".join(words)
     new = re.sub(r"\s", " ", raw)
     # Where one text of the page ends and the next begins: Enter puts a new item or line right after
@@ -2183,7 +2183,7 @@ def _lone_as_text(soup, lone, doc, token, comment) -> dict:
                                               for o, p, back, climb, gap in sites), key=lambda x: x[0])):
         cum, spot = 0, None
         for t in _texts(soup):
-            kept = _kept(str(t), comment)
+            kept = _kept(str(t), comment_re)
             n = len(kept)
             if back and o > 0 and cum < o <= cum + n or not (back and o > 0) and cum <= o < cum + n:
                 j = o - cum
@@ -2228,7 +2228,7 @@ def _html_blocks(md: str) -> int:
     return r.stdout.count('"t":"RawBlock"') if r.returncode == 0 else -1
 
 
-def _tags_as_text(content: str, fragment: str, token, comments=frozenset()):
+def _tags_as_text(content: str, fragment: str, token, comments):
     """(the fragment with each element that stands for a raw tag of `content` written as two
     placeholders around its words, {placeholder: the source's bytes}). `comments` are the comment
     placeholders the fragment holds."""
@@ -2404,9 +2404,10 @@ def _convert_with_comments(block, fragment: str, strays=None):
         return t
 
     frag = RAW_COMMENT_RE.sub(keep, ANCHOR_RE.sub(swap, fragment))
-    frag, tags = _tags_as_text(block.content, frag, token, frozenset(tokens.values()) | frozenset(placed.keys()))
+    comments = frozenset(tokens.values()) | frozenset(placed.keys())
+    frag, tags = _tags_as_text(block.content, frag, token, comments)
     frag, notes = _notes_as_tokens(frag, token)
-    new_md = html_block_to_md(frag, block.content, strays, frozenset(tokens.values()) | frozenset(placed.keys()), frozenset(notes.keys()))
+    new_md = html_block_to_md(frag, block.content, strays, comments, frozenset(notes.keys()))
     for t, cited in notes.items():
         if new_md.count(t) != 1:
             raise EditError("block cites a footnote the edit cannot keep; edit it in the .md")

@@ -2448,6 +2448,21 @@ def test_a_tick_in_a_list_the_text_reading_guesses_wrong_still_lands_on_the_righ
         assert reached                               # the slow fallback served, not a lucky first reading
 
 
+def test_a_generated_rectoverso_still_draws_its_locked_pressed_one_offs(box, rectoversos, github):
+    # A pressed one-off is drawn locked, names no action and writes nothing (#110), so the generated mark (ticket 156),
+    # which hides the buttons whose tick it refuses, leaves it on the row with who pressed it.
+    assert box.post("/_/tick", now(box, {"doc": JOEY, "action": 0, "word": "Approve"}), member=NELL).status == 200
+    github.issues[5].update(status="In progress at TT", updated=ago(60))   # the record routine moved it
+    box.hub.the_list.poll()
+    box.hub.docs.put(JOEY, {**box.hub.docs.get(JOEY),
+                            "generated": {"by": "builder", "id": "tok1", "at": "2026-11-22T10:00:00+0100"}})
+    rows = [r[0] for s in read(box.get("/list", member=NELL)).values() for g in s.values() for r in g]
+    assert "Reply to Joey about column L Approve ✓ James" in rows
+    soup = BeautifulSoup(box.get("/list", member=NELL).text, "html.parser")
+    drawn = soup.select(f'button.list-act[data-doc="{JOEY}"]')
+    assert drawn and all(b.has_attr("disabled") and not b.has_attr("data-action") for b in drawn)   # none to press
+
+
 def test_move_to_is_read_as_belongs_to():
     """Ticket 168: a rectoverso that still carries the old word `Move to` gives the action `Belongs to`."""
     s = the_list.read_rectoverso("a/b/c.md", "# A rectoverso\n\n- [ ] Move to klium (ref 18f3a9c2)\n")

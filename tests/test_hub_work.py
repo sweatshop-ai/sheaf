@@ -2096,3 +2096,21 @@ def test_a_fork_on_a_rectoverso_marked_generated_after_the_first_look_is_refused
     assert got.status == 403 and GENERATED in got.text
     assert (work / DOC).read_text(encoding="utf-8") == before
     assert hub_rows("generated-refused")[-1]["endpoint"] == "/_/sessions"
+
+
+def test_james_s_session_on_a_generated_rectoverso_is_never_dropped_by_the_setter_s_next_update(team, browser, work,
+                                                                                                 james_writes):
+    # Ticket 156: the hub writes `sessions` into a generated rectoverso after its setter's door write (9.12). The
+    # setter's next `update` cannot take the line out without a word: a door write that changes `sessions` is refused.
+    james_wrote({"sessions": team.hub.the_list.cfg.sessions_dir}, NEW)
+    read = json.loads(james_door(browser, james_writes, "read", doc=ADDRESS)[1])
+    got = james_door(browser, james_writes, "update", session=NEW, doc=ADDRESS, text=read["text"] + "\nMore.\n",
+                     expected_hash=read["hash"], generated=True)
+    assert not got[0], got[1]
+    assert json.loads(james_door(browser, james_writes, "read", doc=ADDRESS)[1])["generated"]
+    assert NEW in sessions_of(work)[0]
+    now = json.loads(james_door(browser, james_writes, "read", doc=ADDRESS)[1])
+    is_error, said = james_door(browser, james_writes, "update", doc=ADDRESS, text=read["text"] + "\nRebuilt.\n",
+                                expected_hash=now["hash"])
+    assert is_error and "sessions" in said
+    assert NEW in sessions_of(work)[0]

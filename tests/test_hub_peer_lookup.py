@@ -8,6 +8,7 @@ import os
 import socket
 import struct
 import sys
+import threading
 import time
 
 import pytest
@@ -155,7 +156,7 @@ def test_the_self_test_passes_where_the_hub_can_read_its_own_connection():
     assert peer.selftest() is None
 
 
-@pytest.mark.parametrize("answer", [[], [ME + 1], [ME, ME + 1]])
+@pytest.mark.parametrize("answer", [[], [ME + 1], [ME, ME + 1], [ME + 1, ME + 1]])
 def test_the_self_test_says_why_when_the_owner_read_is_not_the_hubs_own(answer, monkeypatch):
     monkeypatch.setattr(peer, "PLATFORM", "linux")
     monkeypatch.setattr(peer, "owners", lambda conn: answer)
@@ -175,3 +176,60 @@ def test_the_self_test_says_why_when_the_lookup_raises(monkeypatch):
 def test_the_self_test_has_nothing_to_say_where_the_platform_is_not_checked(monkeypatch):
     monkeypatch.setattr(peer, "PLATFORM", "darwin")
     assert peer.selftest() is None
+
+
+def test_the_self_test_judges_the_set_of_uids_as_the_check_does(monkeypatch):
+    """Two rows of the hub's own uid are what a /proc read under socket churn gave on CI (ticket 186);
+    `check` lets them through, so the self-test does not call that `off`."""
+    monkeypatch.setattr(peer, "PLATFORM", "linux")
+    monkeypatch.setattr(peer, "owners", lambda conn: [ME, ME])
+    assert peer.selftest() is None
+
+
+RESET = struct.pack("ii", 1, 0)          # SO_LINGER on, 0 s: close() resets, and leaves no TIME_WAIT row behind
+
+
+def churn(stop):
+    """Loopback pairs opened and closed until `stop`: the rows that shift a read of /proc/net/tcp."""
+    while not stop.is_set():
+        try:
+            with socket.socket() as srv:
+                srv.bind(("127.0.0.1", 0))
+                srv.listen(8)
+                held = []
+                for _ in range(10):
+                    c = socket.socket()
+                    c.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, RESET)
+                    c.connect(srv.getsockname())
+                    a = srv.accept()[0]
+                    a.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, RESET)
+                    held += [c, a]
+                for s in held:
+                    s.close()
+        except OSError:
+            pass
+
+
+@linux
+def test_the_owner_read_in_proc_while_other_sockets_come_and_go_is_one_uid(ends, monkeypatch):
+    """Ticket 186 under the real kernel, beside its red tests (tables that list the row twice or skip
+    it, in test_hub_peer.py). The race is rare: this passed on main in five runs of two seconds on a
+    laptop, while main's CI failed once on it at load 33. It holds the fixed reading to [ME], or to
+    a refusal ([]) where both reads skip the row, never to a second row or another uid."""
+    monkeypatch.setattr(peer, "NETLINK", False)
+    cli, acc = pair()
+    ends += [cli, acc]
+    c, stop = conn_of(cli), threading.Event()
+    threads = [threading.Thread(target=churn, args=(stop,), daemon=True) for _ in range(4)]
+    for t in threads:
+        t.start()
+    try:
+        seen, until = [], time.monotonic() + 2         # wall time is the point here: a bounded run
+        while time.monotonic() < until:
+            seen.append(peer.owners(c))
+    finally:
+        stop.set()
+        for t in threads:
+            t.join()
+    # [] is a row both reads skipped: a refusal, which is allowed to happen; a second row or uid is not.
+    assert [ME] in seen and [s for s in seen if s not in ([ME], [])] == []

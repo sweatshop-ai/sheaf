@@ -771,10 +771,11 @@ _BREAK_ENDS = (_EMPTY_SHELL - {"br", "span", "b", "strong", "i", "em", "u"}) | {
 def _ends_its_cell(br, cell) -> bool:
     """Whether a break shows nothing after it in its table cell: nothing but white space and breaks follow it there;
     a comment node is something the cell holds. The page's white space is not Python's: a no-break space shows,
-    except the one Enter leaves at the cut, right after the break. Two are a typed one."""
+    except the one Enter leaves at the cut, right after the break (also past the end of a mark the break ends). Two
+    are a typed one."""
     from bs4 import NavigableString
 
-    first = br.next_sibling
+    first = br.next_element
     for x in br.next_elements:
         if cell not in x.parents:
             return True

@@ -102,3 +102,10 @@ def test_two_no_break_spaces_in_a_table_with_a_shortcode_keep_the_break():
     html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", ">x<br>\u00a0\u00a0<")
     out = saved_table(html, src)
     assert "<table" in out and "x<br />" in out and out.count("\u00a0") == 1 and ":smile:" in out
+
+
+def test_one_no_break_space_after_a_break_at_the_end_of_bold_in_a_table_with_a_backslash_goes_with_it():
+    src = "| a | b |\n|---|---|\n| x | a\\b |"
+    html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", "><b>x<br></b>\u00a0<")
+    out = saved_table(html, src)
+    assert "<table" not in out and "<br" not in out

@@ -253,6 +253,29 @@ def test_two_edits_far_apart_leave_a_closing_tag_with_no_opener_where_it_was():
     assert saved(src, html=html) == src.replace("First", "Once").replace("here", "there") + "\n"
 
 
+# Ticket 183 BS: a comment and a closing tag with no opener at one place keep their order, after the words before
+# them or, at the start of an item or a cell, before the words after them.
+
+C2 = C1.replace("id=c1", "id=c2")
+A1 = '<span class="rd-anchor" data-rd-id="c1"></span>'
+A2 = A1.replace("c1", "c2")
+
+
+@pytest.mark.parametrize("src,page", [
+    ("Start" + C1 + "</x1> b here.", "<p>Start" + A1 + " b there.</p>"),
+    ("Start</x1>" + C1 + " b here.", "<p>Start" + A1 + " b there.</p>"),
+    ("Start" + C1 + C2 + "</x1> b here.", "<p>Start" + A1 + A2 + " b there.</p>"),
+    ("Start" + C1 + "</x1>" + C2 + " b here.", "<p>Start" + A1 + A2 + " b there.</p>"),
+    ("Start" + C1 + "</x1></x2> b here.", "<p>Start" + A1 + " b there.</p>"),
+    ("Start<!-- foreign --></x1> b here.", "<p>Start<!-- foreign --> b there.</p>"),
+    ("Start</x1><!-- foreign --> b here.", "<p>Start<!-- foreign --> b there.</p>"),
+    ("- a\n- </x1><!-- foreign -->Start b here.", "<ul>\n<li>a</li>\n<li><!-- foreign -->Start b there.</li>\n</ul>"),
+], ids=["comment-tag", "tag-comment", "two-comments-tag", "comment-tag-comment", "comment-two-tags", "foreign-tag",
+        "tag-foreign", "item-tag-comment"])
+def test_a_comment_and_a_closing_tag_with_no_opener_at_one_place_keep_their_order(src, page):
+    assert saved(src, html=page) == src.replace("here", "there") + "\n"
+
+
 # Gate 3 on #157: a tag between words in the source stays between words when the word before it changes.
 
 @pytest.mark.parametrize("src,html,want", [

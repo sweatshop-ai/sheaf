@@ -2092,6 +2092,10 @@ class _Shift:
 
 
 _ENCLOSED = ("code", "pre")
+# A tag's placeholder in `_lone_as_text`, and a run of them at the start or the end of a text.
+_TAG_TOKEN = "\u27e6[A-Z0-9]+\u27e7"
+_LEADING_TAGS = re.compile(f"(?:{_TAG_TOKEN})+")
+_TRAILING_TAGS = re.compile(f"(?:{_TAG_TOKEN})+$")
 
 
 def _kept(s: str, comment_re) -> list:
@@ -2125,12 +2129,29 @@ def _lone_as_text(soup, lone, doc, token, comment_re) -> dict:
     if r.returncode != 0:
         return {}
     src = BeautifulSoup(r.stdout, "html.parser")
+    # How many comments stand between each tag and the words beside it: before it (a tag after words), or after it (a
+    # tag at the start of an item or a cell, before its words). The page keeps a placeholder for each, and the tag goes
+    # on its own side of them (ticket 183 BS). Tags side by side share the comments before or after the run of them.
+    lead, trail = {}, {}
+
+    def comments(sib, step):
+        n = 0
+        while isinstance(sib, Comment):
+            n, sib = n + 1, getattr(sib, step)
+        return n
+
+    for t in src.find_all(string=lambda x: not isinstance(x, Comment)):
+        for run, side, count in ((_LEADING_TAGS.match(str(t)), "previous_sibling", lead),
+                                 (_TRAILING_TAGS.search(str(t)), "next_sibling", trail)):
+            for q in re.findall(_TAG_TOKEN, run.group() if run else ""):
+                if q in placed:
+                    count[q] = comments(getattr(t, side), side)
     # A comment splits the source's words where the page has none.
     for c in src.find_all(string=lambda x: isinstance(x, Comment)):
         c.extract()
     src.smooth()
     for t in _texts(src):
-        parts = [x for x in re.split("(\u27e6[A-Z0-9]+\u27e7)", str(t)) if x]
+        parts = [x for x in re.split(f"({_TAG_TOKEN})", str(t)) if x]
         if len(parts) > 1:
             t.replace_with(*(NavigableString(x) for x in parts))
     texts = _texts(src)
@@ -2196,8 +2217,22 @@ def _lone_as_text(soup, lone, doc, token, comment_re) -> dict:
             n = len(kept)
             if back and o > 0 and cum < o <= cum + n or not (back and o > 0) and cum <= o < cum + n:
                 j = o - cum
-                # Right after the words before it, or right before the words after it.
-                spot = t, (kept[j - 1] + 1 if j > 0 and back else kept[j] if j < n else len(t))
+                # Right after the words before it, and after the comments that stood between them and it; or
+                # right before the words after it, and before the comments that stood between it and them.
+                if j > 0 and back:
+                    at = kept[j - 1] + 1
+                    for _ in range(lead.get(p, 0)):
+                        if not (m := comment_re.match(str(t), at)):
+                            break
+                        at = m.end()
+                else:
+                    at = kept[j] if j < n else len(t)
+                    for _ in range(trail.get(p, 0)):
+                        ends = [m.start() for m in comment_re.finditer(str(t), 0, at) if m.end() == at]
+                        if not ends:
+                            break
+                        at = ends[0]
+                spot = t, at
                 break
             cum += n
         if spot is None:

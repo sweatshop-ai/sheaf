@@ -1188,7 +1188,7 @@ def _group(leader: int) -> list[str]:
 
 def _slow_stop(hub, group: list[str], took: float) -> str:
     """What a stop message that came late, or not at all, waited on: the processes left in the
-    cancelled delivery's group a second after the cancel, the jobs still on the thread and the
+    cancelled delivery's group a second or more after the cancel, the jobs still on the thread and the
     hub's diagnostics."""
     rows = [(r["kind"], {k: v for k, v in r.items() if k not in ("at", "source", "kind", "pid", "session")})
             for r in diagnostics.read()]
@@ -1224,6 +1224,7 @@ def test_cancelling_a_delivery_still_running_kills_it_and_sends_the_stop_message
     assert wait_until(lambda: session.claude.calls() != [])
     first = session.claude.calls()[0]["pid"]
     r = post(browser, "/_/cancel")
+    asked = time.monotonic()
     assert r.json() == {"ok": True}
     assert wait_until(lambda: ended(first))
     assert ready.read_text(encoding="utf-8") == before
@@ -1236,7 +1237,6 @@ def test_cancelling_a_delivery_still_running_kills_it_and_sends_the_stop_message
     # (173 Q), so a stop that takes more than a second says what was still there.
     def stopped():
         return len(session.claude.calls()) == 2 and session.claude.calls()[1]["stdin"]
-    asked = time.monotonic()
     if not wait_until(stopped, 1.0):
         group = _group(first)                                   # read while it still holds the stop up
         came = wait_until(stopped, hub.runner.term_grace + 4.0)  # the stop went by the courier too

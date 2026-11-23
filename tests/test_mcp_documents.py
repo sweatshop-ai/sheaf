@@ -105,6 +105,15 @@ def test_the_persons_own_last_message_is_never_unread(browser, notes):
     assert r["unread"] == 0 and r["dot"] == "blue"
 
 
+def test_a_legacy_action_reply_is_the_persons_own_when_the_person_is_named_claude(browser, notes):
+    """The unread rule reads the last author as `display` names it (5.3, 8.7), as the index does: a legacy
+    `"Claude (action)"` reply is Claude's, so for a person named Claude only c2, Ada's, is unread."""
+    browser.hub.person = "Claude"
+    update_file(notes / "busy.md", lambda t: rdc.reply(t, "c1", "Did it.", "Claude (action)", "2026-10-14T11:00"))
+    [r] = docs(browser)
+    assert r["unread"] == 1
+
+
 def test_a_thread_that_was_told_and_waits_makes_the_dot_orange(browser, notes):
     e = browser.hub.entry("notes/busy.md")
     e.live.await_reply("c1")

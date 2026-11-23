@@ -2116,6 +2116,11 @@ var create = function (ROOT, CFG, opts) {
       try { drag.head.setPointerCapture(e.pointerId); } catch (_) { /* a pointer that is gone */ }
     }
     putInside(drag.left + dx, drag.top + dy);
+    if (!pop._moved && window.ResizeObserver) {
+      // A box that grows after its last draw (the line "being sent" goes, the form comes back) is held inside again too.
+      var moved = pop;
+      new ResizeObserver(function () { if (pop === moved) clampMoved(); }).observe(moved);
+    }
     pop._moved = true;
   });
   // The box at (left, top) in client coordinates, held MOVE_EDGE inside the visible area (a box taller than the area keeps its
@@ -2130,15 +2135,18 @@ var create = function (ROOT, CFG, opts) {
     pop.style.right = '';
     pop._heldIn = sizesOf(v);
   }
-  function sizesOf(v) { return [v.right - v.left, v.bottom - v.top, pop.offsetWidth, pop.offsetHeight].join(); }
+  function areaOf(v) { return [v.right - v.left, v.bottom - v.top].join(); }
+  function sizesOf(v) { return areaOf(v) + ',' + [pop.offsetWidth, pop.offsetHeight].join(); }
   // A moved box is held inside the visible area again only when the area or the box changed size since it was last held
-  // (a window made smaller, a reply that made the box taller): a box the reader scrolled out of view with the text stays
-  // where it was dropped, and one that lies inside the new area does not move.
+  // (a window made smaller, a reply that made the box taller), and one that lies inside the new area does not move. A box
+  // the reader scrolled out of view with the text stays where it was dropped when only the box changed size; a smaller
+  // area brings it back even when the box now lies wholly past the area's new edge.
   function clampMoved() {
-    var v = viewRect();
-    if (!pop || !pop._moved || pop.classList.contains('rd-docked') || pop._heldIn === sizesOf(v)) return;
-    var r = pop.getBoundingClientRect();
-    if (r.bottom <= v.top || r.top >= v.bottom) { pop._heldIn = sizesOf(v); return; }     // scrolled away with the text: left there
+    if (!pop || !pop._moved || pop.classList.contains('rd-docked')) return;
+    var v = viewRect(), held = pop._heldIn || '';
+    if (held === sizesOf(v)) return;
+    var r = pop.getBoundingClientRect(), sameArea = held.split(',').slice(0, 2).join() === areaOf(v);
+    if (sameArea && (r.bottom <= v.top || r.top >= v.bottom)) { pop._heldIn = sizesOf(v); return; }     // scrolled away with the text: left there
     putInside(r.left, r.top);
   }
   function dropped(e) {

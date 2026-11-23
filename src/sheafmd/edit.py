@@ -971,7 +971,7 @@ def _bare_urls_as_words(fragment: str):
         return fragment, {}
     soup, put = BeautifulSoup(fragment, "html.parser"), {}
     for a in soup.find_all("a", href=True):
-        if _BARE_URL.fullmatch(a["href"]) and "\\" in a["href"] and a.get_text() == a["href"] and not a.find_parent(["code", "pre"]) and not a.find(True):
+        if _bare_url_whole(a["href"]) and "\\" in a["href"] and a.get_text() == a["href"] and not a.find_parent(["code", "pre"]) and not a.find(True):
             word = _fresh_word("RDURL", fragment, put)
             put[word] = a["href"]
             a.replace_with(word)
@@ -1081,6 +1081,11 @@ def _hrefs_as_words(fragment: str):
 _BARE_URL_PAREN = re.compile(r"https?://[^|\s<>]*\)")
 
 
+def _bare_url_whole(url: str) -> bool:
+    """Whether GFM links all of `url` when it is written bare: `_BARE_URL`, or one ending in a `)` its own `(` balance."""
+    return bool(_BARE_URL.fullmatch(url) or (_BARE_URL_PAREN.fullmatch(url) and url.count("(") >= url.count(")")))
+
+
 def _gfm_domain(url: str) -> bool:
     """Whether GFM takes the domain of the bare `url` for one: at least one period, and no underscore in its last two
     labels. GFM's domain ends at the first character other than a letter, a digit, `_`, `-` or `.`. `url` holds
@@ -1093,8 +1098,7 @@ def _gfm_links_bare(out: str, start: int, end: int, url: str) -> bool:
     """Whether `url`, written bare at out[start:end], is a link of that address in GFM: only at the start of a
     line, after white space, `*`, `_`, `~` or `(`, with a domain GFM takes (`_gfm_domain`), and whole, up to white
     space or a tag after the marks GFM trims off its end."""
-    whole = _BARE_URL.fullmatch(url) or (_BARE_URL_PAREN.fullmatch(url) and url.count("(") >= url.count(")"))
-    if not whole or not _gfm_domain(url) or (start and out[start - 1] not in " \t\n*_~("):
+    if not _bare_url_whole(url) or not _gfm_domain(url) or (start and out[start - 1] not in " \t\n*_~("):
         return False
     marks = ".,:!?*_~" if "(" in url else ".,:!?*_~)"
     return re.match(rf"[{re.escape(marks)}]*(?:\s|<|$)", out[end:]) is not None

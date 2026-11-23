@@ -1383,6 +1383,7 @@ var create = function (ROOT, CFG, opts) {
       if (!stashAll()) return false;
       stopDictation(true);
       unpaintWidened();
+      if (pop._room) pop._room.remove();
       pop.remove(); pop = null; popId = null; drag = null; paint(null); setTimeout(flushHold, 0);
       setTimeout(function () { if (mouseDown) keptDue = true; else drawKept(); }, 0);
     }
@@ -2025,6 +2026,7 @@ var create = function (ROOT, CFG, opts) {
     if (!dock()) {
       undock();
       if (pop._target && pop._target.isConnected && pop.style.position !== 'fixed' && !pop._moved) place(pop, pop._target);
+      clampMoved();       // a moved box that grew (a reply came in), or a visible area that changed size
     }
     if (atEnd) sc.scrollTop = sc.scrollHeight;       // a thread that was at its last message stays there when the box changes size
   }
@@ -2053,6 +2055,7 @@ var create = function (ROOT, CFG, opts) {
     var st = pop.style;
     if (!pop._was) { pop._was = {}; DOCKED.forEach(function (k) { pop._was[k] = st[k]; }); }
     pop.classList.add('rd-docked');
+    if (pop._room) pop._room.remove();      // a docked box is fixed: it lengthens no page
     st.position = 'fixed';
     st.top = (v.offsetTop + DOCK_GAP) + 'px';
     st.bottom = 'auto';
@@ -2068,6 +2071,7 @@ var create = function (ROOT, CFG, opts) {
     DOCKED.forEach(function (k) { pop.style[k] = pop._was[k]; });
     pop.classList.remove('rd-docked');
     pop._was = null;
+    if (pop._moved) roomBelow();      // the room dock() took away; clampMoved() finds the sizes held and returns
   }
   if (window.visualViewport) ['resize', 'scroll'].forEach(function (ev) {
     listen(window.visualViewport, ev, function () {
@@ -2078,7 +2082,7 @@ var create = function (ROOT, CFG, opts) {
     });
   });
   // A frame resized, a phone turned, with a mouse as with a thumb: the thread wraps at another width.
-  listen(window, 'resize', function () { if (pop) keepThread(); });
+  listen(window, 'resize', function () { if (pop) { keepThread(); clampMoved(); } });
   // A popover with no place in the text (a kept comment, a thread whose badge is hidden or gone) is pinned
   // beside the panel.
   function pin(p) { p.style.position = 'fixed'; p.style.top = '80px'; p.style.left = ''; p.style.right = '390px'; }
@@ -2109,17 +2113,57 @@ var create = function (ROOT, CFG, opts) {
     if (!drag.on) {
       if (Math.abs(dx) < MOVE_SLOP && Math.abs(dy) < MOVE_SLOP) return;
       drag.on = true;
+      // A finger that drags the band is not a tap on it: the touch-end handler of the box's empty area (below, `emptyTouch`)
+      // would otherwise put the cursor in the field, and the keyboard would dock the box that was just dragged.
+      if (emptyTouch) emptyTouch.moved = true;
       try { drag.head.setPointerCapture(e.pointerId); } catch (_) { /* a pointer that is gone */ }
     }
+    putInside(drag.left + dx, drag.top + dy);
+    if (!pop._moved && window.ResizeObserver) {
+      // A box that grows after its last draw (the line "being sent" goes, the form comes back) is held inside again too.
+      var moved = pop;
+      new ResizeObserver(function () { if (pop === moved) clampMoved(); }).observe(moved);
+    }
+    pop._moved = true;
+  });
+  // The box at (left, top) in client coordinates, held MOVE_EDGE inside the visible area (a box taller than the area keeps its
+  // head), and the size of the area and of the box it was held against, which clampMoved() compares with.
+  function putInside(left, top) {
     var v = viewRect(), w = pop.offsetWidth, h = pop.offsetHeight, o = pageOrigin();
-    var x = Math.max(v.left + MOVE_EDGE, Math.min(drag.left + dx, v.right - w - MOVE_EDGE));
-    var y = Math.max(v.top + MOVE_EDGE, Math.min(drag.top + dy, v.bottom - h - MOVE_EDGE));
+    var x = Math.max(v.left + MOVE_EDGE, Math.min(left, v.right - w - MOVE_EDGE));
+    var y = Math.max(v.top + MOVE_EDGE, Math.min(top, v.bottom - h - MOVE_EDGE));
     var fixed = pop.style.position === 'fixed';
     pop.style.left = (fixed ? x : o.x + x) + 'px';
     pop.style.top = (fixed ? y : o.y + y) + 'px';
     pop.style.right = '';
-    pop._moved = true;
-  });
+    pop._heldIn = sizesOf(v);
+    roomBelow();
+  }
+  // A box held at the foot of a short page is the page's lowest part: the page ends at the box, and when the box shrinks
+  // again the browser scrolls up to the new end, so the box ends flush with the window's foot and a fraction of a pixel
+  // puts it outside (a margin does not lengthen the page). An empty part MOVE_EDGE tall under the box keeps its edge.
+  function roomBelow() {
+    var room = pop._room;
+    if (pop.style.position === 'fixed' || pop.classList.contains('rd-docked')) { if (room) room.remove(); return; }
+    if (!room) room = pop._room = el('div', { 'class': 'rd-room', 'aria-hidden': 'true' });
+    room.style.top = (pop.offsetTop + pop.offsetHeight) + 'px';
+    room.style.height = MOVE_EDGE + 'px';
+    if (room.previousSibling !== pop) pop.parentNode.insertBefore(room, pop.nextSibling);
+  }
+  function areaOf(v) { return [v.right - v.left, v.bottom - v.top].join(); }
+  function sizesOf(v) { return areaOf(v) + ',' + [pop.offsetWidth, pop.offsetHeight].join(); }
+  // A moved box is held inside the visible area again only when the area or the box changed size since it was last held
+  // (a window made smaller, a reply that made the box taller), and one that lies inside the new area does not move. A box
+  // the reader scrolled out of view with the text stays where it was dropped when only the box changed size; a smaller
+  // area brings it back even when the box now lies wholly past the area's new edge.
+  function clampMoved() {
+    if (!pop || !pop._moved || pop.classList.contains('rd-docked')) return;
+    var v = viewRect(), held = pop._heldIn || '';
+    if (held === sizesOf(v)) return;
+    var r = pop.getBoundingClientRect(), sameArea = held.split(',').slice(0, 2).join() === areaOf(v);
+    if (sameArea && (r.bottom <= v.top || r.top >= v.bottom)) { pop._heldIn = sizesOf(v); roomBelow(); return; }     // scrolled away with the text: left there
+    putInside(r.left, r.top);
+  }
   function dropped(e) {
     if (!drag || e.pointerId !== drag.id) return;
     drag = null;

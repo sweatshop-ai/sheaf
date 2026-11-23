@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 
 from .. import config
-from ..source import file_lock
+from ..source import _folder_of, file_lock
 from . import loose, state
 from . import roots as roots_mod
 
@@ -214,9 +214,36 @@ class Archive:
             for part in reversed(dest.relative_to(Path(root.path) / TRASH / str(at)).parents):
                 if str(part) != ".":
                     self._plain_dir(Path(root.path) / TRASH / str(at) / part, make=True)
-            if os.path.lexists(dest):
-                raise loose.Refused("a page of that name was deleted in the same second: try again")
-            os.replace(src, dest)
+            # The move is made from folder descriptors, each folder opened from the one above it without following a link:
+            # a folder on the way swapped for a link since the look by path above is refused, never followed out of the root.
+            try:
+                sfd, sname = _folder_of(root.path, rel)
+            except OSError:
+                raise loose.Refused("the page is in a folder that is a link or went away: refused") from None
+            try:
+                if not stat.S_ISREG(os.stat(sname, dir_fd=sfd, follow_symlinks=False).st_mode):
+                    raise loose.Refused("the page is not a plain file: refused")
+                try:
+                    dfd, dname = _folder_of(root.path, str(dest.relative_to(root.path)))
+                except OSError:
+                    raise loose.Refused("the trash of the loose root is in a folder that is a link or a file: refused") from None
+                try:
+                    # a link, never a rename: it fails when the name is taken, so nothing in the trash is overwritten
+                    os.link(sname, dname, src_dir_fd=sfd, dst_dir_fd=dfd, follow_symlinks=False)
+                except FileExistsError:
+                    raise loose.Refused("a page of that name was deleted in the same second: try again") from None
+                except OSError as e:
+                    raise loose.Refused(f"the page could not be moved to the trash ({e.strerror})") from None
+                else:
+                    try:
+                        os.unlink(sname, dir_fd=sfd)
+                    except OSError as e:
+                        os.unlink(dname, dir_fd=dfd)        # the page stays at its address, never in two places
+                        raise loose.Refused(f"the page could not be moved to the trash ({e.strerror})") from None
+                finally:
+                    os.close(dfd)
+            finally:
+                os.close(sfd)
             loose.stamp_held(root.path, ARCHIVED, {rel: None})      # the marks go in the hold of the move: no sweep between
             loose.stamp_held(root.path, SEEN, {rel: None})
             loose.keep_held(root.path, rel, False)
@@ -251,8 +278,11 @@ class Archive:
         if not stamp.isdigit() or not rel or any(p in ("", ".", "..") for p in rel.split("/")):
             raise KeyError(ident)
         src = Path(root.path) / TRASH / stamp / rel
-        if not os.path.lexists(src) or not stat.S_ISREG(os.lstat(src).st_mode):
-            raise KeyError(ident)
+        try:
+            if not stat.S_ISREG(os.lstat(src).st_mode):     # one look: a purge between two looks leaked FileNotFoundError
+                raise KeyError(ident)
+        except FileNotFoundError:
+            raise KeyError(ident) from None
         dest = Path(root.path) / rel
         # The file lock of the address first (the hub's lock order: a file lock, then the state stores'). A door create takes no
         # lock, only a link that fails when the name is taken: so the move here is a link too, never a rename, which would
@@ -271,6 +301,10 @@ class Archive:
                 os.link(src, dest, follow_symlinks=False)       # the entry itself, never what a link put there since the look leads to
             except FileExistsError:
                 raise Taken(rel) from None
+            except FileNotFoundError:
+                if not os.path.lexists(src):
+                    raise KeyError(ident) from None     # purged since its status above
+                raise loose.Refused("the page could not be put back (its folder went away)") from None
             except OSError as e:
                 raise loose.Refused(f"the page could not be put back ({e.strerror})") from None
             try:

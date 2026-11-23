@@ -371,3 +371,29 @@ def test_the_team_overlay_leaves_a_page_whose_meta_is_not_json_as_it_is():
 def test_another_members_session_with_an_id_that_is_not_a_plain_id_still_has_its_remote_control_link(two):
     two.hub.writes.add("work/plan.md", "Claude Code (Cal)", "laptop", "update", session="not a plain id", link=RC)
     assert link_of(two) == {"kind": "remote", "href": RC}
+
+
+def test_a_clear_by_another_thread_between_the_look_and_the_read_of_a_kept_title_does_not_raise(tmp_path):
+    from sheafmd.hub.sheaf_view import Titles
+
+    class Clearing(dict):
+        armed = False
+
+        def __contains__(self, k):
+            there = super().__contains__(k)
+            if self.armed:
+                self.clear()      # another thread's full-cache start-over, right after the look
+            return there
+
+        def get(self, k, default=None):
+            if self.armed:
+                self.clear()
+            return super().get(k, default)
+
+    p = tmp_path / "a.md"
+    p.write_text("# Hello\n", encoding="utf-8")
+    t = Titles()
+    t._kept = Clearing()
+    assert t.of(p, "a.md") == "Hello"
+    t._kept.armed = True
+    assert t.of(p, "a.md") == "Hello"

@@ -215,10 +215,10 @@ def behind_a_delete(agents, monkeypatch, *racers):
     """Run each of `racers` (a function) in a thread started while Delete holds the page, after the page's locks are taken and
     before it moves: each must still be waiting 0.3 s later, and is joined once Delete is done. Their results, in order."""
     results, threads = [None] * len(racers), []
-    real_replace = os.replace
+    real_link = os.link
 
-    def replace(src, dst, *a, **kw):
-        if "/.sheaf/trash/" in str(dst) and not threads:
+    def link(src, dst, *a, **kw):
+        if kw.get("dst_dir_fd") is not None and not threads:      # the move into the trash, made from folder descriptors
             for i, racer in enumerate(racers):
                 t = threading.Thread(target=lambda i=i, racer=racer: results.__setitem__(i, racer()))
                 t.start()
@@ -226,8 +226,8 @@ def behind_a_delete(agents, monkeypatch, *racers):
             for t in threads:
                 t.join(0.3)
             assert all(t.is_alive() for t in threads), "a writer came in while Delete moved the page"
-        return real_replace(src, dst, *a, **kw)
-    monkeypatch.setattr(os, "replace", replace)
+        return real_link(src, dst, *a, **kw)
+    monkeypatch.setattr(os, "link", link)
     return results, threads
 
 
@@ -430,3 +430,81 @@ def test_purge_does_not_follow_a_linked_sheaf_folder(agents, clock, tmp_path):
     clock.now += 60 * DAY
     agents.hub.archive.purge()
     assert (old / "page.md").is_file()
+
+
+# ── Ticket 183 AN and AX ─────────────────────────────────────────────────────
+
+def test_a_trashed_page_purged_between_the_first_look_and_its_status_is_not_found_not_an_error(agents, clock, monkeypatch):
+    doc = made(agents, "bea-claude")
+    assert delete(agents, doc).status == 200
+    [row] = trash_rows(agents)
+    root = root_of(agents, doc)
+    src = root.path / ".sheaf" / "trash" / row["id"]
+    real, looks = os.lstat, []
+
+    def lstat(p, *a, **k):
+        got = real(p, *a, **k)
+        if str(p) == str(src) and not looks:
+            looks.append(p)
+            os.unlink(src)                          # the purge, right after the first look at the entry
+        return got
+    monkeypatch.setattr(archive.os, "lstat", lstat)
+    with pytest.raises(KeyError):
+        agents.hub.archive.restore_trash(root, row["id"])
+
+
+def test_a_trashed_page_purged_between_its_status_and_the_link_is_not_found_not_a_refusal(agents, clock, monkeypatch):
+    doc = made(agents, "bea-claude")
+    assert delete(agents, doc).status == 200
+    [row] = trash_rows(agents)
+    root = root_of(agents, doc)
+    src = root.path / ".sheaf" / "trash" / row["id"]
+    real = os.link
+
+    def link(a, b, *args, **k):
+        if str(a) == str(src):
+            os.unlink(src)                          # the purge, right before the link
+        return real(a, b, *args, **k)
+    monkeypatch.setattr(archive.os, "link", link)
+    with pytest.raises(KeyError):
+        agents.hub.archive.restore_trash(root, row["id"])
+    assert not agents.hub.file(doc).exists()
+
+
+def test_a_folder_swapped_for_a_link_after_the_check_does_not_bring_an_outside_file_into_the_trash(agents, clock, monkeypatch, tmp_path):
+    doc = made(agents, "bea-claude")
+    root = root_of(agents, doc)
+    (root.path / "sub").mkdir()
+    (root.path / "sub" / "x.md").write_text("# The root's\n", encoding="utf-8")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "x.md").write_text("# Not the root's\n", encoding="utf-8")
+    real = archive.file_lock
+
+    @contextlib.contextmanager
+    def swapping(p):
+        os.rename(root.path / "sub", tmp_path / "sub-was")
+        os.symlink(outside, root.path / "sub")      # another account swaps the folder between the check and the move
+        with real(p):
+            yield
+    monkeypatch.setattr(archive, "file_lock", swapping)
+    with pytest.raises(loose.Refused):
+        agents.hub.archive.trash(root, "sub/x.md")
+    assert (outside / "x.md").read_text(encoding="utf-8") == "# Not the root's\n"
+    assert not list((root.path / ".sheaf").rglob("x.md"))
+
+
+def test_a_page_that_cannot_be_taken_from_its_address_is_not_left_in_the_trash_too(agents, clock, monkeypatch):
+    doc = made(agents, "bea-claude")
+    path = agents.hub.file(doc)
+    real, refused = os.unlink, []
+
+    def unlink(p, *a, dir_fd=None, **k):
+        if dir_fd is not None and str(p) == path.name and not refused:      # the page's own address, once: the undo goes through
+            refused.append(p)
+            raise PermissionError(1, "Operation not permitted")
+        return real(p, *a, dir_fd=dir_fd, **k)
+    monkeypatch.setattr(archive.os, "unlink", unlink)
+    assert delete(agents, doc).status == 409
+    assert path.exists()
+    assert not list((root_of(agents, doc).path / ".sheaf").rglob(path.name))

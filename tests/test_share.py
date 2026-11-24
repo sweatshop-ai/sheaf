@@ -1160,3 +1160,36 @@ def test_the_row_button_ticks_the_text_it_wrote_not_a_later_read_of_the_page(tea
     monkeypatch.setattr(the_list, "share_edit", lambda text: (seen.append(text), real_edit(text))[1])
     team.post("/_/share", {"doc": doc, "hash": md_hash(read(team, doc))}, member=ALICE)
     assert seen and "Alice's notes" in seen[0]
+
+
+# ── a CRLF page whose last line is its heading ────────────────────────────────────────────────────────────────────
+
+import re
+
+BARE_CR = re.compile(rb"\r(?!\n)")
+HEADING_LAST = "---\nowner: alice\n---\n# Alice's notes".replace("\n", "\r\n")
+
+
+@pytest.mark.parametrize("page", [HEADING_LAST, "# Alice's notes".replace("\n", "\r\n") + "\r\n", "---\r\nowner: alice\r\n---"])
+def test_a_share_line_added_to_a_crlf_page_leaves_every_line_end_a_crlf(page):
+    from sheafmd.hub.visibility import with_share_line
+    raw = with_share_line(page, ["bob"]).encode()
+    assert b"Share with bob" in raw
+    assert not BARE_CR.search(raw), raw
+    assert raw.count(b"\n") == raw.count(b"\r\n"), raw
+
+
+def test_a_crlf_page_whose_last_line_is_its_heading_shared_through_the_button_has_clean_line_ends(team):
+    doc = made(team, "alice", PRIVATE)["doc"]
+    team.hub.file(doc).write_bytes(HEADING_LAST.encode())
+    row = {r["doc"]: r for r in shared_rows(team, ALICE)["rows"]}[doc]
+    assert team.post("/_/share", {"doc": doc, "hash": row["share"]}, member=ALICE).status == 200
+    raw = team.hub.file(doc).read_bytes()
+    assert b"Share" in raw and not BARE_CR.search(raw) and raw.count(b"\n") == raw.count(b"\r\n"), raw
+
+
+def test_a_door_create_of_a_crlf_page_whose_last_line_is_its_heading_with_a_ticked_share_line_has_clean_line_ends(team):
+    doc = made(team, "alice", "# Agent page\r\n\r\n- [x] Share with bob", doc="crlf.md")["doc"]
+    raw = team.hub.file(doc).read_bytes()       # a create is read as LF (`_as_read`): whole LF or whole CRLF, never a mix
+    assert b"Share with bob" in raw and not BARE_CR.search(raw) and b"\r" not in raw.replace(b"\r\n", b"") \
+        and (b"\r" not in raw or raw.count(b"\n") == raw.count(b"\r\n")), raw

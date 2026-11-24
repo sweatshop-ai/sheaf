@@ -333,9 +333,19 @@ def with_share_line(text_: str, names=()) -> str:
         at += 1
     if at < len(lines) and lines[at].startswith("# "):
         at += 1
-        lines[at:at] = [cr, line + cr]
-        if at + 2 < len(lines) and lines[at + 2].strip():
-            lines.insert(at + 2, cr)
+        if at == len(lines):                     # the heading is the last line, with no line end of its own yet
+            lines[at - 1] += cr
+            lines[at:at] = [cr, line]            # the Share line ends the page as the heading did: no line end
+        else:
+            lines[at:at] = [cr, line + cr]
+            if at + 2 < len(lines) and lines[at + 2].strip():
+                lines.insert(at + 2, cr)
+    elif cr and at == len(lines):                # nothing follows: the new line goes after the last, which ends the page
+        if lines[-1]:
+            lines[-1] += cr
+            lines.append(line)
+        else:                                    # the page ends in a line end: the new line goes before that empty tail
+            lines.insert(at - 1, line + cr)
     else:
         lines[at:at] = [line + cr, cr]
     return "\n".join(lines)

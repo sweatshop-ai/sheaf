@@ -68,6 +68,7 @@ GITHUB_HOSTS = ("github.com", "ssh.github.com", "www.github.com")
 
 NO_CLONES = "none"
 OK, PRIVATE_ROOT, NO_APP, NOT_CLONED, CLONING = "ok", "private-root", "no-app", "not-cloned", "cloning"
+NO_ROW = "_no_row"          # in a report's `declared`: the thread makes the clone and writes no row for the page
 MOVED = "moved"             # the clone's root went to another tiroir: its answer carries the new origin (`moved_to`)
 NO_LAZY_FETCH_FROM = (2, 44)    # the git that honours GIT_NO_LAZY_FETCH; an older one ignores it without an error
 
@@ -715,7 +716,7 @@ class Repos:
         return True, named if isinstance(named, str) and named else None
 
     # ── the report ───────────────────────────────────────────────────────────
-    def report(self, member: str, repo, path, commit, private_roots=(), declared=None) -> dict:
+    def report(self, member: str, repo, path, commit, private_roots=(), declared=None, row: bool = True) -> dict:
         """The tiroir hears that `member` works on the page `path` of `repo` at `commit`. Raises `Refused` for a name
         that is none, and for a clone that failed since the last report; otherwise the answer: `clone` (`ok`,
         `cloning`, `private-root`, `not-cloned`, `no-app`, `moved`), `commit_known`, for `no-app` the link that adds the
@@ -723,7 +724,9 @@ class Repos:
         nothing. `private_roots` are (member, folder) pairs. A repo that is the caller's own private root is told so;
         one that is another member's is `not-cloned` and nothing else: no clone, no record, no owner named (SPEC 9.11).
         A repo that became a private root after it was cloned keeps its clone and its records, takes no more.
-        Nothing here clones or fetches: that is the repo's thread's (see the top of the file)."""
+        Nothing here clones or fetches: that is the repo's thread's (see the top of the file). With `row` False the report
+        only makes the clone held and written nowhere: the thread settles it without a row for the page."""
+        declared = {**(declared or {}), **({} if row else {NO_ROW: True})}
         repo, path, commit = _clean_repo(repo), _clean_path(path), _clean_commit(commit)
         if (private := self._private(member, repo, private_roots)) is not None:
             return {"repo": repo, "path": path, "clone": private, "commit_known": None}
@@ -874,6 +877,8 @@ class Repos:
                 return
         self._wake(repo, dest, token)
         for member, path, commit, declared in batch:
+            if declared.get(NO_ROW):
+                continue
             folder = path.rpartition("/")[0]
             if token is not None:
                 self._widen(dest, folder, token)

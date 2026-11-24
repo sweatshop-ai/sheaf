@@ -222,6 +222,13 @@ def test_the_first_report_keeps_the_page_a_later_report_by_another_member_does_n
     assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") == "bea"
 
 
+def test_a_report_without_a_row_makes_the_clone_and_records_no_owner(hub_repos, origin):
+    repos = hub_repos.hub.repos
+    repos.report("bea", REPO, "docs/plan.md", sh(origin, "rev-parse", "main"), (), {}, row=False)
+    assert repos.settle(), "the tiroir's thread did not finish"
+    assert repos.owner_of(REPO, "docs/plan.md") is None and (the_clone(hub_repos) / ".git").exists()
+
+
 def test_front_matter_owner_wins_over_the_record(hub_repos, tmp_path, origin):
     pusher = laptop_clone(tmp_path, origin, "pusher")
     (pusher / "docs" / "plan.md").write_text("---\nowner: cal\n---\n# Plan\n", encoding="utf-8")

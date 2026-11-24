@@ -24,12 +24,13 @@ class FakeRepos:
 
     busy, settle_ok = False, True
 
-    def report(self, member, repo, path, commit, privates=(), declared=None):
+    def report(self, member, repo, path, commit, privates=(), declared=None, row=True):
         self.calls.append((member, repo, path, commit, list(privates)))
         if isinstance(self.answer, Exception):
             raise self.answer
         self.busy = True            # the report is settled on the repo's own thread: `settle` waits for it
-        self.queue.append((member, repo, path, commit))
+        if row:
+            self.queue.append((member, repo, path, commit))      # the row a report settles; `row=False` makes the clone only
         return {"repo": repo, "path": path, **self.answer}
 
     def clone_dir(self, repo):
@@ -144,8 +145,8 @@ def test_a_report_is_made_for_each_owned_page_so_each_keeps_the_owner_its_front_
     h = hub(clone)
     incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None), ("b.md", "bob@example.com", None),
                                 ("c.md", "nobody@example.com", None)))
-    assert [(who, path) for who, _, path, *_ in h.repos.calls] == [("al", "a.md")]      # the first one clones; the rest are queued whole
-    assert h.repos.rest == [("o/r", git(clone, "rev-parse", "dev"), [("bob", "b.md")])]
+    assert [(who, path) for who, _, path, *_ in h.repos.calls] == [("al", "a.md")]      # the first one only clones; every page is queued whole after the toml check
+    assert h.repos.rest == [("o/r", git(clone, "rev-parse", "dev"), [("al", "a.md"), ("bob", "b.md")])]
 
 
 def test_a_clone_being_made_answers_cloning(clone):
@@ -305,6 +306,19 @@ def test_a_root_whose_toml_at_the_tip_does_not_name_this_tiroir_is_refused_whole
     assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None))) == (409, {"why": "not_named"})
 
 
+def test_a_root_refused_not_named_leaves_no_row_of_any_page(clone):
+    set_toml(clone, 'tiroir = "https://other.example"\n')
+    h = hub(clone)
+    assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None))) == (409, {"why": "not_named"})
+    assert h.repos.queue == [] and h.repos.rest == []
+
+
+def test_the_first_owned_page_is_reported_with_the_rest_once_the_toml_names_this_tiroir(clone):
+    h = hub(clone)
+    assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)))[0] == 200
+    assert [path for _, _, path, _ in h.repos.queue] == ["a.md"]
+
+
 def test_the_toml_naming_this_tiroir_in_another_spelling_is_accepted(clone):
     set_toml(clone, 'tiroir = "HTTPS://Here.example/"\n')
     status, _ = incoming.check_root(hub(clone), body(clone, ("a.md", "alice@example.com", None)))
@@ -344,12 +358,12 @@ def test_a_repo_that_is_no_repo_name_is_refused_whole(clone):
     assert incoming.check_root(hub(clone), body(clone, ("a.md", "alice@example.com", None), repo="not a repo")) == (409, {"why": "refused"})
 
 
-def test_the_owned_pages_after_the_first_are_reported_together_and_none_is_dropped(clone):
+def test_the_owned_pages_are_reported_together_and_none_is_dropped(clone):
     h = hub(clone)
     pages = [("a.md", "alice@example.com", None)] + [(f"p{n}.md", "bob@example.com", "0" * 40) for n in range(200)]
     incoming.check_root(h, body(clone, *pages))
     (repo, commit, owned), = h.repos.rest
-    assert len(owned) == 200 and {m for m, _ in owned} == {"bob"}
+    assert len(owned) == 201 and {m for m, _ in owned} == {"al", "bob"}
 
 
 def test_a_page_whose_owner_may_not_have_the_clone_is_refused_and_the_others_go_on(clone):

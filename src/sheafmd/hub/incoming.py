@@ -13,7 +13,7 @@ import os
 import time
 from pathlib import Path
 
-from .. import mcp, paths
+from .. import config, diagnostics, mcp, paths
 from . import channel, loose, proxy, root_moves, state, visibility
 from . import repos as repos_mod
 from .state import TokenRow
@@ -262,9 +262,11 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
     page's owner is the member its e-mail names; the page's blob must be what this tiroir's own clone holds at the save
     branch. `(202, {state: cloning})` while the clone is made or the tip not here yet; `(409, {why})` for the whole root;
     else `(200, {pages: {path: {ready: True} | {ok: False, why}}})`. A repo whose root moved away from here is refused whole
-    (`moved`), unless `peer` (the origin the channel's token names, passed by the caller) is the tiroir it moved to: that root is coming back,
-    and is unmoved once nothing in this check refuses it. This writes nothing of its own: the report is the laptop's, so it dates the clone as used and records the first
-    owner's page, as a laptop's would; the page's own state is landing's."""
+    (`moved`), unless `peer` (the origin the channel's token names, passed by the caller) is the tiroir it moved to: that root is
+    coming back, and is unmoved once nothing in this check refuses it. The root's `.sheaf.toml` at the tip must name this tiroir
+    (`not_named` otherwise; a root unmoved by this call then sleeps again). The clone's state is written only by what this calls:
+    the unmove, and the report, which is the laptop's own, so it dates the clone as used and records each owned page, as a
+    laptop's would; the page's own state is landing's."""
     if (bad := _root_shape(b)) is not None:
         raise ValueError(bad)
     repos = getattr(hub, "repos", None)
@@ -272,36 +274,76 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
         return 409, {"why": "no_clones"}
     if getattr(hub, "proxy", None) is None:
         return 409, {"why": "no_origin"}
-    judged, first = {}, None
+    try:
+        repo = repos_mod._clean_repo(b["repo"])      # the key everything of the repo is stored under: one repo, one clone, one set of rows
+    except repos_mod.Refused:
+        return 409, {"why": "refused"}
+    judged, owned, unmoved = {}, [], False
     for p in b["pages"]:
         owner, why = owner_for(hub, p["owner_email"])
         if owner is None:
             judged[p["path"]] = {"ok": False, "why": why}
-        elif first is None:
-            first = (owner, p["path"])
+        else:
+            owned.append((owner, p["path"]))
+    first = owned[0] if owned else None
     if first is not None:
         privates = [(m.short or m.id, m.private_root) for m in hub.proxy.members.values() if m.private_root]
-        if peer and root_moves.origin(peer) == repos.moved_to(b["repo"]):
+        if peer and root_moves.origin(peer) == repos.moved_to(repo):
             # the root comes back from the tiroir it moved to, the peer the channel's token names (never the body's `from`):
             # it is unmoved only once nothing in this check would refuse it
-            if (why := repos.refusal(first[0].short or first[0].id, b["repo"], privates)) is not None:
+            if (why := repos.refusal(first[0].short or first[0].id, repo, privates)) is not None:
                 return 409, {"why": why.replace("-", "_"),
-                             **({"install": url} if why == repos_mod.NO_APP and (url := repos.install_url(b["repo"])) else {})}
-            repos.unmove(b["repo"])
+                             **({"install": url} if why == repos_mod.NO_APP and (url := repos.install_url(repo)) else {})}
+            repos.unmove(repo)
+            unmoved = True
+        def _left(status, answer):
+            """The check ends without a 200: a root it unmoved goes back to sleep, so the sender's next try finds it as it was."""
+            if unmoved:
+                _sleep_again(repos, repo, root_moves.origin(peer))
+            return status, answer
         try:
-            said = repos.report(first[0].short or first[0].id, b["repo"], first[1], b["tip"], privates, {})
+            said = repos.report(first[0].short or first[0].id, repo, first[1], b["tip"], privates, {}, row=False)
+            clone = said.get("clone")
         except repos_mod.Refused:
-            return 409, {"why": "refused"}
-        clone = said.get("clone")
+            return _left(409, {"why": "refused"})
         if clone == repos_mod.NO_APP:
-            return 409, {"why": "no_app", **({"install": said["install"]} if said.get("install") else {})}
+            return _left(409, {"why": "no_app", **({"install": said["install"]} if said.get("install") else {})})
         if clone in (repos_mod.PRIVATE_ROOT, repos_mod.NOT_CLONED, repos_mod.MOVED):
-            return 409, {"why": clone.replace("-", "_")}
+            return _left(409, {"why": clone.replace("-", "_")})
         if clone != repos_mod.OK or not said.get("commit_known"):
-            return 202, {"state": "cloning"}
-        dest = repos.clone_dir(b["repo"])
+            return _left(202, {"state": "cloning"})
+        if not repos.settle(channel.SECONDS / 2, repo=repo):       # the report's own thread writes the page's row and keeps the repo busy: it ends before any page lands or the clone sleeps
+            return _left(202, {"state": "cloning"})
+        named = config.tiroir_named(repos.root_toml(repo, b["tip"]) or "")
+        if named is None or root_moves.origin(named) != root_moves.origin(hub.proxy.origin):
+            return _left(409, {"why": "not_named"})
+        # every owned page is reported once the toml names this tiroir, the first too (its first report only made the clone), so a
+        # root refused for it leaves no row at all; each page keeps the owner its front matter names; all at once, because the queue
+        # of a laptop's reports drops a report past its cap and a root has many pages
+        try:
+            for path, state_ in repos.report_rest(repo, b["tip"], [(o.short or o.id, path) for o, path in owned], privates).items():
+                judged[path] = {"ok": False, "why": state_.replace("-", "_")}
+        except repos_mod.Refused:
+            return _left(409, {"why": "refused"})
+        if not repos.settle(channel.SECONDS / 2, repo=repo):
+            return _left(202, {"state": "cloning"})
+        dest = repos.clone_dir(repo)
         for p in b["pages"]:
             if p["path"] not in judged:
                 judged[p["path"]] = {"ready": True} if root_moves.tip_holds(dest, b["branch"], p["path"], p["blob"]) \
                     else {"ok": False, "why": "text_differs"}
     return 200, {"pages": judged}
+
+
+SLEEP_TRIES = 3
+
+
+def _sleep_again(repos, repo: str, to: str):
+    """A root this call unmoved goes back to sleep as moved to `to`. A report queued meanwhile makes `sleep_moved` answer False
+    ("ask again"): so it waits for the repo's thread and asks again, a few times; a root that still will not sleep is told to the
+    diagnostics, not left unsaid."""
+    for _ in range(SLEEP_TRIES):
+        if repos.sleep_moved(repo, to):
+            return
+        repos.settle(channel.SECONDS / 2, repo=repo)
+    diagnostics.record("hub", "root-not-asleep-again", repo=repo)

@@ -230,6 +230,15 @@ def branch_named(text: str) -> str | None:
         and ".." not in branch and not branch.endswith((".lock", "/", ".")) else None
 
 
+def tiroir_named(text: str) -> str | None:
+    """The `tiroir` a `.sheaf.toml` says, given as text (a repo's file read from git); None when it names none or is not TOML."""
+    try:
+        named = tomllib.loads(text).get("tiroir")
+    except tomllib.TOMLDecodeError:
+        return None
+    return named if isinstance(named, str) and named.strip() else None
+
+
 class GitPlace(NamedTuple):
     top: Path | None            # the top of the git work tree the folder is in; each worktree is its own
     in_git_dir: bool            # inside a git directory, where no work tree is the folder's

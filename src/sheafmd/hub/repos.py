@@ -756,10 +756,14 @@ class Repos:
         `not-cloned`); those are not queued. Raises `Refused` for a name that is none."""
         repo, commit = _clean_repo(repo), _clean_commit(commit)
         refused, items = {}, []
+        with self._records:
+            rows = self._read().get(repo, {})
         for member, path in owned:
             if (private := self._private(member, repo, private_roots)) is not None:
                 refused[_clean_path(path)] = private
-            else:
+            elif not (isinstance(row := rows.get(_clean_path(path)), dict) and row.get("commit") == commit):
+                # a page whose row is at this commit already was settled by an earlier try of the same check: asked again, a big root
+                # would redo every page each time and never get past the wait
                 items.append((member, _clean_path(path), commit, {}))
         if items:
             self._use(repo)
@@ -797,9 +801,11 @@ class Repos:
         with self._guard:
             queue = self._queues.get(repo)
             if queue is not None:
+                queued = {q[:3] for q in queue}
                 for item in items:
-                    if (not cap or len(queue) < MAX_QUEUED) and not any(q[:3] == item[:3] for q in queue):
+                    if (not cap or len(queue) < MAX_QUEUED) and item[:3] not in queued:
                         queue.append(item)
+                        queued.add(item[:3])
                 return
             self._queues[repo] = list(items)
             self._start(repo, self._drain, repo)           # under the guard, as in sleep()

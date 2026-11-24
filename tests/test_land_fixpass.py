@@ -60,3 +60,10 @@ def test_settle_for_a_repo_joins_only_that_repos_thread(repos):
         assert repos.settle(0.2) is False
     finally:
         stop.set()
+
+
+def test_a_page_whose_row_is_at_the_commit_already_is_not_queued_again(repos):
+    repos._write({"o/r": {"a.md": {"owner": "al", "commit": "c" * 40}}})
+    repos._enqueue = lambda repo, *items, cap=True: setattr(repos, "queued", items)
+    repos.report_rest("o/r", "c" * 40, [("al", "a.md"), ("al", "b.md")])
+    assert [i[1] for i in repos.queued] == ["b.md"]

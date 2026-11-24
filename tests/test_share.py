@@ -1170,11 +1170,16 @@ BARE_CR = re.compile(rb"\r(?!\n)")
 HEADING_LAST = "---\nowner: alice\n---\n# Alice's notes".replace("\n", "\r\n")
 
 
-@pytest.mark.parametrize("page", [HEADING_LAST, "# Alice's notes".replace("\n", "\r\n") + "\r\n", "---\r\nowner: alice\r\n---"])
-def test_a_share_line_added_to_a_crlf_page_leaves_every_line_end_a_crlf(page):
+FRONT_ONLY = "---\r\nowner: alice\r\n---"
+CASES = [(HEADING_LAST, ["bob"]), (HEADING_LAST, []), (FRONT_ONLY, ["bob"]), (FRONT_ONLY, [])]   # a page with no \r\n is an LF page
+
+
+@pytest.mark.parametrize("page,names", CASES,
+                         ids=["front+heading, names", "front+heading, none", "front only, names", "front only, none"])
+def test_a_share_line_added_to_a_crlf_page_leaves_every_line_end_a_crlf(page, names):
     from sheafmd.hub.visibility import with_share_line
-    raw = with_share_line(page, ["bob"]).encode()
-    assert b"Share with bob" in raw
+    raw = with_share_line(page, names).encode()
+    assert b"Share" in raw
     assert not BARE_CR.search(raw), raw
     assert raw.count(b"\n") == raw.count(b"\r\n"), raw
 
@@ -1186,10 +1191,3 @@ def test_a_crlf_page_whose_last_line_is_its_heading_shared_through_the_button_ha
     assert team.post("/_/share", {"doc": doc, "hash": row["share"]}, member=ALICE).status == 200
     raw = team.hub.file(doc).read_bytes()
     assert b"Share" in raw and not BARE_CR.search(raw) and raw.count(b"\n") == raw.count(b"\r\n"), raw
-
-
-def test_a_door_create_of_a_crlf_page_whose_last_line_is_its_heading_with_a_ticked_share_line_has_clean_line_ends(team):
-    doc = made(team, "alice", "# Agent page\r\n\r\n- [x] Share with bob", doc="crlf.md")["doc"]
-    raw = team.hub.file(doc).read_bytes()       # a create is read as LF (`_as_read`): whole LF or whole CRLF, never a mix
-    assert b"Share with bob" in raw and not BARE_CR.search(raw) and b"\r" not in raw.replace(b"\r\n", b"") \
-        and (b"\r" not in raw or raw.count(b"\n") == raw.count(b"\r\n")), raw

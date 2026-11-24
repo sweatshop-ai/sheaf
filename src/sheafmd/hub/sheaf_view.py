@@ -236,13 +236,21 @@ def _data(hub, member, titles: Titles, view: str = "", gone=None) -> dict:
                 write_tip, session_tip_, link = "", "", None
             else:
                 write_tip, session_tip_, link = last.host if last else "", session_tip(session) if session else "", way_back(session, member)
+            said_write, said_session = say_write(last, session), session.writer if session else ""
+            if not given and (repo := hub.clone_of(address)):       # a repo page: the report's session, else the commit's, else git (13)
+                by = hub.repos.attribution(repo, at.rel)
+                if by["session"] and session is None:
+                    said_session, session_tip_, link = by["label"], " on ".join(t for t in (by["session"], by["host"]) if t), \
+                        {"kind": "remote", "href": by["link"]} if by["link"] else None
+                if not said_write and not said_session:
+                    said_write = by["label"]
             rows.append({"doc": told, "url": d["url"] if told == address else roots_mod.url_path(told), "title": title, "root": SHARED if given else at.root,
                          "folder": folder, "shared_by": agent, **given,
                          "share": unshared if own_root(at.root) and not given else "",
                          "can_move": own_root(at.root) and not given, "mtime": d["mtime"], "when": index_mod.when(d["mtime"], now),
-                         "open": d["open"], "own": own_root(at.root) and not given, "archived": archived, "kept": kept_, "write": say_write(last, session),
+                         "open": d["open"], "own": own_root(at.root) and not given, "archived": archived, "kept": kept_, "write": said_write,
                          "write_tip": write_tip,
-                         "session": session.writer if session else "",
+                         "session": said_session,
                          "session_tip": session_tip_,
                          "session_link": link})
     rows.sort(key=lambda r: (-r["mtime"], r["doc"]))

@@ -625,7 +625,7 @@ class Index:
             if gone is not None and gone():
                 raise Abandoned
             giver = None                            # the member whose loose root this is, when it is another's
-            if member is not None and not hub.owns(member, root):
+            if member is not None and not hub.owns(member, root) and not (root.clone and hub.repos is not None):
                 giver = hub.giver(member, root)     # only a loose root that Shares a page with this member is listed
                 if giver is None:
                     continue

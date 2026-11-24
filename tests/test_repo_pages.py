@@ -1225,3 +1225,62 @@ def test_whether_a_repo_has_a_queue_is_asked_under_the_guard(tmp_path, origin):
     repos._queues = _Guarded(repos._guard)
     assert repos.refusal("bea", REPO) == repos_mod.NO_APP
     assert repos.report("bea", REPO, "docs/plan.md", "a" * 40)["clone"] == repos_mod.NO_APP
+
+
+# ── a repo page's row, and the report's Write log line (the handler's listing, local bare repo) ──
+
+def repo_row(hub_repos, member=BEA, path="docs/plan.md"):
+    got = hub_repos.get("/_/mount?sheaf=1", member=member)
+    assert got.status == 200, got.text
+    rows = {r["doc"]: r for r in got.json()["sheaf"]["rows"]}
+    return rows[f"{repos_mod.root_name(REPO)}/{path}"]
+
+
+def test_a_repo_pages_row_names_the_session_and_host_of_the_latest_report(hub_repos):
+    report(hub_repos, session=SESSION, host="bea-laptop")
+    row = repo_row(hub_repos)
+    assert row["session"] and row["session_tip"] == f"{SESSION} on bea-laptop"
+    assert row["write"].startswith("bea-claude") or row["write"]
+
+
+def test_a_repo_pages_row_without_a_report_session_names_the_commit_trailers(hub_repos, tmp_path, origin):
+    pusher = laptop_clone(tmp_path, origin, "pusher")
+    (pusher / "docs" / "plan.md").write_text("# Plan\n\nTrailed.\n", encoding="utf-8")
+    sh(pusher, "commit", "-qam", f"change\n\nSheaf-Session: {SESSION}\nSheaf-Host: bea-laptop")
+    sh(pusher, "push", "-q", "origin", "HEAD:main")
+    report(hub_repos)
+    row = repo_row(hub_repos)
+    assert row["session_tip"] == f"{SESSION} on bea-laptop"
+
+
+def test_a_repo_pages_row_with_no_report_session_and_no_trailer_says_git_and_the_author_never_an_empty_cell(hub_repos):
+    report(hub_repos)
+    hub_repos.hub.writes._lines.clear()         # a page reported before reports left a Write log line
+    row = repo_row(hub_repos)
+    assert row["write"] == "git · Dee Dev"
+
+
+def test_a_repo_page_has_a_row_for_its_owner_and_none_for_a_member_it_is_not_shared_with(hub_repos):
+    report(hub_repos, session=SESSION)
+    address = f"{repos_mod.root_name(REPO)}/docs/plan.md"
+    got = {m: [r["doc"] for r in hub_repos.get("/_/mount?sheaf=1", member=m).json()["sheaf"]["rows"]] for m in (BEA, CAL)}
+    assert address in got[BEA]
+    assert address not in got[CAL]
+    assert not any(d.startswith(repos_mod.root_name(REPO)) for d in got[CAL])
+
+
+def test_a_render_report_leaves_one_write_log_line_with_the_fields_a_door_write_leaves(hub_repos):
+    report_once(hub_repos, session=SESSION, host="bea-laptop", link="https://claude.ai/code/session_01ABC")
+    assert hub_repos.hub.repos.settle()
+    lines = hub_repos.hub.writes.lines(f"{repos_mod.root_name(REPO)}/docs/plan.md")
+    assert len(lines) == 1
+    line = lines[0]
+    assert (line.via, line.place, line.session, line.host, line.link) == (
+        "report", "laptop", SESSION, "bea-laptop", "https://claude.ai/code/session_01ABC")
+    assert line.writer == "Claude Code (Bea)"
+
+
+def test_a_report_the_tiroir_refuses_leaves_no_write_log_line(hub_repos):
+    hub_repos.app.installed.clear()
+    report_once(hub_repos, session=SESSION)
+    assert hub_repos.hub.writes.lines(f"{repos_mod.root_name(REPO)}/docs/plan.md") == []

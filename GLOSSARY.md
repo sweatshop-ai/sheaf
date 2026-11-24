@@ -277,12 +277,20 @@ One unit of a rectoverso's recto that a member can add, move or remove as a whol
 _Avoid_: section, element, node
 
 **Block type**:
-The kind of a Block and the attributes it may carry, one fixed set declared by sheaf itself: paragraph, heading, list, quote, table, image, callout, columns, button. A member cannot define a type of their own.
+The kind of a Block and the attributes it may carry, one fixed set declared by sheaf itself: paragraph, heading, list, quote, table, image, callout, columns, button, app. A member cannot define a type of their own.
 _Avoid_: widget, component
 
 **Rich block**:
-A Block whose type has no plain Markdown form (callout, columns, button). It is the only kind of Block that keeps a stored id of its own; it may hold plain Blocks, one level deep.
+A Block whose type has no plain Markdown form (callout, columns, button, app). It is the only kind of Block that keeps a stored id of its own; it may hold plain Blocks, one level deep.
 _Avoid_: HTML block, island, custom block
+
+**App**:
+A Rich block holding code that a member or an assistant wrote and that runs when the page shows it, sealed: on a host apart from the front, cut off from the page, the member and the network. A reader without the editor sees its code. (Named 2026-11-24, wayfinder `sheaf-modular-editor` ticket 05.)
+_Avoid_: artifact, widget, script block, embed
+
+**Apps host**:
+The one host, on a domain of its own and never the front's, that serves every App to the page that shows it. On the laptop it is a second loopback port.
+_Avoid_: sandbox domain, usercontent site
 
 **Stub**:
 A Block whose type the page does not know. It is shown locked and written back byte for byte, never dropped and never refused.

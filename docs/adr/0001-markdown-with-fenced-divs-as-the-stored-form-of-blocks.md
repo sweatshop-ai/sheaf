@@ -16,3 +16,8 @@ A rectoverso that learns richer blocks (callout, columns, button) keeps its rect
 - Pandoc normalises nested fence lengths (`::::` comes back as `:::::`): a cosmetic change in bytes that the merge and the diff must not report as an edit.
 - Plain Markdown blocks keep no stored id; how they get one in memory is the block-model ticket's question.
 - Nesting is one level: columns hold columns, which hold plain blocks; a callout holds plain blocks.
+
+## Amendments (2026-11-24)
+
+- **Layout divs as a second level** (decision 06). A `.box` (a plain block carrying only `align` or `pad`) and an `.image` (a resized or aligned image on a line of its own) may sit inside a callout or column. Rich blocks still may not.
+- **The button is inline content** (decision 07). It is stored as a bracketed span around one link, `[[Buy](https://example.test)]{.button size="m" variant="primary"}`, read and written with `gfm+fenced_divs+bracketed_spans`, not as a `::: {.button}` div, so it can stand in a table cell, a sentence, a list item, a column or a callout. On pandoc 3.9 it renders to `<span class="button" …><a href>` and round-trips unchanged; a reader without the extension sees the link with `{.button}` as text. A sized image inside text or a table cell takes the same form, `[![alt](url)]{.image size="50"}`. Pandoc pads table columns on writing, another cosmetic change the merge must ignore.

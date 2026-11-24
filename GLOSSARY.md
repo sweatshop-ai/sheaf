@@ -277,11 +277,11 @@ One unit of a rectoverso's recto that a member can add, move or remove as a whol
 _Avoid_: section, element, node
 
 **Block type**:
-The kind of a Block and the attributes it may carry, one fixed set declared by sheaf itself: paragraph, heading, list, quote, table, image, callout, columns, button, app. A member cannot define a type of their own.
+The kind of a Block and the attributes it may carry, one fixed set declared by sheaf itself: paragraph, heading, list, quote, table, image, callout, columns, app, and the button, which is Inline content rather than a Block. A member cannot define a type of their own.
 _Avoid_: widget, component
 
 **Rich block**:
-A Block whose type has no plain Markdown form (callout, columns, button, app). It is the only kind of Block that keeps a stored id of its own; it may hold plain Blocks, one level deep.
+A Block whose type has no plain Markdown form (callout, columns, app). It keeps a stored id of its own; a callout or column may hold plain Blocks, one level deep.
 _Avoid_: HTML block, island, custom block
 
 **App**:
@@ -291,6 +291,18 @@ _Avoid_: artifact, widget, script block, embed
 **Apps host**:
 The one host, on a domain of its own and never the front's, that serves every App to the page that shows it. On the laptop it is a second loopback port.
 _Avoid_: sandbox domain, usercontent site
+
+**Container**:
+A Block that holds other Blocks: columns, column and callout, and Markdown's own quote and list item. A quote or list item holds plain Blocks only. (Named 2026-11-24, wayfinder `sheaf-modular-editor` ticket 07.)
+_Avoid_: parent, wrapper, group
+
+**Inline content**:
+What a Block holds that is not a Block itself: text, links, an image inside a sentence or a table cell, a button. It has no id of its own and moves with its Block. (Named 2026-11-24, wayfinder `sheaf-modular-editor` ticket 07.)
+_Avoid_: inline block, span block
+
+**Source adapter**:
+The one piece through which the block editor reads and writes a page's source as a whole document: a Markdown file today, a site's content or a CMS post later. (Named 2026-11-24, wayfinder `sheaf-modular-editor` ticket 07.)
+_Avoid_: connector, driver, backend
 
 **Stub**:
 A Block whose type the page does not know. It is shown locked and written back byte for byte, never dropped and never refused.

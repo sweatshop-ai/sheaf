@@ -324,14 +324,6 @@ def test_a_root_with_no_clone_of_the_tip_yet_is_not_judged_by_its_toml(clone):
     assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None))) == (202, {"state": "cloning"})
 
 
-def test_a_root_unmoved_by_the_call_goes_back_to_sleep_though_its_report_is_still_being_settled(clone):
-    set_toml(clone, 'tiroir = "https://other.example"\n')
-    h = moved_hub(clone)
-    assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)), peer=THERE) == (409, {"why": "not_named"})
-    assert h.repos.slept == [("o/r", THERE)] and h.repos.moved == THERE and not h.repos.busy
-
-
-# ── the fix round of the fifth review (ticket 21 part 2b) ────────────────────
 
 def test_the_root_toml_is_read_through_the_root_file_and_not_a_markdown_page_path(clone):
     """`FakeRepos.page_text` refuses a path that is not a page's, as `Repos.page_text` does: the toml cannot go through it."""
@@ -367,7 +359,6 @@ def test_a_page_whose_owner_may_not_have_the_clone_is_refused_and_the_others_go_
     assert answer["pages"] == {"a.md": {"ready": True}, "b.md": {"ok": False, "why": "private_root"}}
 
 
-
 def test_a_root_that_cannot_go_back_to_sleep_at_once_is_put_to_sleep_when_asked_again(clone):
     set_toml(clone, 'tiroir = "https://other.example"\n')
     h = moved_hub(clone)
@@ -384,10 +375,10 @@ def test_a_root_that_will_not_sleep_is_still_refused_not_named(clone):
     assert h.repos.slept == []
 
 
-def hub_with_root(clone, store, strict=False):
-    h = land_hub(clone)
-    root = SimpleNamespace(id="r1", path=clone, name="o--r")
-    h.roots = SimpleNamespace(get=lambda name: root if name == "o--r" else None)
-    h.private_roots = {"r1": "x"} if strict else {}
-    h._versions_of = lambda r, named="", strict=False: store
-    return h
+
+@pytest.mark.parametrize("answer", [{"clone": repos_mod.OK, "commit_known": False}, {"clone": repos_mod.CLONING}])
+def test_a_root_unmoved_by_the_call_sleeps_again_when_the_check_leaves_early(clone, answer):
+    h = moved_hub(clone)
+    h.repos.answer.update(answer)
+    status, _ = incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)), peer=THERE)
+    assert status != 200 and h.repos.unmoved == ["o/r"] and h.repos.slept == [("o/r", THERE)]

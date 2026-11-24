@@ -1,14 +1,11 @@
 """The fix round of the fifth review of ticket 21 part 2b, against the real stores: no fake."""
-import os
 import subprocess
 import threading
 
 import pytest
 from test_repo_pages import REPO, FakeApp, origin  # noqa: F401  (fixtures and helpers)
 
-from sheafmd.hub import state as hub_state
 from sheafmd.hub.repos import Repos
-from sheafmd.hub.writelog import WriteLog
 
 
 @pytest.fixture

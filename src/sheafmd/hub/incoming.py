@@ -296,6 +296,11 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
                              **({"install": url} if why == repos_mod.NO_APP and (url := repos.install_url(repo)) else {})}
             repos.unmove(repo)
             unmoved = True
+        def _left(status, answer):
+            """The check ends without a 200: a root it unmoved goes back to sleep, so the sender's next try finds it as it was."""
+            if unmoved:
+                _sleep_again(repos, repo, root_moves.origin(peer))
+            return status, answer
         try:
             said = repos.report(first[0].short or first[0].id, repo, first[1], b["tip"], privates, {})
             clone = said.get("clone")
@@ -305,20 +310,18 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
                 for path, state_ in repos.report_rest(repo, b["tip"], [(o.short or o.id, path) for o, path in owned[1:]], privates).items():
                     judged[path] = {"ok": False, "why": state_.replace("-", "_")}
         except repos_mod.Refused:
-            return 409, {"why": "refused"}
+            return _left(409, {"why": "refused"})
         if clone == repos_mod.NO_APP:
-            return 409, {"why": "no_app", **({"install": said["install"]} if said.get("install") else {})}
+            return _left(409, {"why": "no_app", **({"install": said["install"]} if said.get("install") else {})})
         if clone in (repos_mod.PRIVATE_ROOT, repos_mod.NOT_CLONED, repos_mod.MOVED):
-            return 409, {"why": clone.replace("-", "_")}
+            return _left(409, {"why": clone.replace("-", "_")})
         if clone != repos_mod.OK or not said.get("commit_known"):
-            return 202, {"state": "cloning"}
+            return _left(202, {"state": "cloning"})
         if not repos.settle(channel.SECONDS / 2, repo=repo):       # the report's own thread writes the page's row and keeps the repo busy: it ends before any page lands or the clone sleeps
-            return 202, {"state": "cloning"}
+            return _left(202, {"state": "cloning"})
         named = config.tiroir_named(repos.root_toml(repo, b["tip"]) or "")
         if named is None or root_moves.origin(named) != root_moves.origin(hub.proxy.origin):
-            if unmoved:
-                _sleep_again(repos, repo, root_moves.origin(peer))       # it was not for this tiroir after all: asleep again
-            return 409, {"why": "not_named"}
+            return _left(409, {"why": "not_named"})
         dest = repos.clone_dir(repo)
         for p in b["pages"]:
             if p["path"] not in judged:

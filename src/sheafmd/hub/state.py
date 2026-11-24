@@ -327,6 +327,41 @@ class Versions:
                 out.append(text)
         return out
 
+    def stamps(self, address: str) -> dict[str, int]:
+        """The age of each version of the document, `{hash: mtime_ns}`, as `texts` orders them: what `take_back` gives back."""
+        found = {}
+        for p in self._folder(address).glob("*.md"):
+            try:
+                if _HASH_RE.fullmatch(p.stem) and p.is_file():
+                    found[p.stem] = p.stat().st_mtime_ns
+            except OSError:
+                pass
+        return found
+
+    def take_back(self, address: str, before: list[str], made: list[str], stamps: dict[str, int] | None = None) -> None:
+        """A landing that put the texts `made` among the newest versions of the document and did not land takes back those, and no
+        more: a version of `made` that `before` (as `texts` gave them) did not hold goes, a version it pushed out of the newest
+        comes back, and what someone else wrote meanwhile and the pinned ones are never touched. With `stamps` (as `stamps` gave
+        them before) every version `before` held has its age again, the one a landing touched and the one it pushed out alike, so
+        the order of the history and the days a version has left are the ones it had."""
+        folder = self._folder(address)
+        kept = {md_hash(t) for t in before}
+        for h in {md_hash(t) for t in made} - kept:
+            try:
+                (folder / f"{h}.md").unlink()
+            except OSError:
+                pass
+        for text in before:
+            h = md_hash(text)
+            f = folder / f"{h}.md"
+            if not f.is_file():
+                write_text_private(self._make_folder(address) / f"{h}.md", text, self._root is not None)
+            if stamps and h in stamps:
+                try:
+                    os.utime(f, ns=(stamps[h], stamps[h]), follow_symlinks=False)
+                except OSError:
+                    pass
+
     def forget(self, address: str, inside: bool = False):
         """Drop every version of one document. A root that is forgotten takes its documents'
         versions with it: the name may go to another folder, and a page still open on the old

@@ -1,11 +1,14 @@
 """The fix round of the fifth review of ticket 21 part 2b, against the real stores: no fake."""
+import os
 import subprocess
 import threading
 
 import pytest
 from test_repo_pages import REPO, FakeApp, origin  # noqa: F401  (fixtures and helpers)
 
+from sheafmd.hub import state as hub_state
 from sheafmd.hub.repos import Repos
+from sheafmd.hub.writelog import WriteLog
 
 
 @pytest.fixture
@@ -67,3 +70,30 @@ def test_a_page_whose_row_is_at_the_commit_already_is_not_queued_again(repos):
     repos._enqueue = lambda repo, *items, cap=True: setattr(repos, "queued", items)
     repos.report_rest("o/r", "c" * 40, [("al", "a.md"), ("al", "b.md")])
     assert [i[1] for i in repos.queued] == ["b.md"]
+def test_take_back_gives_the_versions_their_order_and_their_age(tmp_path):
+    store = hub_state.Versions()
+    address = "o--r/a.md"
+    prior = [f"# prior {n}\n" for n in range(hub_state.VERSIONS_KEPT)]
+    for n, text in enumerate(prior):
+        store.put(address, text)
+        f = store._folder(address) / f"{hub_state.md_hash(text)}.md"
+        os.utime(f, ns=(1_000_000_000_000 + n * 10**9,) * 2)
+    before, stamps = store.texts(address), store.stamps(address)
+    made = [f"# incoming {n}\n" for n in range(3)]
+    for text in made:
+        store.put(address, text)
+    store.take_back(address, before, made, stamps)
+    assert store.texts(address) == before
+    assert store.stamps(address) == stamps
+
+
+def test_take_back_leaves_the_age_of_a_version_the_landing_touched_as_it_was(tmp_path):
+    store = hub_state.Versions()
+    address = "o--r/a.md"
+    store.put(address, "# same\n")
+    f = store._folder(address) / f"{hub_state.md_hash('# same' + chr(10))}.md"
+    os.utime(f, ns=(1_000_000_000_000,) * 2)
+    before, stamps = store.texts(address), store.stamps(address)
+    store.put(address, "# same\n")      # an incoming version identical to a prior one counts as written now
+    store.take_back(address, before, ["# same\n"], stamps)
+    assert store.stamps(address) == stamps

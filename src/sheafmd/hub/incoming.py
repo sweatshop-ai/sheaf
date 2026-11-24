@@ -304,11 +304,6 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
         try:
             said = repos.report(first[0].short or first[0].id, repo, first[1], b["tip"], privates, {})
             clone = said.get("clone")
-            if clone == repos_mod.OK and said.get("commit_known") and owned[1:]:
-                # each other owned page is reported for its owner too, so each row keeps the owner its front matter names; all of them
-                # at once, because the queue of a laptop's reports drops a report past its cap and a root has many pages
-                for path, state_ in repos.report_rest(repo, b["tip"], [(o.short or o.id, path) for o, path in owned[1:]], privates).items():
-                    judged[path] = {"ok": False, "why": state_.replace("-", "_")}
         except repos_mod.Refused:
             return _left(409, {"why": "refused"})
         if clone == repos_mod.NO_APP:
@@ -322,6 +317,17 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
         named = config.tiroir_named(repos.root_toml(repo, b["tip"]) or "")
         if named is None or root_moves.origin(named) != root_moves.origin(hub.proxy.origin):
             return _left(409, {"why": "not_named"})
+        if owned[1:]:
+            # the rest of the owned pages are reported once the toml names this tiroir, so a root refused for it leaves a row for the
+            # first page only; each other page keeps the owner its front matter names; all at once, because the queue of a laptop's
+            # reports drops a report past its cap and a root has many pages
+            try:
+                for path, state_ in repos.report_rest(repo, b["tip"], [(o.short or o.id, path) for o, path in owned[1:]], privates).items():
+                    judged[path] = {"ok": False, "why": state_.replace("-", "_")}
+            except repos_mod.Refused:
+                return _left(409, {"why": "refused"})
+            if not repos.settle(channel.SECONDS / 2, repo=repo):
+                return _left(202, {"state": "cloning"})
         dest = repos.clone_dir(repo)
         for p in b["pages"]:
             if p["path"] not in judged:

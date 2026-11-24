@@ -46,7 +46,7 @@ function sessionNode(doc, text, link) {
 
 // AgentView on the member's own laptop (SPEC 8.6): the click brings the session's terminal to the front, or opens it
 // again when it has ended; only the provider and id the hub recorded go in the body. A refusal or no answer is "not
-// here". Shared by the rows and by the byline of an opened page (page.js), which asks the same way.
+// here". Shared by the rows and by the byline of an opened page (the page script), which asks the same way.
 var LAPTOP = 'http://127.0.0.1:8765';
 var ABSENT_FOR = 30000, absentAt = 0;
 // AgentView has not answered for a while: the Remote Control link is then followed by the browser itself, as the

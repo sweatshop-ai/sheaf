@@ -768,6 +768,18 @@ def test_a_broken_repository_is_not_taken_for_a_folder_outside_any(tiroir, scrat
     assert "Nothing was sent" in err
 
 
+def test_a_page_in_a_bare_repository_worktree_layout_is_sent_though_rev_parse_answers_false(tiroir, tmp_path, capsys):
+    subprocess.run(["git", "init", "-q", "--bare", str(tmp_path / "p" / ".bare")], check=True)
+    (tmp_path / "p" / ".git").write_text("gitdir: ./.bare\n", encoding="utf-8")
+    page = tmp_path / "p" / "docs" / "a.md"
+    page.parent.mkdir()
+    page.write_text(TEXT, encoding="utf-8")
+    assert subprocess.run(["git", "-C", str(page.parent), "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True).stdout.strip() == "false"
+    code, out, err = run(capsys, page)
+    assert code == 0, err
+    assert [m for _, _, m in tiroir.seen if m and m["method"] == "tools/call"]
+
+
 def test_a_git_that_does_not_run_stops_the_send(tiroir, scratch, local, capsys, monkeypatch):
     def none(folder):
         raise OSError("no git here")
@@ -829,3 +841,24 @@ def test_a_retried_create_of_another_page_with_that_name_is_still_refused(tiroir
     code, out, err = run(capsys, other)
     assert code == 1 and "exists already" in err
     assert str(other.resolve()) not in state()
+
+
+def test_a_retried_create_is_not_taken_up_by_a_second_file_with_the_same_name_and_text(tiroir, scratch, tmp_path, capsys):
+    run(capsys, scratch)
+    twin = tmp_path / "elsewhere" / scratch.name
+    twin.parent.mkdir()
+    twin.write_text(TEXT, encoding="utf-8")
+    code, out, err = run(capsys, twin)
+    assert code == 1 and "exists already" in err and "Nothing was sent" in err
+    assert str(twin.resolve()) not in state()
+
+
+def test_a_row_of_a_file_that_no_longer_exists_does_not_block_the_takeover(tiroir, scratch, tmp_path, capsys):
+    first = tmp_path / "gone" / scratch.name
+    first.parent.mkdir()
+    first.write_text(TEXT, encoding="utf-8")
+    run(capsys, first)
+    first.unlink()
+    code, out, err = run(capsys, scratch)
+    assert code == 0, err                            # the row of a file that is gone binds nothing: the same name and text is taken up
+    assert str(scratch.resolve()) in state()

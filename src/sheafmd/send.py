@@ -523,9 +523,13 @@ def _git_probe(folder: Path) -> subprocess.CompletedProcess:
                           encoding="utf-8", errors="replace", timeout=10, env={**os.environ, "LC_ALL": "C"})
 
 
+# git's own words for a folder under no repository; a broken repository says `not a git repository: <path>`, which is not this
+NOT_A_REPO = re.compile(r"fatal: not a git repository \(or any (?:of the )?parent[^)]*\)")
+
+
 def require_known_place(md: Path):
     """Return when git says the page's folder is inside a repository or plainly outside any: SendError for any other
-    answer (git missing, a timeout, "dubious ownership", an unreadable repository). The page is then not sent as a loose
+    answer (git missing, a timeout, "dubious ownership", a repository git names as broken). The page is then not sent as a loose
     page, since a repository's page must never go up as one."""
     folder = md.resolve().parent
     try:
@@ -535,7 +539,7 @@ def require_known_place(md: Path):
     if done.returncode == 0:
         return
     why = (done.stderr or "").strip().splitlines()
-    if why and why[0].startswith("fatal: not a git repository") and not any("ownership" in l or "unsafe" in l for l in why):
+    if why and NOT_A_REPO.match(why[0]) and not any("ownership" in l or "unsafe" in l for l in why):
         return
     raise SendError(f"cannot tell whether {md} is in a git repository: git said {why[0] if why else 'nothing'!r}. "
                     "Fix that (for dubious ownership: `git config --global --add safe.directory <folder>`) and run sheaf "

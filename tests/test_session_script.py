@@ -41,3 +41,11 @@ def test_the_kit_of_a_page_script_makes_the_chat_link_of_a_way_back():
     kit = js.replace(page_script(), (files("sheafmd") / "page" / "session.js").read_text(encoding="utf-8"))
     out = subprocess.run(["node", "-e", "var window = {};\n" + kit], capture_output=True, text=True, timeout=30, check=True)
     assert json.loads(out.stdout) == ["A", "/chat/42", "Cosima"]
+
+
+@NODE
+def test_the_kit_loaded_twice_stays_the_first_one():
+    kit = (files("sheafmd") / "page" / "session.js").read_text(encoding="utf-8")
+    out = subprocess.run(["node", "-e", "var window = {};\n" + kit + "\nvar one = window.sheafSession;\n" + kit
+                          + "\nconsole.log(window.sheafSession === one)"], capture_output=True, text=True, timeout=30, check=True)
+    assert out.stdout.strip() == "true"

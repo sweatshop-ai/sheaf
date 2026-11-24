@@ -4,6 +4,7 @@
 // page opened directly on its own address, which carries no mount bundle. It defines `window.sheafSession` and nothing else,
 // so it can come before either of them.
 (function () {
+if (window.sheafSession) return;       // a page that loads the page script and the mount bundle has one kit, the first
 // An address is kept only when it is a path on this origin: one slash, then no second slash or backslash, and no
 // control or space anywhere (the URL parser drops a tab or a newline, so "/\t/host" would be "//host").
 function href(a, value) {

@@ -760,6 +760,14 @@ def test_a_git_that_refuses_the_folder_stops_the_send_and_names_why(tiroir, scra
     assert said in err and "Nothing was sent" in err
 
 
+def test_a_broken_repository_is_not_taken_for_a_folder_outside_any(tiroir, scratch, local, capsys, monkeypatch):
+    broken = "fatal: not a git repository: /srv/x/.git/worktrees/y\n"
+    monkeypatch.setattr(send, "_git_probe", lambda folder: subprocess.CompletedProcess([], 128, "", broken))
+    code, out, err = run(capsys, scratch)
+    assert code == 1 and out == "" and local == [] and tiroir.seen == []
+    assert "Nothing was sent" in err
+
+
 def test_a_git_that_does_not_run_stops_the_send(tiroir, scratch, local, capsys, monkeypatch):
     def none(folder):
         raise OSError("no git here")

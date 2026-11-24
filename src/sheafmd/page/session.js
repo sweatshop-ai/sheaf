@@ -1,6 +1,6 @@
 // sheaf session script: the name of the last agent session of a page or a row, and the click on it (SPEC 8.6, 6.2 item 11).
 //
-// Shared by the Sheaf view (sheaf.js, in the mount bundle) and by the byline of an opened page (page.js), including a member's
+// Shared by the Sheaf view (sheaf.js, in the mount bundle) and by the byline of an opened page (the page script), including a member's
 // page opened directly on its own address, which carries no mount bundle. It defines `window.sheafSession` and nothing else,
 // so it can come before either of them.
 (function () {

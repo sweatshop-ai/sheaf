@@ -464,9 +464,9 @@ def _create(door: Door, md: Path, text: str, args, origin: str) -> dict:
 def _arrived(door: Door, md: Path, text: str, address: str, origin: str) -> dict | None:
     """The page at `address` (the one the door's "exists already" named) when the tiroir holds exactly this file's text there: a
     create whose answer was lost took effect, and the run after it finds its own page. {doc, hash} of it, else None.
-    None also when the state row of another local file already holds that address: the page is that file's, not this one's."""
+    None also when the state row of another local file that still exists holds that address: the page is that file's."""
     mine = str(md.resolve())
-    if any(k != mine and isinstance(r, dict) and r.get("tiroir") == origin and r.get("doc") == address
+    if any(k != mine and Path(k).exists() and isinstance(r, dict) and r.get("tiroir") == origin and r.get("doc") == address
            for k, r in read_state().items()):
         return None
     try:
@@ -541,14 +541,11 @@ def require_known_place(md: Path):
         done = _git_probe(folder)
     except (OSError, subprocess.SubprocessError) as e:
         raise SendError(f"cannot tell whether {md} is in a git repository: git did not run ({e}). Nothing was sent.") from None
-    if done.returncode == 0 and (done.stdout or "").strip() != "false":
+    if done.returncode == 0:
         return
     why = (done.stderr or "").strip().splitlines()
     if why and NOT_A_REPO.match(why[0]) and not any("ownership" in l or "unsafe" in l for l in why):
         return
-    if done.returncode == 0:
-        raise SendError(f"cannot tell whether {md} is in a git repository: git said it is inside a .git folder or a bare repository "
-                        "(rev-parse answered 'false'). Move the file out of it and run sheaf again. Nothing was sent.")
     raise SendError(f"cannot tell whether {md} is in a git repository: git said {why[0] if why else 'nothing'!r}. "
                     "Fix that (for dubious ownership: `git config --global --add safe.directory <folder>`) and run sheaf "
                     "again. Nothing was sent.")

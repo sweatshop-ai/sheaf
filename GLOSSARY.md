@@ -292,6 +292,10 @@ _Avoid_: artifact, widget, script block, embed
 The one host, on a domain of its own and never the front's, that serves every App to the page that shows it. On the laptop it is a second loopback port.
 _Avoid_: sandbox domain, usercontent site
 
+**Run report**:
+What one view of an App tells the hub about one version of it: whether it loaded and the errors it threw. It comes only from a page a person opened; an App nobody has viewed since its last change has none yet. (Named 2026-11-24, wayfinder `sheaf-modular-editor` ticket 08.)
+_Avoid_: App log, test run, preview result
+
 **Container**:
 A Block that holds other Blocks: columns, column and callout, and Markdown's own quote and list item. A quote or list item holds plain Blocks only. (Named 2026-11-24, wayfinder `sheaf-modular-editor` ticket 07.)
 _Avoid_: parent, wrapper, group

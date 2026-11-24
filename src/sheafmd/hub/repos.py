@@ -448,7 +448,11 @@ class Repos:
         if row.get("session"):
             return {"session": row["session"], "host": row.get("host"), "link": row.get("link"),
                     "label": f"session {row['session']}"}
-        key = (repo, path, row.get("commit"), stamp)
+        try:        # a fetch that brings a commit touching the page's trailers only leaves its bytes as they were: it moves FETCH_HEAD
+            fetched = (self.clone_dir(repo) / ".git" / "FETCH_HEAD").stat().st_mtime_ns
+        except OSError:
+            fetched = None
+        key = (repo, path, row.get("commit"), stamp, fetched)
         if stamp is not None:
             with self._guard:
                 if key in self._looked:
@@ -720,7 +724,7 @@ class Repos:
         with self._guard:
             failed = self._failed.pop(repo, None)
         if failed:
-            self._enqueue(repo, (member, path, commit, declared or {}, who))     # this report starts the clone again
+            self._enqueue(repo, (member, path, commit, declared or {}, None))     # this report starts the clone again; it is refused, so it leaves no line
             raise Refused(failed)
         dest = self.clone_dir(repo)
         held = (dest / ".git").exists()

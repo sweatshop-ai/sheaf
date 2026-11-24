@@ -1367,3 +1367,12 @@ def test_a_member_with_no_visible_row_in_a_cut_off_clone_learns_nothing_of_it(hu
     assert not any(r["doc"].startswith(name) for r in told["rows"])
     assert name not in told["more"] and name not in str(told["tree"])
     assert name not in str(hub_repos.get("/_/index.json", member=CAL).json())
+
+
+def test_a_report_refused_for_a_failed_clone_leaves_no_write_log_line_when_the_clone_then_succeeds(hub_repos):
+    repos = hub_repos.hub.repos
+    repos._failed[REPO] = "the clone failed"
+    bad, got = report_once(hub_repos, session=SESSION)
+    assert bad and "failed" in got
+    assert repos.settle()
+    assert hub_repos.hub.writes.lines(f"{repos_mod.root_name(REPO)}/docs/plan.md") == []

@@ -1031,9 +1031,13 @@ class Door:
             raise ToolError("A render report is made with the token of a member: this one acts for nobody.", "no member")
         privates = [(visibility.owner_key(m), m.private_root) for m in self.hub.proxy.members.values() if m.private_root]
         try:
-            return repos.report(visibility.owner_key(member), args["repo"], args["path"], args["commit"], privates, caller.declared)
+            said = repos.report(visibility.owner_key(member), args["repo"], args["path"], args["commit"], privates, caller.declared)
         except repos_mod.Refused as e:
             raise ToolError(str(e), "refused") from None
+        if said.get("clone") in (repos_mod.OK, repos_mod.CLONING):      # a report the tiroir took leaves a Write log line, as a write does
+            place, declared = written_from(caller)
+            self.hub.writes.add(f"{repos_mod.root_name(said['repo'])}/{said['path']}", caller.display, place, "report", **declared)
+        return said
 
     # ── create and update: a row in the diagnostics log for every call (SPEC 9.7, 15) ─
     def _run(self, name: str, args: dict, caller: Caller):

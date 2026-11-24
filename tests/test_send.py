@@ -768,6 +768,13 @@ def test_a_broken_repository_is_not_taken_for_a_folder_outside_any(tiroir, scrat
     assert "Nothing was sent" in err
 
 
+def test_a_rev_parse_answering_false_stops_the_send_and_names_why(tiroir, scratch, local, capsys, monkeypatch):
+    monkeypatch.setattr(send, "_git_probe", lambda folder: subprocess.CompletedProcess([], 0, "false\n", ""))
+    code, out, err = run(capsys, scratch)
+    assert code == 1 and out == "" and local == [] and tiroir.seen == []
+    assert "'false'" in err and "Nothing was sent" in err
+
+
 def test_a_git_that_does_not_run_stops_the_send(tiroir, scratch, local, capsys, monkeypatch):
     def none(folder):
         raise OSError("no git here")
@@ -829,3 +836,13 @@ def test_a_retried_create_of_another_page_with_that_name_is_still_refused(tiroir
     code, out, err = run(capsys, other)
     assert code == 1 and "exists already" in err
     assert str(other.resolve()) not in state()
+
+
+def test_a_retried_create_is_not_taken_up_by_a_second_file_with_the_same_name_and_text(tiroir, scratch, tmp_path, capsys):
+    run(capsys, scratch)
+    twin = tmp_path / "elsewhere" / scratch.name
+    twin.parent.mkdir()
+    twin.write_text(TEXT, encoding="utf-8")
+    code, out, err = run(capsys, twin)
+    assert code == 1 and "exists already" in err and "Nothing was sent" in err
+    assert str(twin.resolve()) not in state()

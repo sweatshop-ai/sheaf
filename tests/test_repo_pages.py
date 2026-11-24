@@ -229,6 +229,22 @@ def test_a_report_without_a_row_makes_the_clone_and_records_no_owner(hub_repos, 
     assert repos.owner_of(REPO, "docs/plan.md") is None and (the_clone(hub_repos) / ".git").exists()
 
 
+def test_a_report_without_a_row_still_fetches_a_tip_the_clone_lacks_and_records_nothing(modern_git, hub_repos, tmp_path, origin):
+    repos = hub_repos.hub.repos
+    first = sh(origin, "rev-parse", "main")
+    repos.report("bea", REPO, "docs/plan.md", first, (), {}, row=False)
+    assert repos.settle()
+    pusher = laptop_clone(tmp_path, origin, "pusher")
+    (pusher / "docs" / "plan.md").write_text("# Plan\n\nChanged.\n", encoding="utf-8")
+    sh(pusher, "commit", "-qam", "change")
+    sh(pusher, "push", "-q", "origin", "HEAD:main")
+    new = sh(pusher, "rev-parse", "HEAD")
+    assert repos.report("bea", REPO, "docs/plan.md", new, (), {}, row=False)["commit_known"] is False
+    assert repos.settle()
+    assert repos.report("bea", REPO, "docs/plan.md", new, (), {}, row=False)["commit_known"] is True     # the queued item fetched it: no 202 loop
+    assert repos.settle() and repos.owner_of(REPO, "docs/plan.md") is None
+
+
 def test_front_matter_owner_wins_over_the_record(hub_repos, tmp_path, origin):
     pusher = laptop_clone(tmp_path, origin, "pusher")
     (pusher / "docs" / "plan.md").write_text("---\nowner: cal\n---\n# Plan\n", encoding="utf-8")

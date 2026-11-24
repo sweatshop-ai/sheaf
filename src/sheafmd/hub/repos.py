@@ -877,13 +877,13 @@ class Repos:
                 return
         self._wake(repo, dest, token)
         for member, path, commit, declared in batch:
-            if declared.get(NO_ROW):
-                continue
             folder = path.rpartition("/")[0]
             if token is not None:
                 self._widen(dest, folder, token)
             if not self._knows(dest, repo, commit, token) or not self._holds(dest, commit, path):
                 continue
+            if declared.get(NO_ROW):
+                continue            # looked at (the fetch above), written nowhere
             readable, named = self._named_owner(dest, commit, path, token)
             with self._records:
                 data = self._read()

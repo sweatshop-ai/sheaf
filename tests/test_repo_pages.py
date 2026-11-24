@@ -1239,8 +1239,8 @@ def repo_row(hub_repos, member=BEA, path="docs/plan.md"):
 def test_a_repo_pages_row_names_the_session_and_host_of_the_latest_report(hub_repos):
     report(hub_repos, session=SESSION, host="bea-laptop")
     row = repo_row(hub_repos)
-    assert row["session"] and row["session_tip"] == f"{SESSION} on bea-laptop"
-    assert row["write"].startswith("bea-claude") or row["write"]
+    assert row["session"] == "Claude Code (Bea)" and row["session_tip"] == f"{SESSION} on bea-laptop"
+    assert row["write"] == "Claude Code (Bea) · laptop"
 
 
 def test_a_repo_pages_row_without_a_report_session_names_the_commit_trailers(hub_repos, tmp_path, origin):
@@ -1255,7 +1255,7 @@ def test_a_repo_pages_row_without_a_report_session_names_the_commit_trailers(hub
 
 def test_a_repo_pages_row_with_no_report_session_and_no_trailer_says_git_and_the_author_never_an_empty_cell(hub_repos):
     report(hub_repos)
-    hub_repos.hub.writes._lines.clear()         # a page reported before reports left a Write log line
+    hub_repos.hub.writes._lines.clear()         # a page reported before reports left a Write log line (its record stays)
     row = repo_row(hub_repos)
     assert row["write"] == "git · Dee Dev"
 
@@ -1267,6 +1267,8 @@ def test_a_repo_page_has_a_row_for_its_owner_and_none_for_a_member_it_is_not_sha
     assert address in got[BEA]
     assert address not in got[CAL]
     assert not any(d.startswith(repos_mod.root_name(REPO)) for d in got[CAL])
+    told = hub_repos.get("/_/mount?sheaf=1", member=CAL).json()["sheaf"]
+    assert repos_mod.root_name(REPO) not in str(told["tree"]) and repos_mod.root_name(REPO) not in told["more"]
 
 
 def test_a_render_report_leaves_one_write_log_line_with_the_fields_a_door_write_leaves(hub_repos):

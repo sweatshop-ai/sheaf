@@ -9,14 +9,14 @@ The one local process that serves every document.
 _Avoid_: server, per-document server
 
 **Root**:
-A git repo (or a folder outside git) whose documents the hub serves, named after its folder.
+A place whose rectoversos the hub serves: a git repo or a folder outside git, named after its folder, or a source a source adapter reads, named in the user config. Inside a source, a rectoverso's path is the adapter's own name for the document. (Widened 2026-11-24, wayfinder `sheaf-modular-editor` ticket 09.)
 _Avoid_: project, collection
 
 **Core**:
 What every sheaf user gets: rendering, editing, comments, the agent adapter, the plain theme.
 
 **Layer**:
-An organisation's additions on top of the core, made of a theme, a root config, and separate programs that use sheaf as a library.
+An organisation's additions on top of the core, made of a theme, a root config, source adapters for its own sites, and separate programs that use sheaf as a library.
 _Avoid_: plugin, extension
 
 **Theme**:

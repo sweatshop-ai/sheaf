@@ -448,7 +448,7 @@ def _create(door: Door, md: Path, text: str, args, origin: str) -> dict:
         arguments["keep"] = True
     bad, got = door.tool("create", arguments)
     if bad and "exists already" in got and args.folder is None:
-        arrived = _arrived(door, md, text)
+        arrived = _arrived(door, md, text, got.split(" exists already", 1)[0].strip())
         if arrived is not None:
             keep_row(md, {"tiroir": origin, "doc": arrived["doc"], "hash": arrived["hash"], "local": md_hash(text)})
             return arrived
@@ -461,16 +461,16 @@ def _create(door: Door, md: Path, text: str, args, origin: str) -> dict:
     return got
 
 
-def _arrived(door: Door, md: Path, text: str) -> dict | None:
-    """The page `md.name` the tiroir holds when its text is exactly this file's: a create whose answer was lost took
-    effect, and the run after it finds its own page there. {doc, hash} of it, else None."""
+def _arrived(door: Door, md: Path, text: str, address: str) -> dict | None:
+    """The page at `address` (the one the door's "exists already" named) when the tiroir holds exactly this file's text there: a
+    create whose answer was lost took effect, and the run after it finds its own page. {doc, hash} of it, else None."""
     try:
-        bad, now = door.tool("read", {"doc": md.name})
+        bad, now = door.tool("read", {"doc": address})
     except (SendError, Moved):
         return None
     if bad or md_hash(now["text"]) != md_hash(text):
         return None
-    return {"doc": md.name, "hash": now["hash"]}
+    return {"doc": address, "hash": now["hash"]}
 
 
 def _update(door: Door, md: Path, text: str, row: dict) -> dict:

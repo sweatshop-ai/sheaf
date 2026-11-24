@@ -232,7 +232,8 @@ def test_a_second_refusal_before_the_merge_keeps_the_tiroirs_latest_text(tiroir,
     run(capsys, scratch)
     changed_there(tiroir, address, TEXT + "\nOne.\n\nTwo.\n")
     assert run(capsys, scratch)[0] == 1
-    assert scratch.with_name("notes.tiroir.md").read_text(encoding="utf-8") == TEXT + "\nOne.\n\nTwo.\n"
+    assert scratch.with_name("notes.tiroir.md").read_text(encoding="utf-8") == TEXT + "\nOne.\n"          # never overwritten
+    assert scratch.with_name("notes.tiroir-2.md").read_text(encoding="utf-8") == TEXT + "\nOne.\n\nTwo.\n"
 
 
 # ── the state file, held by more than one sheaf at once ──────────────────────
@@ -728,7 +729,7 @@ def test_a_conflict_whose_text_is_the_copy_already_there_reuses_that_copy(tiroir
     address = f"loose-bea/{loose.month()}/notes.md"
     changed_there(tiroir, address, TEXT + "\nTheirs.\n")
     scratch.write_text(TEXT + "\nMine.\n", encoding="utf-8")
-    run(capsys, scratch)
+    scratch.with_name("notes.tiroir.md").write_text(TEXT + "\nTheirs.\n", encoding="utf-8")   # already there, same text
     code, out, err = run(capsys, scratch)
     assert code == 1 and "notes.tiroir.md" in err
     assert not scratch.with_name("notes.tiroir-2.md").exists()

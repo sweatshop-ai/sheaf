@@ -320,3 +320,31 @@ def test_a_config_that_cannot_be_read_stops_the_command_before_anything_is_writt
     code, _, err = run(capsys, FRONT, laptop(tiroir))
     assert code == 1 and "config.toml" in err and "Nothing was written" in err
     assert keyring.items == {} and not claude_json().exists()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root writes into a folder whatever its mode")
+def test_a_config_folder_that_cannot_be_written_stops_the_command_before_anything_is_written(tiroir, keyring, capsys):
+    folder = paths.config_file().parent
+    folder.mkdir(parents=True, exist_ok=True)
+    folder.chmod(0o500)
+    try:
+        code, _, err = run(capsys, FRONT, laptop(tiroir))
+    finally:
+        folder.chmod(0o700)
+    assert code == 1 and "config.toml" in err and "Nothing was written" in err
+    assert keyring.items == {} and not claude_json().exists()
+    assert not paths.config_file().exists()
+
+
+@pytest.mark.skipif(os.geteuid() == 0, reason="root writes into a folder whatever its mode")
+def test_a_config_folder_that_cannot_be_written_does_not_matter_when_the_laptop_has_a_default_already(tiroir, keyring, capsys):
+    folder = paths.config_file().parent
+    folder.mkdir(parents=True, exist_ok=True)
+    paths.config_file().write_text('tiroir = "https://mine.example.com"\n')
+    folder.chmod(0o500)
+    try:
+        code, _, err = run(capsys, FRONT, laptop(tiroir))
+    finally:
+        folder.chmod(0o700)
+    assert code == 0, err
+    assert keyring.get("sheaf", FRONT) is not None

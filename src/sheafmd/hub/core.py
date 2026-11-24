@@ -370,9 +370,16 @@ class Hub:
             repos.roots = self.roots
             repos.mover = self.commits.moved
             repos.holding = self.commits._repo_lock
+            repos.recorded = self._report_recorded
             for root in self.roots.all():
                 if root.clone:
                     repos.credential(root.clone)
+
+    def _report_recorded(self, repo: str, path: str, who: tuple) -> None:
+        """A render report's record was made: its Write log line, as a door write leaves one. `who` is (writer, place, declared)."""
+        from . import repos as repos_mod
+        writer, place_, declared = who
+        self.writes.add(f"{repos_mod.root_name(repo)}/{path}", writer, place_, "report", **declared)
 
     def clone_of(self, address: str) -> str:
         """The repo whose clone serves `address`, or "" for any other page."""

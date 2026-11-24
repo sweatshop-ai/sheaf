@@ -319,9 +319,16 @@ def check_config(origin: str) -> None:
     """The laptop's config.toml reads and can take the default, before the token is stored: a file `make_default`
     cannot write would stop the command after the token was already written."""
     try:
-        _with_default(origin)
+        out = _with_default(origin)
     except config.ConfigError as e:
         raise ConnectError(f"{e}. Mend that file and run the command again. Nothing was written.") from None
+    if out is not None:
+        folder = paths.config_file().parent
+        while not folder.exists() and folder != folder.parent:
+            folder = folder.parent
+        if not folder.is_dir() or not os.access(folder, os.W_OK | os.X_OK):
+            raise ConnectError(f"{paths.config_file()} cannot be written: {folder} is not a folder this laptop can write "
+                               "into. Make it writable and run the command again. Nothing was written.")
 
 
 def connect(url: str, token: str, out=print) -> None:

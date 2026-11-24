@@ -207,8 +207,8 @@ def test_the_remote_control_notice_of_the_byline_is_a_plain_toast_not_an_error(t
     tab.open()
     # sheaf.js says it as `where.say(text, false)` when the click opens the Remote Control link (the surface's own `follow` is stood in for here)
     tab.page.evaluate("""() => {
-      window.sheafSession = window.sheafSession || {};
-      window.sheafSession.follow = (a, e, where) => where.say('This name now opens its Remote Control link directly.', false);
+      window.sheafSession = Object.assign({}, window.sheafSession, {      // the kit is frozen: a copy with `follow` stood in
+        follow: (a, e, where) => where.say('This name now opens its Remote Control link directly.', false)});
       const a = document.createElement('a'); a.className = 'sheaf-session-link'; a.setAttribute('data-laptop', '1'); a.textContent = 'Cosima';
       document.querySelector('p.doc-by').append(a); a.click();
     }""")

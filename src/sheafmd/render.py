@@ -971,8 +971,9 @@ def _page_asset(name: str) -> str:
 
 
 def page_script() -> str:
-    """The script of a page: the browser's one live stream (live.js, ticket 160), then the page's own."""
-    return _page_asset("live.js") + "\n" + _page_asset("page.js")
+    """The script of a page: the browser's one live stream (live.js, ticket 160), the name of a session and its click
+    (session.js: a page opened on its own address has no mount bundle to bring them), then the page's own."""
+    return _page_asset("live.js") + "\n" + _page_asset("session.js") + "\n" + _page_asset("page.js")
 
 
 FRONT_MATTER_TITLE_RE = re.compile(r"\A---\r?\n(?:(?!---\r?\n).*\r?\n)*?title:[ \t]*\S")

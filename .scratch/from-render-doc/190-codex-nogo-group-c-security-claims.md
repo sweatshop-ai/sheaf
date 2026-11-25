@@ -49,7 +49,7 @@ recommended options. Every finding below was checked against `origin/main` at f3
 - F: `tests/test_read_through_two_hubs.py::test_the_agency_sets_what_a_client_page_acts_on_whatever_the_client_tiroir_says`
   failed on main, passes on the branch (page meta and mount config; `work` and `way_back` dropped too).
 - F, from the Codex review of this PR: a non-script element with the id `rd-edit-meta` ahead of the rewritten block was read
-  by `getElementById`; page.js now reads `script#rd-edit-meta[type="application/json"]`. Browser test
+  by `getElementById`; page.js now reads the first `script[type="application/json"]` whose id is `rd-edit-meta`. Browser test
   `tests/page/test_page_clients.py::test_an_element_that_borrows_the_meta_blocks_id_is_not_read_as_the_meta` (CI only).
 - A–D: SPEC 9.1, 9.6, 9.10 and README edited; G–I: the note's items 115, 103, 192, 286 and 306 corrected.
 

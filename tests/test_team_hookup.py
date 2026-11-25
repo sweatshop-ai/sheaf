@@ -182,8 +182,9 @@ def test_the_mount_config_and_the_page_meta_carry_the_same_team_list(agency_and_
 
 
 @pytest.mark.parametrize("meta", ["[1, 2]", '"text"', "7", "null"])
-def test_a_client_page_whose_meta_block_is_json_but_not_an_object_is_sent_on_as_it_came(agency_and_client, monkeypatch, meta):
-    # 183 AL: a meta block that parses but is not an object is left as it is, as one that does not parse is, never a 500.
+def test_a_client_page_whose_meta_block_is_json_but_not_an_object_is_answered_with_the_agencys_meta(agency_and_client, monkeypatch, meta):
+    # 183 AL: a meta block that parses but is not an object is never a 500. Since ticket 190 (SPEC 9.9) the agency
+    # rebuilds it from nothing, as it does a block that does not parse: the client's value never reaches the page.
     agency, client = agency_and_client
     mine = client.make("alice", "# Plan\n\nsome words here\n")
     relay = agency.hub.clients.relay
@@ -196,7 +197,9 @@ def test_a_client_page_whose_meta_block_is_json_but_not_an_object_is_sent_on_as_
     monkeypatch.setattr(agency.hub.clients, "relay", odd_meta)
     page = agency.get(f"/Clients/acme/{mine}", member=AG_ALICE)
     assert page.status == 200
-    assert f'<script id="rd-edit-meta" type="application/json">{meta}</script>' in page.text
+    assert f'<script id="rd-edit-meta" type="application/json">{meta}</script>' not in page.text
+    blocks = re.findall(r'<script id="rd-edit-meta" type="application/json">(.*?)</script>', page.text, flags=re.DOTALL)
+    assert len(blocks) == 1 and isinstance(json.loads(blocks[0]), dict) and json.loads(blocks[0]).get("doc")
 
 
 @pytest.mark.parametrize("config", ["[1]", '"text"', "null"])

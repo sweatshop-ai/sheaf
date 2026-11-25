@@ -330,6 +330,19 @@ def _document_events(name: str, data):
     return proxy.for_member(data) if isinstance(data, dict) else data
 
 
+def _meta_of_page(body: str, change) -> str:
+    """`body`, a client page, with its meta block an object `change(meta)` gives; a block that is no object is left as it came."""
+    def one(m):
+        try:
+            meta = json.loads(m.group(2))
+        except ValueError:
+            return m.group(0)       # as the doc and mount branches leave a body they cannot read
+        if not isinstance(meta, dict):
+            return m.group(0)       # valid JSON that is not an object (183 AL): left as one that does not parse
+        return m.group(1) + json.dumps(change(meta)).replace("<", "\\u003c") + m.group(3)
+    return _META_RE.sub(one, body)
+
+
 class Handler:
     def __init__(self, hub, peer_check=peer.check):
         self.hub = hub
@@ -1345,15 +1358,7 @@ class Handler:
         member's name on this hub, which signs a Team comment: the page's own `me` is the one the client tiroir gave."""
         team = self.hub.team.list(doc)
         if op == "page":
-            def with_team(m):
-                try:
-                    meta = json.loads(m.group(2))
-                except ValueError:
-                    return m.group(0)       # as the doc and mount branches leave a body they cannot read
-                if not isinstance(meta, dict):
-                    return m.group(0)       # valid JSON that is not an object (183 AL): left as one that does not parse
-                return m.group(1) + json.dumps({**meta, "team": team, "team_me": me}).replace("<", "\\u003c") + m.group(3)
-            return _META_RE.sub(with_team, body)
+            return _meta_of_page(body, lambda meta: {**meta, "team": team, "team_me": me})
         try:
             got = json.loads(body)
         except ValueError:
@@ -1362,6 +1367,14 @@ class Handler:
         if not isinstance(into, dict):
             return body                     # valid JSON the list cannot join (183 AL): left as a body that does not parse
         into.update(team=team, team_me=me)
+        return json.dumps(got)
+
+    @staticmethod
+    def _agency_mount(body: str, doc: str) -> str:
+        """A client page's mount answer with its config's say on what the page acts on taken by this hub (`readthrough.agency_config`)."""
+        got = json.loads(body)              # `_own_build` already refused a mount body that is no object
+        if isinstance(got.get("config"), dict):
+            got["config"] = readthrough.agency_config(got["config"], doc)
         return json.dumps(got)
 
     def _relayed(self, req: Req, client: str, op: str, ask, doc: str | None = None) -> Response:
@@ -1384,6 +1397,10 @@ class Handler:
             body = self._own_build(body)
         if op == "doc" and status == 200:     # what an older client tiroir still says of its agents is not shown here (9.9)
             body = self._read_only_doc(body)
+        if env.get("type") == "html":          # what the page acts on is this hub's to say, whatever status the client chose (9.9)
+            body = readthrough.agency_meta(body, doc)
+        elif op == "mount" and status == 200 and doc is not None:
+            body = self._agency_mount(body, doc)
         if status == 200 and doc is not None and self.hub.team is not None:
             body = self._with_team(op, body, doc, req.member.name)
         if env.get("type") == "html":

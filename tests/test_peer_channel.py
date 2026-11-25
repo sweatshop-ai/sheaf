@@ -352,6 +352,39 @@ def test_a_credential_name_is_one_safe_word_per_origin_and_port():
     assert connect.peer_credential_name("HTTPS://Other.Example.com") == a
 
 
+def test_no_two_peer_origins_share_a_credential_name():
+    # A shared file name would send the token kept for one peer to the other (ticket 190 E).
+    origins = ["https://a.example:8443", "https://a.example-8443", "https://a.example_p8443", "https://a.example",
+               "https://[::1]:8443", "https://[::1]", "https://a_3a.example",
+               "https://a.example:443", "https://a.example:44"]
+    names = [connect.peer_credential_name(o) for o in origins]
+    assert len(set(names)) == len({connect.origin_of(o) for o in origins})
+    assert all(re.fullmatch(r"[A-Za-z0-9._-]+", n) for n in names)
+
+
+def test_a_credential_file_of_the_old_port_name_is_not_read_for_the_other_peer(monkeypatch, tmp_path):
+    (tmp_path / "sheaf-peer-a.example-8443").write_text(FAKE)
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+    assert connect._credential_file("https://a.example:8443") is None
+    assert connect._credential_file("https://a.example-8443") == FAKE
+
+
+
+def test_a_credential_file_left_under_the_old_port_name_is_said_once(monkeypatch, tmp_path, capsys):
+    (tmp_path / "sheaf-peer-b.example-8443").write_text(FAKE)
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+    assert connect._credential_file("https://b.example:8443") is None
+    assert connect._credential_file("https://b.example:8443") is None
+    err = capsys.readouterr().err
+    assert err.count("sheaf-peer-b.example-8443") == 1 and "sheaf-peer-b.example_p8443" in err and FAKE not in err
+    (tmp_path / "sheaf-peer----1--8443").write_text(FAKE)
+    assert connect._credential_file("https://[::1]:8443") is None
+    assert "sheaf-peer----1--8443" in capsys.readouterr().err
+    (tmp_path / "sheaf-peer----1-").write_text(FAKE)                # an IPv6 origin with no port was renamed too
+    assert connect._credential_file("https://[::1]") is None
+    assert "sheaf-peer----1-" in capsys.readouterr().err
+
+
 def test_the_hub_reads_the_peer_token_from_the_credentials_folder_before_the_keyring(keyring, monkeypatch, tmp_path):
     keyring.set("sheaf-peer", PEER, "sheaf_mcp_" + "k" * 43)
     (tmp_path / connect.peer_credential_name(PEER)).write_text(FAKE + "\n")

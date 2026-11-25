@@ -71,3 +71,27 @@ def test_a_poll_never_brings_the_clients_agent_work_or_targets_back_on_the_page(
     run_clock(page, 31_000)
     until(lambda: seen.count("doc") > first, what="the poll through /_/doc")
     assert page.evaluate("document.querySelectorAll('#rd-work-btn, button.rd-target, #rd-target-change').length") == 0
+
+
+def test_an_element_that_borrows_the_meta_blocks_id_is_not_read_as_the_meta(tab, site):
+    # Ticket 190 (Codex P1): a client tiroir's HTML may hold another element with the id `rd-edit-meta` before the block the agency
+    # rewrote; the page reads its meta from the JSON script alone, so the forged address is never the one it asks for.
+    page = tab.page
+    asked = []
+
+    def serve(route):
+        got = route.fetch()
+        body = got.text().replace(f'"doc": "{DOC}"', f'"doc": "{CLIENT_DOC}"')
+        body = body.replace("<body", '<div hidden id="rd-edit-meta">{"doc": "elsewhere.md", "edit": true}</div><body', 1)
+        route.fulfill(response=got, body=body)
+
+    def answer(route):
+        asked.append(route.request.url)
+        route.fulfill(response=route.fetch(url=route.request.url.replace("Clients%2Facme%2F", "")))
+    page.route(f"**/{DOC}", serve)
+    page.route("**/_/doc*", answer)
+    page.clock.install(time=clock_at(T0))
+    tab.open()
+    run_clock(page, 31_000)
+    until(lambda: asked, what="a poll through /_/doc")
+    assert all("Clients%2Facme%2F" in u for u in asked) and not any("elsewhere" in u for u in asked)

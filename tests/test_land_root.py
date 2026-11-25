@@ -229,6 +229,14 @@ def test_a_body_that_is_not_a_root_is_refused_with_the_reason(clone, bad):
         incoming.check_root(hub(clone), body(clone, ("a.md", "alice@example.com", None), **bad))
 
 
+@pytest.mark.parametrize("page", [{"path": [], "owner_email": "a@example.com", "blob": "b"},
+                                  {"path": {}, "owner_email": "a@example.com", "blob": "b"}, "a.md"])
+def test_a_page_path_of_another_json_type_is_refused_as_no_path(clone, page):
+    """A path no set can hold (a list) raised TypeError before the shapes were checked (189 B)."""
+    with pytest.raises(ValueError, match="a page of the root's move has no path"):
+        incoming.check_root(hub(clone), body(clone, pages=[page]))
+
+
 def test_a_repo_that_moved_away_is_refused_whole_and_never_answers_cloning(clone):
     assert incoming.check_root(hub(clone, repos_mod.MOVED), body(clone, ("a.md", "alice@example.com", None))) == (409, {"why": "moved"})
 

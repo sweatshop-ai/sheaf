@@ -568,18 +568,29 @@ def _servable_at(real: str, top: Path) -> bool:
 
 
 _NOT_A_REPO = object()
+_LATE = object()
 
 
-def _git_names(folder: Path):
+def _git_names(folder: Path, deadline: float | None = None):
     """Tracked and untracked markdown files git lists in `folder`, gitignored ones and
     `node_modules` left out. `_NOT_A_REPO` when git says the folder is no repository any more
     (nothing is ignored there, so it can be walked); None when git gives no answer (not
-    installed, too slow, refusing), when nothing may be listed that git did not vouch for."""
+    installed, too slow, refusing), when nothing may be listed that git did not vouch for.
+    Git is given no more than what is left to `deadline`; `_LATE` when that ran out first (189 D)."""
+    timeout, cut = _GIT_LIST_SECONDS, False
+    if deadline is not None:
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return _LATE
+        if left < timeout:
+            timeout, cut = left, True
     try:
         r = subprocess.run(["git", "-C", str(folder), "ls-files", "-z", "-co", "--exclude-standard",
                             "--", "*.md", ":!:**/node_modules/**", ":!:.sheaf/**"],
-                           capture_output=True, timeout=_GIT_LIST_SECONDS,
+                           capture_output=True, timeout=timeout,
                            env={**os.environ, "LC_ALL": "C"})
+    except subprocess.TimeoutExpired:
+        return _LATE if cut else None
     except (OSError, subprocess.SubprocessError):
         return None
     if r.returncode != 0:
@@ -636,16 +647,48 @@ class _Late(Exception):
 
 
 def _walk(top: Path, deadline: float | None = None) -> Iterator[str]:
-    """The name of every markdown file under `top`, in walk order, skipping `.git`, `node_modules`
-    and every folder whose name starts with `.` (D15). `_Late` when `deadline` passes between two folders."""
-    for folder, dirs, files in os.walk(top):
-        if deadline is not None and time.monotonic() > deadline:
+    """The name of every markdown file under `top`, in the order of `os.walk` (top down, links to folders not
+    followed), skipping `.git`, `node_modules` and every folder whose name starts with `.` (D15). `_Late` when
+    `deadline` passes, looked at for every entry read: `os.walk` reads a folder whole before it gives it, so one
+    huge or slow folder ran past the deadline unchecked (189 E). A folder that cannot be read is passed, as there."""
+    def late():
+        return deadline is not None and time.monotonic() > deadline
+    stack = [""]                    # folders still to read, as paths under `top`; the next one last
+    while stack:
+        under = stack.pop()
+        if late():
             raise _Late
-        dirs[:] = sorted(d for d in dirs if d != "node_modules" and not d.startswith("."))
-        under = os.path.relpath(folder, top).replace(os.sep, "/")
+        here = os.path.join(top, under) if under else top
+        if under and os.path.islink(here):   # made a link since its folder was read: not entered, as os.walk
+            continue
+        dirs, files = [], []
+        try:
+            with os.scandir(here) as entries:
+                for entry in entries:
+                    if late():
+                        raise _Late          # what this folder gave is dropped: `_capped` would drop it, past the deadline
+                    try:
+                        is_dir = entry.is_dir()
+                    except OSError:
+                        is_dir = False
+                    if not is_dir:
+                        files.append(entry.name)
+                    elif not (entry.name == "node_modules" or entry.name.startswith(".") or _is_link(entry)):
+                        dirs.append(entry.name)
+        except OSError:
+            continue
         for name in sorted(files):
             if name.endswith(".md"):
-                yield name if under == "." else f"{under}/{name}"
+                yield f"{under}/{name}" if under else name
+        stack.extend(f"{under}/{d}" if under else d for d in sorted(dirs, reverse=True))
+
+
+def _is_link(entry) -> bool:
+    """Whether the walk must not enter `entry`, a link to a folder; one it cannot tell is not entered."""
+    try:
+        return entry.is_symlink()
+    except OSError:
+        return True
 
 
 def _capped(top: Path, names: Iterable[str], kept: Callable[[str, bool], bool], cap: int = LIST_CAP,
@@ -680,8 +723,10 @@ def list_documents(root: Root, cap: int | None = None, deadline: float | None = 
     top = Path(config.realpath(root.path))
     if not os.path.isdir(top):              # gone, or the hub may not enter it (`Root.closed`)
         return Listing([], 0)
-    names = _git_names(top) if root.git else _NOT_A_REPO
+    names = _git_names(top, deadline) if root.git else _NOT_A_REPO
     if names is None:                      # git gave no answer: list nothing it has not vouched for
         return Listing([], 0, failed=True)
+    if names is _LATE:                     # the deadline ran out before git answered
+        return Listing([], 0, stopped=True)
     return _capped(top, _walk(top, deadline) if names is _NOT_A_REPO else sorted(set(names)), _kept(root),
                    LIST_CAP if cap is None else cap, deadline)

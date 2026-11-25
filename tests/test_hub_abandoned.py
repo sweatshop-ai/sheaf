@@ -3,6 +3,7 @@ refusal it was owed is dropped quietly (a reload during a slow listing, SPEC 8.6
 memory in test_hub_sheaf.py."""
 import socket
 import struct
+import sys
 import threading
 import time
 from http.server import ThreadingHTTPServer
@@ -70,9 +71,12 @@ class Held:
         time.sleep(min(timeout or 0, 0.05))
         return None
 
+    def close(self):                 # what `_Http._stream` calls as it ends, as on a Subscription
+        self.closed = True
+
 
 def test_a_stream_the_hub_closed_ends_its_connection_and_does_not_idle_until_the_peer_does():
-    held = Held()
+    held, raised = Held(), []
 
     class Streams:
         peer_off = "a stand-in handler: nobody looks at who owns the connection"
@@ -80,7 +84,10 @@ def test_a_stream_the_hub_closed_ends_its_connection_and_does_not_idle_until_the
         def handle(self, method, target, headers, body=b"", conn=None, via="port", gone=None):
             return Response(200, {"Content-Type": "text/event-stream"}, stream=held)
     wired = {"handler": Streams(), "stopping": threading.Event(), "closing": threading.Event()}
-    httpd = ThreadingHTTPServer(("127.0.0.1", 0), type("Http", (server._Http,), wired))
+    class Server(ThreadingHTTPServer):
+        def handle_error(self, request, client_address):     # an error in the handler, which the plain server only prints
+            raised.append(sys.exc_info()[1])
+    httpd = Server(("127.0.0.1", 0), type("Http", (server._Http,), wired))
     httpd.daemon_threads = True
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     try:
@@ -91,6 +98,7 @@ def test_a_stream_the_hub_closed_ends_its_connection_and_does_not_idle_until_the
         c.settimeout(3)
         while c.recv(4096):
             pass                                             # the hub ends the connection: recv gives b""
+        assert raised == [], raised                          # ended by the stream's close, not by an error (189 C)
     finally:
         httpd.shutdown()
         httpd.server_close()

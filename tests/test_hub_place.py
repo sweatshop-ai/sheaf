@@ -178,11 +178,12 @@ def test_a_door_create_taken_back_leaves_a_file_that_replaced_the_one_it_made(te
     real_create, change, made = mcp.create_file, browser.hub.docs.change, []
 
     def create_then_replaced(top, rel, text, judge=None):
-        real_create(top, rel, text, judge)
+        ident = real_create(top, rel, text, judge)
         other = work / ".other.md"
         other.write_text("# Someone else's\n", encoding="utf-8")
         os.replace(other, work / rel)
         made.append(rel)
+        return ident
 
     def no_clear_after_the_file(a, settle):
         if made:
@@ -193,6 +194,22 @@ def test_a_door_create_taken_back_leaves_a_file_that_replaced_the_one_it_made(te
     is_error, got = call(browser, "create", token=tokens["alice"], doc=address, text=OPEN)
     assert is_error and "not made" in got, got
     assert (work / SHARED).read_text(encoding="utf-8") == "# Someone else's\n"
+
+
+def test_a_door_create_taken_back_deletes_the_file_it_made(team, work, browser, tokens, monkeypatch):
+    """Ticket 195 E: the same take-back, with the file as the create made it, deletes it."""
+    address = f"work/{SHARED}"
+    browser.hub.docs.change(address, lambda e: {**e, "generated": {"by": "x", "id": None, "at": "t", "key": True}})
+    change = browser.hub.docs.change
+
+    def no_clear_after_the_file(a, settle):
+        if (work / SHARED).exists():
+            raise OSError(28, "No space left on device")
+        return change(a, settle)
+    monkeypatch.setattr(browser.hub.docs, "change", no_clear_after_the_file)
+    is_error, got = call(browser, "create", token=tokens["alice"], doc=address, text=OPEN)
+    assert is_error and "not made" in got, got
+    assert not (work / SHARED).exists()
 
 
 def test_a_door_create_at_home_whose_generated_mark_cannot_be_written_makes_no_folder_there(team, work, browser,

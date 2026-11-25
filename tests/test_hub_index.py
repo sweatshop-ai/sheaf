@@ -740,3 +740,20 @@ def test_two_opens_of_one_new_document_make_one_entry_rendered_once(world, work,
     world.hub.forget_document("work/held.md")
     world.hub.entry("work/held.md")
     assert runs.count(True) == 2 * once, runs
+
+
+def test_a_document_deleted_during_its_held_first_render_keeps_no_entry(world, work, put, held_pandoc):
+    """200 D: a delete (`forget_document`, its file gone) while the first render is held in pandoc: the maker keeps no entry
+    for the file that went; it looks again and finds the address names nothing."""
+    from sheafmd.hub import roots as roots_mod
+    go, begun, _ = held_pandoc
+    f = put("held.md", PLAN + f"\n{HELD_MARK}\n")
+    world.hub.roots.for_document(work / "held.md")
+    a, out = _in_thread(world.hub.entry, "work/held.md")
+    assert begun.wait(10)
+    f.unlink()
+    _timed(world.hub.forget_document, "work/held.md")
+    go.set()
+    a.join(10)
+    assert out and isinstance(out[0], roots_mod.NotFound), out
+    assert "work/held.md" not in world.hub.entries

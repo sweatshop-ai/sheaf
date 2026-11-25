@@ -194,6 +194,8 @@ def test_the_temp_file_is_the_owners_alone_until_its_text_is_whole(tmp_path, mon
 @pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="counts descriptors through /proc")
 @pytest.mark.parametrize("locked", [False, True], ids=["file", "document"])
 def test_a_text_that_cannot_be_encoded_leaves_no_descriptor_and_no_temp_file(tmp_path, locked):
+    """A lone surrogate fails the encoding before anything is opened, so no descriptor leaks and no temp file is
+    left; the file keeps its old text (194 C)."""
     from sheafmd import source
     target = tmp_path / "f.md"
     target.write_text("old\n")

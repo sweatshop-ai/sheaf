@@ -923,7 +923,8 @@ _BREAK_ENDS = (_EMPTY_SHELL - {"br", "span", "b", "strong", "i", "em", "u"}) | {
 
 def _text_after(br):
     """The text that follows the break on the page: its next sibling, or past the end of the marks the break
-    ends (`<b>x<br></b>\u00a0`), the text after them. None when an element comes first."""
+    ends (`<b>x<br></b>\u00a0`), the text after them. None when an element comes first. It walks the page, not the
+    cell: the text may sit in the next cell, so a caller that cuts it first checks it is in the break's own cell."""
     from bs4 import NavigableString
 
     x = br.next_element
@@ -983,7 +984,7 @@ def _without_placeholder_breaks(fragment: str) -> str:
         if block is not None and block.name in ("td", "th") and not br.find_parent(["code", "pre"]):
             if table_is_taken:
                 # _cell_breaks takes the table (no backslash or shortcode in it) and sorts the cut from a typed one.
-                if (after := _text_after(br)) is not None and block in after.parents and after.startswith("\xa0"):
+                if (after := _text_after(br)) is not None and any(p is block for p in after.parents) and after.startswith("\xa0"):
                     continue
             elif not _ends_its_cell(br, block):
                 # The table goes as raw HTML with its breaks: the typed line stays, without Enter's cut.
@@ -1057,9 +1058,10 @@ def _cell_breaks(fragment: str):
     if token is None:
         return fragment, None
     for br in breaks:
-        if _ends_its_cell(br, br.find_parent(["td", "th"])):
+        cell = br.find_parent(["td", "th"])
+        if _ends_its_cell(br, cell):
             # The no-break space Enter leaves at the cut ends with the break.
-            if (after := _text_after(br)) is not None and br.find_parent(["td", "th"]) in after.parents:
+            if (after := _text_after(br)) is not None and any(p is cell for p in after.parents):
                 _cut(after, False)
             br.decompose()
             continue

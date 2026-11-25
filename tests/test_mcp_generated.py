@@ -316,3 +316,29 @@ def test_the_clear_of_a_left_mark_leaves_a_mark_set_on_the_new_page_meanwhile(br
     monkeypatch.setattr(mcp, "create_file", then_marked)
     ok(browser, "create", doc="work/made.md", text="# Made\n\nBy hand.\n", token=other)
     assert browser.hub.docs.get("work/made.md")["generated"] == live
+
+
+def test_the_clear_of_a_left_mark_leaves_the_same_setters_mark_set_meanwhile_in_the_same_minute(browser, plan, work,
+                                                                                                monkeypatch):
+    """Ticket 196 E (from #630): a mark's time has the minute's grain, so the setter of the left mark that marks the new
+    page between its file and the clear writes the same token, id and time. The clear must still take only the left
+    mark: each mark set is its own, never equal to another."""
+    import sys
+
+    from sheafmd import mcp
+    monkeypatch.setattr(mcp, "now", lambda: "2026-11-23T10:00:00+0100")
+    builder, other = Tokens().add("builder", write=True), Tokens().add("other", write=True)
+    ok(browser, "create", doc="work/made.md", text="# Made\n\nBy a job.\n", generated=True, token=builder)
+    (work / "made.md").unlink()         # the page is gone, its mark is left on the address
+    left = browser.hub.docs.get("work/made.md")["generated"]
+    real = mcp.create_file
+
+    def then_marked(top, rel, text, judge=None):
+        got = real(top, rel, text, judge)
+        made_by = sys._getframe(1).f_locals["self"]             # the door making the page
+        made_by._mark_generated("work/made.md", True, mcp.Caller("builder", token=Tokens().verify(builder)))
+        return got
+    monkeypatch.setattr(mcp, "create_file", then_marked)
+    ok(browser, "create", doc="work/made.md", text="# Made\n\nBy hand.\n", token=other)
+    mark = browser.hub.docs.get("work/made.md").get("generated")
+    assert mark is not None and mark["by"] == "builder" and mark is not left

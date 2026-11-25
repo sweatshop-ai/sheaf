@@ -1101,7 +1101,7 @@ class Hub:
                 root = roots_mod.forget(self.roots, self.docs, self.seen, self.versions, name,
                                         members=self.member_seen)
             except Exception:
-                if self.roots.get(name) is not None:
+                if self.roots.holds(name):
                     for a in held:      # the registry still holds the root: it stays, and so do its documents' versions
                         self.entries[a].live.reattach()
                     raise

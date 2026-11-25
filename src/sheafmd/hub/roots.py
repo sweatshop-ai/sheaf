@@ -314,6 +314,12 @@ class Roots:
             root = self._roots.get(name)
             return None if root is not None and self.hidden(root) else root
 
+    def holds(self, name: str) -> bool:
+        """Whether a root is registered by `name`, a private root too (`get` answers None for one): what a forget that
+        failed looks at to know whether the name was let go."""
+        with self._lock:
+            return name in self._roots
+
     def _add(self, path: Path, git: bool, name: str | None = None, clone: str = "") -> Root:
         """Register `path`. `name` fixes the root's name (a clone's, made from its repo) instead of the folder's; a name
         another folder holds is refused, never numbered, since a Forward is for ever."""
@@ -353,9 +359,17 @@ class Roots:
             held = self._roots.get(name)
         with self._changing():
             root = self._roots.pop(name, None)
-            self._added.pop(name, None)
+            added = self._added.pop(name, None)
             if root is not None:
-                self._save()
+                try:
+                    self._save()
+                except BaseException:
+                    # roots.json still holds the root: so does the registry, so `holds` answers what a reload would
+                    # (ticket 196 C)
+                    self._roots[name] = root
+                    if added is not None:
+                        self._added[name] = added
+                    raise
             return root or held         # a root another process already took out of the file is still the one forgotten here
 
     @staticmethod

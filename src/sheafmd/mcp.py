@@ -534,7 +534,9 @@ class Door:
         told = self.hub.alias(member, real) if root is not None and self.hub.shared_with(member, root, real) else doc
         if told == real:
             return text
-        return re.sub(rf"(?<![\w/-]){re.escape(real)}(?![\w/-]|\.\w)", lambda _: told, text)    # the whole address, not the start of a longer name
+        # The whole address, not the start of a longer name (`plan.md.bak`, `plan.md~`, `plan.md+copy.md`): it ends the
+        # text, or white space follows it, or punctuation that closes a sentence or a quote and then white space.
+        return re.sub(rf"(?<![\w/-]){re.escape(real)}(?=$|\s|[.,;:!?)\]}}'\"`]+(?:\s|$))", lambda _: told, text)
 
     def _told(self, address: str, caller: Caller) -> dict:
         """`doc` and `url` of the page at `address` as `caller` is told of it: a page Shared with its member by another is told

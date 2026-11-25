@@ -19,12 +19,30 @@ _STAND_IN = re.compile(_OPEN + r"([ xX])" + _CLOSE)
 _ITEM = re.compile(r"(<li>(?:<p>)?)" + _OPEN + r"([ xX])" + _CLOSE + r"[ \t]*(?=[^<\s]|<(?!/))")
 # the label ends where the item's words do: at the end of the paragraph, or before a block that follows them
 _LABEL_END = re.compile(r"</p>|\n?<(?:[uo]l|pre|blockquote|table|hr|h[1-6]|div|figure|dl)\b|</li>")
+# What the label's end is looked for in: a comment, skipped whole, or a tag, its quoted values taken whole. Pandoc
+# passes raw HTML through as the source wrote it, and CommonMark takes a tag as raw HTML only when a value that holds
+# `<`, `>` or white space is quoted, so `</p>` in a value or a comment is no end.
+_COMMENT_OR_TAG = re.compile(r"<!--[\s\S]*?-->|<[^<>\"']*(?:(?:\"[^\"]*\"|'[^']*')[^<>\"']*)*>")
+
+
+def _label_end(html: str, pos: int):
+    """Where the label that starts at `pos` ends: the offset of its end (`_LABEL_END`), or None."""
+    for m in _COMMENT_OR_TAG.finditer(html, pos):
+        if m.group(0).startswith("<!--"):
+            continue
+        at = m.start() - 1 if m.start() > pos and html[m.start() - 1] == "\n" else m.start()
+        end = _LABEL_END.match(html, at) or _LABEL_END.match(html, m.start())
+        if end is not None:
+            return end.start()
+    return None
 
 
 def hide(src: str) -> str:
     """`src` with the `[ ]` of each ordered item swapped for a stand-in. Left alone when it holds the stand-in already."""
     if _OPEN in src or _CLOSE in src:
         return src
+    # Pandoc deletes every CR before it reads anything (`1. [ \r] a` is a task to it): the mark is read as pandoc reads it.
+    src = src.replace("\r", "")
     return _MARK.sub(lambda m: f"{m.group(1)}{_OPEN}{m.group(2)}{_CLOSE}", src)
 
 
@@ -40,12 +58,12 @@ def show(html: str) -> str:
         return html
     out, last = [], 0
     for m in _ITEM.finditer(html):
-        end = _LABEL_END.search(html, m.end())
+        end = _label_end(html, m.end())
         if end is None:
             continue
         out.append(html[last:m.start()])
-        out.append(_box(m) + html[m.end():end.start()] + "</label>")
-        last = end.start()
+        out.append(_box(m) + html[m.end():end] + "</label>")
+        last = end
     out.append(html[last:])
     html = "".join(out)
     return _STAND_IN.sub(lambda m: f"[{m.group(1)}]", html)

@@ -4,7 +4,7 @@ import http.client
 import json
 
 import pytest
-from test_read_through_two_hubs import (AG_ALICE, CLIENT_ORIGIN, MARKER, agency_and_client, comment)  # noqa: F401  (fixture)
+from test_read_through_two_hubs import (AG_ALICE, AG_BOB, CLIENT_ORIGIN, MARKER, agency_and_client, comment)  # noqa: F401  (fixture)
 
 import importlib
 
@@ -384,3 +384,33 @@ def test_a_doc_answer_that_is_not_an_object_is_a_client_that_does_not_answer(age
     agency, client = agency_and_client
     speaks(agency, json_env(body="[1]"))
     assert agency.get("/_/doc?doc=Clients/acme/work/x.md", member=AG_ALICE).status == 502
+
+
+# ── ticket 202 A (Codex on #655): the drafts of a page read through are kept under this hub's member, never the client's say ─
+
+CLIENT_SAYS = {"proxy": False, "member": "one-for-everyone"}
+
+
+def page_meta(got):
+    return json.loads(got.text.split(f"<script {readthrough._META_ATTRS}>")[1].split("</script>")[0])
+
+
+def test_a_client_page_names_the_signed_in_agency_member_whatever_its_meta_block_says(agency_and_client):
+    agency, client = agency_and_client
+    speaks(agency, {**hostile_page(), "body": f'<html><body><script {readthrough._META_ATTRS}>{json.dumps(CLIENT_SAYS)}</script></body></html>'})
+    metas = [page_meta(agency.get("/Clients/acme/work/x.md", member=m)) for m in (AG_ALICE, AG_BOB)]
+    assert [(m["proxy"], m["member"]) for m in metas] == [(True, AG_ALICE), (True, AG_BOB)]
+
+
+def test_a_client_mount_names_the_signed_in_agency_member_whatever_its_config_says(agency_and_client):
+    agency, client = agency_and_client
+    speaks(agency, json_env(body=json.dumps({"kind": "doc", "title": "T", "html": "<main>x</main>", "config": CLIENT_SAYS, "css": ""})))
+    configs = [agency.get("/_/mount?doc=Clients/acme/work/x.md", member=m).json()["config"] for m in (AG_ALICE, AG_BOB)]
+    assert [(c["proxy"], c["member"]) for c in configs] == [(True, AG_ALICE), (True, AG_BOB)]
+
+
+def test_a_real_client_page_names_the_agency_member_not_the_clients_account_of_them(agency_and_client):
+    agency, client = agency_and_client
+    doc = client.make("alice", f"# Plan\n\n{MARKER}\n")
+    meta = page_meta(agency.get(f"/Clients/acme/{doc}", member=AG_ALICE))
+    assert (meta["proxy"], meta["member"]) == (True, AG_ALICE)

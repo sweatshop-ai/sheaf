@@ -113,9 +113,10 @@ def test_a_join_whose_answer_is_lost_leaves_no_stream_on_the_hub(site, shared):
     lost, joins = [], []
 
     def once(route):
-        if route.request.post_data_json.get("doc") == "":
+        index = route.request.post_data_json.get("doc") == ""
+        if index:
             joins.append(1)
-        if route.request.post_data_json.get("doc") == "" and not lost:
+        if index and not lost:
             route.fetch()                # the hub takes the join
             lost.append(1)
             route.abort("connectionreset")   # and the browser hears no answer

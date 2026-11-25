@@ -681,6 +681,7 @@ def _walk(top: Path, deadline: float | None = None) -> Iterator[str]:
 
 
 def _is_link(entry) -> bool:
+    """Whether the walk must not enter `entry`, a link to a folder; one it cannot tell is not entered."""
     try:
         return entry.is_symlink()
     except OSError:

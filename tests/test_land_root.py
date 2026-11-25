@@ -223,14 +223,18 @@ def test_a_hub_with_no_clones_refuses_the_root(clone):
 
 @pytest.mark.parametrize("bad", [{"id": ""}, {"repo": 3}, {"branch": None}, {"tip": ""}, {"pages": "x"}, {"pages": [{"path": "../x.md", "owner_email": "a", "blob": "b"}]},
                                  {"pages": [{"path": "a.md", "blob": "b"}]},
-                                 {"pages": [{"path": "a.md", "owner_email": "a@example.com", "blob": "b"}] * 2},
-                                 # A path of another JSON type, one that no set can hold among them (189 B).
-                                 {"pages": [{"path": [], "owner_email": "a@example.com", "blob": "b"}]},
-                                 {"pages": [{"path": {}, "owner_email": "a@example.com", "blob": "b"}]},
-                                 {"pages": ["a.md"]}])
+                                 {"pages": [{"path": "a.md", "owner_email": "a@example.com", "blob": "b"}] * 2}])
 def test_a_body_that_is_not_a_root_is_refused_with_the_reason(clone, bad):
     with pytest.raises(ValueError):
         incoming.check_root(hub(clone), body(clone, ("a.md", "alice@example.com", None), **bad))
+
+
+@pytest.mark.parametrize("page", [{"path": [], "owner_email": "a@example.com", "blob": "b"},
+                                  {"path": {}, "owner_email": "a@example.com", "blob": "b"}, "a.md"])
+def test_a_page_path_of_another_json_type_is_refused_as_no_path(clone, page):
+    """A path no set can hold (a list) raised TypeError before the shapes were checked (189 B)."""
+    with pytest.raises(ValueError, match="a page of the root's move has no path"):
+        incoming.check_root(hub(clone), body(clone, pages=[page]))
 
 
 def test_a_repo_that_moved_away_is_refused_whole_and_never_answers_cloning(clone):

@@ -875,6 +875,7 @@ def test_a_git_root_gives_git_no_more_than_the_time_left_and_a_cut_call_is_stopp
 
 
 def test_a_git_root_whose_deadline_passed_does_not_ask_git(tmp_path, monkeypatch):
+    """A listing whose budget is spent before its git root is reached is `stopped` at once, git not started (189 D)."""
     repo = make_repo(tmp_path / "r")
     monkeypatch.setattr(roots.subprocess, "run", lambda *a, **k: pytest.fail("git asked past the deadline"))
     listing = roots.list_documents(roots.Root("r", repo, True), deadline=time.monotonic() - 1)

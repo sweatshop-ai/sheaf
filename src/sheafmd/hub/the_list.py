@@ -914,8 +914,7 @@ class TheList:
         return r is not None and r.name == name and r.path == Path(config.realpath(self.cfg.root))
 
     def data(self, member, show: str) -> dict:
-        # Each row is judged against the same few folders: git is asked once per folder for the page, not ~20 times per row
-        # (60 rows: 1,200 `git rev-parse` runs, 5 s on the box; ticket 52). The answers end with the page (SPEC 8.2).
+        """The list as `member` reads it (see `_data`), with one answer of git per folder for the page, not ~20 runs per row (8.2)."""
         with config.git_places_remembered():
             return self._data(member, show)
 

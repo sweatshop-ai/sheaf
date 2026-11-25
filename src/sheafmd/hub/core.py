@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from .. import __version__, _pandoc, beneath, config, diagnostics, paths
+from .. import __version__, beneath, config, diagnostics, paths
 from ..agents import registry
 from ..agents.base import Adapter, Target
 from ..render import RenderError, render_file
@@ -30,6 +30,7 @@ from ..source import STAMP_FORMAT, file_lock, lock_key, md_hash
 from . import archive as archive_mod
 from . import assets as assets_mod
 from . import boxwait
+from . import client as client_mod
 from . import forwards as forwards_mod
 from . import loose as loose_mod
 from . import outgoing
@@ -126,6 +127,9 @@ class Entry:
 
 
 RESTART_TOLD_TTL = 30            # seconds a restart that was announced is still expected
+# How long `/_/render` waits for its render before it answers `pending` (199): below `sheaf open`'s own wait, which counts
+# any wait for a lock here too. The render goes on, and the next open serves its page.
+RENDER_ANSWER_WITHIN = client_mod.RENDER_TIMEOUT - 10
 
 
 def _project(address: str) -> str:
@@ -972,14 +976,43 @@ class Hub:
     def render(self, md: Path, settings: dict, target: dict | None) -> dict:
         """Register `md`, record the settings and target of this render (SPEC 8.3) and make the
         page. A render with other settings re-renders and tells the open tabs; it never
-        restarts anything."""
+        restarts anything.
+
+        The render runs on a thread of its own, locks included, and the caller waits for it for RENDER_ANSWER_WITHIN at
+        most (199): a render that takes longer (behind a lock, or a long page) is no failure, and the answer is
+        `{doc, url, pending: True}` while it goes on and publishes its page. Its failure within the wait is raised here."""
         md = Path(md).resolve()
         try:
             address = self.roots.address(md)       # a file of a private root has no address of its own (9.11)
         except roots_mod.NotFound:
             raise RenderError(f"{md} is not in a root the hub serves.") from None
-        # Every pandoc run of this render shares the one limit (198 D): `sheaf open` waits RENDER_TIMEOUT, a little more.
-        with _pandoc.budget(), place.held(self, address):  # the name's lock first (9.11), as `entry` takes it
+        done, gate, out = threading.Event(), threading.Lock(), {}
+
+        def work():
+            try:
+                got = ("answer", self._render_held(address, md, settings, target))
+            except Exception as ex:                # the request's, while it waits; else written down
+                got = ("error", ex)
+            with gate:
+                out[got[0]] = got[1]
+                late = out.get("late", False)
+                done.set()
+            if late and got[0] == "error":
+                self.record("render-failed", address, error=f"{type(got[1]).__name__}: {got[1]}"[:500])
+        # `place.held` is bound to the thread that takes it, so the worker takes every lock itself.
+        threading.Thread(target=work, name=f"render {address}", daemon=True).start()
+        if not done.wait(RENDER_ANSWER_WITHIN):
+            with gate:
+                if not done.is_set():
+                    out["late"] = True
+                    return {"doc": address, "url": self.url(address), "pending": True}
+        if "error" in out:
+            raise out["error"]
+        return out["answer"]
+
+    def _render_held(self, address: str, md: Path, settings: dict, target: dict | None) -> dict:
+        """The render of `render`, on its own thread: every lock it needs it takes here."""
+        with place.held(self, address):  # the name's lock first (9.11), as `entry` takes it
             with self._lock:
                 e, rebuild, existed = self._render_entry(address, md, settings, target)
             # A delete, move or forget between the two parts under the hub's lock has taken the entry: its page is not read

@@ -308,6 +308,10 @@ _Avoid_: inline block, span block
 The one piece through which the block editor reads and writes a page's source as a whole document. There are two: the Markdown-file adapter for a folder root, and the remote adapter, which reaches every other source through its Source service. (Named 2026-11-24, wayfinder `sheaf-modular-editor` ticket 07; two adapters only since ticket 13, 2026-11-25.)
 _Avoid_: connector, driver, backend, plugin
 
+**Block change**:
+One insertion, move, removal or edit of a single Block, as core finds it by comparing a save with the version it was based on. A change of type or attributes is an edit; a drag into another container is a move. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 14.)
+_Avoid_: diff entry, operation (an agent's request is an op; a block change is what core finds)
+
 **Source service**:
 A program the owner of a source runs beside it, which holds the source's credentials, turns its documents into blocks and back, checks its rules and names the commit's author; the hub reaches it through the remote adapter and holds no key to the source. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 13.)
 _Avoid_: backend, adapter server, connector

@@ -43,6 +43,6 @@ The Markdown-file adapter is built from what exists: the plain-text file write, 
 
 ## Consequences
 
-- sheaf's index-based blocks (`<!--MDB:i-->`, `{i, html}` saves) give way to the block tree with ids; the page sends whole Markdown and core finds the changed blocks.
+- sheaf's index-based blocks (`<!--MDB:i-->`, `{i, html}` saves) give way to the block tree with ids; the page sends whole Markdown and core finds the changed blocks (with the ids the page holds, ADR 0007).
 - The merge must treat pandoc's cosmetic normalisation (fence lengths, table column padding) as no change.
 - The MCP tools over blocks (a later decision) speak this block list, its ids and its three outcomes.

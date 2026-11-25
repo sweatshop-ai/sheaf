@@ -622,3 +622,121 @@ def test_a_legacy_action_reply_counts_as_claudes_as_the_door_counts_it():
     text = with_threads(thread("c1", "Bob", "Claude (action)"))
     assert index_mod.summarize(text).threads == (("c1", 2, "Claude"),)
     assert [c.last_by for c in rdc.parse(text).comments] == ["Claude"]
+
+
+# ── 200: a first render runs outside the hub's lock ──────────────────────────
+HELD_MARK = "quinces held by the test"
+
+
+@pytest.fixture
+def held_pandoc(monkeypatch):
+    """Pandoc held for every document whose text carries HELD_MARK, until `go` is set; every run is counted in `runs`
+    (held or not), and `begun` is set when a held run starts."""
+    from sheafmd import _pandoc
+    real, go, begun, runs = subprocess.run, threading.Event(), threading.Event(), []
+
+    def run(cmd, timeout=None, input=None, **kw):
+        if cmd[0] == _pandoc.pypandoc.get_pandoc_path():
+            runs.append(HELD_MARK in (input or ""))
+            if HELD_MARK in (input or ""):
+                begun.set()
+                go.wait(20)
+        return real(cmd, timeout=timeout, input=input, **kw)
+    monkeypatch.setattr(_pandoc.subprocess, "run", run)
+    yield go, begun, runs
+    go.set()
+    _join_renders()
+
+
+def _in_thread(fn, *a):
+    """Run `fn(*a)` on a thread; gives (the thread, the list its result or exception lands in)."""
+    out = []
+
+    def work():
+        try:
+            out.append(fn(*a))
+        except BaseException as ex:
+            out.append(ex)
+    t = threading.Thread(target=work, daemon=True)
+    t.start()
+    return t, out
+
+
+def _timed(fn, *a, within=1.0):
+    """`fn(*a)` on a thread, joined for `within` seconds: gives its result, or fails when it is still waiting."""
+    t, out = _in_thread(fn, *a)
+    t.join(within)
+    assert not t.is_alive(), f"{fn} still waits after {within} s"
+    if isinstance(out[0], BaseException):
+        raise out[0]
+    return out[0]
+
+
+def test_a_first_render_held_in_pandoc_never_delays_a_document_already_opened(world, work, put, held_pandoc):
+    """200 A: while the first render of document A waits in pandoc, the entry of an opened document B and a render of B with
+    the same settings answer at once: the hub's lock is not held by A's render."""
+    go, begun, _ = held_pandoc
+    world.hub.render(work / "start.md", {}, None)
+    put("held.md", PLAN + f"\n{HELD_MARK}\n")
+    world.hub.roots.for_document(work / "held.md")
+    a, out = _in_thread(world.hub.entry, "work/held.md")
+    assert begun.wait(10)
+    assert _timed(world.hub.entry, "work/start.md").address == "work/start.md"
+    assert not _timed(world.hub.render, work / "start.md", {}, None).get("pending")
+    assert a.is_alive() and not out, "A's render ended before its pandoc was let go"
+    go.set()
+    a.join(10)
+    assert out and out[0].address == "work/held.md", out
+
+
+def test_a_first_render_held_in_pandoc_never_delays_the_first_render_of_another_document(world, work, put, held_pandoc):
+    """200 B: two first renders run side by side; B's is made and rendered while A's pandoc is held."""
+    go, begun, _ = held_pandoc
+    put("held.md", PLAN + f"\n{HELD_MARK}\n")
+    world.hub.roots.for_document(work / "held.md")
+    a, out = _in_thread(world.hub.entry, "work/held.md")
+    assert begun.wait(10)
+    e = _timed(world.hub.entry, "work/start.md", within=10)
+    assert e.address == "work/start.md" and "apples" in e.html
+    assert a.is_alive() and not out
+    go.set()
+    a.join(10)
+    assert out and out[0].address == "work/held.md", out
+
+
+def test_a_root_forgotten_during_a_held_first_render_leaves_its_address_naming_nothing(world, work, put, held_pandoc):
+    """200 C1: `forget_root` while A's first render is held in pandoc: A's open is NotFound, and the hub keeps no entry."""
+    from sheafmd.hub import roots as roots_mod
+    go, begun, _ = held_pandoc
+    put("held.md", PLAN + f"\n{HELD_MARK}\n")
+    world.hub.roots.for_document(work / "held.md")
+    a, out = _in_thread(world.hub.entry, "work/held.md")
+    assert begun.wait(10)
+    _timed(world.hub.forget_root, "work", within=10)
+    go.set()
+    a.join(10)
+    assert out and isinstance(out[0], roots_mod.NotFound), out
+    assert "work/held.md" not in world.hub.entries
+
+
+def test_two_opens_of_one_new_document_make_one_entry_rendered_once(world, work, put, held_pandoc):
+    """200 C2: two threads open the same new document while its pandoc is held: one entry, one render."""
+    go, begun, runs = held_pandoc
+    put("held.md", PLAN + f"\n{HELD_MARK}\n")
+    world.hub.roots.for_document(work / "held.md")
+    first, one = _in_thread(world.hub.entry, "work/held.md")
+    assert begun.wait(10)
+    held_runs = runs.count(True)
+    second, two = _in_thread(world.hub.entry, "work/held.md")
+    second.join(0.5)
+    assert second.is_alive(), "the second open did not wait for the first one's render"
+    go.set()
+    first.join(10)
+    second.join(10)
+    assert one and two and one[0] is two[0] is world.hub.entries["work/held.md"], (one, two)
+    once = runs.count(True)
+    assert held_runs == 1 and once >= 1
+    # the second open rendered nothing: a fresh first render of the same text runs pandoc as many times as the first did
+    world.hub.forget_document("work/held.md")
+    world.hub.entry("work/held.md")
+    assert runs.count(True) == 2 * once, runs

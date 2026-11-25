@@ -11,6 +11,7 @@ import pytest
 from helpers import BEA, CAL
 
 from sheafmd import connect, paths
+from sheafmd.hub import channel as chan
 from sheafmd.hub.state import Tokens
 
 PEER = "https://other.example.com"
@@ -463,3 +464,48 @@ def test_a_corrupt_credential_file_is_warned_about_once_per_process(keyring, mon
     keyring.set("sheaf-peer", "https://third.example.com", FAKE)
     connect.peer_token_for("https://third.example.com")               # another peer's file is another warning
     assert len(capsys.readouterr().err.strip().splitlines()) == 1
+
+
+# ── the root verb ────────────────────────────────────────────────
+
+ROOT_BODY = {"id": "m1", "repo": "o/r", "branch": "dev", "tip": "abc", "from": {"origin": "https://third.example", "by": "bea"},
+             "pages": []}
+
+
+@pytest.fixture
+def landed(monkeypatch):
+    """What `incoming.land_root` is called with; it answers an empty landing."""
+    seen = []
+    monkeypatch.setattr("sheafmd.hub.incoming.land_root",
+                        lambda hub, body, peer=None: (seen.append((body, peer)), (200, {"pages": {}}))[1])
+    return seen
+
+
+def test_a_peer_with_the_transfer_scope_reaches_the_root_verb_and_is_the_peer_the_token_names(members, landed):
+    res = channel(members, "root", ROOT_BODY, peer_token())
+    assert res.status == 200 and res.json() == {"pages": {}}
+    assert landed == [(ROOT_BODY, PEER)]          # the body says the root comes from third.example: only the token's origin counts
+
+
+def test_anyone_else_gets_the_answer_of_an_unknown_route_on_the_root_verb(members, landed):
+    unknown = channel(members, "nothing", {})
+    assert channel(members, "root", ROOT_BODY).body == unknown.body
+    assert channel(members, "root", ROOT_BODY, "sheaf_mcp_" + "x" * 43).body == unknown.body
+    assert channel(members, "root", ROOT_BODY, peer_token(), headers={"X-Forwarded-For": "8.8.8.8"}).body == unknown.body
+    assert channel(members, "root", ROOT_BODY, peer_token(["read"])).body == unknown.body
+    assert landed == []
+
+
+def test_a_root_body_may_be_as_big_as_a_transfer_and_no_bigger(members, landed):
+    token = peer_token()
+    h = {**TAILNET, "Authorization": f"Bearer {token}"}
+    ok = json.dumps({**ROOT_BODY, "pad": "x" * (64 * 1024)}).encode()
+    assert members.request("POST", "/_/tiroir/root", member=None, raw=ok, headers=h).status == 200
+    big = json.dumps({**ROOT_BODY, "pad": "x" * (chan.MAX_TRANSFER + 1)}).encode()
+    assert members.request("POST", "/_/tiroir/root", member=None, raw=big, headers=h).status == 413
+    assert len(landed) == 1
+
+
+def test_a_body_that_is_not_a_root_is_a_400(members):
+    res = channel(members, "root", {"id": "m1"}, peer_token())
+    assert res.status == 400

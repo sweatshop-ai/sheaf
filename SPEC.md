@@ -182,7 +182,7 @@ tools/ci/                      the service checks CI runs on a runner; they refu
 | Chrome or Chromium | PDF only | Not a dependency. Found by `find_chrome()`; without it the PDF button and `--pdf` say what to install |
 | dev: `pytest`, `playwright` | tests | |
 
-Every call of the bundled pandoc goes through `_pandoc.run`, with a heap cap (`+RTS -M1g`) and a time limit (120 s): pandoc 3.9 runs without end and grows without bound on a footnote that cites itself (`[^1]: a [^1]`). A run that hits either is a document pandoc cannot read: `RenderError` on a render, a skipped edit or comment on the page. A document of 470 KB needs about 180 MB.
+Every call of the bundled pandoc goes through `_pandoc.run`, with a heap cap (`+RTS -M1g`) and a time limit (120 s): pandoc 3.9 runs without end and grows without bound on a footnote that cites itself (`[^1]: a [^1]`). A render runs pandoc more than once; the runs of one hub render share those 120 s, so `sheaf open`, which waits 130 s, gets its answer. A run that hits either is a document pandoc cannot read: `RenderError` on a render, a skipped edit or comment on the page. A document of 470 KB needs about 180 MB.
 
 No web framework. The hub uses `http.server.ThreadingHTTPServer`. The MCP door is a small hand-written JSON-RPC handler (section 12), not the MCP SDK, so the HTTP door runs inside the same server.
 

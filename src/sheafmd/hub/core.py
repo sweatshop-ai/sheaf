@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from .. import __version__, beneath, config, diagnostics, paths
+from .. import __version__, _pandoc, beneath, config, diagnostics, paths
 from ..agents import registry
 from ..agents.base import Adapter, Target
 from ..render import RenderError, render_file
@@ -978,7 +978,8 @@ class Hub:
             address = self.roots.address(md)       # a file of a private root has no address of its own (9.11)
         except roots_mod.NotFound:
             raise RenderError(f"{md} is not in a root the hub serves.") from None
-        with place.held(self, address):                    # the name's lock first (9.11), as `entry` takes it
+        # Every pandoc run of this render shares the one limit (198 D): `sheaf open` waits RENDER_TIMEOUT, a little more.
+        with _pandoc.budget(), place.held(self, address):  # the name's lock first (9.11), as `entry` takes it
             with self._lock:
                 e, rebuild, existed = self._render_entry(address, md, settings, target)
             # A delete, move or forget between the two parts under the hub's lock has taken the entry: its page is not read

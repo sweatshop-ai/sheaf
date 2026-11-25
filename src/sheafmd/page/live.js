@@ -238,6 +238,10 @@
           // A join the hub would not take (signed out, the connection gone, no answer) is that tab's stream refused.
           if (what === 'join' && (status < 200 || status > 299) && self.joined[key] === j) {
             delete self.joined[key];
+            // No answer is no refusal: the hub may have taken the join and lost its answer. The tab asks for a new
+            // stream under a new key, and this one would stay on the hub for the life of the connection, a tab
+            // counted for ever and one of its 200 streams spent (ticket 189 A). Its leave goes after its join.
+            if (status === 0 && self.es && sid === self.sid) self.post('leave', key);
             tell({ t: 'ev', k: key, e: 'refused', d: { status: status } });
           }
         });

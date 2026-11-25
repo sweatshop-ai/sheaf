@@ -238,11 +238,14 @@ def _data(hub, member, titles: Titles, view: str = "", gone=None) -> dict:
                 write_tip, session_tip_, link = last.host if last else "", session_tip(session) if session else "", way_back(session, member)
             said_write, said_session = say_write(last, session), session.writer if session else ""
             if not given and (repo := hub.clone_of(address)):       # a repo page: the report's session, else the commit's, else git (13)
-                by = hub.repos.attribution(repo, at.rel)
-                if by["session"] and session is None:
+                # the Write log's own session answers first: git is asked only when it names none (or the row would say nothing)
+                by = hub.repos.attribution(repo, at.rel, d["mtime"]) if session is None or not (said_write or said_session) else None
+                if by is None:
+                    pass
+                elif by["session"] and session is None:
                     said_session, session_tip_, link = by["label"], " on ".join(t for t in (by["session"], by["host"]) if t), \
                         {"kind": "remote", "href": by["link"]} if by["link"] else None
-                if not said_write and not said_session:
+                if by is not None and not said_write and not said_session:
                     said_write = by["label"]
             rows.append({"doc": told, "url": d["url"] if told == address else roots_mod.url_path(told), "title": title, "root": SHARED if given else at.root,
                          "folder": folder, "shared_by": agent, **given,

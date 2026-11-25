@@ -874,6 +874,7 @@ var create = function (ROOT, CFG, opts) {
       k = 1; x = (vw - sw) / 2; y = (vh - sh) / 2;
       place();
     }
+    function mid() { return { x: window.innerWidth / 2, y: window.innerHeight / 2 }; }
     function zoomAt(cx, cy, f) {
       var k2 = Math.max(MIN, Math.min(MAX, k * f));
       f = k2 / k;
@@ -939,12 +940,12 @@ var create = function (ROOT, CFG, opts) {
     el.addEventListener('pointerup', up);
     el.addEventListener('pointercancel', up);
 
-    bIn.addEventListener('click', function () { zoomAt(window.innerWidth / 2, window.innerHeight / 2, 1.5); });
-    bOut.addEventListener('click', function () { zoomAt(window.innerWidth / 2, window.innerHeight / 2, 1 / 1.5); });
+    bIn.addEventListener('click', function () { zoomAt(mid().x, mid().y, 1.5); });
+    bOut.addEventListener('click', function () { zoomAt(mid().x, mid().y, 1 / 1.5); });
     bReset.addEventListener('click', reset);
     bClose.addEventListener('click', closeZoom);
     z.keys = function (e) {
-      var cx = window.innerWidth / 2, cy = window.innerHeight / 2, step = 60;
+      var cx = mid().x, cy = mid().y, step = 60;
       if (e.key === 'Escape') closeZoom();
       else if (e.key === '+' || e.key === '=') zoomAt(cx, cy, 1.4);
       else if (e.key === '-' || e.key === '_') zoomAt(cx, cy, 1 / 1.4);
@@ -959,7 +960,7 @@ var create = function (ROOT, CFG, opts) {
       } else return false;
       return true;
     };
-    z.resize = reset;
+    z.resize = function () { if (k === 1) reset(); };   // a zoom or pan the person made stays when the phone's bars move the window
   }
   // Capture phase, before edit mode's own Escape and arrow keys, and only while the viewer is open.
   listen(PAGE_EV, 'keydown', function (e) {
@@ -972,7 +973,8 @@ var create = function (ROOT, CFG, opts) {
     if (e.button || zoomView) return;
     var src = zoomTarget(e.target);
     if (!src) return;
-    if (e.target.closest && e.target.closest('a[href]') && main.contains(e.target.closest('a[href]'))) return;   // a link inside the diagram goes where it goes
+    var link = e.target.closest('a[href]');
+    if (link && main.contains(link)) return;                                   // a link inside the diagram goes where it goes
     var s = getSel();
     if (s && !s.isCollapsed && String(s)) return;                              // the click that ends a selection of the diagram's words is no open
     openZoom(src);

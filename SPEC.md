@@ -464,11 +464,9 @@ Any Markdown editor shows a quote with a first line `[!COPY]`, so the marking is
 
 ---
 
-## 7. Editing and saving
-
 ### 6.9 The diagram viewer
 
-A click or tap on a diagram (a `mermaid` fence or a `chart` fence, both inline `<svg>`) or on an SVG image opens it in a viewer of the whole window, so that a large diagram can be read. The viewer is the page's own (`#rd-zoom`, in the page's root, outside `<main>`) and the diagram's markup is not changed: the pointer shows `zoom-in` by selector, so entering edit mode, comments and a save are unaffected.
+A click or tap on a diagram (a `mermaid` fence or a `chart` fence, both inline `<svg>`) or on an SVG image opens it in a viewer of the whole window, so that a large diagram can be read. The viewer is the page's own (`#rd-zoom`, in the page's root, outside `<main>`) and the diagram's markup is not changed: the pointer shows `zoom-in` by selector, so comments and a save are unaffected. In Edit mode a click on a diagram opens the viewer too (a diagram is not editable text), and Esc closes the viewer before it leaves Edit mode.
 
 - **Zoom.** The wheel zooms about the pointer, a trackpad's pinch too (it arrives as a wheel with Ctrl), two fingers pinch about their midpoint and pan with it. The scale runs from 0.5 to 40 times the fitted size; `+` `-` `0` and the arrow keys do the same from the keyboard, and the `+`, `-` and Fit buttons from a screen.
 - **Pan.** One pointer drags. A press that moved is not a tap.
@@ -477,6 +475,8 @@ A click or tap on a diagram (a `mermaid` fence or a `chart` fence, both inline `
 - **Not taken.** A click that ends a selection of the diagram's words, a click on a link inside the diagram, and any click while the viewer is open open nothing.
 - **Colour.** The diagram sits on the colour it has on the page, found by walking up from it, so it reads in the light and the dark theme; the surround is dim in both.
 - **Share copy and PDF.** None: the share copy carries no script (6.1), so it has no viewer; the viewer is hidden in print.
+
+## 7. Editing and saving
 
 ### 7.1 The Source file
 

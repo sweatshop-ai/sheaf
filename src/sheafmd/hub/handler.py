@@ -653,7 +653,7 @@ class Handler:
             raise Refuse(404, "no such route", row="peer-refused", fields={"reason": why})
         req.token = row
         verb = req.path.removeprefix("/_/tiroir/")
-        self._read_body(req, self._body(req, raw, channel.MAX_TRANSFER if verb == "transfer" else channel.MAX_ASK))
+        self._read_body(req, self._body(req, raw, channel.MAX_TRANSFER if verb in ("transfer", "root") else channel.MAX_ASK))
         return getattr(self, f"_peer_{verb}")(req)
 
     def _peer_resolve(self, req: Req) -> Response:
@@ -680,6 +680,15 @@ class Handler:
     def _peer_comment(self, req: Req) -> Response:
         """A comment of an agency member written here under their name (ticket 23)."""
         return _json(*readthrough.comment_answer(self, req.body))
+
+    def _peer_root(self, req: Req) -> Response:
+        """Land a root moved here: `incoming.land_root`. The origin it comes from is the one the token names, never the
+        body's `from`. A body that is not a root's move is a 400."""
+        try:
+            status, answer = incoming.land_root(self.hub, req.body, req.token.peer)
+        except ValueError as e:
+            raise Refuse(400, str(e)) from None
+        return _json(status, answer)
 
     def _unalias(self, req: Req) -> None:
         """A page Shared with the member is told to them under an opaque name (`Hub.alias`, 9.11): the one they send back, in

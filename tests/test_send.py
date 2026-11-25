@@ -450,6 +450,46 @@ def test_a_door_whose_tool_list_cannot_be_read_is_called_by_the_bare_name(tiroir
     assert [m["params"]["name"] for _, _, m in tiroir.seen if m and m["method"] == "tools/call"] == ["create"]
 
 
+def test_a_door_that_pages_its_tool_list_is_read_to_the_end(prefixed_door, scratch, capsys, monkeypatch):
+    inner = send.post
+
+    def post(url, bearer, message, headers):
+        status, got, back = inner(url, bearer, message, headers)
+        if message.get("method") == "tools/list":
+            tools = got["result"]["tools"]
+            cursor = (message.get("params") or {}).get("cursor")
+            got["result"] = ({"tools": tools[:1], "nextCursor": "p2"} if not cursor else {"tools": tools[1:]})
+        return status, got, back
+
+    monkeypatch.setattr(send, "post", post)
+    code, _, err = run(capsys, scratch)
+    assert code == 0, err
+    assert "sheaf_create" in prefixed_door.wire and "create" not in prefixed_door.wire
+
+
+def test_a_tool_list_that_errors_leaves_the_call_to_say_what_is_wrong(tiroir, scratch, capsys, monkeypatch):
+    inner = send.post
+
+    def post(url, bearer, message, headers):
+        if message.get("method") == "tools/list":
+            raise send.Unreachable("the list timed out.")
+        return inner(url, bearer, message, headers)
+
+    monkeypatch.setattr(send, "post", post)
+    code, _, err = run(capsys, scratch)
+    assert code == 0, err
+    assert [m["params"]["name"] for _, _, m in tiroir.seen if m and m["method"] == "tools/call"] == ["create"]
+
+
+def test_a_403_after_a_write_does_not_say_that_nothing_was_sent(tiroir, monkeypatch):
+    door_ = send.Door(FRONT, tiroir.token, {})
+    door_.landed = True
+    monkeypatch.setattr(send, "post", lambda *a: (403, None, {"refusal": "no"}))
+    with pytest.raises(send.TokenRefused) as e:
+        door_._post_checked({"method": "x"})
+    assert "Nothing was sent" not in str(e.value) and "no" in str(e.value)
+
+
 def test_a_403_shows_what_the_door_said_and_not_that_the_token_was_revoked(tiroir, scratch, local, capsys, monkeypatch):
     inner = send.post
 

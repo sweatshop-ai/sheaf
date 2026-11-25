@@ -921,6 +921,15 @@ _EMPTY_SHELL = {"br", "p", "div", "span", "ul", "ol", "li", "blockquote", "b", "
 _BREAK_ENDS = (_EMPTY_SHELL - {"br", "span", "b", "strong", "i", "em", "u"}) | {"td", "th", "dt", "dd"}
 
 
+def _text_after(br):
+    """The text that follows the break on the page: its next sibling, or past the end of the marks the break
+    ends (`<b>x<br></b>\u00a0`), the text after them. None when an element comes first."""
+    from bs4 import NavigableString
+
+    x = br.next_element
+    return x if type(x) is NavigableString else None
+
+
 def _ends_its_cell(br, cell) -> bool:
     """Whether a break shows nothing after it in its table cell: nothing but white space and breaks follow it there;
     a comment node is something the cell holds. The page's white space is not Python's: a no-break space shows,
@@ -974,11 +983,11 @@ def _without_placeholder_breaks(fragment: str) -> str:
         if block is not None and block.name in ("td", "th") and not br.find_parent(["code", "pre"]):
             if table_is_taken:
                 # _cell_breaks takes the table (no backslash or shortcode in it) and sorts the cut from a typed one.
-                if type(br.next_sibling) is NavigableString and br.next_sibling.startswith("\xa0"):
+                if (after := _text_after(br)) is not None and block in after.parents and after.startswith("\xa0"):
                     continue
             elif not _ends_its_cell(br, block):
                 # The table goes as raw HTML with its breaks: the typed line stays, without Enter's cut.
-                for t, end in ((br.previous_sibling, True), (br.next_sibling, False)):
+                for t, end in ((br.previous_sibling, True), (_text_after(br), False)):
                     if type(t) is NavigableString:
                         _cut(t, end)
                 continue
@@ -1050,11 +1059,11 @@ def _cell_breaks(fragment: str):
     for br in breaks:
         if _ends_its_cell(br, br.find_parent(["td", "th"])):
             # The no-break space Enter leaves at the cut ends with the break.
-            if type(br.next_sibling) is NavigableString:
-                _cut(br.next_sibling, False)
+            if (after := _text_after(br)) is not None and br.find_parent(["td", "th"]) in after.parents:
+                _cut(after, False)
             br.decompose()
             continue
-        for t, end in ((br.previous_sibling, True), (br.next_sibling, False)):
+        for t, end in ((br.previous_sibling, True), (_text_after(br), False)):
             if type(t) is NavigableString:
                 _cut(t, end)
         br.replace_with(token)

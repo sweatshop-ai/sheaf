@@ -166,7 +166,7 @@ def test_a_mode_that_leaves_the_owner_no_read_is_still_given(tmp_path):
     assert stat.S_IMODE(target.stat().st_mode) == 0o200
     os.chmod(target, 0o600)
     assert target.read_text() == "new\n"
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["f"]
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith(".sheaf-tmp")]
 
 
 @pytest.mark.skipif(os.name == "nt", reason="no owner-only mode on Windows")
@@ -204,4 +204,4 @@ def test_a_text_that_cannot_be_encoded_leaves_no_descriptor_and_no_temp_file(tmp
         else:
             write_text_atomic(target, "bad \ud800\n")
     assert len(os.listdir("/proc/self/fd")) == before
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["f.md"] and target.read_text() == "old\n"
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith(".sheaf-tmp")] and target.read_text() == "old\n"

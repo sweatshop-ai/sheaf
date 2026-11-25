@@ -64,15 +64,16 @@ def test_an_escaped_shortcode_among_changed_words_keeps_its_escape_at_its_place(
     new_a = " ".join(f"v{i}" for i in range(400))
     new_b = " ".join(f"y{i}" for i in range(400))
     out = saved_as(f"aaaa {old_a} \\:smile: {old_b}", f"<p>aaaa :smile: {new_a} :smile: {new_b}</p>")
-    assert out == f"aaaa :smile: {new_a} \\:smile: {new_b}\n", (out[:20], out[1990:2040])
+    at = out.index("\\:smile:")
+    assert out == f"aaaa :smile: {new_a} \\:smile: {new_b}\n", out[max(0, at - 20):at + 30]
 
 
 # 658: a <b>'s own `font-weight` replaces its default `bolder`, and is relative to the weight its parent has.
 
 def test_a_bold_tag_whose_own_style_says_lighter_is_read_from_its_parent():
-    html = ('<p><span style="font-weight:500"><b style="font-weight:lighter"><span style="font-weight:bolder">'
+    page = ('<p><span style="font-weight:500"><b style="font-weight:lighter"><span style="font-weight:bolder">'
             'plain</span></b></span> words</p>')
-    assert rde.html_block_to_md(html, source="Old words") == "plain words"
+    assert rde.html_block_to_md(page, source="Old words") == "plain words"
 
 
 def test_a_bold_tag_whose_own_style_says_bolder_is_bolder_once():

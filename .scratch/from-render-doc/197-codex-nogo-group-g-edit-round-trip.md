@@ -33,4 +33,4 @@
 
 ## Notes
 
-- `tests/test_edit_137_followups.py`'s three CPU-time cases for a long block fail on the laptop under load on main and on this branch alike (about 1.0 to 1.3 s against a 1.0 s limit, load 15); the profile of that case shows the same call count on both, and none of the code changed here runs in it. CI on t-compute is the measure.
+- `tests/test_edit_137_followups.py`'s three CPU-time cases for a long block fail on the laptop under load on main and on this branch alike (about 1.0 to 1.3 s against a 1.0 s limit, load 15); the profile of that case shows the same call count on both, and none of the code changed here runs in it. CI on the CI runner host is the measure.

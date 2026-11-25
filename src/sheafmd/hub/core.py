@@ -77,13 +77,18 @@ class MemberTarget:
 
 
 class _Making:
-    """An entry being made outside the hub's lock (200): `done` is set when its maker has inserted it or given up; `void`
-    is set, under the hub's lock, by a delete or move of its address meanwhile (`Hub._void_making`), so the maker makes it
-    again from the file the address names then."""
+    """An entry being made outside the hub's lock (200). `done` is set when its maker has inserted it or given it up. Set
+    under the hub's lock meanwhile: `dropped` by a delete or move of its address (`Hub._drop_making`), and the maker makes
+    it again from the file the address names then; `forget` where the entry it gives up must take out what its first
+    render stored, as a moved page's entry does; `detached` by a forget of its root (`_let_go_root`), as the entries the
+    hub holds are detached, so that forget takes out only its own texts."""
 
-    def __init__(self):
+    def __init__(self, entry: "Entry"):
+        self.entry = entry
         self.done = threading.Event()
-        self.void = False
+        self.dropped = False
+        self.forget = False
+        self.detached = False
 
 
 @dataclass
@@ -608,34 +613,46 @@ class Hub:
                 return e
             if self.roots.get(name) != root:
                 raise roots_mod.NotFound(address)
-            making = self._making.get(address)
-            if making is None:
-                making = self._making[address] = _Making()
+            other = self._making.get(address)
+            if other is None:
+                # Made before it is marked: a new entry that raises (a private root not seen) leaves no mark to wait on.
                 e = self._new_entry(address, name, root, path)
-        if e is None:                         # another thread makes it: its entry, once rendered, or a new try
-            making.done.wait()
+                mine = self._making[address] = _Making(e)
+        if other is not None:                 # another thread makes it: its entry, once rendered, or a new try
+            other.done.wait()
             return self._entry(address)
+        kept = gone = False
         try:
             e.live.refresh(force=True)           # the first render: e.html, with no lock of the hub held
             with self._lock:
-                if self.roots.get(name) != root:
-                    raise roots_mod.NotFound(address)
-                if not making.void:
+                gone = self.roots.get(name) != root
+                if not gone and not mine.dropped:
                     self.entries[address] = e
-                    return e
+                    kept = True
         finally:
             with self._lock:
-                if self._making.get(address) is making:
+                if self._making.get(address) is mine:
                     del self._making[address]
-            making.done.set()
+                forget = not kept and (mine.forget or mine.detached)
+            if forget:                       # what its first render stored goes, as for an entry the hub dropped
+                try:
+                    e.live.forget()
+                except Exception:
+                    self.record_exception("forget-failed", address)
+            mine.done.set()
+        if kept:
+            return e
+        if gone:
+            raise roots_mod.NotFound(address)
         return self._entry(address)          # deleted or moved meanwhile: made again from what the address names now
 
-    def _void_making(self, *addresses: str, prefix: str = ""):
-        """Under the hub's lock: an entry being made at one of `addresses` (or under `prefix`) is not kept by its maker, which
-        makes it again (200). Called where an entry is dropped for a delete or a move of its address."""
-        for a, making in self._making.items():
-            if a in addresses or (prefix and a.startswith(prefix)):
-                making.void = True
+    def _drop_making(self, address: str, forget: bool = False):
+        """Under the hub's lock: an entry being made at `address` is not kept by its maker, which makes it again (200); with
+        `forget`, it takes out what its first render stored. Called where the hub drops an entry for a delete or a move."""
+        m = self._making.get(address)
+        if m is not None:
+            m.dropped = True
+            m.forget = m.forget or forget
 
     def _new_entry(self, address: str, name: str, root, path: Path) -> Entry:
         """A new entry for `address`, not rendered yet: under the hub's lock, with no pandoc run."""
@@ -1067,10 +1084,11 @@ class Hub:
         return out["answer"]
 
     def _render_held(self, address: str, md: Path, settings: dict, target: dict | None) -> dict:
-        """The render of `render`, on its own thread: every lock it needs it takes here."""
+        """The render of `render`, on its own thread: every lock it needs it takes on this thread, the name's here, the
+        hub's in `_render_entry` and below, never over a pandoc run (200)."""
         with place.held(self, address):  # the name's lock first (9.11), as `entry` takes it
             e, rebuild, existed = self._render_entry(address, md, settings, target)
-            # A delete, move or forget between the two parts under the hub's lock has taken the entry: its page is not read
+            # A delete, move or forget since `_render_entry` found the entry has taken it: its page is not read
             # again (its file may be gone, and its tabs were told `gone`, after which they hear nothing more).
             kept, gone = self.entries.get(address) is e, RenderError(f"{md} went away while its page was rendered.")
             if not kept and not md.exists():
@@ -1157,7 +1175,7 @@ class Hub:
         versions stay, and come back with it when it does (8.6)."""
         with self._lock:
             e = self.entries.pop(address, None)
-            self._void_making(address)
+            self._drop_making(address)       # its versions stay, as a deleted page's do (8.6)
         if e is not None:
             e.bus.publish("gone", {"doc": address})
 
@@ -1191,6 +1209,11 @@ class Hub:
             # then for the late forget to leave them (`LiveDocument.detach`).
             for a in held:
                 self.entries[a].live.detach()   # no wait for its lock here: a render holds it for up to 120 s
+            # An entry still in its first render is detached too: its maker finds the root gone and forgets it (200).
+            making = [m for a, m in self._making.items() if a.startswith(prefix)]
+            for m in making:
+                m.entry.live.detach()
+                m.detached = True
             known = self.roots.held(name)     # a private root too, which `get` hides
             try:
                 root = roots_mod.forget(self.roots, self.docs, self.seen, self.versions, name,
@@ -1199,6 +1222,9 @@ class Hub:
                 if self.roots.held(name) is not None:
                     for a in held:      # the registry still holds the root: it stays, and so do its documents' versions
                         self.entries[a].live.reattach()
+                    for m in making:
+                        m.entry.live.reattach()
+                        m.detached = False
                     raise
                 # The registry let the name go, and another folder may take it now: the forget goes on, its documents
                 # detached, and only an entry store that was not emptied is left (a row in the diagnostics log).
@@ -1264,7 +1290,8 @@ class Hub:
         with self._lock:
             e = self.entries.pop(old, None)
             self.entries.pop(new, None)         # an entry made for the address before the page came is made again
-            self._void_making(old, new)
+            self._drop_making(old, forget=True)     # as the entry popped here: what it holds at `old` goes
+            self._drop_making(new)
         if e is not None:
             # After the versions were carried (a version kept under the old key is the last of the old page, none of
             # the new one's): what the entry's document still holds at the old address goes, as `forget_root` does it.
@@ -1316,7 +1343,7 @@ class Hub:
         def finish():
             with self._lock:
                 e = self.entries.pop(old, None)
-                self._void_making(old)
+                self._drop_making(old, forget=True)
             if e is not None:
                 try:
                     e.live.forget()

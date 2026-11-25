@@ -705,11 +705,13 @@ def test_a_first_render_held_in_pandoc_never_delays_the_first_render_of_another_
 
 
 def test_a_root_forgotten_during_a_held_first_render_leaves_its_address_naming_nothing(world, work, put, held_pandoc):
-    """200 C1: `forget_root` while A's first render is held in pandoc: A's open is NotFound, and the hub keeps no entry."""
+    """200 C1: `forget_root` while A's first render is held in pandoc: A's open is NotFound, the hub keeps no entry, and
+    the version its first render stored is taken out of the store, as a forgotten document's are."""
     from sheafmd.hub import roots as roots_mod
     go, begun, _ = held_pandoc
     put("held.md", PLAN + f"\n{HELD_MARK}\n")
     world.hub.roots.for_document(work / "held.md")
+    store = world.hub._versions_of(world.hub.roots.get("work"))
     a, out = _in_thread(world.hub.entry, "work/held.md")
     assert begun.wait(10)
     _timed(world.hub.forget_root, "work", within=10)
@@ -717,6 +719,7 @@ def test_a_root_forgotten_during_a_held_first_render_leaves_its_address_naming_n
     a.join(10)
     assert out and isinstance(out[0], roots_mod.NotFound), out
     assert "work/held.md" not in world.hub.entries
+    assert store.texts("work/held.md") == []
 
 
 def test_two_opens_of_one_new_document_make_one_entry_rendered_once(world, work, put, held_pandoc):
@@ -724,22 +727,21 @@ def test_two_opens_of_one_new_document_make_one_entry_rendered_once(world, work,
     go, begun, runs = held_pandoc
     put("held.md", PLAN + f"\n{HELD_MARK}\n")
     world.hub.roots.for_document(work / "held.md")
-    first, one = _in_thread(world.hub.entry, "work/held.md")
+    first, first_out = _in_thread(world.hub.entry, "work/held.md")
     assert begun.wait(10)
-    held_runs = runs.count(True)
-    second, two = _in_thread(world.hub.entry, "work/held.md")
+    second, second_out = _in_thread(world.hub.entry, "work/held.md")
     second.join(0.5)
     assert second.is_alive(), "the second open did not wait for the first one's render"
     go.set()
     first.join(10)
     second.join(10)
-    assert one and two and one[0] is two[0] is world.hub.entries["work/held.md"], (one, two)
-    once = runs.count(True)
-    assert held_runs == 1 and once >= 1
-    # the second open rendered nothing: a fresh first render of the same text runs pandoc as many times as the first did
+    assert first_out and second_out and first_out[0] is second_out[0] is world.hub.entries["work/held.md"]
+    one_render = runs.count(True)
+    assert one_render >= 1
+    # the second open rendered nothing: a fresh first render of the same text runs pandoc as many times as both opens did
     world.hub.forget_document("work/held.md")
     world.hub.entry("work/held.md")
-    assert runs.count(True) == 2 * once, runs
+    assert runs.count(True) == 2 * one_render, runs
 
 
 def test_a_document_deleted_during_its_held_first_render_keeps_no_entry(world, work, put, held_pandoc):
@@ -757,3 +759,17 @@ def test_a_document_deleted_during_its_held_first_render_keeps_no_entry(world, w
     a.join(10)
     assert out and isinstance(out[0], roots_mod.NotFound), out
     assert "work/held.md" not in world.hub.entries
+
+
+def test_a_new_entry_that_cannot_be_made_leaves_no_mark_for_the_next_open(world, work, monkeypatch):
+    """200 D: an entry whose making raises before its render (a private root not seen) leaves no mark of a render under
+    way: the next open of the address makes it, and does not wait for a render that never comes."""
+    made = world.hub._new_entry
+
+    def refused(*a, **kw):
+        monkeypatch.setattr(world.hub, "_new_entry", made)
+        raise RuntimeError("not now")
+    monkeypatch.setattr(world.hub, "_new_entry", refused)
+    with pytest.raises(RuntimeError):
+        world.hub.entry("work/start.md")
+    assert _timed(world.hub.entry, "work/start.md", within=10).address == "work/start.md"

@@ -170,6 +170,51 @@ def test_a_late_join_on_the_old_connection_after_the_tab_left_the_new_one_is_dro
     new.close()
 
 
+def test_a_late_join_on_the_old_connection_after_the_new_one_closed_is_dropped(world, docs):
+    """Ticket 193 A: the newer connection that had the key ended before the old leader's late join arrived. Its end
+    must not take the bar with it: the old connection, still open, would count the tab until it ends."""
+    old = shared(world)
+    new = shared(world, sid="n" * 24)
+    assert join(world, "t1:1", docs[0], sid="n" * 24).status == 200
+    new.close()
+    assert join(world, "t1:1", docs[0]).status == 200          # the late one, on the older connection
+    assert old.keys() == [] and world.hub.tabs(docs[0]) == 0
+    old.close()
+
+
+def test_a_late_join_on_the_old_connection_after_the_new_one_came_back_under_its_id_is_dropped(world, docs):
+    """Ticket 193 A: the newer connection that had the key was opened again under its id, and the tab has not joined
+    it yet. The fresh stream never had the key; the late join on the older connection is still dropped."""
+    old = shared(world)
+    shared(world, sid="n" * 24)
+    assert join(world, "t1:1", docs[0], sid="n" * 24).status == 200
+    again = shared(world, sid="n" * 24)
+    assert join(world, "t1:1", docs[0]).status == 200          # the late one, on the older connection
+    assert old.keys() == [] and world.hub.tabs(docs[0]) == 0
+    assert join(world, "t1:1", docs[0], sid="n" * 24).status == 200
+    assert again.keys() == ["t1:1"] and world.hub.tabs(docs[0]) == 1
+    old.close()
+    again.close()
+
+
+def test_the_keys_an_old_connection_is_barred_from_are_bounded(world, docs):
+    """Ticket 193 B: tabs that come and go on the newer connection bar their keys on the older one; a long-lived pair
+    of connections keeps a bounded number of them, the oldest dropped first, and the newest still barred."""
+    from sheafmd.hub.handler import _SharedStream
+    old = shared(world)
+    new = shared(world, sid="n" * 24)
+    n = _SharedStream.BARS + 5
+    for i in range(n):
+        assert join(world, f"t{i}:1", docs[0], sid="n" * 24).status == 200
+        assert world.post("/_/live/leave", {"stream": "n" * 24, "key": f"t{i}:1"}).status == 200
+    held = world.handler._shared[SID]
+    assert len(held.barred) == _SharedStream.BARS
+    assert join(world, f"t{n - 1}:1", docs[0]).status == 200   # the newest bar holds
+    assert old.keys() == []
+    old.close()
+    new.close()
+
+
 def test_a_connection_opened_again_under_its_id_is_the_newest(world, docs):
     """The same browser comes back under the same id: the stream that replaced the old one takes its keys."""
     other = shared(world, sid="n" * 24)

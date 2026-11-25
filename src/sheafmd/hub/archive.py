@@ -132,6 +132,8 @@ class Archive:
                 self.purge()
                 if getattr(self.hub, "repos", None) is not None:
                     self.hub.repos.sleep_idle()     # a clone nobody used for thirty days sleeps (13)
+                    from . import root_sender
+                    root_sender.sweep(self.hub)     # a root whose `.sheaf.toml` names another tiroir moves there
             except Exception:
                 self.hub.record_exception("archive-failed")
 

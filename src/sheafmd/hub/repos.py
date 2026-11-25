@@ -436,6 +436,16 @@ class Repos:
         owner, name = repo.split("/")
         return self.base / "clones" / owner / name
 
+    def records(self, repo: str) -> dict:
+        """The rows of the pages reports made in `repo`, `{path: row}` (a copy)."""
+        with self._records:
+            return {p: dict(r) for p, r in self._read().get(repo, {}).items() if isinstance(r, dict)}
+
+    def clones(self) -> list[str]:
+        """The repos this hub holds a clone of."""
+        with self._records:
+            return sorted(self._usage())
+
     def owner_of(self, repo: str, path: str) -> str | None:
         """The member of a repo page: the `owner` of its front matter at the commit of the latest report when it names
         one, else the one the first report recorded; None for a page no report made."""

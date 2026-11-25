@@ -2119,7 +2119,8 @@ def test_enter_after_a_headings_last_word_and_before_its_comment_makes_a_paragra
     until(lambda: "Under it." in f.read_text(), what="the save in the file")
     settled(p)
     got = f.read_text()
-    assert "\n\nUnder it.\n" in got and "# Under it." not in got, got
+    # The comment's anchor stood after the caret, so it goes down with the new line: where it lands is no part of this.
+    assert "## A heading here\n\nUnder it." in got and "# Under it." not in got, got
     assert got.count("## ") == before.count("## "), got
 
 

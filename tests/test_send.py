@@ -232,7 +232,8 @@ def test_a_second_refusal_before_the_merge_keeps_the_tiroirs_latest_text(tiroir,
     run(capsys, scratch)
     changed_there(tiroir, address, TEXT + "\nOne.\n\nTwo.\n")
     assert run(capsys, scratch)[0] == 1
-    assert scratch.with_name("notes.tiroir.md").read_text(encoding="utf-8") == TEXT + "\nOne.\n\nTwo.\n"
+    assert scratch.with_name("notes.tiroir.md").read_text(encoding="utf-8") == TEXT + "\nOne.\n"          # never overwritten
+    assert scratch.with_name("notes.tiroir-2.md").read_text(encoding="utf-8") == TEXT + "\nOne.\n\nTwo.\n"
 
 
 # ── the state file, held by more than one sheaf at once ──────────────────────
@@ -702,3 +703,162 @@ def test_a_certificate_that_fails_its_check_is_untrusted_whether_the_error_comes
         with pytest.raises(send.SendError, match="cannot trust") as e:
             send.get("https://chat.example.com/x", "t")
         assert not isinstance(e.value, send.Unreachable)
+
+
+# ── a conflict copy is never written over ────────────────────────────────────
+
+def test_a_second_conflict_leaves_the_first_conflict_copy_as_it_is_and_writes_the_next_free_name(tiroir, scratch, capsys):
+    run(capsys, scratch)
+    address = f"loose-bea/{loose.month()}/notes.md"
+    changed_there(tiroir, address, TEXT + "\nFirst.\n")
+    scratch.write_text(TEXT + "\nMine.\n", encoding="utf-8")
+    assert run(capsys, scratch)[0] == 1
+    first = scratch.with_name("notes.tiroir.md")
+    first.write_text("my merge, half done\n", encoding="utf-8")        # the person has begun editing the copy
+    changed_there(tiroir, address, TEXT + "\nFirst.\n\nSecond.\n")
+    code, out, err = run(capsys, scratch)
+    assert code == 1
+    assert first.read_text(encoding="utf-8") == "my merge, half done\n"
+    second = scratch.with_name("notes.tiroir-2.md")
+    assert second.read_text(encoding="utf-8") == TEXT + "\nFirst.\n\nSecond.\n"
+    assert "notes.tiroir-2.md" in err
+
+
+def test_a_conflict_whose_text_is_the_copy_already_there_reuses_that_copy(tiroir, scratch, capsys):
+    run(capsys, scratch)
+    address = f"loose-bea/{loose.month()}/notes.md"
+    changed_there(tiroir, address, TEXT + "\nTheirs.\n")
+    scratch.write_text(TEXT + "\nMine.\n", encoding="utf-8")
+    scratch.with_name("notes.tiroir.md").write_text(TEXT + "\nTheirs.\n", encoding="utf-8")   # already there, same text
+    code, out, err = run(capsys, scratch)
+    assert code == 1 and "notes.tiroir.md" in err
+    assert not scratch.with_name("notes.tiroir-2.md").exists()
+
+
+def test_pull_leaves_an_existing_conflict_copy_as_it_is_too(tiroir, scratch, capsys):
+    run(capsys, scratch)
+    address = f"loose-bea/{loose.month()}/notes.md"
+    scratch.write_text(TEXT + "\nMine.\n", encoding="utf-8")
+    changed_there(tiroir, address, TEXT + "\nTheirs.\n")
+    scratch.with_name("notes.tiroir.md").write_text("an unrelated file\n", encoding="utf-8")
+    code, out, err = run(capsys, "pull", scratch)
+    assert code == 1
+    assert scratch.with_name("notes.tiroir.md").read_text(encoding="utf-8") == "an unrelated file\n"
+    assert scratch.with_name("notes.tiroir-2.md").read_text(encoding="utf-8") == TEXT + "\nTheirs.\n"
+
+
+# ── a page whose place in git cannot be told is not sent ─────────────────────
+
+@pytest.mark.parametrize("stderr, said", [
+    ("fatal: detected dubious ownership in repository at '/srv/x'\n", "dubious ownership"),
+    ("fatal: unsafe repository ('/srv/x' is owned by someone else)\n", "unsafe repository"),
+])
+def test_a_git_that_refuses_the_folder_stops_the_send_and_names_why(tiroir, scratch, local, capsys, monkeypatch, stderr, said):
+    monkeypatch.setattr(send, "_git_probe", lambda folder: subprocess.CompletedProcess([], 128, "", stderr))
+    code, out, err = run(capsys, scratch)
+    assert code == 1 and out == "" and local == [] and tiroir.seen == []
+    assert said in err and "Nothing was sent" in err
+
+
+def test_a_broken_repository_is_not_taken_for_a_folder_outside_any(tiroir, scratch, local, capsys, monkeypatch):
+    broken = "fatal: not a git repository: /srv/x/.git/worktrees/y\n"
+    monkeypatch.setattr(send, "_git_probe", lambda folder: subprocess.CompletedProcess([], 128, "", broken))
+    code, out, err = run(capsys, scratch)
+    assert code == 1 and out == "" and local == [] and tiroir.seen == []
+    assert "Nothing was sent" in err
+
+
+def test_a_page_in_a_bare_repository_worktree_layout_is_sent_though_rev_parse_answers_false(tiroir, tmp_path, capsys):
+    subprocess.run(["git", "init", "-q", "--bare", str(tmp_path / "p" / ".bare")], check=True)
+    (tmp_path / "p" / ".git").write_text("gitdir: ./.bare\n", encoding="utf-8")
+    page = tmp_path / "p" / "docs" / "a.md"
+    page.parent.mkdir()
+    page.write_text(TEXT, encoding="utf-8")
+    assert subprocess.run(["git", "-C", str(page.parent), "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True).stdout.strip() == "false"
+    code, out, err = run(capsys, page)
+    assert code == 0, err
+    assert [m for _, _, m in tiroir.seen if m and m["method"] == "tools/call"]
+
+
+def test_a_git_that_does_not_run_stops_the_send(tiroir, scratch, local, capsys, monkeypatch):
+    def none(folder):
+        raise OSError("no git here")
+    monkeypatch.setattr(send, "_git_probe", none)
+    code, out, err = run(capsys, scratch)
+    assert code == 1 and local == [] and tiroir.seen == []
+    assert "no git here" in err and "Nothing was sent" in err
+
+
+def test_a_folder_git_says_is_no_repository_is_a_loose_page_and_is_sent(tiroir, scratch, capsys):
+    code, out, err = run(capsys, scratch)
+    assert code == 0, err
+    assert [m for _, _, m in tiroir.seen if m and m["method"] == "tools/call"]
+
+
+# ── a write that may have arrived ────────────────────────────────────────────
+
+def test_a_failure_after_the_write_does_not_say_nothing_was_sent(tiroir, scratch, local, capsys, monkeypatch):
+    first = tiroir.calls[0]
+
+    def dies_on_the_write(url, bearer, message, headers):
+        if message.get("method") == "tools/call" and message["params"]["name"] == "create":
+            raise send.Unreachable("cannot reach chat.example.com: reset. Nothing was sent.")   # as `_request` words it
+        return first(url, bearer, message, headers)
+
+    monkeypatch.setattr(send, "post", dies_on_the_write)
+    code, out, err = run(capsys, scratch)
+    assert code == 1 and "Nothing was sent" not in err
+    assert "not known" in err and "may have reached" in err
+
+
+def test_a_retried_create_of_a_page_that_did_arrive_takes_it_up_instead_of_the_name_collision(tiroir, scratch, local, capsys, monkeypatch):
+    first = tiroir.calls[0]
+
+    def dies_after_the_write(url, bearer, message, headers):
+        got = first(url, bearer, message, headers)
+        if message.get("method") == "tools/call" and message["params"]["name"] == "create":
+            raise send.Unreachable("cannot reach chat.example.com: reset")
+        return got
+
+    monkeypatch.setattr(send, "post", dies_after_the_write)
+    assert run(capsys, scratch)[0] == 1
+    monkeypatch.setattr(send, "post", first)
+    code, out, err = run(capsys, scratch)
+    address = f"loose-bea/{loose.month()}/notes.md"
+    assert code == 0, err
+    assert on_the_tiroir(tiroir, address) == TEXT
+    assert state()[str(scratch.resolve())]["doc"] == address
+    scratch.write_text(TEXT + "\nNext.\n", encoding="utf-8")
+    assert run(capsys, scratch)[0] == 0                                  # the next run updates it
+    assert on_the_tiroir(tiroir, address) == TEXT + "\nNext.\n"
+
+
+def test_a_retried_create_of_another_page_with_that_name_is_still_refused(tiroir, scratch, tmp_path, capsys):
+    run(capsys, scratch)
+    other = tmp_path / "elsewhere" / scratch.name
+    other.parent.mkdir()
+    other.write_text("# Other\n\nA different page.\n", encoding="utf-8")
+    code, out, err = run(capsys, other)
+    assert code == 1 and "exists already" in err
+    assert str(other.resolve()) not in state()
+
+
+def test_a_retried_create_is_not_taken_up_by_a_second_file_with_the_same_name_and_text(tiroir, scratch, tmp_path, capsys):
+    run(capsys, scratch)
+    twin = tmp_path / "elsewhere" / scratch.name
+    twin.parent.mkdir()
+    twin.write_text(TEXT, encoding="utf-8")
+    code, out, err = run(capsys, twin)
+    assert code == 1 and "exists already" in err and "Nothing was sent" in err
+    assert str(twin.resolve()) not in state()
+
+
+def test_a_row_of_a_file_that_no_longer_exists_does_not_block_the_takeover(tiroir, scratch, tmp_path, capsys):
+    first = tmp_path / "gone" / scratch.name
+    first.parent.mkdir()
+    first.write_text(TEXT, encoding="utf-8")
+    run(capsys, first)
+    first.unlink()
+    code, out, err = run(capsys, scratch)
+    assert code == 0, err                            # the row of a file that is gone binds nothing: the same name and text is taken up
+    assert str(scratch.resolve()) in state()

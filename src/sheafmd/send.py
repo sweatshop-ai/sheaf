@@ -232,9 +232,10 @@ class Door:
         except Unreachable as e:
             if not self.wrote:
                 raise
-            raise SendError(f"{e} The write may have reached {self.origin}: run sheaf again: if the page arrived, "
-                            "the answer is that a page of that name exists already, and it is this one. Nothing was "
-                            "changed on this laptop.") from None
+            cause = str(e).replace(" Nothing was sent.", "")
+            raise SendError(f"{cause} Whether the write reached {self.origin} is not known: it may have reached it. Nothing "
+                            "was changed on this laptop. Run sheaf again: a page that did arrive is taken up as this "
+                            "file's, and a page of that name with other text is refused.") from None
 
     def _post_checked(self, message: dict) -> tuple[int, dict | None, dict]:
         status, got, back = post(self.origin + connect.DOOR_PATH, self.token, message, self.headers)
@@ -388,14 +389,33 @@ def credential(origin: str) -> str | None:
 
 # ── send and pull ────────────────────────────────────────────────────────────
 
-def _beside(md: Path) -> Path:
-    return md.with_name(md.stem + ".tiroir" + md.suffix)
+def _beside(md: Path, n: int = 1) -> Path:
+    return md.with_name(md.stem + (".tiroir" if n == 1 else f".tiroir-{n}") + md.suffix)
+
+
+def _copy_for(md: Path, text: str) -> Path:
+    """Where the tiroir's text goes beside `md`: `FILE.tiroir.md` when it is free or already holds exactly this text, else
+    the next free `FILE.tiroir-2.md`, `-3`...; never over a file that is there (it may be a copy the person has begun to
+    merge from, or a file of their own). Two commands at the very same instant can still choose one name."""
+    n = 1
+    while True:
+        beside = _beside(md, n)
+        if os.path.lexists(beside):
+            try:
+                if beside.is_file() and beside.read_text(encoding="utf-8") == text:
+                    return beside
+            except (OSError, UnicodeDecodeError):
+                pass
+            n += 1
+            continue
+        return beside
 
 
 def _leave_theirs(md: Path, row: dict, now: dict, sending: bool = True) -> SendError:
     """The tiroir's text, written beside the file and recorded as read; the error that tells the agent what to do."""
-    beside = _beside(md)
-    write_text_atomic(beside, now["text"])
+    beside = _copy_for(md, now["text"])
+    if not beside.exists():
+        write_text_atomic(beside, now["text"])
     keep_row(md, {**row, "hash": now["hash"]})
     nothing = "so nothing was sent" if sending else "and the file has changes of yours"
     return SendError(f"{row['doc']} has changed on the shared Sheaf since you last read it, {nothing}. Its text is in "
@@ -427,6 +447,11 @@ def _create(door: Door, md: Path, text: str, args, origin: str) -> dict:
     if args.keep:
         arguments["keep"] = True
     bad, got = door.tool("create", arguments)
+    if bad and "exists already" in got and args.folder is None:
+        arrived = _arrived(door, md, text, got.split(" exists already", 1)[0].strip(), origin)
+        if arrived is not None:
+            keep_row(md, {"tiroir": origin, "doc": arrived["doc"], "hash": arrived["hash"], "local": md_hash(text)})
+            return arrived
     if bad and "exists already" in got:
         raise SendError(f"a page named {md.name} exists already on the shared Sheaf and was not sent from this file. "
                         f"Rename {md} and run sheaf again. Nothing was sent.")
@@ -434,6 +459,23 @@ def _create(door: Door, md: Path, text: str, args, origin: str) -> dict:
         raise SendError(f"{got} Nothing was sent.")
     keep_row(md, {"tiroir": origin, "doc": got["doc"], "hash": got["hash"], "local": md_hash(text)})
     return got
+
+
+def _arrived(door: Door, md: Path, text: str, address: str, origin: str) -> dict | None:
+    """The page at `address` (the one the door's "exists already" named) when the tiroir holds exactly this file's text there: a
+    create whose answer was lost took effect, and the run after it finds its own page. {doc, hash} of it, else None.
+    None also when the state row of another local file that still exists holds that address: the page is that file's."""
+    mine = str(md.resolve())
+    if any(k != mine and Path(k).exists() and isinstance(r, dict) and r.get("tiroir") == origin and r.get("doc") == address
+           for k, r in read_state().items()):
+        return None
+    try:
+        bad, now = door.tool("read", {"doc": address})
+    except (SendError, Moved):
+        return None
+    if bad or md_hash(now["text"]) != md_hash(text):
+        return None
+    return {"doc": address, "hash": now["hash"]}
 
 
 def _update(door: Door, md: Path, text: str, row: dict) -> dict:
@@ -478,6 +520,35 @@ def _git(top: Path, *args) -> subprocess.CompletedProcess:
                               encoding="utf-8", errors="replace", timeout=30)
     except (OSError, subprocess.SubprocessError) as e:
         return subprocess.CompletedProcess(args, 1, "", str(e))
+
+
+def _git_probe(folder: Path) -> subprocess.CompletedProcess:
+    """`git rev-parse` in `folder`, with git's messages in English; raises OSError or SubprocessError when git does not run."""
+    return subprocess.run(["git", "-C", str(folder), "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=10, env={**os.environ, "LC_ALL": "C"})
+
+
+# git's own words for a folder under no repository; a broken repository says `not a git repository: <path>`, which is not this
+NOT_A_REPO = re.compile(r"fatal: not a git repository \(or any (?:of the )?parent[^)]*\)")
+
+
+def require_known_place(md: Path):
+    """Return when git says the page's folder is inside a repository or plainly outside any: SendError for any other
+    answer (git missing, a timeout, "dubious ownership", a repository git names as broken). The page is then not sent as a loose
+    page, since a repository's page must never go up as one."""
+    folder = md.resolve().parent
+    try:
+        done = _git_probe(folder)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise SendError(f"cannot tell whether {md} is in a git repository: git did not run ({e}). Nothing was sent.") from None
+    if done.returncode == 0:
+        return
+    why = (done.stderr or "").strip().splitlines()
+    if why and NOT_A_REPO.match(why[0]) and not any("ownership" in l or "unsafe" in l for l in why):
+        return
+    raise SendError(f"cannot tell whether {md} is in a git repository: git said {why[0] if why else 'nothing'!r}. "
+                    "Fix that (for dubious ownership: `git config --global --add safe.directory <folder>`) and run sheaf "
+                    "again. Nothing was sent.")
 
 
 class Local(Exception):
@@ -578,6 +649,7 @@ def send_page(md: Path, args, out, err, environ=None) -> int | None:
         token = credential(origin) if origin else None
         if token is None:
             return None
+        require_known_place(md)
         if (top := config.git_place(md.resolve().parent).top) is not None:
             return report_page(md, top, origin, token, args, out, err, environ)
         text = _read_local(md)

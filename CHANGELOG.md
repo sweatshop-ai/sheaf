@@ -4,6 +4,16 @@ sheafmd is released by merging a pull request that sets `__version__` in `src/sh
 Its page assets are cached by version (`/_/mount.css?v=<version>`, immutable), so the version
 changes whenever an asset does. The entries name pull requests of sweatshop-ai/sheaf.
 
+## Unreleased
+
+### Fixed
+
+- A conflict copy (`FILE.tiroir.md`) is never overwritten: a second conflict leaves the next free name, `FILE.tiroir-2.md`, `-3`, and the same text reuses the copy already there; `pull` does the same.
+- A send whose folder git cannot place (git missing, timed out, dubious ownership, unsafe repository) stops with the cause instead of sending the page as a loose one.
+- A failure after a write no longer says "Nothing was sent": it says whether the page arrived is not known, and the next run takes up a page that did arrive.
+- `sheaf connect` checks that `config.toml` can be written before it stores the token.
+- A page opened on its own address keeps the link of its byline's session name (the session kit moved to `session.js`, loaded by the page script and the mount bundle).
+
 ## 1.3.0 (2026-11-20)
 
 Everything merged since 1.2.1 (#472), up to #534. Version 1.2.1 was never tagged; this release carries it.

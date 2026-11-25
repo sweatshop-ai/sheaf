@@ -222,6 +222,29 @@ def test_the_first_report_keeps_the_page_a_later_report_by_another_member_does_n
     assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") == "bea"
 
 
+def test_a_report_without_a_row_makes_the_clone_and_records_no_owner(hub_repos, origin):
+    repos = hub_repos.hub.repos
+    repos.report("bea", REPO, "docs/plan.md", sh(origin, "rev-parse", "main"), (), {}, row=False)
+    assert repos.settle(), "the tiroir's thread did not finish"
+    assert repos.owner_of(REPO, "docs/plan.md") is None and (the_clone(hub_repos) / ".git").exists()
+
+
+def test_a_report_without_a_row_still_fetches_a_tip_the_clone_lacks_and_records_nothing(modern_git, hub_repos, tmp_path, origin):
+    repos = hub_repos.hub.repos
+    first = sh(origin, "rev-parse", "main")
+    repos.report("bea", REPO, "docs/plan.md", first, (), {}, row=False)
+    assert repos.settle()
+    pusher = laptop_clone(tmp_path, origin, "pusher")
+    (pusher / "docs" / "plan.md").write_text("# Plan\n\nChanged.\n", encoding="utf-8")
+    sh(pusher, "commit", "-qam", "change")
+    sh(pusher, "push", "-q", "origin", "HEAD:main")
+    new = sh(pusher, "rev-parse", "HEAD")
+    assert repos.report("bea", REPO, "docs/plan.md", new, (), {}, row=False)["commit_known"] is False
+    assert repos.settle()
+    assert repos.report("bea", REPO, "docs/plan.md", new, (), {}, row=False)["commit_known"] is True     # the queued item fetched it: no 202 loop
+    assert repos.settle() and repos.owner_of(REPO, "docs/plan.md") is None
+
+
 def test_front_matter_owner_wins_over_the_record(hub_repos, tmp_path, origin):
     pusher = laptop_clone(tmp_path, origin, "pusher")
     (pusher / "docs" / "plan.md").write_text("---\nowner: cal\n---\n# Plan\n", encoding="utf-8")
@@ -1376,3 +1399,16 @@ def test_a_report_refused_for_a_failed_clone_leaves_no_write_log_line_when_the_c
     assert bad and "failed" in got
     assert repos.settle()
     assert hub_repos.hub.writes.lines(f"{repos_mod.root_name(REPO)}/docs/plan.md") == []
+
+
+def test_a_report_sent_again_after_a_refused_one_is_the_one_that_leaves_the_line(hub_repos):
+    repos = hub_repos.hub.repos
+    gate = threading.Event()
+    real = repos._wake
+    repos._wake = lambda *a, **k: (gate.wait(5), real(*a, **k))[1]
+    repos._failed[REPO] = "the clone failed"
+    report_once(hub_repos, session=SESSION)                 # refused, queued without a line
+    report_once(hub_repos, session=SESSION)                 # the retry: the same member, path and commit
+    gate.set()
+    assert repos.settle()
+    assert len(hub_repos.hub.writes.lines(f"{repos_mod.root_name(REPO)}/docs/plan.md")) == 1

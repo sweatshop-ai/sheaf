@@ -75,6 +75,15 @@ def read_only_doc(got: dict) -> dict:
             "target": None, "targets": [], "capabilities": [], "lines": {}, "telling": []}
 
 
+def agency_config(config: dict, doc: str) -> dict:
+    """The meta block of a page read through, or the config of its mount, with what the page script acts on set by this hub:
+    the address it reads and writes is `doc`, the one this hub asked for, and it has no actions, no editor and no agent. The
+    script runs on this origin with the member's cookie, so a client tiroir that named another address or an action would
+    have this hub's page act on them (ticket 190); the client's own keys it reads only for drawing are kept."""
+    return {**config, "doc": doc, "actions": [], "edit": False, "editable": [], "agent": None, "can": [], "targets": [],
+            "lines": {}}
+
+
 def fold_rows(client: str, rows: list) -> list:
     """The rows `client`'s hub told, drawn under `Clients/<client>`: the address, URL, folder and root carry the prefix. Whose
     rows they are is the client hub's to say, so none of the owner's actions (Share, Keep, Archive, a session's way back)

@@ -172,3 +172,46 @@ def test_tell_on_a_client_page_is_refused_and_nothing_is_written(agency_and_clie
     before = client.text(doc)
     assert comment(agency, client, doc, AG_ALICE, tell=True).status == 400
     assert client.text(doc) == before
+
+
+FORGED = {"doc": "loose-alice/agency-secret.md", "actions": [{"id": "x", "label": "Go"}], "edit": True, "editable": [0],
+          "agent": {"kind": "agent", "token": "t", "display": "D"}, "can": ["deliver"], "targets": [{"target": "x"}],
+          "lines": {"tell": "x"}}
+_META = r'(<script id="rd-edit-meta" type="application/json">)(.*?)(</script>)'
+
+
+def _forging(agency, monkeypatch):
+    """The client hub answers with a meta block (page) or config (mount) that names what the agency page acts on."""
+    import re
+    relay = agency.hub.clients.relay
+
+    def forged(*a, **k):
+        env = relay(*a, **k)
+        if env["status"] != 200:
+            return env
+        if env.get("type") == "html":
+            body = re.sub(_META, lambda m: m.group(1) + json.dumps({**json.loads(m.group(2)), **FORGED}) + m.group(3),
+                          env["body"], count=1, flags=re.S)
+        else:
+            got = json.loads(env["body"])
+            got["config"] = {**got.get("config", {}), **FORGED}
+            body = json.dumps(got)
+        return {**env, "body": body}
+    monkeypatch.setattr(agency.hub.clients, "relay", forged)
+
+
+def test_the_agency_sets_what_a_client_page_acts_on_whatever_the_client_tiroir_says(agency_and_client, monkeypatch):
+    # Ticket 190 F: the page script runs on the agency's origin with the member's cookie, so the address it reads and writes,
+    # its actions and its agent are the agency's to say, never the client hub's.
+    import re
+    agency, client = agency_and_client
+    mine = client.make("alice", f"# Alice's plan\n\n{MARKER}\n")
+    _forging(agency, monkeypatch)
+    page = agency.get(f"/Clients/acme/{mine}", member=AG_ALICE)
+    assert page.status == 200
+    meta = json.loads(re.search(_META, page.text, re.S).group(2))
+    config = agency.get(f"/_/mount?doc=Clients/acme/{mine}", member=AG_ALICE).json()["config"]
+    for got in (meta, config):
+        assert got["doc"] == f"Clients/acme/{mine}"
+        assert got["actions"] == [] and got["edit"] is False and got["editable"] == []
+        assert got["agent"] is None and got["can"] == [] and got["targets"] == [] and got["lines"] == {}

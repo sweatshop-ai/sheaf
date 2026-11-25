@@ -230,6 +230,10 @@ _Avoid_: remote session, server session
 **Agent adapter**:
 How the hub reaches an agent session: ask it a question, deliver a Tell, read its state, stop it. Each agent offers only what it can really do.
 
+**Source adapter**:
+How the hub reads and writes the text of a rectoverso, whatever keeps it: `read`, `write` against a base, an integer interface version. The Markdown-file adapter is the first; every write to a rectoverso's file goes through it. Not the Agent adapter, which reaches a session.
+_Avoid_: agent adapter
+
 **MCP door**:
 How an agent reaches the hub: read a document's threads and its text, reply, resolve, and, with the right to write, make a page and change its text. Any agent that speaks MCP can use it, whether the hub runs on the same machine or on a box it connects to.
 _Avoid_: MCP server, plugin

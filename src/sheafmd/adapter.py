@@ -102,8 +102,8 @@ class MarkdownFileAdapter:
     def apply(self, change: Callable, *, expected: str | None = None, move=None, author: str = "", note: str = "",
               by=None):
         """`(outcome, old, new)`: `change(text, opened)` applied under the file lock. With `expected`, a text
-        that is no longer the one that hash names is a conflict, and nothing is written. `by`: the low-level writer to use instead of
-        `source.update_beneath` / `update_file` (a seam for a caller whose tests stand in for it)."""
+        that is no longer the one that hash names is a conflict, and nothing is written. `by`: the low-level writer to call in place of
+        `source.update_beneath` / `update_file`; the MCP door passes its own names for them."""
         def judged(text, opened):
             if expected is not None and rds.md_hash(text) != expected:
                 raise _Conflict(rds.md_hash(text))

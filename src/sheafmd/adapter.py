@@ -100,10 +100,12 @@ class MarkdownFileAdapter:
         return out
 
     def apply(self, change: Callable, *, expected: str | None = None, move=None, author: str = "", note: str = "",
-              by=None):
+              by=None, between: Callable | None = None, kept: Callable | None = None):
         """`(outcome, old, new)`: `change(text, opened)` applied under the file lock. With `expected`, a text
         that is no longer the one that hash names is a conflict, and nothing is written. `by`: the low-level writer to call in place of
-        `source.update_beneath` / `update_file`; the MCP door passes its own names for them."""
+        `source.update_beneath` / `update_file`; the MCP door passes its own names for them.
+        After a write that was not a conflict, with the file lock released: `between()` (a seam of the live document),
+        then `kept(new)`, the Versions store's record of the text written, in that order."""
         def judged(text, opened):
             if expected is not None and rds.md_hash(text) != expected:
                 raise _Conflict(rds.md_hash(text))
@@ -116,6 +118,10 @@ class MarkdownFileAdapter:
                 old, new = (by or rds.update_file)(self._file(), lambda t: judged(t, None), move=move)
         except _Conflict as c:
             return conflict(c.base), None, None
+        if between is not None:
+            between()
+        if kept is not None:
+            kept(new)
         return written(rds.md_hash(new)), old, new
 
     @staticmethod

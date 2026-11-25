@@ -114,18 +114,20 @@ class LiveDocument:
             return self._entry.read()
         return self._file().read_text(encoding="utf-8")
 
-    def _update(self, change, move=None):
+    def _update(self, change, move=None, remember=False):
         """The write of this document's file, through its Markdown-file adapter; `change(text, opened)`. With an entry
         the file is opened once beneath its root, judged, read from that descriptor and written through it;
-        `opened` is that open, None where the document has no entry. Returns (old text, new text)."""
+        `opened` is that open, None where the document has no entry. With `remember`, the adapter calls `_after_write` and
+        then `_remember` (the Versions store) on the text written, as a save and a rewrite do. Returns (old text, new text)."""
+        hooks = {"between": self._after_write, "kept": self._remember} if remember else {}
         if self._entry is None:
-            _, old, new = self._adapter.apply(change, move=move)
+            _, old, new = self._adapter.apply(change, move=move, **hooks)
             return old, new
 
         def judged(t, op):
             self._entry.judge(op)
             return change(t, op)
-        _, old, new = self._adapter.apply(judged, move=move)
+        _, old, new = self._adapter.apply(judged, move=move, **hooks)
         return old, new
 
     # ── the lock, and the guard against a callback calling back in ─────────────
@@ -344,12 +346,10 @@ class LiveDocument:
             md = self._file()
             token = rde.DOC.set(md)
             try:
-                _, new_text = self._update(lambda t, op: change(t), move=move)
+                _, new_text = self._update(lambda t, op: change(t), move=move, remember=True)
             finally:
                 rde.DOC.reset(token)
-            self._after_write()
             report = got["report"]
-            self._remember(new_text)
             if report["changed"]:
                 self._rerender()
                 # One event for the whole write: the watcher compares the hash just taken and
@@ -528,9 +528,7 @@ class LiveDocument:
         written (9.12: the hub's own line in the front matter)."""
         with self._hold(), self._held():
             before = self._text
-            _, new_text = self._update(lambda t, op: change(t))
-            self._after_write()
-            self._remember(new_text)
+            _, new_text = self._update(lambda t, op: change(t), remember=True)
             if new_text != before:
                 self._rerender()
                 self._announce(self._snapshot(self._text), before)

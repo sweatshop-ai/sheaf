@@ -112,3 +112,13 @@ def test_create_writes_a_new_page_and_refuses_a_name_that_is_not_markdown(tmp_pa
         a.creating(tmp_path, "n.txt", "x\n")
     with pytest.raises(FileExistsError):
         a.creating(tmp_path, "n.md", "again\n")()
+
+
+def test_apply_calls_between_then_kept_with_the_text_written_and_neither_on_a_conflict(tmp_path):
+    a = rda.MarkdownFileAdapter(make(tmp_path))
+    seen = []
+    a.apply(lambda t, o: "N.\n", between=lambda: seen.append("between"), kept=lambda new: seen.append(new))
+    assert seen == ["between", "N.\n"]
+    seen.clear()
+    out, _, _ = a.apply(lambda t, o: "M.\n", expected="0" * 16, between=lambda: seen.append("b"), kept=seen.append)
+    assert out["outcome"] == "conflict" and seen == []

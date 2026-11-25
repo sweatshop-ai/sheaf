@@ -798,3 +798,20 @@ def test_a_root_whose_repo_thread_frees_up_during_the_wait_ends_asleep(clone, mo
     monkeypatch.setattr(diagnostics, "record", lambda *a, **k: noted.append(a))
     assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)), peer=THERE) == (409, {"why": "not_named"})
     assert h.repos.slept == [("o/r", THERE)] and noted == []
+
+
+def test_a_page_path_that_is_not_a_markdown_path_is_refused_alone_and_the_others_are_judged(clone):
+    pages = [("a.md", "alice@example.com", None), (".sheaf.toml", "alice@example.com", None), ("b.md", "alice@example.com", None)]
+    status, answer = incoming.check_root(hub(clone), body(clone, *pages))
+    assert status == 200
+    assert answer["pages"][".sheaf.toml"] == {"ok": False, "why": "refused"}
+    assert answer["pages"]["a.md"] == {"ready": True}
+    assert answer["pages"]["b.md"] == {"ok": False, "why": "text_differs"}      # judged: the clone holds no b.md
+
+
+def test_a_first_page_with_a_path_that_is_not_a_markdown_path_does_not_refuse_the_root(clone):
+    h = hub(clone)
+    pages = [("notes.txt", "alice@example.com", None), ("a.md", "alice@example.com", None)]
+    status, answer = incoming.check_root(h, body(clone, *pages))
+    assert (status, answer) == (200, {"pages": {"notes.txt": {"ok": False, "why": "refused"}, "a.md": {"ready": True}}})
+    assert h.repos.calls[0][2] == "a.md"        # the report that makes the clone is of a page that can be reported

@@ -97,3 +97,10 @@ def test_take_back_leaves_the_age_of_a_version_the_landing_touched_as_it_was(tmp
     store.put(address, "# same\n")      # an incoming version identical to a prior one counts as written now
     store.take_back(address, before, ["# same\n"], stamps)
     assert store.stamps(address) == stamps
+
+
+def test_a_path_that_is_not_a_markdown_path_is_refused_alone_and_the_other_pages_still_queue(repos):
+    repos._queues[REPO.lower()] = []
+    got = repos.report_rest(REPO, "c0ffee1", [("al", "a.md"), ("al", ".sheaf.toml"), ("al", "b.md")])
+    assert got == {".sheaf.toml": "refused"}
+    assert [item[1] for item in repos._queues[REPO.lower()]] == ["a.md", "b.md"]

@@ -853,3 +853,91 @@ def test_a_root_added_under_a_name_is_not_named_clients_either(tmp_path, name):
     (tmp_path / "x").mkdir()
     with pytest.raises(roots.NameTaken):
         roots.Roots()._add(tmp_path / "x", False, name=name)
+
+
+# ── a listing's deadline (189 D, E) ──────────────────────────────────────────
+
+
+def test_a_git_root_gives_git_no_more_than_the_time_left_and_a_cut_call_is_stopped(tmp_path, monkeypatch):
+    """`git ls-files` had its own 20 s whatever the caller's budget, and its timeout read as "git gave no answer"
+    (`failed`). It is given what is left to the deadline, and a call the deadline cut is `stopped` (189 D)."""
+    repo = make_repo(tmp_path / "r")
+    md(repo / "a.md")
+    given = []
+
+    def run(*a, timeout=None, **k):
+        given.append(timeout)
+        raise subprocess.TimeoutExpired(a[0], timeout)
+    monkeypatch.setattr(roots.subprocess, "run", run)
+    listing = roots.list_documents(roots.Root("r", repo, True), deadline=time.monotonic() + 0.5)
+    assert given and given[0] <= 0.5, given
+    assert (listing.stopped, listing.failed) == (True, False)
+
+
+def test_a_git_root_whose_deadline_passed_does_not_ask_git(tmp_path, monkeypatch):
+    repo = make_repo(tmp_path / "r")
+    monkeypatch.setattr(roots.subprocess, "run", lambda *a, **k: pytest.fail("git asked past the deadline"))
+    listing = roots.list_documents(roots.Root("r", repo, True), deadline=time.monotonic() - 1)
+    assert (listing.stopped, listing.failed, listing.docs) == (True, False, [])
+
+
+def test_a_git_timeout_with_time_left_is_still_no_answer(tmp_path, monkeypatch):
+    """Without a deadline, or with more time left than git's own limit, a timeout is git not answering, as before."""
+    repo = make_repo(tmp_path / "r")
+
+    def run(*a, timeout=None, **k):
+        raise subprocess.TimeoutExpired(a[0], timeout)
+    monkeypatch.setattr(roots.subprocess, "run", run)
+    for deadline in (None, time.monotonic() + 3600):
+        listing = roots.list_documents(roots.Root("r", repo, True), deadline=deadline)
+        assert (listing.stopped, listing.failed) == (False, True)
+
+
+class _SlowFolder:
+    """`os.scandir` of a folder that gives one entry every 20 ms, as a huge folder on a slow disk does."""
+
+    def __init__(self, it):
+        self.it = it
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.it.close()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        time.sleep(0.02)
+        return next(self.it)
+
+    def close(self):
+        self.it.close()
+
+
+def test_a_walk_stops_at_its_deadline_inside_one_huge_folder(tmp_path, monkeypatch):
+    """The deadline was looked at between folders only, and a folder is read whole before the walk sees it: one folder
+    of 200 entries at 20 ms each ran 4 s past a 0.3 s budget (189 E). Wall time is the point here: it is the budget."""
+    top = tmp_path / "w"
+    top.mkdir()
+    for i in range(200):
+        (top / f"{i:03}.md").write_text("# x\n")
+    real = os.scandir
+    monkeypatch.setattr(os, "scandir", lambda p=".": _SlowFolder(real(p)))
+    t0 = time.monotonic()
+    listing = roots.list_documents(roots.Root("w", top, False), deadline=t0 + 0.3)
+    assert time.monotonic() - t0 < 1.5
+    assert listing.stopped
+
+
+def test_a_walk_in_time_lists_what_os_walk_listed(tmp_path):
+    """The walk that reads entry by entry keeps the order and the skips of `os.walk`: dot folders, `node_modules`,
+    and a link to a folder, which is not followed."""
+    top = tmp_path / "w"
+    for rel in ("b.md", "a/z.md", "a/b/c.md", ".hid/x.md", "node_modules/y.md", "c/d.md", "a/note.txt"):
+        (top / rel).parent.mkdir(parents=True, exist_ok=True)
+        (top / rel).write_text("# x\n")
+    (top / "linked").symlink_to(top / "c", target_is_directory=True)
+    got = list(roots._walk(top, time.monotonic() + 60))
+    assert got == ["b.md", "a/z.md", "a/b/c.md", "c/d.md"]

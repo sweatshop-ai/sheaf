@@ -198,6 +198,10 @@ class Diag:
             self._unpaired.add((repo, to))
             self._row("unpaired", repo=repo, to=to)
 
+    def paired(self, repo: str, to: str):
+        """The target is paired now: a later loss of the pairing is a state change again, and writes its row again."""
+        self._unpaired.discard((repo, to))
+
 
 class Inventory(NamedTuple):
     send: dict          # path -> owner: the pages that go and are forwarded

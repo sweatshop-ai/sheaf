@@ -224,3 +224,52 @@ def test_an_unpaired_target_is_written_to_the_diagnostics_once_across_sweeps(hub
     for _ in range(3):
         root_sender.sweep(hub, post=Receiver(), moves=root_moves.Moves(tmp_path / "state"))
     assert len(rows) == 1
+
+
+@pytest.fixture
+def rows(monkeypatch):
+    got = []
+    monkeypatch.setattr(root_moves.diagnostics, "record", lambda *a, **k: got.append((a[1], k)))
+    return got
+
+
+def kinds(rows):
+    return [k for k, _ in rows]
+
+
+def test_a_move_with_no_branch_writes_started_once_and_held_once(hub, tmp_path, rows):
+    hub.repos.saves_on = lambda repo: ("", "")
+    state, diag = root_moves.Moves(tmp_path / "state"), root_moves.Diag()
+    for _ in range(2):
+        assert root_sender.run(hub, "o/r", THERE, post=Receiver(), moves=state, diag=diag) == "held"
+    assert kinds(rows) == ["root-move-started", "root-move-held"]
+
+
+def test_a_move_whose_branch_appears_later_does_not_write_started_again(hub, tmp_path, rows):
+    real = hub.repos.saves_on
+    hub.repos.saves_on = lambda repo: ("", "")
+    state, diag = root_moves.Moves(tmp_path / "state"), root_moves.Diag()
+    root_sender.run(hub, "o/r", THERE, post=Receiver(), moves=state, diag=diag)
+    hub.repos.saves_on = real
+    root_sender.run(hub, "o/r", THERE, post=Receiver(ok("a.md", "b.md")), moves=state, diag=diag)
+    assert kinds(rows).count("root-move-started") == 1
+
+
+def test_a_move_held_only_by_a_combined_hold_writes_a_held_row(hub, tmp_path, rows):
+    (hub.repos.dest / "a.md").write_text("# changed\n")
+    git(hub.repos.dest, "-c", "user.name=a", "-c", "user.email=a@example.com", "commit", "-qam", "more")
+    state, diag = root_moves.Moves(tmp_path / "state"), root_moves.Diag()
+    for _ in range(2):
+        assert root_sender.run(hub, "o/r", THERE, post=Receiver(), moves=state, diag=diag) == "held"
+    held = [d for k, d in rows if k == "root-move-held"]
+    assert len(held) == 1 and "a.md" in held[0]["pages"]
+
+
+def test_a_target_paired_and_then_unpaired_again_writes_unpaired_again(hub, tmp_path, monkeypatch, rows):
+    diag = root_moves.Diag()
+    state = root_moves.Moves(tmp_path / "state")
+    for paired in (False, True, False):
+        monkeypatch.setattr(root_moves, "paired", lambda to, store=None, v=paired: v)
+        hub.repos.moved = None
+        root_sender.run(hub, "o/r", THERE, post=Receiver((200, {"pages": {}})), moves=state, diag=diag)
+    assert kinds(rows).count("root-move-unpaired") == 2

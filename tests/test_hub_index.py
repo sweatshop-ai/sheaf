@@ -314,7 +314,7 @@ def test_the_pandoc_runs_of_one_render_share_one_time_limit_shorter_than_the_cli
             raise subprocess.TimeoutExpired(cmd, timeout)
         return subprocess.CompletedProcess(cmd, 0, "", "")
     monkeypatch.setattr(_pandoc.subprocess, "run", slow)
-    monkeypatch.setattr(_pandoc.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(_pandoc, "_clock", lambda: now[0])
     world.hub.render(work / "start.md", {}, None)       # the page it serves says pandoc did not finish
     assert len(limits) >= 2, limits
     assert now[0] - 1000.0 <= _pandoc.TIMEOUT < client.RENDER_TIMEOUT, limits

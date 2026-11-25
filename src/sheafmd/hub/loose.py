@@ -9,6 +9,7 @@ import os
 import stat
 import threading
 import time
+from collections.abc import Iterable
 from pathlib import Path
 
 from .. import config, paths
@@ -142,13 +143,15 @@ def keep(root_path: Path, rel: str, on: bool = True) -> None:
 
 def keep_held(root_path: Path, rel: str, on: bool = True) -> None:
     """`keep` for a caller that holds `loose-keep.lock` already (the flock is not re-entrant)."""
-    held = marks(root_path)
-    if (rel in held) == on:
+    if not on:
+        unkeep_held(root_path, [rel])
         return
-    _put(root_path, KEEP.name, sorted([*held, rel] if on else [h for h in held if h != rel]), "keep marks")
+    held = marks(root_path)
+    if rel not in held:
+        _put(root_path, KEEP.name, sorted([*held, rel]), "keep marks")
 
 
-def unkeep_held(root_path: Path, rels) -> None:
+def unkeep_held(root_path: Path, rels: Iterable[str]) -> None:
     """Take the keep marks of every address of `rels` off in one write, for a caller that holds `loose-keep.lock` (the
     sweep's addresses with no page: one write per address would rewrite and sync the file N times under the lock)."""
     held = marks(root_path)

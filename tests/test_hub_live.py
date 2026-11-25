@@ -3,6 +3,7 @@
 No server here. A render callback that records what it was given stands in for the
 page, and a list stands in for the event stream.
 """
+import os
 import threading
 
 import pytest
@@ -1212,3 +1213,55 @@ def test_a_refresh_whose_first_look_at_the_file_cannot_decide_it_either_publishe
     doc._entry = Entry()
     assert doc.refresh() is rdl.RETRY and events == []
     assert doc.current() == (rds.md_hash(DOC), DOC)
+
+
+# Ticket 195 B (from #618): a read whose text is the one the tabs hold says nothing settled when the file moved during the
+# read, or could not be stat-ed before it. The caller keeps the (mtime, size) it saw only for a refresh that decided the file,
+# and a write in flight that ends with that same key would otherwise never be read.
+def test_an_unchanged_read_while_the_file_moves_is_not_taken_as_settled(made):
+    doc, md, rendered, events, _ = made()
+    real = doc._read
+
+    def read_then_moved():
+        text = real()
+        st = md.stat()
+        os.utime(md, ns=(st.st_atime_ns, st.st_mtime_ns + 1_000_000))       # a write in flight moves the file meanwhile
+        return text
+    doc._read = read_then_moved
+    assert doc.refresh() is rdl.RETRY and events == []
+
+
+def test_an_unchanged_read_of_a_file_that_could_not_be_stat_ed_is_not_taken_as_settled(made):
+    doc, md, rendered, events, _ = made()
+    doc._stamp = lambda: None
+    assert doc.refresh() is rdl.RETRY and events == []
+
+
+# Ticket 195 C (from #618): a rebuild (the render settings changed) reads the file as a refresh does: a read that a write
+# moved under is no text the tabs are told of. The page is rendered again from the text they hold, and the write is left to the
+# next refresh, which tells it whole.
+def test_a_rebuild_that_a_write_moved_under_tells_the_tabs_the_text_they_hold(made):
+    doc, md, rendered, events, _ = made()
+    torn, whole = "# Title\n\nFirst par", DOC.replace("First paragraph.", "First, reworded.")
+    md.write_text(torn, encoding="utf-8")
+    writes = iter([lambda: md.write_text(whole, encoding="utf-8")])
+    served = []
+    doc._render = lambda text: (served.append(text), next(writes, lambda: None)())[1]
+    snap = doc.rebuild()
+    assert served == [torn, DOC]
+    assert doc.current() == (rds.md_hash(DOC), DOC)
+    assert [n for n, _ in events] == ["changed"] and events[0][1]["hash"] == rds.md_hash(DOC) == snap["hash"]
+    assert rds.md_hash(torn) not in doc._versions
+    events.clear()
+    assert doc.refresh()["hash"] == rds.md_hash(whole) and [n for n, _ in events] == ["changed"]
+
+
+# Ticket 195 A (from #618): a forgotten document tells its tabs nothing more: `gone` comes after its forget, so a refresh or a
+# rebuild that takes the document's lock after the forget would publish `changed` after the page heard `gone`.
+def test_a_forgotten_document_publishes_no_change(made):
+    doc, md, rendered, events, _ = made()
+    doc.forget()
+    md.write_text(DOC.replace("First paragraph.", "First, reworded."), encoding="utf-8")
+    assert doc.refresh() is None
+    assert doc.rebuild() is None
+    assert events == []

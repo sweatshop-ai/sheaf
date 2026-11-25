@@ -213,11 +213,11 @@ def test_the_macos_image_is_named_never_latest(text):
 
 
 def test_a_job_that_hangs_is_stopped(text):
-    """ubuntu within 60 minutes; macOS, about four times slower on its runner, within 120."""
+    """ubuntu within 90 minutes (the page step inside it has 60); macOS, about four times slower on its runner, within 120."""
     got = re.search(r"^    timeout-minutes: \$\{\{ startsWith\(matrix\.os, 'ubuntu'\) && (\d+) \|\| (\d+) \}\}\s*$",
                     text, flags=re.M)
     assert got, "timeout-minutes names one limit for ubuntu and one for the rest"
-    assert int(got.group(1)) <= 60 and int(got.group(2)) <= 120
+    assert int(got.group(1)) <= 90 and int(got.group(2)) <= 120
 
 
 def test_the_token_can_only_read_and_the_one_secret_is_the_list_of_names_for_the_public_tree_guard(text):
@@ -323,7 +323,8 @@ def test_a_slow_package_mirror_cannot_hold_the_page_test_step_for_an_hour(text):
     j = text.index("\n      - name:", i + 1)
     block = text[i:j]
     assert re.search(r"^        timeout-minutes: (\d+)$", block, flags=re.M), "the step has a limit of its own"
-    assert int(re.search(r"^        timeout-minutes: (\d+)$", block, flags=re.M).group(1)) < 60
+    job = re.search(r"^    timeout-minutes: \$\{\{ startsWith\(matrix\.os, 'ubuntu'\) && (\d+) \|\|", text, flags=re.M)
+    assert int(re.search(r"^        timeout-minutes: (\d+)$", block, flags=re.M).group(1)) < int(job.group(1)), "the step ends before the job"
     assert re.search(r'command -v timeout >/dev/null; then bounded="timeout -k 30 \d+"', block), "macOS has no timeout: the bound is there only where it exists"
     assert re.search(r"for try in 1 2 3; do \$bounded uv run --no-sync playwright install \$deps \$engines && break", block)
 

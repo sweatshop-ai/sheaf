@@ -203,12 +203,12 @@ def test_the_keys_an_old_connection_is_barred_from_are_bounded(world, docs):
     from sheafmd.hub.handler import _SharedStream
     old = shared(world)
     new = shared(world, sid="n" * 24)
-    n = _SharedStream.BARS + 5
+    n = _SharedStream.BARRED_MAX + 5
     for i in range(n):
         assert join(world, f"t{i}:1", docs[0], sid="n" * 24).status == 200
         assert world.post("/_/live/leave", {"stream": "n" * 24, "key": f"t{i}:1"}).status == 200
-    held = world.handler._shared[SID]
-    assert len(held.barred) == _SharedStream.BARS
+    assert len(old.barred) == _SharedStream.BARRED_MAX       # no other way to see the bound than the set itself
+    assert not old.bars("t0:1") and old.bars(f"t{n - 1}:1")
     assert join(world, f"t{n - 1}:1", docs[0]).status == 200   # the newest bar holds
     assert old.keys() == []
     old.close()

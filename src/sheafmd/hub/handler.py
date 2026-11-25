@@ -264,15 +264,20 @@ class _SharedStream(events.Shared):
         self.seq = 0                     # set when it is listed: a newer stream has a higher one
         # Keys a newer stream of the same owner took: a late join of one here is dropped (ticket 193). Kept here, on
         # the stream that must refuse, so the newer stream closing or coming back under its id takes no bar away.
-        # Bounded, the oldest dropped first: a late join arrives seconds after the hand-over, not BARS tabs later.
-        self.barred: dict = {}
+        # Bounded, the oldest dropped first: a late join comes seconds after the hand-over, not BARRED_MAX tabs later.
+        self.barred: dict = {}           # key -> None, an ordered set: the oldest bar first
 
-    BARS = 1000
+    BARRED_MAX = 1000                    # keys barred on one stream at most
 
-    def bar(self, key: str):
+    def bars(self, key: str) -> bool:
+        """Whether a join of `key` here comes late: a newer stream of the same owner took the key."""
+        return key in self.barred
+
+    def taken_by_newer(self, key: str):
+        """A newer stream of the same owner took `key`: a join of it here is dropped from now on."""
         self.barred.pop(key, None)
         self.barred[key] = None
-        while len(self.barred) > self.BARS:
+        while len(self.barred) > self.BARRED_MAX:
             del self.barred[next(iter(self.barred))]
 
     def close(self):
@@ -1079,14 +1084,14 @@ class Handler:
         # The old leader's own join of the key can reach the hub after that (ticket 181 D): once a newer connection
         # had the key, held still, left, closed or opened again since (ticket 193), the late join is dropped.
         with self._join_lock:
-            if key not in stream.barred:
+            if not stream.bars(key):
                 with self._shared_lock:
                     others = [s for s in self._shared.values() if s is not stream and s.owner == stream.owner]
                 stream.join(key, sub)
                 for other in others:
                     other.leave(key)
                     if other.seq < stream.seq:
-                        other.bar(key)
+                        other.taken_by_newer(key)
                 return _ok()
         if not isinstance(sub, int):
             sub.close()

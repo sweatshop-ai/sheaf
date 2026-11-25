@@ -9,18 +9,18 @@ The one local process that serves every document.
 _Avoid_: server, per-document server
 
 **Root**:
-A git repo (or a folder outside git) whose documents the hub serves, named after its folder.
+A place whose rectoversos the hub serves: a git repo or a folder outside git, named after its folder, or a source a source adapter reads, named in the user config. Inside a source, a rectoverso's path is the adapter's own name for the document. (Widened 2026-11-24, wayfinder `sheaf-modular-editor` ticket 09.)
 _Avoid_: project, collection
 
 **Core**:
 What every sheaf user gets: rendering, editing, comments, the agent adapter, the plain theme.
 
 **Layer**:
-An organisation's additions on top of the core, made of a theme, a root config, and separate programs that use sheaf as a library.
+An organisation's additions on top of the core, made of a theme, a root config, source services for its own sites, and separate programs that use sheaf as a library.
 _Avoid_: plugin, extension
 
 **Theme**:
-A folder of data that gives pages their look: stylesheet, fonts, wordmark, PDF footer. `plain` is built in.
+A folder of data that gives pages and their Blocks their look: stylesheet, fonts, wordmark, PDF footer. `plain` is built in. Only the hub's admin writes one.
 _Avoid_: skin, brand
 
 **Root config**:
@@ -272,3 +272,79 @@ _Avoid_: voice message, speech-to-text send
 **Shared with me**:
 The top-level folder of a member's Sheaf that holds the loose pages other members Shared with them, one sub-folder per owner. It tells nothing of the owner's own folders. A row in it is `new` until the member opens the page, and again when the page changed since. See SPEC 9.11, "Share on a loose page".
 _Avoid_: inbox, received
+
+**Block**:
+One unit of a rectoverso's recto that a member can add, move or remove as a whole: a paragraph, a heading, a list, a callout. Every block has exactly one Block type. (Named 2026-11-23, wayfinder `sheaf-modular-editor` ticket 04.)
+_Avoid_: section, element, node
+
+**Block type**:
+The kind of a Block and the attributes it may carry, one fixed set declared by sheaf itself: paragraph, heading, list, quote, table, image, callout, columns, app, and the button, which is Inline content rather than a Block. A member cannot define a type of their own.
+_Avoid_: widget, component
+
+**Rich block**:
+A Block whose type has no plain Markdown form (callout, columns, app). It keeps a stored id of its own; a callout or column may hold plain Blocks, one level deep.
+_Avoid_: HTML block, island, custom block
+
+**App**:
+A Rich block holding code that a member or an assistant wrote and that runs when the page shows it, sealed: on a host apart from the front, cut off from the page, the member and the network. A reader without the editor sees its code. (Named 2026-11-24, wayfinder `sheaf-modular-editor` ticket 05.)
+_Avoid_: artifact, widget, script block, embed
+
+**Apps host**:
+The one host, on a domain of its own and never the front's, that serves every App to the page that shows it. On the laptop it is a second loopback port.
+_Avoid_: sandbox domain, usercontent site
+
+**Run report**:
+What one view of an App tells the hub about one version of it: whether it loaded and the errors it threw. It comes only from a page a person opened; an App nobody has viewed since its last change has none yet. (Named 2026-11-24, wayfinder `sheaf-modular-editor` ticket 08.)
+_Avoid_: App log, test run, preview result
+
+**Container**:
+A Block that holds other Blocks: columns, column and callout, and Markdown's own quote and list item. A quote or list item holds plain Blocks only. (Named 2026-11-24, wayfinder `sheaf-modular-editor` ticket 07.)
+_Avoid_: parent, wrapper, group
+
+**Inline content**:
+What a Block holds that is not a Block itself: text, links, an image inside a sentence or a table cell, a button. It has no id of its own and moves with its Block. (Named 2026-11-24, wayfinder `sheaf-modular-editor` ticket 07.)
+_Avoid_: inline block, span block
+
+**Source adapter**:
+The one piece through which the block editor reads and writes a page's source as a whole document. There are two: the Markdown-file adapter for a folder root, and the remote adapter, which reaches every other source through its Source service. (Named 2026-11-24, wayfinder `sheaf-modular-editor` ticket 07; two adapters only since ticket 13, 2026-11-25.)
+_Avoid_: connector, driver, backend, plugin
+
+**Block change**:
+One insertion, move, removal or edit of a single Block, as core finds it by comparing a save with the version it was based on. A change of type or attributes is an edit; a drag into another container is a move. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 14.)
+_Avoid_: diff entry, operation (an agent's request is an op; a block change is what core finds)
+
+**Block comment**:
+A Comment on a whole Block rather than on a passage of its text, for a Block that has no text to select (an image, an App, columns) or when the remark is about the Block as a whole. It moves with its Block and becomes an orphan when its Block is removed. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 16.)
+_Avoid_: block note, block annotation
+
+**Comment store**:
+Where the hub keeps the Comments of a page whose source cannot hold them, that is every source reached through a Source service, each tied to its document and Block. A Markdown file never uses it: its Comments stay in the file. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 16.)
+_Avoid_: comment database, sidecar, hub-side store
+
+**Version**:
+A state of a rectoverso's text that its version list shows: a commit of the file in a root that commits, an entry of the Versions store otherwise, or a version its Source service lists. A save that changes only comments is none. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 17.)
+_Avoid_: revision, snapshot, history entry
+
+**Named version**:
+A Version a member or an agent gave a name, shown when the version list shows named ones only, and never pruned. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 17.)
+_Avoid_: checkpoint, tag, milestone
+
+**Compare mode**:
+The page showing a rectoverso as it was at a chosen Version, with that Version's Block changes marked in their authors' colours, against the Version before it or against the current page. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 17.)
+_Avoid_: diff view, track changes, suggestion mode
+
+**Source service**:
+A program the owner of a source runs beside it, which holds the source's credentials, turns its documents into blocks and back, checks its rules and names the commit's author; the hub reaches it through the remote adapter and holds no key to the source. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 13.)
+_Avoid_: backend, adapter server, connector
+
+**Stub**:
+A Block whose type the page does not know. It is shown locked and written back byte for byte, never dropped and never refused.
+_Avoid_: invalid block, unknown block error
+
+**Theme property**:
+One named value of a Block's look (a callout tone, a button colour, a padding step, a radius) that a Theme may set; a Theme that leaves one out gets sheaf's default. The names are a promise kept across versions. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 15.)
+_Avoid_: theme variable, token, design token
+
+**Editor chrome**:
+The controls the block editor draws around Blocks while a member edits: gutter, add and drag handles, block toolbar, slash menu, selection outline. It is sheaf's own; a Theme gives it a font and an accent colour and nothing else. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 15.)
+_Avoid_: editor UI, toolbar (for the whole), editor skin

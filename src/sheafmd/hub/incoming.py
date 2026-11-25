@@ -282,6 +282,11 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
     except repos_mod.Refused:
         return 409, {"why": "refused"}
     judged, owned, unmoved = {}, [], False
+    deadline = time.monotonic() + channel.SECONDS         # the sender's own wait: every wait of this call, the sleep again too, ends by it
+
+    def _wait() -> float:
+        """What one wait of this call may take: half the sender's wait, and never past the call's deadline."""
+        return max(0.0, min(channel.SECONDS / 2, deadline - time.monotonic()))
     for p in b["pages"]:
         owner, why = owner_for(hub, p["owner_email"])
         if owner is None:
@@ -307,7 +312,7 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
         def _left(status, answer):
             """The check ends without a 200: a root it unmoved goes back to sleep, so the sender's next try finds it as it was."""
             if unmoved:
-                _sleep_again(repos, repo, root_moves.origin(peer))
+                _sleep_again(repos, repo, root_moves.origin(peer), deadline)
             return status, answer
         try:
             said = repos.report(first[0].short or first[0].id, repo, first[1], b["tip"], privates, {}, row=False)
@@ -320,7 +325,7 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
             return _left(409, {"why": clone.replace("-", "_")})
         if clone != repos_mod.OK or not said.get("commit_known"):
             return _left(202, {"state": "cloning"})
-        if not repos.settle(channel.SECONDS / 2, repo=repo):       # the report's own thread writes the page's row and keeps the repo busy: it ends before any page lands or the clone sleeps
+        if not repos.settle(_wait(), repo=repo):       # the report's own thread writes the page's row and keeps the repo busy: it ends before any page lands or the clone sleeps
             return _left(202, {"state": "cloning"})
         named = config.tiroir_named(repos.root_toml(repo, b["tip"]) or "")
         if named is None or root_moves.origin(named) != root_moves.origin(hub.proxy.origin):
@@ -333,7 +338,7 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
                 judged[path] = {"ok": False, "why": state_.replace("-", "_")}
         except repos_mod.Refused:
             return _left(409, {"why": "refused"})
-        if not repos.settle(channel.SECONDS / 2, repo=repo):
+        if not repos.settle(_wait(), repo=repo):
             return _left(202, {"state": "cloning"})
         dest = repos.clone_dir(repo)
         for p in b["pages"]:
@@ -346,14 +351,18 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
 SLEEP_TRIES = 3
 
 
-def _sleep_again(repos, repo: str, to: str):
+def _sleep_again(repos, repo: str, to: str, deadline: float):
     """A root this call unmoved goes back to sleep as moved to `to`. A report queued meanwhile makes `sleep_moved` answer False
-    ("ask again"): so it waits for the repo's thread and asks again, a few times; a root that still will not sleep is told to the
-    diagnostics, not left unsaid."""
+    ("ask again"): so it waits for the repo's thread and asks again, a few times, but never past `deadline` (the sender's own
+    wait: the call must not outlast it); it asks at least once. A root that still will not sleep is told to the diagnostics,
+    not left unsaid; the sender's next try finds it awake and unmoved, which that call handles as any root."""
     for _ in range(SLEEP_TRIES):
         if repos.sleep_moved(repo, to):
             return
-        repos.settle(channel.SECONDS / 2, repo=repo)
+        left = deadline - time.monotonic()
+        if left <= 0:
+            break
+        repos.settle(min(channel.SECONDS / 2, left), repo=repo)
     diagnostics.record("hub", "root-not-asleep-again", repo=repo)
 
 

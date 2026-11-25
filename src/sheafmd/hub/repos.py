@@ -190,6 +190,12 @@ def ssh_hostname(host: str, config: str | None = None) -> str | None:
     return None
 
 
+def _queue_key(item: tuple) -> tuple:
+    """What makes two queued reports one: the member, the page, the commit, and whether the report writes a row for the page."""
+    declared = (item[3] if len(item) > 3 else None) or {}
+    return item[:3] + (bool(declared.get(NO_ROW)),)
+
+
 class Repos:
     def __init__(self, base: Path, provider, remote_url=None):
         self.base, self.provider = Path(base), provider
@@ -842,18 +848,19 @@ class Repos:
 
     def _enqueue(self, repo: str, *items: tuple, cap: bool = True):
         """Queue the reports `items` for the repo's thread, which is started when there is none. A report whose member, path and
-        commit are queued already is not queued twice; past `MAX_QUEUED` a report is dropped, unless `cap` is False."""
+        commit are queued already is not queued twice, a clone-only report (`NO_ROW`) apart from one that writes a row: the first
+        must not swallow the second, whose row would then never be written; past `MAX_QUEUED` a report is dropped, unless `cap` is False."""
         with self._guard:
             queue = self._queues.get(repo)
             if queue is not None:
-                queued = {q[:3]: n for n, q in enumerate(queue)}
+                queued = {_queue_key(q): n for n, q in enumerate(queue)}
                 for item in items:
-                    if (n := queued.get(item[:3])) is not None:
+                    if (n := queued.get(_queue_key(item))) is not None:
                         if queue[n][4] is None and item[4] is not None:     # the retry of a report that was refused is the one that leaves the line
                             queue[n] = queue[n][:3] + item[3:]       # with its declared: a clone-only report queued first must not swallow the row
                     elif not cap or len(queue) < MAX_QUEUED:
                         queue.append(item)
-                        queued[item[:3]] = len(queue) - 1
+                        queued[_queue_key(item)] = len(queue) - 1
                 return
             self._queues[repo] = list(items)
             self._start(repo, self._drain, repo)           # under the guard, as in sleep()

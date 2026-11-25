@@ -1412,3 +1412,17 @@ def test_a_report_sent_again_after_a_refused_one_is_the_one_that_leaves_the_line
     gate.set()
     assert repos.settle()
     assert len(hub_repos.hub.writes.lines(f"{repos_mod.root_name(REPO)}/docs/plan.md")) == 1
+
+
+# ── ticket 37: the queue's dedupe keeps a row-writing report apart from a clone-only one ──
+
+def test_a_clone_only_report_queued_first_does_not_swallow_the_laptops_report_of_the_same_page(tmp_path, origin, monkeypatch):
+    repos = Repos(tmp_path / "clones", FakeApp(installed=()), remote_url=lambda repo: str(origin))
+    monkeypatch.setattr(repos, "_start", lambda *a, **k: None)         # no thread: the queue is what is looked at
+    only = ("bea", "docs/plan.md", "a" * 40, {repos_mod.NO_ROW: True}, None)
+    real = ("bea", "docs/plan.md", "a" * 40, {}, None)
+    repos._enqueue(REPO, only)
+    repos._enqueue(REPO, real)
+    repos._enqueue(REPO, real)                                          # the same report twice is still one
+    repos._enqueue(REPO, only)
+    assert list(repos._queues.values()) == [[only, real]]

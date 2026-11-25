@@ -790,6 +790,42 @@ def test_a_failed_landing_takes_back_the_write_log_lines_it_carried_and_no_other
     assert h.writes.took_back == [("o--r/a.md", h.writes.made)] and h.writes.restored == []
 
 
+# ── ticket 37: the whole call stays within the sender's wait, a busy repo thread or not ──
+
+def test_a_root_put_back_to_sleep_while_the_repo_thread_stays_busy_is_answered_within_the_senders_wait(clone, monkeypatch):
+    import time
+    from sheafmd import diagnostics
+    from sheafmd.hub import channel
+    monkeypatch.setattr(channel, "SECONDS", 0.6)
+    set_toml(clone, 'tiroir = "https://other.example"\n')            # not named: the call ends without a 200 after it unmoved
+    h = moved_hub(clone)
+    waited, noted = [], []
+
+    def stuck_settle(seconds=120.0, repo=None):                      # the repo's thread never ends: each wait runs to its limit
+        waited.append(seconds)
+        time.sleep(seconds)
+        return False
+    h.repos.settle = stuck_settle
+    h.repos.sleep_moved = lambda repo, to: False                       # a report is always being settled: "ask again"
+    monkeypatch.setattr(diagnostics, "record", lambda *a, **k: noted.append((a, k)))
+    start = time.monotonic()
+    incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)), peer=THERE)
+    assert time.monotonic() - start <= channel.SECONDS + 0.3          # never the 2 x SECONDS a wait of its own per try gave
+    assert sum(waited) <= channel.SECONDS + 0.01
+    assert noted == [(("hub", "root-not-asleep-again"), {"repo": "o/r"})]      # told to the diagnostics, not left unsaid
+
+
+def test_a_root_whose_repo_thread_frees_up_during_the_wait_ends_asleep(clone, monkeypatch):
+    from sheafmd import diagnostics
+    set_toml(clone, 'tiroir = "https://other.example"\n')
+    h = moved_hub(clone)
+    h.repos.sleep_fails = 2                                            # two "ask again" before the thread frees up
+    noted = []
+    monkeypatch.setattr(diagnostics, "record", lambda *a, **k: noted.append(a))
+    assert incoming.check_root(h, body(clone, ("a.md", "alice@example.com", None)), peer=THERE) == (409, {"why": "not_named"})
+    assert h.repos.slept == [("o/r", THERE)] and noted == []
+
+
 def test_a_page_path_that_is_not_a_markdown_path_is_refused_alone_and_the_others_are_judged(clone):
     pages = [("a.md", "alice@example.com", None), (".sheaf.toml", "alice@example.com", None), ("b.md", "alice@example.com", None)]
     status, answer = incoming.check_root(hub(clone), body(clone, *pages))

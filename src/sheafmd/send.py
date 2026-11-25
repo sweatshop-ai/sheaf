@@ -299,9 +299,9 @@ class Door:
                 if status != 200 or not isinstance(tools, list):
                     break
                 listed |= {t["name"] for t in tools if isinstance(t, dict) and isinstance(t.get("name"), str)}
-                self.listed = set(listed)
                 cursor = result.get("nextCursor")
                 if not isinstance(cursor, str) or not cursor:
+                    self.listed = set(listed)       # the whole list was read: a partial one says nothing about a missing tool
                     break
             # A door lists the hub's `create`, `update` and `read` under one prefix (`<prefix>create`...) and may list a tool of
             # its own that keeps a bare name, `read` among them: so the prefix is the one under which all three stand.

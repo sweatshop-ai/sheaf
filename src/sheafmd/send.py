@@ -239,6 +239,7 @@ class Door:
         self.origin, self.token, self.headers, self.n = origin, token, dict(headers), 0
         self.started = False
         self.names: dict[str, str] | None = None     # the tool names the server lists, by the bare name (see `_name`)
+        self.listed: set[str] = set()                # every tool name its `tools/list` gave; empty when it could not be read
         self.landed = False  # a create or update was answered 200: the tiroir holds the text, whatever comes after
         self.wrote = False   # a create or update has been sent: from then on the tiroir may hold the text
 
@@ -298,6 +299,7 @@ class Door:
                 if status != 200 or not isinstance(tools, list):
                     break
                 listed |= {t["name"] for t in tools if isinstance(t, dict) and isinstance(t.get("name"), str)}
+                self.listed = set(listed)
                 cursor = result.get("nextCursor")
                 if not isinstance(cursor, str) or not cursor:
                     break
@@ -308,6 +310,14 @@ class Door:
             if len(prefixes) == 1:                  # every tool of the hub is then called under it, listed or not
                 self.names = {bare: prefixes[0] + bare for bare in _HUB_TOOLS}
         return self.names.get(name, name)
+
+    def lacks(self, name: str) -> bool:
+        """True when the server's `tools/list` was read and does not name the tool `name` (under its prefix, if any). A
+        list that could not be read says nothing: the call is then made, as before."""
+        if not self.started:
+            self._start()
+        sent = self._name(name)
+        return bool(self.listed) and sent not in self.listed
 
     def tool(self, name: str, arguments: dict) -> tuple[bool, object]:
         """(is it an error, the parsed result or the sentence of the error) of one tool call."""
@@ -646,6 +656,9 @@ def report_page(md: Path, top: Path, origin: str, token: str, args, out, err, en
         return None
     door = Door(origin, token, declared(environ))
     try:
+        if door.lacks("render_report"):
+            err(f"sheaf: {origin} does not take render reports yet; rendering {md} on this laptop.")
+            return None
         bad, got = door.tool("render_report", {"repo": repo, "path": path, "commit": commit})
         report = None if bad else parse_report(origin, got)
     except Unreachable as e:

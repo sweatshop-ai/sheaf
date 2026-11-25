@@ -375,6 +375,11 @@ def _page_shape(b) -> str | None:
     return None
 
 
+def _answer_key(came_from: str, b, p) -> str:
+    """The key `transfers.json` keeps a landed page's answer under, for `land_root`'s lookup and `_land_page`'s write alike: keyed by peer."""
+    return f"{root_moves.origin(came_from)}:{b['id']}:{p['path']}"
+
+
 def land_root(hub, b, peer: str | None = None) -> tuple:
     """Second stage of a root moved here: `check_root`, and for each page it found `ready` the page's record, versions and
     Write log lines, each page whole or not at all. Anything but a 200 of the check is answered as it is. `(200, {pages:
@@ -393,7 +398,7 @@ def land_root(hub, b, peer: str | None = None) -> tuple:
     by = (b.get("from") or {}).get("by") if isinstance(b.get("from"), dict) else None
     for p in b["pages"]:
         with state.file_locked("transfers.lock"):       # a send whose confirmation was lost is answered again, whatever the check says now
-            known = state.read_json(_answers(), {}).get(f"{b['id']}:{p['path']}")
+            known = state.read_json(_answers(), {}).get(_answer_key(came_from, b, p))
         if isinstance(known, dict):
             pages[p["path"]] = {"ok": True, **known}
         elif pages.get(p["path"]) == {"ready": True}:
@@ -416,7 +421,7 @@ def _versions_for(hub, repo: str):
 
 def _land_page(hub, b, p, owner, came_from: str, by: str) -> dict:
     """The landing of one page of `land_root`, with `transfers.lock` held."""
-    key, address = f"{root_moves.origin(came_from)}:{b['id']}:{p['path']}", f"{repos_mod.root_name(b['repo'])}/{p['path']}"
+    key, address = _answer_key(came_from, b, p), f"{repos_mod.root_name(b['repo'])}/{p['path']}"
     known = state.read_json(_answers(), {}).get(key)
     if isinstance(known, dict):
         return {"ok": True, **known}

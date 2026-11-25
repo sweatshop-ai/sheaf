@@ -817,3 +817,15 @@ def test_a_repeat_after_the_tip_moved_on_is_answered_with_the_first_answer_for_a
     b["tip"] = git(clone, "rev-parse", "dev")            # the same id and page, the blob no longer at the tip
     assert incoming.land_root(h, b) == first
     assert len(h.writes.carried) == 1
+
+
+def test_a_repeat_from_a_named_peer_after_the_tip_moved_on_is_answered_with_the_first_answer(clone):
+    h = land_hub(clone)
+    b = body(clone, ("a.md", "alice@example.com", None))
+    first = incoming.land_root(h, b, peer="https://peer.example")
+    (clone / "a.md").write_text("# A moved on\n")
+    git(clone, "-c", "user.name=a", "-c", "user.email=a@example.com", "commit", "-qam", "moved")
+    git(clone, "push", "-q", "origin", "dev")
+    b["tip"] = git(clone, "rev-parse", "dev")
+    assert incoming.land_root(h, b, peer="HTTPS://Peer.example/") == first      # the key is the peer's origin, spelled otherwise
+    assert len(h.writes.carried) == 1

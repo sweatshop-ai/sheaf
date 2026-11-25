@@ -29,6 +29,8 @@ SAYS = {
 }
 MAX_VERSIONS = 60       # `Versions` keeps no more
 MAX_WRITES = 200
+MAX_RECORD_FIELD = 2048        # a page's `session`, `host` or `link` of the sender
+MAX_VERSION_TEXT = 2_000_000   # one version's text, in characters
 
 
 def owner_for(hub, email) -> tuple:
@@ -360,9 +362,13 @@ def _page_shape(b) -> str | None:
     for p in b["pages"]:
         if p.get("record") is not None and not isinstance(p["record"], dict):
             return "a page's record is not an object"
+        for k in ("session", "host", "link"):
+            v = (p.get("record") or {}).get(k)
+            if v is not None and not (isinstance(v, str) and len(v) <= MAX_RECORD_FIELD):
+                return f"a page's record {k} is not short text"
         versions, writes = p.get("versions", []), p.get("writes", [])
         if not (isinstance(versions, list) and len(versions) <= MAX_VERSIONS
-                and all(isinstance(v, dict) and isinstance(v.get("text"), str) for v in versions)):
+                and all(isinstance(v, dict) and isinstance(v.get("text"), str) and len(v["text"]) <= MAX_VERSION_TEXT for v in versions)):
             return "a page's versions are not versions"
         if not (isinstance(writes, list) and len(writes) <= MAX_WRITES and all(isinstance(w, dict) for w in writes)):
             return "a page's Write log lines are not lines"
@@ -386,7 +392,11 @@ def land_root(hub, b, peer: str | None = None) -> tuple:
     came_from = peer or ""          # the origin the channel's token names: the body's `from.origin` is the sender's own word
     by = (b.get("from") or {}).get("by") if isinstance(b.get("from"), dict) else None
     for p in b["pages"]:
-        if pages.get(p["path"]) == {"ready": True}:
+        with state.file_locked("transfers.lock"):       # a send whose confirmation was lost is answered again, whatever the check says now
+            known = state.read_json(_answers(), {}).get(f"{b['id']}:{p['path']}")
+        if isinstance(known, dict):
+            pages[p["path"]] = {"ok": True, **known}
+        elif pages.get(p["path"]) == {"ready": True}:
             owner, _ = owner_for(hub, p["owner_email"])
             with state.file_locked("transfers.lock"):       # held to the end of the page: two sends of one id land one page
                 pages[p["path"]] = _land_page(hub, b, p, owner, came_from,
@@ -412,11 +422,19 @@ def _land_page(hub, b, p, owner, came_from: str, by: str) -> dict:
         return {"ok": True, **known}
     store = _versions_for(hub, b["repo"])
     was_versions, stamps = (store.texts(address), store.stamps(address)) if store is not None else ([], {})     # what the address kept before, and how old: a page that came back has them
-    with hub.writes.own_lines() as mine:
-        return _land_page_steps(hub, b, p, owner, came_from, by, key, address, store, was_versions, stamps, mine)
+    writer = object()      # the landing's own name in the claims of the folder (`Versions.watch`): what another writer saves is theirs
+    if store is not None:
+        store.watch(address, writer)
+    try:
+        with hub.writes.own_lines() as mine:
+            return _land_page_steps(hub, b, p, owner, came_from, by, key, address, store, was_versions, stamps, mine, writer)
+    finally:
+        if store is not None:
+            with contextlib.suppress(Exception):
+                store.unwatch(address, writer)
 
 
-def _land_page_steps(hub, b, p, owner, came_from, by, key, address, store, was_versions, stamps, mine) -> dict:
+def _land_page_steps(hub, b, p, owner, came_from, by, key, address, store, was_versions, stamps, mine, writer=None) -> dict:
     recorded, made = False, []
     try:
         prior = hub.repos.land_record(b["repo"], p["path"], owner.short or owner.id, b["tip"], p.get("record") or {})
@@ -425,7 +443,7 @@ def _land_page_steps(hub, b, p, owner, came_from, by, key, address, store, was_v
             if store is None:
                 break
             made.append(visibility.set_keys(visibility.without_ticked_share(v["text"]), {"shared": None}))
-            store.put(address, made[-1])
+            store.put(address, made[-1], writer)
         hub.writes.carry(address, p.get("writes", []), came_from, by)
         answer = {"hash": p["blob"]}
         state.write_json(_answers(), {**state.read_json(_answers(), {}), key: answer})
@@ -435,7 +453,7 @@ def _land_page_steps(hub, b, p, owner, came_from, by, key, address, store, was_v
                 hub.repos.drop_record(b["repo"], p["path"], prior)
         if store is not None:
             with contextlib.suppress(Exception):
-                store.take_back(address, was_versions, made, stamps)
+                store.take_back(address, was_versions, made, stamps, writer)
         with contextlib.suppress(Exception):
             hub.writes.undo(address, mine)
         if not isinstance(e, Exception):

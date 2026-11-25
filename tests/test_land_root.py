@@ -372,15 +372,21 @@ class Versions:
     def stamps(self, address):
         return {}
 
-    def put(self, address, text):
+    def put(self, address, text, writer=None):
         if self.fail:
             raise OSError("disk full")
         self.puts.append((address, text))
 
+    def watch(self, address, writer):
+        pass
+
+    def unwatch(self, address, writer):
+        pass
+
     def texts(self, address):
         return list(self.before)
 
-    def take_back(self, address, before, made, stamps=None):
+    def take_back(self, address, before, made, stamps=None, writer=None):
         self.taken_back.append((address, list(before), list(made)))
 
 
@@ -525,7 +531,7 @@ def test_a_failed_landing_restores_the_row_the_page_had_and_is_not_remembered(cl
 def test_one_page_failing_does_not_stop_the_next(clone):
     h = land_hub(clone)
     real = h.versions.put
-    h.versions.put = lambda address, text: (_ for _ in ()).throw(OSError("x")) if address.endswith("a.md") else real(address, text)
+    h.versions.put = lambda address, text, writer=None: (_ for _ in ()).throw(OSError("x")) if address.endswith("a.md") else real(address, text)
     (clone / "b.md").write_text("# B\n")
     git(clone, "add", "b.md")
     git(clone, "-c", "user.name=a", "-c", "user.email=a@example.com", "commit", "-qm", "b")
@@ -570,7 +576,10 @@ def test_the_peer_is_passed_on_to_the_check(clone):
 
 @pytest.mark.parametrize("extra", [{"record": "x"}, {"record": ["a"]}, {"versions": "x"}, {"versions": [{"nope": 1}]}, {"versions": [3]},
                                    {"versions": [{"text": "x"}] * (incoming.MAX_VERSIONS + 1)}, {"writes": [3]}, {"writes": "x"},
-                                   {"writes": [{}] * (incoming.MAX_WRITES + 1)}])
+                                   {"writes": [{}] * (incoming.MAX_WRITES + 1)},
+                                   {"record": {"session": ["s"]}}, {"record": {"host": {"a": 1}}}, {"record": {"link": 3}},
+                                   {"record": {"session": "s" * (incoming.MAX_RECORD_FIELD + 1)}},
+                                   {"versions": [{"text": "x" * (incoming.MAX_VERSION_TEXT + 1)}]}])
 def test_a_page_with_a_malformed_extra_is_a_value_error_before_anything_is_written(clone, extra):
     h = land_hub(clone)
     b = body(clone, ("a.md", "alice@example.com", None))
@@ -796,3 +805,15 @@ def test_a_first_page_with_a_path_that_is_not_a_markdown_path_does_not_refuse_th
     status, answer = incoming.check_root(h, body(clone, *pages))
     assert (status, answer) == (200, {"pages": {"notes.txt": {"ok": False, "why": "refused"}, "a.md": {"ready": True}}})
     assert h.repos.calls[0][2] == "a.md"        # the report that makes the clone is of a page that can be reported
+
+
+def test_a_repeat_after_the_tip_moved_on_is_answered_with_the_first_answer_for_a_page_that_landed(clone):
+    h = land_hub(clone)
+    b = body(clone, ("a.md", "alice@example.com", None))
+    first = incoming.land_root(h, b)
+    (clone / "a.md").write_text("# A moved on\n")
+    git(clone, "-c", "user.name=a", "-c", "user.email=a@example.com", "commit", "-qam", "moved")
+    git(clone, "push", "-q", "origin", "dev")
+    b["tip"] = git(clone, "rev-parse", "dev")            # the same id and page, the blob no longer at the tip
+    assert incoming.land_root(h, b) == first
+    assert len(h.writes.carried) == 1

@@ -104,3 +104,24 @@ def test_a_path_that_is_not_a_markdown_path_is_refused_alone_and_the_other_pages
     got = repos.report_rest(REPO, "c0ffee1", [("al", "a.md"), ("al", ".sheaf.toml"), ("al", "b.md")])
     assert got == {".sheaf.toml": "refused"}
     assert [item[1] for item in repos._queues[REPO.lower()]] == ["a.md", "b.md"]
+
+
+def test_take_back_leaves_a_version_another_writer_saved_during_the_landing(tmp_path):
+    store = hub_state.Versions()
+    address = "o--r/a.md"
+    before = store.texts(address)
+    store.watch(address, "landing")
+    store.put(address, "# same\n", "landing")
+    store.put(address, "# same\n", "someone")            # another writer saves the same text, so the same hash
+    store.put(address, "# mine\n", "landing")
+    store.take_back(address, before, ["# same\n", "# mine\n"], None, "landing")
+    assert store.texts(address) == ["# same\n"]
+
+
+def test_take_back_with_a_writer_still_takes_back_what_only_the_landing_made(tmp_path):
+    store = hub_state.Versions()
+    address = "o--r/a.md"
+    store.watch(address, "landing")
+    store.put(address, "# mine\n", "landing")
+    store.take_back(address, [], ["# mine\n"], None, "landing")
+    assert store.texts(address) == [] and store._folder(address) not in store._claims

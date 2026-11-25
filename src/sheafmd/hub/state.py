@@ -369,19 +369,42 @@ class Versions:
                 pass
         return found
 
-    def take_back(self, address: str, before: list[str], made: list[str], stamps: dict[str, int] | None = None) -> None:
+    def unwatch(self, address: str, writer):
+        """`writer`'s `watch` of the folder of `address` ends, and what it recorded there with it, as `forget_texts` ends it."""
+        folder = self._folder(address)
+        with self._claims_lock:
+            watched = self._claims.get(folder)
+            if watched is None:
+                return
+            watched.watchers.discard(writer)
+            for h in [h for h, writers in watched.by_hash.items() if writers == {writer}]:
+                del watched.by_hash[h]
+            for writers in watched.by_hash.values():
+                writers.discard(writer)
+            if not watched.watchers:
+                del self._claims[folder]
+
+    def take_back(self, address: str, before: list[str], made: list[str], stamps: dict[str, int] | None = None, writer=None) -> None:
         """A landing that put the texts `made` among the newest versions of the document and did not land takes back those, and no
         more: a version of `made` that `before` (as `texts` gave them) did not hold goes, a version it pushed out of the newest
         comes back, and what someone else wrote meanwhile and the pinned ones are never touched. With `stamps` (as `stamps` gave
         them before) every version `before` held has its age again, the one a landing touched and the one it pushed out alike, so
-        the order of the history and the days a version has left are the ones it had."""
+        the order of the history and the days a version has left are the ones it had. With `writer` (the landing's `watch`, which
+        its `put`s named) a text that another writer saved meanwhile has the same hash and stays; the watch ends here."""
         folder = self._folder(address)
         kept = {md_hash(t) for t in before}
         for h in {md_hash(t) for t in made} - kept:
+            if writer is not None:
+                with self._claims_lock:
+                    watched = self._claims.get(folder)
+                    if watched is not None and watched.by_hash.get(h, set()) - {writer}:
+                        continue
             try:
                 (folder / f"{h}.md").unlink()
             except OSError:
                 pass
+        if writer is not None:
+            self.unwatch(address, writer)
         for text in before:
             h = md_hash(text)
             f = folder / f"{h}.md"

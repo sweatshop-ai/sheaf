@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import __version__, beneath, paths
+from . import __version__, beneath, diagnostics, paths
 from . import comments as rdc
 from .agents import detect
 from .hub.auth import clean_display
@@ -1020,7 +1020,7 @@ class Door:
             else:
                 entry.pop("generated", None)
             return entry
-        with contextlib.suppress(OSError):
+        with contextlib.suppress(OSError, paths.PathError):
             self.hub.docs.change(address, settle)
 
     def _render_report(self, args: dict, caller: Caller) -> dict:
@@ -1321,7 +1321,7 @@ class Door:
             # also where the name's lock holds nothing (a page the hub does not place) (ticket 183 BD).
             try:
                 marked = self._mark_generated(address, True, caller)
-            except OSError:
+            except (OSError, paths.PathError):     # a state folder sheaf will not use refuses it as a full disk does
                 raise ToolError(f"{address} was not made: its generated mark could not be written.",
                                 "not written") from None
         # A mark on an address with no page (ticket 183 BR), read now: the clear after the file takes this one only.
@@ -1333,9 +1333,9 @@ class Door:
                 with place.folders_lock(top, name):     # so no move's tidying takes them before the file is in
                     made.folders = _missing_folders(top, rel)
                     os.close(place.make_folders(top, rel, judge)[0])
-                    create_file(top, rel, text, judge)
+                    made.ident = create_file(top, rel, text, judge)
             else:
-                create_file(top, rel, text, judge)
+                made.ident = create_file(top, rel, text, judge)
         except BaseException as e:
             self._take_back(address, made, written=False)      # a page that was not made leaves nothing behind
             if isinstance(e, Private) or not isinstance(e, OSError):
@@ -1364,8 +1364,15 @@ class Door:
         home, the mark it set. The list's row that `assignees` dropped stays dropped: it was of a file no longer there,
         which is what the address holds again."""
         if written:
+            # The file it made, known by its inode (ticket 195 E): one that replaced it at the name since (an editor's save,
+            # a sync) stays. What comes between this look and the unlink is not covered; the name's lock keeps the hub's
+            # own writers out of it.
             with contextlib.suppress(OSError):
-                os.unlink(made.top / made.rel)
+                st = os.lstat(made.top / made.rel)
+                if made.ident is not None and (st.st_dev, st.st_ino) == made.ident:
+                    os.unlink(made.top / made.rel)
+                else:       # replaced, or a filesystem whose inode numbers do not hold (some FUSE mounts): left, and said
+                    diagnostics.record("mcp", "take-back-left-file", address)
         self.hub.writes.told(address)
         if made.folders:
             with place.folders_lock(made.top, made.name):
@@ -1611,6 +1618,7 @@ class _Made:
     judge: object
     folders: list
     marked: tuple[dict, dict] | None
+    ident: tuple[int, int] | None = None     # (st_dev, st_ino) of the file `create_file` made: the one a take-back deletes
 
 
 def _unmake(top: Path, made: list, judge=None):

@@ -17,7 +17,7 @@ import pytest
 from bs4 import BeautifulSoup
 from helpers import FRONT, Front, call, hub_rows
 
-from sheafmd import _pandoc
+from sheafmd import _pandoc, diagnostics
 from sheafmd.blocks import split_md_blocks
 from sheafmd.hub import place, projects, proxy, the_list, work as work_mod
 from sheafmd.hub.state import INSIDE, Tokens, doc_key
@@ -150,6 +150,68 @@ def test_a_door_create_at_home_whose_generated_mark_cannot_be_written_leaves_no_
     is_error, got = call(browser, "create", token=tokens["alice"], doc=f"work/{SHARED}", text=PRIVATE, generated=True)
     assert not is_error, got
     assert (work / HOME).exists()
+
+
+def test_a_door_create_whose_state_folder_refuses_the_generated_mark_is_refused_as_not_made(team, work, browser, tokens,
+                                                                                            monkeypatch):
+    """Ticket 195 D (from #616): a state folder sheaf will not use (`paths.PathError`, not an OSError) refuses the mark as a
+    full disk does: the create is answered as not made, with no file, and no other error than the door's own."""
+    from sheafmd import paths
+    change = browser.hub.docs.change
+
+    def refuse_the_mark(address, settle):
+        if "generated" in settle({}):
+            raise paths.PathError("the state folder is not a folder of yours; sheaf will not use it")
+        return change(address, settle)
+    monkeypatch.setattr(browser.hub.docs, "change", refuse_the_mark)
+    is_error, got = call(browser, "create", token=tokens["alice"], doc=f"work/{SHARED}", text=OPEN, generated=True)
+    assert is_error and "its generated mark could not be written" in got, got
+    assert not (work / SHARED).exists()
+
+
+def test_a_door_create_taken_back_leaves_a_file_that_replaced_the_one_it_made(team, work, browser, tokens, monkeypatch):
+    """Ticket 195 E (from #616): a create refused after its file was made takes back that file, and no other: one that
+    replaced it at the name meanwhile (an editor's save, a sync) stays."""
+    from sheafmd import mcp
+    address = f"work/{SHARED}"
+    browser.hub.docs.change(address, lambda e: {**e, "generated": {"by": "x", "id": None, "at": "t", "key": True}})
+    real_create, change, made = mcp.create_file, browser.hub.docs.change, []
+
+    def create_then_replaced(top, rel, text, judge=None):
+        ident = real_create(top, rel, text, judge)
+        other = work / ".other.md"
+        other.write_text("# Someone else's\n", encoding="utf-8")
+        os.replace(other, work / rel)
+        made.append(rel)
+        return ident
+
+    def no_clear_after_the_file(a, settle):
+        if made:
+            raise OSError(28, "No space left on device")
+        return change(a, settle)
+    monkeypatch.setattr(mcp, "create_file", create_then_replaced)
+    monkeypatch.setattr(browser.hub.docs, "change", no_clear_after_the_file)
+    is_error, got = call(browser, "create", token=tokens["alice"], doc=address, text=OPEN)
+    assert is_error and "not made" in got, got
+    assert (work / SHARED).read_text(encoding="utf-8") == "# Someone else's\n"
+    assert any(r.get("kind") == "take-back-left-file" and r.get("doc") == address for r in diagnostics.read()), \
+        "a file left behind by a take-back is said in the diagnostics log"
+
+
+def test_a_door_create_taken_back_deletes_the_file_it_made(team, work, browser, tokens, monkeypatch):
+    """Ticket 195 E: the same take-back, with the file as the create made it, deletes it."""
+    address = f"work/{SHARED}"
+    browser.hub.docs.change(address, lambda e: {**e, "generated": {"by": "x", "id": None, "at": "t", "key": True}})
+    change = browser.hub.docs.change
+
+    def no_clear_after_the_file(a, settle):
+        if (work / SHARED).exists():
+            raise OSError(28, "No space left on device")
+        return change(a, settle)
+    monkeypatch.setattr(browser.hub.docs, "change", no_clear_after_the_file)
+    is_error, got = call(browser, "create", token=tokens["alice"], doc=address, text=OPEN)
+    assert is_error and "not made" in got, got
+    assert not (work / SHARED).exists()
 
 
 def test_a_door_create_at_home_whose_generated_mark_cannot_be_written_makes_no_folder_there(team, work, browser,

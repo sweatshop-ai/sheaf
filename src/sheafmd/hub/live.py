@@ -70,6 +70,7 @@ class LiveDocument:
         self._written = set()        # the hashes this document put in the store: what a forget that came late takes out
         self._detached = False       # `detach`: its root was forgotten, and nothing of it reaches a store now
         self._detached_store = None  # the store it had then, for `forget` to take its texts out of
+        self._forgotten = False      # `forget` ran: its tabs heard `gone` after it, so a refresh or rebuild tells them nothing
         self._lock = threading.Lock()
         self._owner = None
         text = self._read()
@@ -275,13 +276,19 @@ class LiveDocument:
 
     def rebuild(self):
         """Render the page again from the file as it is and tell the tabs: the render settings
-        changed, so what they show is not the same page (`textSame` false)."""
+        changed, so what they show is not the same page (`textSame` false). Returns the snapshot told; RETRY when a write
+        moved the file under the read, so the page was rendered from the text the tabs hold and the caller must look at the
+        file again; None for a forgotten document, which tells nothing."""
         with self._hold(), self._held():
-            self._rerender()
+            if self._forgotten:
+                return None
+            # Read as a refresh reads (ticket 195 C): a read that a write moved under is not what the tabs are told of. The
+            # page is rendered again from the text they hold, with the new settings, and the write is the next refresh's.
+            settled = self._rerender_settled(self._stamp())
             snap = self._snapshot(self._text)
             snap["textSame"] = False
             self._publish_telling("changed", snap)
-            return snap
+            return snap if settled else RETRY
 
     def save(self, base_hash, edits, rid=None, guard=None, move=None):
         """Apply a page's block edits, made against the text named by base_hash.
@@ -578,6 +585,7 @@ class LiveDocument:
         then and goes with the others. After `detach`, only the texts this document wrote go: the name may
         be another folder's by now."""
         with self._held():
+            self._forgotten = True      # first: a forget that raises below is followed by `gone` all the same
             detached = self._detached
             store = self._detached_store if detached else self._stored()
             if store is not None and self._address is not None:
@@ -714,22 +722,35 @@ class LiveDocument:
         `changed` and returns its snapshot, returns None when nothing moved, and RETRY when it could not decide (look again).
 
         force: render whatever the file holds and return the snapshot, publishing nothing: the
-        caller announces the result itself."""
+        caller announces the result itself. A forgotten document (its tabs heard `gone`) returns None, forced or not."""
         with self._hold(), self._held():
+            if self._forgotten:         # its tabs heard `gone` (ticket 195 A)
+                return None
             if force:
                 self._rerender()
                 return self._snapshot(self._text)
             seen = self._stamp()
             if rds.md_hash(self._read()) == self._hash:
-                return None
-            before, kept = self._text, (self._text, self._hash, self._branch)
-            self._rerender(remember=False)      # a read that may be torn is no version: kept once the file has not moved under it
-            if seen is None or self._stamp() != seen:       # a file that cannot be stat-ed is not known to have held still
-                # An editor's truncate-then-write landed while this read and render ran: what was read may be a torn
-                # file. Keep what the tabs hold and publish nothing; the watcher sees the file move and comes back.
-                self._text, self._hash, self._branch = kept
-                branch = self._render(self._text)         # the page the hub serves is the one the tabs hold, not the torn one
-                self._branch = branch if isinstance(branch, str) else None
+                # The text the tabs hold, read from a file that held still: nothing moved. One that moved during the read, or
+                # could not be stat-ed, is not settled (ticket 195 B): the caller keeps the (mtime, size) it saw only for a
+                # look that decided the file, so a write in flight that ends with that key is looked at again.
+                return None if seen is not None and self._stamp() == seen else RETRY
+            before = self._text
+            if not self._rerender_settled(seen):
                 return RETRY
-            self._remember(self._text)
             return self._announce(self._snapshot(self._text), before)
+
+    def _rerender_settled(self, seen) -> bool:
+        """Render the page from the file, and keep that text only when the file held still while it was read and rendered
+        (`seen`: its stamp taken before the read). An editor's truncate-then-write that landed meanwhile may have given a
+        torn file: the text the tabs hold is kept and rendered again, and False says so; the watcher sees the file move and
+        comes back. A file that cannot be stat-ed is not known to have held still."""
+        kept = (self._text, self._hash, self._branch)
+        self._rerender(remember=False)      # a read that may be torn is no version: kept once the file has not moved under it
+        if seen is None or self._stamp() != seen:
+            self._text, self._hash, self._branch = kept
+            branch = self._render(self._text)         # the page the hub serves is the one the tabs hold, not the torn one
+            self._branch = branch if isinstance(branch, str) else None
+            return False
+        self._remember(self._text)
+        return True

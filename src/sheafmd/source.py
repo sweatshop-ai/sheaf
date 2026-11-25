@@ -320,7 +320,8 @@ def create_file(top, rel: str, text: str, judge=None):
     cannot carry the write elsewhere. The text goes into a hidden sibling first and is linked into
     place: a reader never sees half a page, and the link fails (FileExistsError) when the name is
     taken by anything, a dangling link included, even one that appeared a moment ago. The file gets
-    the mode the umask gives a new file. A missing folder is FileNotFoundError. `judge`: see `_folder_of`."""
+    the mode the umask gives a new file. A missing folder is FileNotFoundError. `judge`: see `_folder_of`.
+    Returns (st_dev, st_ino) of the file made, so a take-back deletes that file and never one that replaced it."""
     fd, name = _folder_of(top, rel, judge=judge)
     try:
         tmp = f".{name}.sheaf-new-{secrets.token_hex(6)}"
@@ -330,6 +331,7 @@ def create_file(top, rel: str, text: str, judge=None):
                 f.write(text.encode("utf-8"))
                 f.flush()
                 os.fsync(f.fileno())
+                st = os.fstat(f.fileno())
             os.link(tmp, name, src_dir_fd=fd, dst_dir_fd=fd)
         finally:
             try:
@@ -338,6 +340,7 @@ def create_file(top, rel: str, text: str, judge=None):
                 pass
     finally:
         os.close(fd)
+    return st.st_dev, st.st_ino
 
 
 def check_create(top, rel: str, judge=None):

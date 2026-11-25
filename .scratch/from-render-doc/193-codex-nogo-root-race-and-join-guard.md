@@ -2,7 +2,7 @@
 
 **Claimed by:** Habib
 
-**Status:** open (fixes on branch `habib/193-join-guard`)
+**Status:** done (PR #660, merge 9d674600)
 
 **Blocked by:** none
 
@@ -19,11 +19,13 @@ The serious box is fixed test-first: a red test on main, then the fix.
 
 ## Serious
 
-- [ ] **A** (from #601, `hub/handler.py` `_live_join`): the guard against a late join on an older shared stream reads only the history (`had`) of the streams still registered. Two cases lose that history. If the newer stream that had the key and left it closes, `_shared_closed` drops it. If the browser reconnects under the same stream id, the newer stream is replaced by a fresh one with an empty `had`. Either way, a join that the old leader sent late on the older stream, still open, is accepted, and the hub keeps a ghost stream for a tab that is on the newer connection. Fix: the history is kept on the stream that must refuse the late join, the older one. A key taken by a newer stream is barred on every older stream of the same owner, and that bar lives as long as the older stream.
+- [x] **A** (from #601, `hub/handler.py` `_live_join`): the guard against a late join on an older shared stream reads only the history (`had`) of the streams still registered. Two cases lose that history. If the newer stream that had the key and left it closes, `_shared_closed` drops it. If the browser reconnects under the same stream id, the newer stream is replaced by a fresh one with an empty `had`. Either way, a join that the old leader sent late on the older stream, still open, is accepted, and the hub keeps a ghost stream for a tab that is on the newer connection. Fix: the history is kept on the stream that must refuse the late join, the older one. A key taken by a newer stream is barred on every older stream of the same owner, and that bar lives as long as the older stream.
+  Done in #660: `_SharedStream.taken_by_newer` bars the key on every older stream of the owner, and `_live_join` drops a join the stream `bars`. Tests in `tests/test_hub_shared_live.py`: `test_a_late_join_on_the_old_connection_after_the_new_one_closed_is_dropped` and `test_a_late_join_on_the_old_connection_after_the_new_one_came_back_under_its_id_is_dropped`, red at 2387f22d and green at 3500c9a3 (CI run 45602703093).
 
 ## Minor
 
-- [ ] **B** (from #601, `hub/handler.py` `had`): every key ever joined on a connection stays in `had` for the connection's life. `SHARED_MAX` bounds only the keys still joined, so a long-lived connection whose tabs come and go grows without bound. Fix: the bars that replace `had` are bounded, the oldest dropped first.
+- [x] **B** (from #601, `hub/handler.py` `had`): every key ever joined on a connection stays in `had` for the connection's life. `SHARED_MAX` bounds only the keys still joined, so a long-lived connection whose tabs come and go grows without bound. Fix: the bars that replace `had` are bounded, the oldest dropped first.
+  Done in #660: at most `BARRED_MAX` (1000) bars per stream, the oldest dropped first. Test `test_the_keys_an_old_connection_is_barred_from_are_bounded`, red at 2387f22d, green at 3500c9a3.
 
 ## Already fixed on main
 

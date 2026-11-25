@@ -658,12 +658,15 @@ def _walk(top: Path, deadline: float | None = None) -> Iterator[str]:
         under = stack.pop()
         if late():
             raise _Late
+        here = os.path.join(top, under) if under else top
+        if under and os.path.islink(here):   # made a link since its folder was read: not entered, as os.walk
+            continue
         dirs, files = [], []
         try:
-            with os.scandir(os.path.join(top, under) if under else top) as entries:
+            with os.scandir(here) as entries:
                 for entry in entries:
                     if late():
-                        raise _Late
+                        raise _Late          # what this folder gave is dropped: `_capped` would drop it, past the deadline
                     try:
                         is_dir = entry.is_dir()
                     except OSError:

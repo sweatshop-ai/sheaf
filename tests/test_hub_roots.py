@@ -925,7 +925,8 @@ def test_a_walk_stops_at_its_deadline_inside_one_huge_folder(tmp_path, monkeypat
     for i in range(200):
         (top / f"{i:03}.md").write_text("# x\n")
     real = os.scandir
-    monkeypatch.setattr(os, "scandir", lambda p=".": _SlowFolder(real(p)))
+    # The walk's read of the folder only: the lookup of each file found (`_stat_inside`) reads by descriptor.
+    monkeypatch.setattr(os, "scandir", lambda p=".": _SlowFolder(real(p)) if str(p) == str(top) else real(p))
     t0 = time.monotonic()
     listing = roots.list_documents(roots.Root("w", top, False), deadline=t0 + 0.3)
     assert time.monotonic() - t0 < 1.5
@@ -942,3 +943,37 @@ def test_a_walk_in_time_lists_what_os_walk_listed(tmp_path):
     (top / "linked").symlink_to(top / "c", target_is_directory=True)
     got = list(roots._walk(top, time.monotonic() + 60))
     assert got == ["b.md", "a/z.md", "a/b/c.md", "c/d.md"]
+
+
+def test_a_folder_made_a_link_after_it_was_read_is_not_entered(tmp_path, monkeypatch):
+    """A folder found as a folder and swapped for a link before the walk goes down into it is not followed, as `os.walk`
+    looks again just before it goes down (Codex review of 189 E)."""
+    top = tmp_path / "w"
+    (top / "a").mkdir(parents=True)
+    (top / "a" / "x.md").write_text("# x\n")
+    (tmp_path / "out").mkdir()
+    (tmp_path / "out" / "y.md").write_text("# y\n")
+    walk = roots._walk(top, time.monotonic() + 60)
+    real = os.scandir
+
+    def swap(p="."):
+        if str(p) == str(top):
+            it = list(real(p))           # read while `a` is a folder, then `a` becomes a link
+            (top / "a" / "x.md").unlink()
+            (top / "a").rmdir()
+            (top / "a").symlink_to(tmp_path / "out", target_is_directory=True)
+            return _ListedFolder(it)
+        return real(p)
+    monkeypatch.setattr(os, "scandir", swap)
+    assert list(walk) == []
+
+
+class _ListedFolder:
+    def __init__(self, entries):
+        self.entries = entries
+
+    def __enter__(self):
+        return iter(self.entries)
+
+    def __exit__(self, *exc):
+        pass

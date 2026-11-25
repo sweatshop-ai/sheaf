@@ -534,7 +534,10 @@ class Door:
         told = self.hub.alias(member, real) if root is not None and self.hub.shared_with(member, root, real) else doc
         if told == real:
             return text
-        return re.sub(rf"(?<![\w/-]){re.escape(real)}(?![\w/-]|\.\w)", lambda _: told, text)    # the whole address, not the start of a longer name
+        # The whole address, not the start of a longer name: one that goes on in a character a file name holds
+        # (`plan.md.bak`, `plan.md~`, `plan.md+copy.md`, `plan.md#2`). Anything else after it (`plan.md:3:`,
+        # `plan.md's`, `plan.md,`) ends it, and the owner's folders are never left in the text.
+        return re.sub(rf"(?<![\w/-]){re.escape(real)}(?![\w/~+#=-]|\.\w)", lambda _: told, text)
 
     def _told(self, address: str, caller: Caller) -> dict:
         """`doc` and `url` of the page at `address` as `caller` is told of it: a page Shared with its member by another is told

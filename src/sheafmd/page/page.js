@@ -3699,8 +3699,11 @@ var create = function (ROOT, CFG, opts) {
     rest.setStart(range.endContainer, range.endOffset);
     rest.setEnd(line, line.childNodes.length);
     var words = rest.cloneContents();
-    Array.prototype.forEach.call(words.querySelectorAll('div'), function (d) { d.parentNode.removeChild(d); });
-    if (words.textContent.replace(/[\s\u200b-\u200d\u2060\ufeff]/g, '')) splitIn = h;   // the other lines are not its words
+    // The other lines are not its words, nor is the page's own UI (a comment's anchor and its numbered badge).
+    Array.prototype.forEach.call(words.querySelectorAll('div, [data-rd-ui]'), function (d) {
+      if (d.parentNode) d.parentNode.removeChild(d);
+    });
+    if (words.textContent.replace(/[\s\u200b-\u200d\u2060\ufeff]/g, '')) splitIn = h;
   });
   // The mark is set, or taken off, on every Enter in a heading: the browser copies a marked line's attributes to the line
   // it splits off from it, so Enter at the end of a half would otherwise make the line under it a heading too.

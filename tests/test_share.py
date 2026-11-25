@@ -635,6 +635,19 @@ def test_an_error_text_swaps_only_the_whole_address_it_names_for_the_opaque_name
     assert got == f"{doc}.bak is not {name}, nor x{doc}, nor {doc}y; see {name}."
 
 
+@pytest.mark.parametrize("longer", ["{doc}+copy.md", "{doc}~", "{doc}#2", "{doc}=x"])
+def test_an_error_text_leaves_a_longer_name_with_other_punctuation_alone(team, longer):
+    """Ticket 188 I: a name that goes on past the address in a character a file name may hold is another file; any
+    other character after the address ends it, and the address is swapped."""
+    doc = deep(team)
+    name = told(team, BOB, doc)
+    caller = Caller("Claude Code (Bob)", token=next(r for r in Tokens().list() if r.name == "bob-claude"))
+    other = longer.format(doc=doc)
+    text = f"{other} is not ({doc}), nor '{doc}'; {doc}:3: {doc}'s {doc},x {doc}>; see {doc}"
+    got = team.door.handler.door._told_text(text, {"doc": name}, caller)
+    assert got == f"{other} is not ({name}), nor '{name}'; {name}:3: {name}'s {name},x {name}>; see {name}"
+
+
 def test_a_recipients_update_is_told_by_the_opaque_name_and_written_to_the_log_by_the_real_one(team):
     doc = deep(team)
     name = told(team, BOB, doc)

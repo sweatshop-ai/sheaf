@@ -47,7 +47,7 @@ def _sanitize(fragment: str, source=None, strays=None, comments=frozenset()) -> 
     # Rendering-only wrappers and artefacts of edit mode itself
     for div in soup.select("div.tblwrap"):
         div.unwrap()
-    _lines_as_paragraphs(soup)
+    _lines_as_paragraphs(soup, comments)
     _lines_as_items(soup, comments)
     _drop_empty_task_items(soup)
     if source is not None:
@@ -151,43 +151,90 @@ def _unwrap_strays(soup, source: str, strays) -> None:
             del el[a]
         if drop and strays is not None:
             strays.append(el.name)
-    _split_at_double_breaks(soup, new_br)
+    _split_at_double_breaks(soup, new_br, source)
 
 
-def _split_at_double_breaks(soup, new_br) -> None:
+def _break_runs(kids, counts):
+    """Each run of two <br> or more among `kids` that `counts` takes, white space between them, as (first, last)."""
+    out, run = [], []
+    for k, c in enumerate(kids):
+        if getattr(c, "name", None) == "br" and counts(c):
+            run.append(k)
+        elif not (run and getattr(c, "name", None) is None and not str(c).strip()):
+            if len(run) >= 2:
+                out.append((run[0], run[-1]))
+            run = []
+    if len(run) >= 2:
+        out.append((run[0], run[-1]))
+    return out
+
+
+def _run_key(kids, first, last):
+    """A run of breaks told by its length and the words of the lines on each side of it."""
+    def line(cs):
+        return "".join(c.get_text() if getattr(c, "name", None) else str(c) for c in cs).strip()
+
+    before = next((k for k in range(first - 1, -1, -1) if getattr(kids[k], "name", None) == "br"), -1)
+    after = next((k for k in range(last + 1, len(kids)) if getattr(kids[k], "name", None) == "br"), len(kids))
+    n = sum(1 for c in kids[first:last + 1] if getattr(c, "name", None) == "br")
+    return n, line(kids[before + 1:first]), line(kids[last + 1:after])
+
+
+def _source_break_runs(source) -> list:
+    """The runs of two breaks or more the source's paragraphs have (`_run_key`): a markdown hard break (`\\` or two
+    spaces at the end of a line) is a <br> of the render, never one of the source's text."""
+    from bs4 import BeautifulSoup
+
+    html = _render_source(source) if source and source.strip() else None
+    if html is None:
+        return []
+    runs = []
+    for p in BeautifulSoup(html, "html.parser").find_all("p"):
+        kids = list(p.children)
+        runs += [_run_key(kids, a, b) for a, b in _break_runs(kids, lambda c: True)]
+    return runs
+
+
+def _split_at_double_breaks(soup, new_br, source=None) -> None:
     """Two <br> in a row, none of them in the source, inside a paragraph with words on both sides (an online word
     processor's Shift+Enter twice, each <br> in a span of its own): a blank line, so the paragraph is two. Pandoc
-    would write them as two lines of a lone backslash. One <br> stays a line break."""
+    would write them as two lines of a lone backslash. One <br> stays a line break. A run the source's render has
+    too (markdown hard breaks: `Alpha\\` `\\` `Beta`), told by its length and a line beside it, stays as it is."""
     def blank(c):
         return getattr(c, "name", None) is None and not str(c).strip()
+
+    def words(c):
+        return _shows(str(c)) or getattr(c, "name", None) in ("img", "a", "b", "i", "strong", "em", "code")
+
+    had = None      # the source's runs, read once a run with words on both sides is found
+
+    def kept(kids, first, last):
+        nonlocal had
+        if had is None:
+            had = _source_break_runs(source)
+        n, before, after = _run_key(kids, first, last)
+        old = next((r for r in had if r[0] == n and (r[1] == before or r[2] == after)), None)
+        if old is not None:
+            had.remove(old)
+        return old is not None
 
     for p in soup.find_all("p"):
         if _page_own(p):
             continue
         while True:
             kids = list(p.children)
-            run, first_br = [], None
-            for k, c in enumerate(kids):
-                if getattr(c, "name", None) == "br" and id(c) in new_br:
-                    if first_br is None:
-                        first_br = k
-                    run.append(k)
-                elif blank(c) and first_br is not None:
-                    continue
-                elif first_br is not None and len(run) >= 2:
-                    break
-                else:
-                    run, first_br = [], None
-            else:
-                if len(run) < 2:
-                    break
-            if len(run) < 2 or not any(_shows(str(c)) or getattr(c, "name", None) in ("img", "a", "b", "i", "strong", "em", "code")
-                                        for c in kids[:first_br]) or run[-1] + 1 >= len(kids) or all(blank(c) for c in kids[run[-1] + 1:]):
+            # The first run with words on both sides; a run before the first words, or after the last, stays as it is
+            # and the scan goes on past it.
+            cut = next(((a, b) for a, b in _break_runs(kids, lambda c: id(c) in new_br)
+                        if any(words(c) for c in kids[:a]) and not all(blank(c) for c in kids[b + 1:])
+                        and not kept(kids, a, b)), None)
+            if cut is None:
                 break
+            first, last = cut
             tail = soup.new_tag("p")
-            for c in kids[run[-1] + 1:]:
+            for c in kids[last + 1:]:
                 tail.append(c.extract())
-            for c in kids[first_br:run[-1] + 1]:
+            for c in kids[first:last + 1]:
                 c.extract()
             p.insert_after(tail)
             p = tail
@@ -577,6 +624,8 @@ _START_TAG_RE = re.compile(
 # follows white space, or straight after a quote or a `/`, as the page's parser reads `<a b="x"data-y="z">`. A name
 # and a bare value may hold a quote, as they do to that parser (`attrfind_tolerant`).
 _ATTR_RE = re.compile(r'(?:\s+|(?<=["\'/]))([^\s/>][^\s/=>]*)(?:\s*=+\s*(?:"[^"]*"|\'[^\']*\'|(?!["\'])[^\s>]*))?|\s*/')
+# An HTML comment, kept whole (tag-shaped text in it is no tag: `_sanitize` keeps it as it is), or a start tag.
+_COMMENT_OR_START_TAG_RE = re.compile(r"<!--[\s\S]*?-->|" + _START_TAG_RE.pattern)
 # The name a start tag opens with; its attributes follow it.
 _TAG_NAME_RE = re.compile(r"<[A-Za-z][^\s>/]*")
 # A name `_sanitize` strips from the page fragment: every `data-` one, the page's own (`data-rd-`) too. The page's
@@ -600,7 +649,8 @@ def _strip_tag_data(tag: str) -> str:
 def strip_data_attrs(html: str) -> str:
     """`html` without the `data-` attributes of its tags that `_sanitize` strips from the page: the emoji pandoc draws
     for a shortcode (`data-emoji`), and any that raw HTML in the source carries."""
-    return _START_TAG_RE.sub(lambda m: _strip_tag_data(m.group(0)), html)
+    return _COMMENT_OR_START_TAG_RE.sub(lambda m: m.group(0) if m.group(0).startswith("<!--") else _strip_tag_data(m.group(0)),
+                                       html)
 
 
 def _cut(t, end: bool) -> None:
@@ -613,14 +663,15 @@ def _cut(t, end: bool) -> None:
         t.replace_with(t[1:])
 
 
-def _lines_as_paragraphs(soup):
+def _lines_as_paragraphs(soup, comments=frozenset()):
     """Each line typed after Enter in a paragraph or a heading, as a paragraph after it. The block is the
     element being edited, so the browser cannot split it, and writes every new line as a <div> with no
     attributes inside it; pandoc would keep those as raw <div> lines in the .md. A render never puts a
     <div> in a <p> or a heading. Words after such a line, outside any, go into a paragraph of their own.
     Enter at the start of a heading writes the new lines before its words: they are paragraphs above it,
     and the words stay the heading. A line the page marks `data-rd-split` (Enter inside the heading's words,
-    not at their end) is the heading's second half: a heading of the same level, unless it has no words."""
+    not at their end) is the heading's second half: a heading of the same level, unless it has no words; a comment
+    (one of `comments`, the placeholders of the block's comments) is none."""
     from bs4 import NavigableString
 
     def is_line(el):
@@ -636,6 +687,19 @@ def _lines_as_paragraphs(soup):
 
     def blank(el):
         return isinstance(el, NavigableString) and not el.strip()
+
+    def said(el):
+        # The words of a line, without the placeholders of its comments: a line that holds only a comment has none.
+        text = el.get_text()
+        for t in comments:
+            text = text.replace(t, "")
+        return bool(text.strip())
+
+    def remnant(el):
+        # What an emptied half leaves: white space, or a mark the browser kept with no text in it (`<em></em>`,
+        # `<em><br></em>`). An image, a box or a comment's placeholder is something.
+        return blank(el) or (getattr(el, "name", None) not in (None, "img", "input") and not is_line(el)
+                             and not el.get_text().strip() and el.find(["img", "input"]) is None)
 
     def trim(el, end):
         # Only the cut: a no-break space at the start of the paragraph, at the end of its last line or in code
@@ -680,11 +744,16 @@ def _lines_as_paragraphs(soup):
         if not any(is_line(c) for c in host.children):
             continue
         kids = list(host.children)
-        if host.name != "p" and all(is_line(c) or blank(c) for c in kids):
-            # The heading's own words were all deleted: the half split off from them is the heading now.
-            # Lines before it were typed above the heading, and stay above it.
-            half = next((c for c in kids if is_line(c) and c.has_attr(_SPLIT) and c.get_text(strip=True)), None)
+        if host.name != "p" and all(is_line(c) or remnant(c) for c in kids):
+            # The heading's own words were all deleted: the half split off from them is the heading now, without the
+            # no-break space Enter left at its cut and without what the emptied words left. Lines before it were
+            # typed above the heading, and stay above it.
+            half = next((c for c in kids if is_line(c) and c.has_attr(_SPLIT) and said(c)), None)
             if half is not None:
+                for c in kids:
+                    if not is_line(c) and not blank(c):
+                        c.decompose()
+                trim(half, end=False)
                 half.unwrap()
                 kids = list(host.children)
         # Where the host's own words start: the first child that is neither a line nor white space (0, none
@@ -700,7 +769,7 @@ def _lines_as_paragraphs(soup):
         last, loose, made = host, None, above + [host]
         for c in list(host.children):
             if is_line(c):
-                half = bool(host.name != "p" and c.has_attr(_SPLIT) and c.get_text(strip=True))
+                half = bool(host.name != "p" and c.has_attr(_SPLIT) and said(c))
                 c.extract().name = host.name if half else "p"
                 del c[_SPLIT]
                 last.insert_after(c)

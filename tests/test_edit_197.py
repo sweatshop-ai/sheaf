@@ -29,14 +29,16 @@ def test_a_closing_tag_with_no_opener_climbs_out_of_every_element_past_the_comme
 # 642: `strip_data_attrs` reads each attribute as the page's parser (`_sanitize`, html.parser) does.
 
 def _parsed(tag):
-    """The tag name and the (name, value) pairs html.parser reads from the start tag `tag`."""
+    """The tag name, the (name, value) pairs html.parser reads from the start tag `tag`, and whether it reads it
+    as self-closing."""
     seen = []
 
     class P(html.parser.HTMLParser):
         def handle_starttag(self, name, attrs):
-            seen.append((name, attrs))
+            seen.append((name, attrs, False))
 
-        handle_startendtag = handle_starttag
+        def handle_startendtag(self, name, attrs):
+            seen.append((name, attrs, True))
 
     P().feed(tag)
     return seen[0]
@@ -48,11 +50,13 @@ def _parsed(tag):
     "<div data-x=\"1\"title=a'b>",
     "<div data-x='1'title=\"t\" data-y=2 class=k>",
     "<div a=== data-x=1 b>",
+    "<div/data-x >",
+    "<div\t/data-xtitle >",
 ])
 def test_data_attributes_go_and_the_others_stay_as_the_parser_reads_them(tag):
     out = rde.strip_data_attrs(tag)
-    name, attrs = _parsed(tag)
-    assert _parsed(out) == (name, [(n, v) for n, v in attrs if not n.startswith("data-")]), out
+    name, attrs, closed = _parsed(tag)
+    assert _parsed(out) == (name, [(n, v) for n, v in attrs if not n.startswith("data-")], closed), out
 
 
 # 658: with every word around it changed, an escaped shortcode keeps its escape at its own place, not at a

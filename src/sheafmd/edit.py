@@ -640,21 +640,22 @@ def _strip_tag_data(tag: str) -> str:
     """The start tag `tag` without its `data-` attributes. Its attributes are read one after another from the tag
     name on, so whitespace then `data-` inside a quoted value (`title="the data-sheet"`) is never taken for one. One
     is dropped with the white space after it: the white space, quote or `/` before it stays, and keeps the name of
-    the one after it apart (`<div data-x="1"title=t>` is `<div title=t>`); after a quote, its white space stays too."""
+    the one after it apart (`<div data-x="1"title=t>` is `<div title=t>`); after a quote or `/`, its white space stays too."""
     pos = _TAG_NAME_RE.match(tag, 1).end()
     out, dropped, bare = tag[:pos], False, False
     while (m := _ATTR_RE.match(tag, pos)) and m.end() > pos:
         if _DATA_NAME_RE.match(m.group(1)):
             dropped = True
-            if out[-1] in "'\"":
+            if out[-1] in "'\"/":
                 out += tag[m.end(2) if m.group(2) else m.end(1):m.end()]
         else:
             out += m.group(0)
             bare = m.group(2) is not None and m.group(3)[:1] not in ("'", '"')
         pos = m.end()
     # The white space a dropped attribute leaves at the end, gone; before a `/>` after a bare value it stays, or the
-    # value would take the `/` (`<img src=a.png />`).
-    if dropped and (tag.startswith(">", pos) or not bare):
+    # value would take the `/` (`<img src=a.png />`), and after a `/` it stays, or `<div/data-x >` would close
+    # itself (`<div/>`).
+    if dropped and (tag.startswith(">", pos) or not bare) and not out.rstrip().endswith("/"):
         out = out.rstrip()
     return out + tag[pos:]
 

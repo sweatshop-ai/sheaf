@@ -2,7 +2,7 @@
 
 **Claimed by:** Wilma
 
-**Status:** done in PR #655 (`wilma/190-security-claims`); one minor point left open, below
+**Status:** done, #655 merged as 6b4639c4; one minor point left open, below
 
 **Blocked by:** none
 
@@ -51,6 +51,16 @@ recommended options. Every finding below was checked against `origin/main` at f3
 - F, from the Codex review of this PR: a non-script element with the id `rd-edit-meta` ahead of the rewritten block was read
   by `getElementById`; page.js now reads the first `script[type="application/json"]` whose id is `rd-edit-meta`. Browser test
   `tests/page/test_page_clients.py::test_an_element_that_borrows_the_meta_blocks_id_is_not_read_as_the_meta` (CI only).
+- F, from review round01 of #655 (NO-GO): a second meta block spelled otherwise (two spaces, `</script >`, upper case)
+  passed the rewrite and was kept by `adopt`. `readthrough.agency_meta` now finds every block with `adopt`'s own matcher:
+  the first becomes the agency's, the others are dropped. `tests/test_read_through_two_hubs.py`
+  `test_a_second_meta_block_of_another_spelling_is_no_meta_the_agency_page_reads` (3 cases), red before.
+- F, from round02 (NO-GO): the rewrite ran on a 200 alone, so a client answering 201, 404 or 500 with HTML kept its meta.
+  It now runs on every HTML answer: `test_a_client_page_answered_with_another_status_still_has_the_agencys_meta`, red
+  before. Round03 GO. The 183 AL test (`tests/test_team_hookup.py`) now expects a non-object meta to be answered with the
+  agency's, as SPEC 9.9 says (test-only, merged under the gate's test-only rule).
+- E, from round01 (MINOR): an IPv6 peer with no port is told of its old credential name as well
+  (`tests/test_peer_channel.py`).
 - A–D: SPEC 9.1, 9.6, 9.10 and README edited; G–I: the note's items 115, 103, 192, 286 and 306 corrected.
 
 ## Left open

@@ -106,19 +106,12 @@ def _unwrap_strays(soup, source: str, strays) -> None:
         return (el.name, tuple(sorted((k, str(v)) for k, v in el.attrs.items())))
 
     had = Counter(key(el) for el in BeautifulSoup(source, "html.parser").find_all(True))
-    # A hard break of the markdown (`\` or two spaces at the end of a line) is a <br> of the render, not of the
-    # source's text: the render counts them, so the breaks the block had are never taken for new ones.
-    br, rendered = ("br", ()), source.strip() == ""
     pasted_marks = {}   # the marks `_styled_marks` made, by id: a span that says normal inside one ends it
     new_br = set()      # the <br> the source did not have: two in a row make a paragraph break (`_split_at_double_breaks`)
     for el in soup.find_all(True):
         if _page_own(el):
             continue
         k = key(el)
-        if k == br and not had[k] and not rendered:
-            rendered, html = True, _render_source(source)
-            if html is not None:
-                had[k] += sum(1 for _ in BeautifulSoup(html, "html.parser").find_all("br", attrs={}))
         if had[k] > 0:
             had[k] -= 1
             continue
@@ -155,32 +148,72 @@ def _unwrap_strays(soup, source: str, strays) -> None:
             del el[a]
         if drop and strays is not None:
             strays.append(el.name)
-    _split_at_double_breaks(soup, new_br)
+    _split_at_double_breaks(soup, new_br, source)
 
 
-def _split_at_double_breaks(soup, new_br) -> None:
+def _break_runs(kids, counts):
+    """Each run of two <br> or more among `kids` that `counts` takes, white space between them, as (first, last)."""
+    out, run = [], []
+    for k, c in enumerate(kids):
+        if getattr(c, "name", None) == "br" and counts(c):
+            run.append(k)
+        elif not (run and getattr(c, "name", None) is None and not str(c).strip()):
+            if len(run) >= 2:
+                out.append((run[0], run[-1]))
+            run = []
+    if len(run) >= 2:
+        out.append((run[0], run[-1]))
+    return out
+
+
+def _run_key(kids, first, last):
+    """A run of breaks told by its length and the words of the lines on each side of it."""
+    def line(cs):
+        return "".join(c.get_text() if getattr(c, "name", None) else str(c) for c in cs).strip()
+
+    before = next((k for k in range(first - 1, -1, -1) if getattr(kids[k], "name", None) == "br"), -1)
+    after = next((k for k in range(last + 1, len(kids)) if getattr(kids[k], "name", None) == "br"), len(kids))
+    n = sum(1 for c in kids[first:last + 1] if getattr(c, "name", None) == "br")
+    return n, line(kids[before + 1:first]), line(kids[last + 1:after])
+
+
+def _source_break_runs(source) -> list:
+    """The runs of two breaks or more the source's paragraphs have (`_run_key`): a markdown hard break (`\\` or two
+    spaces at the end of a line) is a <br> of the render, never one of the source's text."""
+    from bs4 import BeautifulSoup
+
+    html = _render_source(source) if source and source.strip() else None
+    if html is None:
+        return []
+    runs = []
+    for p in BeautifulSoup(html, "html.parser").find_all("p"):
+        kids = list(p.children)
+        runs += [_run_key(kids, a, b) for a, b in _break_runs(kids, lambda c: True)]
+    return runs
+
+
+def _split_at_double_breaks(soup, new_br, source=None) -> None:
     """Two <br> in a row, none of them in the source, inside a paragraph with words on both sides (an online word
     processor's Shift+Enter twice, each <br> in a span of its own): a blank line, so the paragraph is two. Pandoc
-    would write them as two lines of a lone backslash. One <br> stays a line break."""
+    would write them as two lines of a lone backslash. One <br> stays a line break. A run the source's render has
+    too (markdown hard breaks: `Alpha\\` `\\` `Beta`), told by its length and a line beside it, stays as it is."""
     def blank(c):
         return getattr(c, "name", None) is None and not str(c).strip()
 
     def words(c):
         return _shows(str(c)) or getattr(c, "name", None) in ("img", "a", "b", "i", "strong", "em", "code")
 
-    def runs(kids):
-        # Each run of two <br> or more the source did not have, white space between them, as (first, last).
-        out, run = [], []
-        for k, c in enumerate(kids):
-            if getattr(c, "name", None) == "br" and id(c) in new_br:
-                run.append(k)
-            elif not (blank(c) and run):
-                if len(run) >= 2:
-                    out.append((run[0], run[-1]))
-                run = []
-        if len(run) >= 2:
-            out.append((run[0], run[-1]))
-        return out
+    had = None      # the source's runs, read once a run with words on both sides is found
+
+    def kept(kids, first, last):
+        nonlocal had
+        if had is None:
+            had = _source_break_runs(source)
+        n, before, after = _run_key(kids, first, last)
+        old = next((r for r in had if r[0] == n and (r[1] == before or r[2] == after)), None)
+        if old is not None:
+            had.remove(old)
+        return old is not None
 
     for p in soup.find_all("p"):
         if _page_own(p):
@@ -189,8 +222,9 @@ def _split_at_double_breaks(soup, new_br) -> None:
             kids = list(p.children)
             # The first run with words on both sides; a run before the first words, or after the last, stays as it is
             # and the scan goes on past it.
-            cut = next(((a, b) for a, b in runs(kids)
-                        if any(words(c) for c in kids[:a]) and not all(blank(c) for c in kids[b + 1:])), None)
+            cut = next(((a, b) for a, b in _break_runs(kids, lambda c: id(c) in new_br)
+                        if any(words(c) for c in kids[:a]) and not all(blank(c) for c in kids[b + 1:])
+                        and not kept(kids, a, b)), None)
             if cut is None:
                 break
             first, last = cut

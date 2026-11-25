@@ -21,10 +21,19 @@ def test_the_hard_breaks_of_the_source_stay_breaks_when_the_paragraph_is_edited(
     assert strays == []
 
 
-def test_two_new_breaks_in_a_paragraph_with_a_break_of_its_own_still_make_two_paragraphs():
-    src = "Alpha\\\nBeta gamma\n"
-    page = "<p>Alpha<br>\nBeta<span><br></span><span><br></span>gamma</p>"
-    assert rde.html_block_to_md(page, source=src, strays=[]) == "Alpha\\\nBeta\n\ngamma"
+@pytest.mark.parametrize("src, page, md", [
+    ("Alpha\\\nBeta gamma\n", "<p>Alpha<br>\nBeta<span><br></span><span><br></span>gamma</p>", "Alpha\\\nBeta\n\ngamma"),
+    # the two new breaks come before the source's own: they are no hard breaks of the source (the review of 188)
+    ("Alpha\\\nBeta\n", "<p>Alpha<br><br>New<br>\nBeta</p>", "Alpha\n\nNew\\\nBeta"),
+    # a raw <br> of the source beside a markdown hard break
+    ("Alpha<br>Beta\\\nGamma delta\n", "<p>Alpha<br>Beta<br>\nGamma<span><br></span><span><br></span>delta</p>",
+     "Alpha\\\nBeta\\\nGamma\n\ndelta"),
+    # the source's own double break, the words after it edited, and a new one after them
+    ("Alpha\\\n\\\nBeta gamma\n", "<p>Alpha<br>\n<br>\nBeta too<span><br></span><span><br></span>gamma</p>",
+     "Alpha\\\n\\\nBeta too\n\ngamma"),
+], ids=["a break before them", "a break after them", "a raw break", "the source's run kept, a new one split"])
+def test_two_new_breaks_in_a_paragraph_with_a_break_of_its_own_still_make_two_paragraphs(src, page, md):
+    assert rde.html_block_to_md(page, source=src, strays=[]) == md
 
 
 # ── B (#559, minor): a double break with no words before it does not end the scan ──
@@ -94,6 +103,6 @@ def test_the_cut_space_goes_from_a_half_that_becomes_the_heading(html):
 
 # ── F (#571, serious, hub side): a split line holding only a comment is no half ──
 
-def test_a_split_line_holding_only_a_comment_stays_with_the_heading():
+def test_a_split_line_holding_only_a_comment_is_a_paragraph_not_a_heading():
     got = rde.html_block_to_md('<h2>Ab<div data-rd-split="">RDCMTAAAAAAAAAA</div></h2>', comments={"RDCMTAAAAAAAAAA"})
-    assert not got.startswith("## Ab\n\n## "), got
+    assert got == "## Ab\n\nRDCMTAAAAAAAAAA", got

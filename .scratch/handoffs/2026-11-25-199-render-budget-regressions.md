@@ -1,22 +1,16 @@
 # Handoff: ticket 199, render time limit regressions (2026-11-25)
 
-**Status:** claimed (0e48640b). The rules and design are in the ticket; no code yet. Handed off at claim because the session that wrote it was near its context limit.
+**Status:** done. Merged in #673 as 9384b5ff; CI run 45704548289 green. The ticket is ticked: `.scratch/from-render-doc/199-render-budget-regressions.md`.
 
-## Start here
+## What landed
 
-1. Read the ticket: `.scratch/from-render-doc/199-render-budget-regressions.md`.
-2. Read the background: ticket 198 boxes D, F, G and H, plus PR #669 (merged as 24e74512).
-3. Work on branch `<name>/199-...` in a /tmp worktree. Write a failing test first for each of G and H.
-4. Run locally only the touched files: `tests/test_hub_index.py` (or its `-k "pandoc or render"` subset), `tests/test_pandoc.py`, and the CLI test file for `sheaf open`. Command: `PYTHONPATH=src /home/tiroir/Projects/sheaf/.venv/bin/python -m pytest -q <file>`.
-5. Do one review round, then merge through `boss_merge.py --repo sweatshop-ai/sheaf --pr N`. The gate needs a round recorded by `boss_review.py --repo sweatshop-ai/sheaf --pr N --checkout <worktree> --author <name> --track sheaf-backlog`. That runs the Opus fallback while Codex is out (account b, until 2026-11-26 00:42).
+- `_pandoc.budget`, `_deadline`, `_clock` and `_SPENT` are gone: each pandoc run has its own 120 s (G).
+- `Hub.render` runs the render, locks included, on a thread named `render <address>` and answers `{doc, url, pending: true}` after `RENDER_ANSWER_WITHIN` (the client's 130 s minus 10). The render goes on and publishes its page (H).
+- `sheaf open` on `pending`: no browser, a line on stderr that the next open serves the page, exit 1.
+- A failure after `pending` is a `render-failed` row. A failed rebuild for new settings sets `Entry.rebuild_due`, and the next render rebuilds. The warnings of a pending render go to the next open.
+- SPEC 3.2 and 15 and the CHANGELOG line of 198 D are updated. 198 F is kept; its docstring gives the new reason.
 
-## Points to know
+## Open
 
-- `place.held` is bound to the thread that holds it, so the worker thread in `Hub.render` must take it itself.
-- `/_/render` is called only by `sheaf open` (`cli.py`, about line 342) through `handler.py`, about line 2803.
-- Keep 198 F: in `comments.py`, `_read_tables` does not cache a failed reading.
-- The 198 D test in `tests/test_hub_index.py` patches `_pandoc._clock`. It goes away together with the budget.
-
-## Open decision
-
-The track asked that "the 120 s budget starts only after the locks are taken". The design meets that by removing the shared budget, so that no pandoc run is ever cut by a lock wait. The hub's answer limit to the client must still count the lock wait, because the client's 130 s includes it. The track has been told.
+- The review was the Opus fallback only (Codex account out until 2026-11-26 00:42): provisional GO, so Codex re-reviews 0f8f77bd before a release.
+- A first render still runs pandoc with the hub's lock held (`Hub.entry`). After a `pending` answer, that lock stays held until pandoc ends. This predates #673 and could become a ticket of its own if it shows.

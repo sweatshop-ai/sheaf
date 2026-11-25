@@ -606,8 +606,8 @@ def _may_hold_table(block: str) -> bool:
 
 
 def _read_tables(block: str):
-    """`_read_tables_kept`, or None when pandoc fails; a failure is not kept (198 F): a render whose pandoc time is
-    spent fails its runs at once, and a cached None would stay for every later reading of the same text."""
+    """`_read_tables_kept`, or None when pandoc fails; a failure is not kept (198 F): a run that failed once (a time
+    limit hit on a starved machine) may pass the next time, and a cached None would stay for every later reading."""
     try:
         return _read_tables_kept(block)
     except AnchorError:

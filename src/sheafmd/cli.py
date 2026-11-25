@@ -343,6 +343,9 @@ def _open(args) -> int:
             if status != 200 or not res.get("ok"):
                 _err(f"sheaf: {md}: {res.get('error') or f'the hub answered {status}'}")
                 return EXIT_FAILED
+            if res.get("pending"):           # the render goes on in the hub, past this command's wait (199)
+                _err(f"sheaf: {md}: the hub is still rendering the page; the next sheaf open serves it")
+                return EXIT_FAILED
             print_log(res.get("log", []))
             for w in res.get("warnings", []):
                 _err(w)

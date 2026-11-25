@@ -194,6 +194,26 @@ def test_a_first_render_that_takes_longer_than_the_proof_timeout_still_opens(she
     assert f"  ~ http://127.0.0.1:{port}/work/plan.md" in r.out
 
 
+def test_a_render_still_going_when_the_hub_answers_opens_no_browser_and_says_the_next_open_serves_it(
+        sheaf, opened_browser, doc, port, monkeypatch):
+    """199 H: a render longer than `sheaf open` waits is answered `pending` by the hub, which goes on rendering and
+    publishes the page. The command opens no browser, says that the next `sheaf open` serves the page, and exits 1:
+    the page was not opened."""
+    real = hubclient.HubClient.call             # the hub runs in a process of its own: its answer is made `pending` here
+
+    def pending(self, method, path, *a, **kw):
+        status, res = real(self, method, path, *a, **kw)
+        if path == "/_/render" and status == 200:
+            res = {"ok": True, "doc": res["doc"], "url": res["url"], "pending": True}
+        return status, res
+    monkeypatch.setattr(hubclient.HubClient, "call", pending)
+    r = sheaf("open", doc)
+    assert r.code == 1, (r.out, r.err)
+    assert opened_browser.opened == []
+    assert "the hub is still rendering the page; the next sheaf open serves it" in r.err
+    assert "~ http" not in r.out
+
+
 def test_a_browser_that_cannot_be_started_says_so_and_still_exits_0(sheaf, opened_browser, doc, port):
     opened_browser.result = False
     r = sheaf("open", doc)

@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from .. import __version__, _pandoc, beneath, config, diagnostics, paths
+from .. import __version__, beneath, config, diagnostics, paths
 from ..agents import registry
 from ..agents.base import Adapter, Target
 from ..render import RenderError, render_file
@@ -30,6 +30,7 @@ from ..source import STAMP_FORMAT, file_lock, lock_key, md_hash
 from . import archive as archive_mod
 from . import assets as assets_mod
 from . import boxwait
+from . import client as client_mod
 from . import forwards as forwards_mod
 from . import loose as loose_mod
 from . import outgoing
@@ -91,6 +92,7 @@ class Entry:
     log: list = field(default_factory=list)        # the render log of the last build
     warnings: list = field(default_factory=list)   # link-rule warnings not yet handed to a command
     first: bool = True                             # no build has run yet
+    rebuild_due: bool = False                      # a render's rebuild for new settings failed: the next render rebuilds (199)
     images_scope: tuple | None = None              # the image rule its last build read: `Hub._image_scope` (9.9)
 
     where: Callable[[], tuple] | None = None     # (the root's folder, the path in it) of its file now: what is opened beneath
@@ -126,6 +128,9 @@ class Entry:
 
 
 RESTART_TOLD_TTL = 30            # seconds a restart that was announced is still expected
+# How long `/_/render` waits for its render before it answers `pending` (199): below `sheaf open`'s own wait, which counts
+# any wait for a lock here too. The render goes on, and the next open serves its page.
+RENDER_ANSWER_WITHIN = client_mod.RENDER_TIMEOUT - 10
 
 
 def _project(address: str) -> str:
@@ -972,14 +977,50 @@ class Hub:
     def render(self, md: Path, settings: dict, target: dict | None) -> dict:
         """Register `md`, record the settings and target of this render (SPEC 8.3) and make the
         page. A render with other settings re-renders and tells the open tabs; it never
-        restarts anything."""
+        restarts anything.
+
+        The render runs on a thread of its own, locks included, and the caller waits for it for RENDER_ANSWER_WITHIN at
+        most (199): a render that takes longer (behind a lock, or a long page) is no failure, and the answer is
+        `{doc, url, pending: True}` while it goes on and publishes its page. Its failure within the wait is raised here."""
         md = Path(md).resolve()
         try:
             address = self.roots.address(md)       # a file of a private root has no address of its own (9.11)
         except roots_mod.NotFound:
             raise RenderError(f"{md} is not in a root the hub serves.") from None
-        # Every pandoc run of this render shares the one limit (198 D): `sheaf open` waits RENDER_TIMEOUT, a little more.
-        with _pandoc.budget(), place.held(self, address):  # the name's lock first (9.11), as `entry` takes it
+        done, gate, out = threading.Event(), threading.Lock(), {}
+
+        def work():
+            try:
+                got = ("answer", self._render_held(address, md, settings, target))
+            except BaseException as ex:            # the request's, while it waits; else written down
+                got, trace = ("error", ex), traceback.format_exc()[-1900:]
+            with gate:
+                out[got[0]] = got[1]
+                late = out.get("late", False)
+                done.set()
+            if late and got[0] == "answer" and got[1].get("warnings"):
+                with self._lock:                   # nobody took this answer: the next open is handed its warnings
+                    e = self.entries.get(address)
+                    if e is not None:
+                        e.warnings = [*got[1]["warnings"], *e.warnings]
+            if late and got[0] == "error":
+                known = isinstance(got[1], (RenderError, config.ConfigError))    # a bug keeps its traceback (`record_exception`)
+                self.record("render-failed", address, error=f"{type(got[1]).__name__}: {got[1]}"[:500],
+                            **({} if known else {"traceback": trace}))
+        # `place.held` is bound to the thread that takes it, so the worker takes every lock itself.
+        threading.Thread(target=work, name=f"render {address}", daemon=True).start()
+        if not done.wait(RENDER_ANSWER_WITHIN):
+            with gate:
+                if not done.is_set():
+                    out["late"] = True
+                    return {"doc": address, "url": self.url(address), "pending": True}
+        if "error" in out:
+            raise out["error"]
+        return out["answer"]
+
+    def _render_held(self, address: str, md: Path, settings: dict, target: dict | None) -> dict:
+        """The render of `render`, on its own thread: every lock it needs it takes here."""
+        with place.held(self, address):  # the name's lock first (9.11), as `entry` takes it
             with self._lock:
                 e, rebuild, existed = self._render_entry(address, md, settings, target)
             # A delete, move or forget between the two parts under the hub's lock has taken the entry: its page is not read
@@ -994,8 +1035,11 @@ class Hub:
                     self._refreshed(e)
                 if rebuild and kept:
                     # A render of the page (pandoc, up to 120 s) waits for the document's lock, and every request that needs
-                    # the hub would wait with it were the hub's lock still held.
+                    # the hub would wait with it were the hub's lock still held. The settings are recorded already: one that
+                    # fails leaves the next render to rebuild, or a later `sheaf open` with them would serve the old page (199).
+                    e.rebuild_due = True
                     e.live.rebuild()
+                    e.rebuild_due = False
             except FileNotFoundError:          # deleted after the look above
                 raise gone from None
             with self._lock:
@@ -1034,7 +1078,7 @@ class Hub:
         old, new = self.docs.change(address, settle)
         existed = address in self.entries
         e = self.entry(address)
-        rebuild = existed and (any(old.get(k) != new[k] for k in SETTING_KEYS)
+        rebuild = existed and (e.rebuild_due or any(old.get(k) != new[k] for k in SETTING_KEYS)
                                or old.get("target") != new.get("target"))
         return e, rebuild, existed
 

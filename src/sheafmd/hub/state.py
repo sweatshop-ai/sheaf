@@ -39,6 +39,7 @@ _HASH_RE = re.compile(r"[0-9a-f]{16}")
 _ADDRESS_FILE = "address"       # in each versions folder: the address it is the key of
 _PINS_DIR = "pins"              # in each versions folder: the versions pages keep
 _MEMBER_PINS = "m-"             # in `pins/`: the prefix of a member's own folder (`member_key`)
+_PINNED_AT = ".at"               # in a root's own store, beside a pin `<hash>.md`: when it was last pinned, ns since the epoch
 INSIDE = Path(".sheaf") / "versions"    # a root's own versions store, inside it (7.4)
 
 
@@ -225,29 +226,44 @@ class Versions:
         """`path` as a folder of this store: private (0700) in the state folder, as it is in a root."""
         return paths.private_dir(path) if self._root is None else inside_dir(path)
 
-    def _keep(self, folder: Path, text: str, newest: int) -> str:
+    def _keep(self, folder: Path, text: str, newest: int, pinned: bool = False) -> str:
         """Write `text` under its hash in `folder` (or count it as written now), and keep the
         `newest` files there. Only a file named by a hash counts or is deleted here: anything else
-        is not a version (`get` would not believe it) and takes no slot."""
+        is not a version (`get` would not believe it) and takes no slot. A pin of a root's own store
+        has its time in a file beside it (`_pinned_at`)."""
         h = md_hash(text)
         f = folder / f"{h}.md"
         if f.is_file():
             os.utime(f, follow_symlinks=False)
         else:
             write_text_private(f, text, self._root is not None)
+        stamped = pinned and self._root is not None
+        if stamped:
+            write_text_private(folder / f"{h}{_PINNED_AT}", str(int(time.time() * 1e9)), True)
         files = []
         for p in folder.glob("*.md"):
             if _HASH_RE.fullmatch(p.stem) and p.is_file():
                 try:
-                    files.append((p.stat().st_mtime_ns, p.name, p))
+                    files.append((self._pinned_at(p) if stamped else p.stat().st_mtime_ns, p.name, p))
                 except OSError:
                     pass
         for _, _, p in sorted(files)[:-newest]:
-            try:
-                p.unlink()
-            except OSError:
-                pass
+            for gone in (p, p.with_suffix(_PINNED_AT)):
+                try:
+                    gone.unlink()
+                except OSError:
+                    pass
         return h
+
+    @staticmethod
+    def _pinned_at(pin: Path) -> int:
+        """When the pin `pin` of a root's own store was last pinned, in ns: the file beside it says, since the store goes to git
+        (8.11) and a clone or checkout writes every file with its own time (ticket 192). None there, or no number: 0, a pin
+        never believed."""
+        try:
+            return int((read_small(pin.with_suffix(_PINNED_AT), 32) or "").strip())   # never a link or a FIFO (7.4)
+        except ValueError:
+            return 0
 
     def _claimed(self, address: str, keep, writer) -> str:
         """`keep()`, the write of a text in the folder of `address`, and, when a late forget watches that folder, the
@@ -273,7 +289,7 @@ class Versions:
         def keep():
             folder = self._dir(self._make_folder(address) / _PINS_DIR)
             key = member_key(member)
-            return self._keep(folder if key is None else self._dir(folder / key), text, PINS_KEPT)
+            return self._keep(folder if key is None else self._dir(folder / key), text, PINS_KEPT, pinned=True)
         return self._claimed(address, keep, writer)
 
     @staticmethod
@@ -299,7 +315,7 @@ class Versions:
         stale = time.time() - PINS_MAX_AGE
         for f in (folder / f"{h}.md", *self._pinned(folder, h)):
             try:
-                if f.parent != folder and f.stat().st_mtime < stale:
+                if f.parent != folder and (self._pinned_at(f) / 1e9 if self._root is not None else f.stat().st_mtime) < stale:
                     continue        # a pin past its age, before any prune (a root's own store is never pruned)
                 text = f.read_text(encoding="utf-8")
             except (OSError, ValueError):
@@ -409,10 +425,11 @@ class Versions:
     def _unlink(self, folder: Path, h: str):
         """The version `h` in the document folder `folder`, newest and pinned alike, gone."""
         for f in (folder / f"{h}.md", *self._pinned(folder, h)):
-            try:
-                f.unlink()
-            except OSError:
-                pass
+            for gone in (f, f.with_suffix(_PINNED_AT)):
+                try:
+                    gone.unlink()
+                except OSError:
+                    pass
 
     def rename(self, old: str, new: str):
         """The versions of the document at `old` are those of `new`: a page that moved keeps its history, newest and

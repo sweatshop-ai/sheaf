@@ -152,3 +152,58 @@ def test_a_write_another_process_replaces_right_after_still_returns(tmp_path, mo
     monkeypatch.setattr(os, "replace", then_theirs)
     write_text_atomic(target, "mine")
     assert target.read_text() == "theirs"
+
+
+# ── ticket 194 A, B, C (#570) ────────────────────────────────────────────────
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="owner bits mean nothing to root; Windows has none")
+def test_a_mode_that_leaves_the_owner_no_read_is_still_given(tmp_path):
+    """The read-back of the temp file is made before its mode is set, so a mode without the owner's read is the
+    file's, as any other mode is."""
+    target = tmp_path / "f"
+    target.write_text("old\n")
+    write_text_atomic(target, "new\n", mode=0o200)
+    assert stat.S_IMODE(target.stat().st_mode) == 0o200
+    os.chmod(target, 0o600)
+    assert target.read_text() == "new\n"
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith(".sheaf-tmp")]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="no owner-only mode on Windows")
+@pytest.mark.parametrize("locked", [False, True], ids=["file", "document"])
+def test_the_temp_file_is_the_owners_alone_until_its_text_is_whole(tmp_path, monkeypatch, locked):
+    """A temp file a crash leaves half written is never readable by the group or others, whatever mode the file gets."""
+    from sheafmd import source
+    target = tmp_path / "f.md"
+    target.write_text("old\n")
+    os.chmod(target, 0o644)
+    real, modes = os.fsync, []
+
+    def hook(fd):
+        modes.append(stat.S_IMODE(os.fstat(fd).st_mode))
+        return real(fd)
+    monkeypatch.setattr(os, "fsync", hook)
+    if locked:
+        source._write_atomic(target, "new\n")
+    else:
+        write_text_atomic(target, "new\n", mode=0o644)
+    assert modes and all(m == 0o600 for m in modes), oct(modes[0]) if modes else modes
+    assert stat.S_IMODE(target.stat().st_mode) == 0o644 and target.read_text() == "new\n"
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="counts descriptors through /proc")
+@pytest.mark.parametrize("locked", [False, True], ids=["file", "document"])
+def test_a_text_that_cannot_be_encoded_leaves_no_descriptor_and_no_temp_file(tmp_path, locked):
+    """A lone surrogate fails the encoding before anything is opened, so no descriptor leaks and no temp file is
+    left; the file keeps its old text (194 C)."""
+    from sheafmd import source
+    target = tmp_path / "f.md"
+    target.write_text("old\n")
+    before = len(os.listdir("/proc/self/fd"))
+    with pytest.raises(UnicodeEncodeError):
+        if locked:
+            source._write_atomic(target, "bad \ud800\n")
+        else:
+            write_text_atomic(target, "bad \ud800\n")
+    assert len(os.listdir("/proc/self/fd")) == before
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith(".sheaf-tmp")] and target.read_text() == "old\n"

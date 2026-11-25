@@ -837,8 +837,11 @@ class Door:
                 if more >= roots_mod.COUNT_LIMIT:
                     break                                      # the count stops at the limit
                 if time.monotonic() > deadline:
-                    # Past the limit every page the caller may see was listed: only the count of the rest is cut short.
-                    if not giving and seen < roots_mod.COUNT_LIMIT:
+                    # Past the limit with some of the rest counted, the `more` row says pages were left out, and only
+                    # its count is cut short. With none counted (the files after the limit were the caller's to judge,
+                    # and none it may see came before the time ran out), a page it may see can still lie ahead: the
+                    # listing says it stopped.
+                    if not giving and (seen < roots_mod.COUNT_LIMIT or not more):
                         late.add(root.name)
                     break
                 consider(src, found, None)

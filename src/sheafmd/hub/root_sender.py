@@ -80,16 +80,17 @@ def run(hub, repo: str, to: str, *, post=outgoing.call, moves: root_moves.Moves 
     if not root_moves.paired(to):
         diag.unpaired(repo, to)
         return "unpaired"
+    diag.paired(repo, to)
     branch, _ = hub.repos.saves_on(repo)
     dest = hub.repos.clone_dir(repo)
     tip = _git(dest, "rev-parse", f"origin/{branch}") if branch else None
+    if moves.get(repo) is None:
+        diag.started(repo, to)
     if tip is None:
         moves.start(repo, to, uuid.uuid4().hex)
         if moves.hold(repo, {"": NO_BRANCH}):
             diag.held(repo, to, {"": NO_BRANCH})
         return "held"
-    if moves.get(repo) is None:
-        diag.started(repo, to)
     move = moves.start(repo, to, uuid.uuid4().hex)
     prefix = roots_mod.Address.prefix(repos_mod.root_name(repo))
     todo = _pages(hub, repo, prefix)
@@ -102,7 +103,8 @@ def run(hub, repo: str, to: str, *, post=outgoing.call, moves: root_moves.Moves 
     row = moves.get(repo) or {}
     held = {**leaving, **no, **({p: w for p, w in row.get("held", {}).items() if p not in row.get("sent", [])} if rows else {})}
     if held or not {r["path"] for r in rows} <= set(row.get("sent", [])):
-        moves.hold(repo, held)
+        if moves.hold(repo, held):
+            diag.held(repo, to, held)
         return "partial" if row.get("sent") else "held"
     if _sleep(hub, repo, to, diag, len(row.get("sent", []))) != "moved":
         return "partial"                # the move stays as it is: the next try asks the clone to sleep, and sends nothing twice

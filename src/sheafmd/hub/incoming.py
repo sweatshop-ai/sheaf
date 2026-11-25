@@ -373,7 +373,7 @@ def land_root(hub, b, peer: str | None = None) -> tuple:
     """Second stage of a root moved here: `check_root`, and for each page it found `ready` the page's record, versions and
     Write log lines, each page whole or not at all. Anything but a 200 of the check is answered as it is. `(200, {pages:
     {path: {ok: True, hash} | {ok: False, why}}})`: a page the check refused keeps its answer and writes nothing; a page
-    whose store failed takes back what it made and is `failed`. `transfers.json` keeps the answer to each `id` and path, so a
+    whose store failed takes back what it made and is `failed`. `transfers.json` keeps the answer to each peer, `id` and path, so a
     send whose confirmation was lost is answered again and never lands twice. A page that is not one is a `ValueError`. The check
     waits for the report's own thread, so no landing is written and then overwritten by it, and a failed page gives back the
     versions and Write log lines its address kept before, never more or less."""
@@ -383,13 +383,13 @@ def land_root(hub, b, peer: str | None = None) -> tuple:
     if status != 200:
         return status, answer
     pages = dict(answer["pages"])
-    came_from = (b.get("from") or {}).get("origin") if isinstance(b.get("from"), dict) else None
+    came_from = peer or ""          # the origin the channel's token names: the body's `from.origin` is the sender's own word
     by = (b.get("from") or {}).get("by") if isinstance(b.get("from"), dict) else None
     for p in b["pages"]:
         if pages.get(p["path"]) == {"ready": True}:
             owner, _ = owner_for(hub, p["owner_email"])
             with state.file_locked("transfers.lock"):       # held to the end of the page: two sends of one id land one page
-                pages[p["path"]] = _land_page(hub, b, p, owner, came_from if isinstance(came_from, str) else "",
+                pages[p["path"]] = _land_page(hub, b, p, owner, came_from,
                                               by if isinstance(by, str) else owner.name)
     return 200, {"pages": pages}
 
@@ -406,7 +406,7 @@ def _versions_for(hub, repo: str):
 
 def _land_page(hub, b, p, owner, came_from: str, by: str) -> dict:
     """The landing of one page of `land_root`, with `transfers.lock` held."""
-    key, address = f"{b['id']}:{p['path']}", f"{repos_mod.root_name(b['repo'])}/{p['path']}"
+    key, address = f"{root_moves.origin(came_from)}:{b['id']}:{p['path']}", f"{repos_mod.root_name(b['repo'])}/{p['path']}"
     known = state.read_json(_answers(), {}).get(key)
     if isinstance(known, dict):
         return {"ok": True, **known}

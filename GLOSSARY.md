@@ -16,7 +16,7 @@ _Avoid_: project, collection
 What every sheaf user gets: rendering, editing, comments, the agent adapter, the plain theme.
 
 **Layer**:
-An organisation's additions on top of the core, made of a theme, a root config, source adapters for its own sites, and separate programs that use sheaf as a library.
+An organisation's additions on top of the core, made of a theme, a root config, source services for its own sites, and separate programs that use sheaf as a library.
 _Avoid_: plugin, extension
 
 **Theme**:
@@ -305,8 +305,12 @@ What a Block holds that is not a Block itself: text, links, an image inside a se
 _Avoid_: inline block, span block
 
 **Source adapter**:
-The one piece through which the block editor reads and writes a page's source as a whole document: a Markdown file today, a site's content or a CMS post later. (Named 2026-11-24, wayfinder `sheaf-modular-editor` ticket 07.)
-_Avoid_: connector, driver, backend
+The one piece through which the block editor reads and writes a page's source as a whole document. There are two: the Markdown-file adapter for a folder root, and the remote adapter, which reaches every other source through its Source service. (Named 2026-11-24, wayfinder `sheaf-modular-editor` ticket 07; two adapters only since ticket 13, 2026-11-25.)
+_Avoid_: connector, driver, backend, plugin
+
+**Source service**:
+A program the owner of a source runs beside it, which holds the source's credentials, turns its documents into blocks and back, checks its rules and names the commit's author; the hub reaches it through the remote adapter and holds no key to the source. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 13.)
+_Avoid_: backend, adapter server, connector
 
 **Stub**:
 A Block whose type the page does not know. It is shown locked and written back byte for byte, never dropped and never refused.

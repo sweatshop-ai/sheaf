@@ -1,6 +1,6 @@
 # Source adapters are entry points, declared as roots in the user config
 
-Status: accepted (2026-11-24, block-editor design, decision 09)
+Status: accepted (2026-11-24, block-editor design, decision 09); amended by ADR 0006 (2026-11-25): the entry-point group `sheaf.adapters` is withdrawn, and every source other than a Markdown file is reached through one remote adapter speaking to a source service.
 
 The block editor, the source-adapter interface (ADR 0004) and the Markdown-file adapter live **inside sheaf**, as the subpackage `sheafmd/blocks/`, with the interface as the module boundary. Every other source adapter lives in a package of its own and is found by the hub through the Python entry-point group `sheaf.adapters`. A source other than a folder is declared in the user config (`config.toml`) as a `[sources.<name>]` table, and the hub serves it as a root. The reason is that the block tree, the versions store, the page and the MCP tools on blocks are all sheaf's, so the interface has a single consumer today; while adapters belong to whoever owns the source they write to, and a source bound to one organisation's site cannot live in a public package.
 
@@ -25,9 +25,9 @@ sheaf carries an adapter-interface version, an integer. Each adapter declares th
 
 The TipTap sources, `package.json` and the lockfile live in the sheaf repository. A pinned esbuild builds the bundle; the built file is committed and shipped in the wheel, so installing sheaf needs no Node. CI builds it again and fails when the committed file differs. This settles what ADR 0003 left to implementation.
 
-## Open
+## Open (settled by ADR 0006)
 
-Whether an adapter runs inside the hub process or behind a service it calls is not decided here. It depends on where the hub runs for a shared site (on the shared machine, on a laptop connected to it) and is a later decision.
+Whether an adapter runs inside the hub process or behind a service it calls was left open here. ADR 0006 settles it: behind a source service, through one remote adapter, served only by the hub of the tiroir that owns the source.
 
 ## Considered options
 

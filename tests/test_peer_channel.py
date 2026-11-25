@@ -377,6 +377,9 @@ def test_a_credential_file_left_under_the_old_port_name_is_said_once(monkeypatch
     assert connect._credential_file("https://b.example:8443") is None
     err = capsys.readouterr().err
     assert err.count("sheaf-peer-b.example-8443") == 1 and "sheaf-peer-b.example_p8443" in err and FAKE not in err
+    (tmp_path / "sheaf-peer----1--8443").write_text(FAKE)
+    assert connect._credential_file("https://[::1]:8443") is None
+    assert "sheaf-peer----1--8443" in capsys.readouterr().err
 
 
 def test_the_hub_reads_the_peer_token_from_the_credentials_folder_before_the_keyring(keyring, monkeypatch, tmp_path):

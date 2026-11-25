@@ -112,16 +112,17 @@ def _credential_file(url: str) -> str | None:
 
 
 def _said_old_name(folder: str, url: str, name: str):
-    """A file left under the name a port had before ticket 190 (`sheaf-peer-<host>-<port>`) is never read, since that name was
-    also another host's: say once which file to write again, and nothing of what is in it."""
-    port = urllib.parse.urlsplit(origin_of(url)).port
-    if not port:
-        return
-    old = name[:-len(f"_p{port}")] + f"-{port}"
+    """A file under the name a peer with a port had before ticket 190 (every character outside `[A-Za-z0-9._-]` written `-`) is
+    never read for it, since that name may be another host's own today: say once that it is there, and nothing of what is in it."""
+    netloc = urllib.parse.urlsplit(origin_of(url)).netloc
+    if ":" not in netloc.rpartition("]")[2]:
+        return                       # no port: the name did not change unless the host has a character it escapes
+    old = "sheaf-peer-" + re.sub(r"[^A-Za-z0-9._-]", "-", netloc)
     if old not in _WARNED and (Path(folder) / old).is_file():
         _WARNED.add(old)
-        print(f"sheaf: the credential file {old} has the name of before, which is not read; keep the token again with "
-              f"`sheaf peer use --store file`, as {name}", file=sys.stderr)
+        print(f"sheaf: no credential file {name} for {origin_of(url)}; the file {old} has the name this peer had before, which "
+              f"may also be another host's, so it is not read for it: if it holds this peer's token, keep it again with "
+              f"`sheaf peer use --store file`", file=sys.stderr)
 
 
 def peer_token_for(url: str, store=None) -> str | None:

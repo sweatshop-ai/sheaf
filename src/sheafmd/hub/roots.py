@@ -314,11 +314,11 @@ class Roots:
             root = self._roots.get(name)
             return None if root is not None and self.hidden(root) else root
 
-    def holds(self, name: str) -> bool:
-        """Whether a root is registered by `name`, a private root too (`get` answers None for one): what a forget that
-        failed looks at to know whether the name was let go."""
+    def held(self, name: str) -> Root | None:
+        """The root registered by `name`, a private root too (`get` answers None for one): what a forget looks at to know
+        which root it lets go, and, once it failed, whether the name was let go (ticket 196 C)."""
         with self._lock:
-            return name in self._roots
+            return self._roots.get(name)
 
     def _add(self, path: Path, git: bool, name: str | None = None, clone: str = "") -> Root:
         """Register `path`. `name` fixes the root's name (a clone's, made from its repo) instead of the folder's; a name
@@ -364,8 +364,8 @@ class Roots:
                 try:
                     self._save()
                 except BaseException:
-                    # roots.json still holds the root: so does the registry, so `holds` answers what a reload would
-                    # (ticket 196 C)
+                    # roots.json still holds the root (`write_json` replaces the file whole or not at all, whatever
+                    # stopped it): so does the registry, so `held` answers what a reload would (ticket 196 C)
                     self._roots[name] = root
                     if added is not None:
                         self._added[name] = added

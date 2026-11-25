@@ -1,5 +1,7 @@
 """A page a job generates (SPEC 8.3, 9.7, 12): the door's `create` and `update` set the mark, `read` shows it,
 and only the token that set it, or the key, may update the page or clear the mark."""
+import sys
+
 import pytest
 from helpers import comment, door, ok, refused, rpc
 
@@ -323,8 +325,6 @@ def test_the_clear_of_a_left_mark_leaves_the_same_setters_mark_set_meanwhile_in_
     """Ticket 196 E (from #630): a mark's time has the minute's grain, so the setter of the left mark that marks the new
     page between its file and the clear writes the same token, id and time. The clear must still take only the left
     mark: each mark set is its own, never equal to another."""
-    import sys
-
     from sheafmd import mcp
     monkeypatch.setattr(mcp, "now", lambda: "2026-11-23T10:00:00+0100")
     builder, other = Tokens().add("builder", write=True), Tokens().add("other", write=True)
@@ -341,4 +341,4 @@ def test_the_clear_of_a_left_mark_leaves_the_same_setters_mark_set_meanwhile_in_
     monkeypatch.setattr(mcp, "create_file", then_marked)
     ok(browser, "create", doc="work/made.md", text="# Made\n\nBy hand.\n", token=other)
     mark = browser.hub.docs.get("work/made.md").get("generated")
-    assert mark is not None and mark["by"] == "builder" and mark is not left
+    assert mark is not None and mark["by"] == "builder" and mark != left

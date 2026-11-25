@@ -1008,9 +1008,10 @@ class Door:
                 # `set` is this setting's own (ticket 196 E): the time has the minute's grain, so the same setter marking
                 # again within it would write an equal mark, and a compare-and-clear (`_put_back_mark`, a create's clear
                 # of a left mark) would take the newer mark for the one it meant
-                entry["generated"] = ({"by": caller.display, "id": None, "at": now(), "key": True} if caller.is_key
-                                      else {"by": caller.token_name, "id": caller.token.id, "at": now()})
-                entry["generated"]["set"] = secrets.token_hex(8)
+                own = secrets.token_hex(8)
+                entry["generated"] = ({"by": caller.display, "id": None, "at": now(), "key": True, "set": own}
+                                      if caller.is_key
+                                      else {"by": caller.token_name, "id": caller.token.id, "at": now(), "set": own})
             return entry
         return self.hub.docs.change(address, settle)
 

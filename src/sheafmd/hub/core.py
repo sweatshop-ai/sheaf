@@ -1096,12 +1096,12 @@ class Hub:
             # then for the late forget to leave them (`LiveDocument.detach`).
             for a in held:
                 self.entries[a].live.detach()   # no wait for its lock here: a render holds it for up to 120 s
-            known = self.roots.get(name)
+            known = self.roots.held(name)     # a private root too, which `get` hides
             try:
                 root = roots_mod.forget(self.roots, self.docs, self.seen, self.versions, name,
                                         members=self.member_seen)
             except Exception:
-                if self.roots.holds(name):
+                if self.roots.held(name) is not None:
                     for a in held:      # the registry still holds the root: it stays, and so do its documents' versions
                         self.entries[a].live.reattach()
                     raise

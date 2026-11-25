@@ -55,9 +55,10 @@ Tell from the page works with Claude Code. The other agents reach sheaf through 
 door; adapters for them come later.
 
 For a Tell pressed on a shared Sheaf to reach a Claude Code session on your laptop, install the
-plugin that comes with this repository (Claude Code 2.1.275 or later):
+plugin that comes with this repository:
 
-    /plugin install sheaf --marketplace sweatshop-ai/sheaf
+    claude plugin marketplace add sweatshop-ai/sheaf
+    claude plugin install sheaf@sheaf
 
 It stays quiet until the session has sent a page to a shared Sheaf.
 

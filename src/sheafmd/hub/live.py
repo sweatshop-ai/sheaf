@@ -16,6 +16,7 @@ import contextlib
 import threading
 import time
 
+from .. import adapter as rda
 from .. import comments as rdc
 from .. import edit as rde
 from .. import source as rds
@@ -63,6 +64,8 @@ class LiveDocument:
         read. The first read, here, is its maker's to hold (`Hub.entry`)."""
         self._file = md if callable(md) else (lambda: md)
         self._entry = entry          # when given, its file is opened beneath its root, judged, for every read and write (9.11)
+        self._adapter = (rda.MarkdownFileAdapter(beneath=entry.where) if entry is not None
+                         else rda.MarkdownFileAdapter(self._file))
         self._hold = hold or contextlib.nullcontext
         self._render, self._publish = render, publish
         self._by, self._clock = by, clock
@@ -112,17 +115,18 @@ class LiveDocument:
         return self._file().read_text(encoding="utf-8")
 
     def _update(self, change, move=None):
-        """`rds.update_file` of this document's file; `change(text, opened)`. With an entry the file is opened once beneath
-        its root, judged, read from that descriptor and written through it (`rds.update_beneath`); `opened` is that
-        open, None where the document has no entry."""
+        """The write of this document's file, through its Markdown-file adapter; `change(text, opened)`. With an entry
+        the file is opened once beneath its root, judged, read from that descriptor and written through it;
+        `opened` is that open, None where the document has no entry. Returns (old text, new text)."""
         if self._entry is None:
-            return rds.update_file(self._file(), lambda t: change(t, None), move=move)
-        top, rel = self._entry.where()
+            _, old, new = self._adapter.apply(change, move=move)
+            return old, new
 
         def judged(t, op):
             self._entry.judge(op)
             return change(t, op)
-        return rds.update_beneath(top, rel, judged, move=move)
+        _, old, new = self._adapter.apply(judged, move=move)
+        return old, new
 
     # ── the lock, and the guard against a callback calling back in ─────────────
     def _held(self):

@@ -163,11 +163,12 @@ def test_a_bounded_diff_places_by_order_where_the_counts_agree():
     assert rde._places_by_order(old, new, olds) == {new.rindex(":smile:")}
 
 
-def test_a_bounded_diff_places_every_one_of_the_name_where_the_counts_differ():
+def test_a_bounded_diff_places_no_shortcode_where_the_counts_differ_and_no_neighbour_is_left():
+    # Ticket 191 (#594): a typed shortcode stays the emoji; before, every one of the name was made text.
     old = "x :smile: y"
     new = ":smile: z :smile:"
     olds = [(m.start(), m.group(1)) for m in rde._SHORTCODE_TEXT.finditer(old)]
-    assert rde._places_by_order(old, new, olds) == {0, new.rindex(":smile:")}
+    assert rde._places_by_order(old, new, olds) == set()
 
 
 # 99: on a mounted page an `<a name>` arrives without its name.

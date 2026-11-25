@@ -97,7 +97,7 @@ def test_a_waiting_tell_says_what_the_plugin_does_and_how_to_install_it(tab, sit
     assert hint.locator("code").inner_text() == INSTALL
     link = hint.locator("a")
     assert link.get_attribute("href") == "https://github.com/sweatshop-ai/sheaf#agents"
-    assert link.get_attribute("rel").split() == ["noopener"] or "noopener" in link.get_attribute("rel").split()
+    assert "noopener" in link.get_attribute("rel").split()
 
 
 @pytest.mark.parametrize("state", ["queued", "seen"])

@@ -285,6 +285,11 @@ def check_root(hub, b, peer: str | None = None) -> tuple:
         if owner is None:
             judged[p["path"]] = {"ok": False, "why": why}
         else:
+            try:
+                repos_mod._clean_path(p["path"])
+            except repos_mod.Refused:       # a path that is no markdown page's is refused alone: one such path never refuses the root
+                judged[p["path"]] = {"ok": False, "why": "refused"}
+                continue
             owned.append((owner, p["path"]))
     first = owned[0] if owned else None
     if first is not None:

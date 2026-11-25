@@ -793,12 +793,17 @@ class Repos:
         path)` of `owned` is queued for its member at `commit`, as `report` queues one, but all of them, whatever `MAX_QUEUED` says
         (a root has up to thousands of pages, and a page left out keeps no row of its owner), and with one look at the clone
         and one date of use for the lot. Returns `{path: answer}` for each page a member may not have (`private-root`,
-        `not-cloned`); those are not queued. Raises `Refused` for a name that is none."""
+        `not-cloned`) or whose path is no markdown page's (`refused`); those are not queued. Raises `Refused` for a repo name that is none."""
         repo, commit = _clean_repo(repo), _clean_commit(commit)
         refused, items = {}, []
         with self._records:
             rows = self._read().get(repo, {})
         for member, path in owned:
+            try:
+                _clean_path(path)
+            except Refused:         # a path that is no markdown page's is refused alone, never the whole call
+                refused[path] = "refused"
+                continue
             if (private := self._private(member, repo, private_roots)) is not None:
                 refused[_clean_path(path)] = private
             elif not (isinstance(row := rows.get(_clean_path(path)), dict) and row.get("commit") == commit):

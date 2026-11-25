@@ -1363,10 +1363,16 @@ _DIFF_BOUND = 2_000_000
 _NEIGHBOURS = 12
 
 
+# A word of `_by_words`.
+_DIFF_WORD = re.compile(r":[a-z0-9_+-]+:|\w+|[^\w\s]")
+
+
 def _by_words(old: str, new: str):
     """{start of a word of `old`: start of the same word in `new`} for the words a diff of the two word lists
-    matches, or None where the lists are too long for it (`_DIFF_BOUND`). A word is a run without white space."""
-    a, b = list(re.finditer(r"\S+", old)), list(re.finditer(r"\S+", new))
+    matches, or None where the lists are too long for it (`_DIFF_BOUND`). A word is a shortcode, a run of letters and
+    digits, or one other character that is not white space (`_DIFF_WORD`): a `(` glued to a literal, or a letter
+    typed beside it, leaves the literal a word of its own that still matches."""
+    a, b = list(_DIFF_WORD.finditer(old)), list(_DIFF_WORD.finditer(new))
     if len(a) * len(b) > _DIFF_BOUND:
         return None
     pairs = {}
@@ -1379,11 +1385,11 @@ def _by_words(old: str, new: str):
 def _places_by_order(old: str, new: str, olds) -> set:
     """The places in `new` of the literals `olds`, (place in `old`, name) pairs, by order: the k-th `:name:` of
     `old` is the k-th of `new` where both hold as many of that name. Where they do not, by a diff of the two texts'
-    words (`_by_words`), whose bound reaches about forty times as far as the characters' diff: a literal in a word
+    words (`_by_words`), whose bound reaches as many words as the characters' diff reaches characters: a literal in a word
     the diff matches keeps its place, and a shortcode the reader typed is a new word, which stays the emoji (#594).
     Past that bound, by the literal's neighbours: the `_NEIGHBOURS` characters before it, or after it, with it, found
     once in `new`. A literal placed by none of these is written bare: one the source escaped then shows as its emoji,
-    on a change of over about 80 000 words around a name typed or deleted beside it."""
+    on a change of over about 1 400 words on each side around a name typed or deleted beside it."""
     def starts(text):
         by_name = {}
         for m in _SHORTCODE_TEXT.finditer(text):
@@ -1397,12 +1403,15 @@ def _places_by_order(old: str, new: str, olds) -> set:
             places.add(after[before.index(start)])
             continue
         if words is False:
-            words, word_starts = _by_words(old, new), [m.start() for m in re.finditer(r"\S+", old)]
+            words, word_starts = _by_words(old, new), [m.start() for m in _DIFF_WORD.finditer(old)]
         if words is not None:
-            # The word the literal is in starts at the last word start at or before it; `old[start]` is its `:`.
+            # The word the literal is in starts at the last word start at or before it; `old[start]` is its `:`. It is
+            # the literal itself unless a shortcode-like word took its first colon (`:b:smile:`): then it is placed
+            # only where `new` holds it at the same distance.
             word = word_starts[bisect.bisect_right(word_starts, start) - 1]
-            if word in words:
-                places.add(words[word] + start - word)
+            at = words[word] + start - word if word in words else None
+            if at is not None and new.startswith(f":{name}:", at):
+                places.add(at)
             continue
         code, end = f":{name}:", start + len(name) + 2
         before_it, after_it = old[max(0, start - _NEIGHBOURS):start], old[end:end + _NEIGHBOURS]

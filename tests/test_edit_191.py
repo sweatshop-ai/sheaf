@@ -95,3 +95,17 @@ def test_an_escaped_shortcode_whose_neighbours_changed_stays_text_in_a_long_chan
 def test_bolder_inside_a_light_span_is_plain():
     html = '<p><span style="font-weight:300">a <span style="font-weight:bolder">b</span> c</span> words</p>'
     assert rde.html_block_to_md(html, source="Old words") == "a b c words"
+
+
+def test_a_literal_with_punctuation_glued_to_it_keeps_its_escape_in_a_long_change():
+    old = " ".join(f"w{i}" for i in range(400))
+    new = " ".join(f"v{i}" for i in range(400))
+    out = saved_as(f"A \\:smile: {old} end", f"<p>A (:smile:) {new} :smile: end</p>")
+    assert out.startswith("A (\\:smile:) v0") and out.endswith("v399 :smile: end\n"), (out[:20], out[-30:])
+
+
+def test_a_literal_whose_word_was_edited_keeps_its_escape_in_a_long_change():
+    old = " ".join(f"w{i}" for i in range(400))
+    new = " ".join(f"v{i}" for i in range(400))
+    out = saved_as(f"A foo\\:smile:bar {old} end", f"<p>A fooX:smile:bar {new} :smile: end</p>")
+    assert out.startswith("A fooX\\:smile:bar v0") and out.endswith("v399 :smile: end\n"), (out[:25], out[-30:])

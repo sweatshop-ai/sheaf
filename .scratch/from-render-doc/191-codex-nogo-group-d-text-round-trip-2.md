@@ -29,15 +29,20 @@ finding's own input) before anything was changed.
   text is read through the tokens only when there are emoji.
 - [ ] [SERIOUS] #594: in a changed part too long to diff, a typed `:smile:` beside a source `\:smile:` saved as
   `\:smile:`. Where the counts of a name differ, `_places_by_order` now diffs the two texts' words (`_by_words`,
-  same `_DIFF_BOUND`, about forty times the reach of the character diff): a literal in a matched word keeps its
-  place, a typed shortcode is a new word and stays the emoji. Past that bound, by its 12 characters of neighbours.
+  same `_DIFF_BOUND`, as many words as the character diff reaches characters; a word is a shortcode, a run of
+  letters and digits or one punctuation character): a literal in a matched word keeps its place, a typed shortcode
+  is a new word and stays the emoji. Past that bound, by its 12 characters of neighbours.
   The first fix (neighbours only) turned the failure round, a source `\:smile:` whose neighbours both changed
-  became an emoji; the review round caught it. Left: on a change of over about 80 000 words around a name typed or
-  deleted beside it, a literal placed by neither is written bare. Tests:
+  became an emoji; the spec review caught it. The Opus bug hunt (GO) found two P2s of words split at white space
+  only, a `(` glued to the literal and a letter typed in its word, fixed by the finer words. Left: on a change of
+  over about 1 400 words on each side around a name typed or deleted beside it, a literal placed by neither is
+  written bare. Tests:
   `test_a_typed_shortcode_in_a_long_change_stays_an_emoji_beside_an_escaped_one`,
   `test_an_escaped_shortcode_whose_neighbours_changed_stays_text_in_a_long_change`,
   `test_places_by_order_where_the_counts_differ_keeps_a_literal_by_its_words`,
-  `test_places_by_order_past_the_word_diff_keeps_a_literal_by_its_neighbours`; the ticket 137 test that asserted
+  `test_places_by_order_past_the_word_diff_keeps_a_literal_by_its_neighbours`,
+  `test_a_literal_with_punctuation_glued_to_it_keeps_its_escape_in_a_long_change`,
+  `test_a_literal_whose_word_was_edited_keeps_its_escape_in_a_long_change`; the ticket 137 test that asserted
   the old rule now asserts the word placement.
 - [ ] [SERIOUS] #594: `<div>\</div>:smile:` escaped the shortcode across the block boundary.
   `_typed_slash_before` now checks the backslash's own ancestors up to the one it shares with the shortcode. Test:

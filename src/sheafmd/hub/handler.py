@@ -1355,7 +1355,7 @@ class Handler:
     def _agency_owned(self, op: str, body: str, doc: str) -> str:
         """A client page's meta block, or its mount's config, with what the page acts on said by this hub (`readthrough.agency_config`)."""
         if op == "page":
-            return _meta_of_page(body, lambda meta: readthrough.agency_config(meta, doc))
+            return readthrough.agency_meta(body, doc)
         got = json.loads(body)              # `_own_build` already refused a mount body that is no object
         if isinstance(got.get("config"), dict):
             got["config"] = readthrough.agency_config(got["config"], doc)

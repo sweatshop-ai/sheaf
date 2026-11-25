@@ -45,6 +45,7 @@ def kept_headers(headers) -> dict:
 _PLAIN_VALUE = re.compile(r"[\t\x20-\x7e\x80-\xff]*")          # a header value: no line break, no NUL, and what a latin-1 header line can hold
 _SCRIPT_RE = re.compile(r"<script\b([^>]*)>(.*?)</script\s*>", re.S | re.I)
 _NONCE_ATTR = re.compile(r'\s+nonce="([^"]*)"')
+_META_ATTRS = 'id="rd-edit-meta" type="application/json"'     # the page's data block, as `adopt` keeps it
 
 
 def adopt(html: str, client_nonce, nonce: str) -> str:
@@ -56,7 +57,7 @@ def adopt(html: str, client_nonce, nonce: str) -> str:
 
     def one(m):
         attrs, body = m.group(1), m.group(2)
-        if attrs.strip() == 'id="rd-edit-meta" type="application/json"':
+        if attrs.strip() == _META_ATTRS:
             return m.group(0)
         if client_nonce and _NONCE_ATTR.fullmatch(attrs) and _NONCE_ATTR.fullmatch(attrs).group(1) == client_nonce and body == own:
             return f'<script nonce="{nonce}">{own}</script>'
@@ -83,6 +84,30 @@ def agency_config(config: dict, doc: str) -> dict:
     them from the doc state; the client's own keys the script reads only for drawing are kept."""
     return {**{k: v for k, v in config.items() if k not in ("way_back", "work")}, "doc": doc, "actions": [], "edit": False,
             "editable": [], "agent": None, "can": [], "targets": [], "lines": {}}
+
+
+def agency_meta(html: str, doc: str) -> str:
+    """A client page with its meta block set by this hub (`agency_config`): every script `adopt` keeps as the data block, by
+    the same matcher, whatever spelling of the tag the client hub chose. The first is the one the page script reads, and it
+    becomes the agency's block in the form the hub writes; the others go. A first block that is no JSON object gives the
+    agency's block from nothing (ticket 190, from the review of #655)."""
+    first = True
+
+    def one(m):
+        nonlocal first
+        if m.group(1).strip() != _META_ATTRS:
+            return m.group(0)
+        if not first:
+            return ""
+        first = False
+        try:
+            meta = json.loads(m.group(2))
+        except ValueError:
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        return f'<script {_META_ATTRS}>' + json.dumps(agency_config(meta, doc)).replace("<", "\\u003c") + "</script>"
+    return _SCRIPT_RE.sub(one, html)
 
 
 def fold_rows(client: str, rows: list) -> list:

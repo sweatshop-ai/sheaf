@@ -112,13 +112,12 @@ def _credential_file(url: str) -> str | None:
 
 
 def _said_old_name(folder: str, url: str, name: str):
-    """A file under the name a peer with a port had before ticket 190 (every character outside `[A-Za-z0-9._-]` written `-`) is
-    never read for it, since that name may be another host's own today: say once that it is there, and nothing of what is in it."""
+    """A file under the name the peer had before ticket 190 (every character outside `[A-Za-z0-9._-]` written `-`: a port, an
+    IPv6 address) is never read for it, since that name may be another host's own today: say once that it is there, and
+    nothing of what is in it."""
     netloc = urllib.parse.urlsplit(origin_of(url)).netloc
-    if ":" not in netloc.rpartition("]")[2]:
-        return                       # no port: the name did not change unless the host has a character it escapes
     old = "sheaf-peer-" + re.sub(r"[^A-Za-z0-9._-]", "-", netloc)
-    if old not in _WARNED and (Path(folder) / old).is_file():
+    if old != name and old not in _WARNED and (Path(folder) / old).is_file():
         _WARNED.add(old)
         print(f"sheaf: no credential file {name} for {origin_of(url)}; the file {old} has the name this peer had before, which "
               f"may also be another host's, so it is not read for it: if it holds this peer's token, keep it again with "

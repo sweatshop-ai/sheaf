@@ -475,6 +475,17 @@ class Versions:
                         if _HASH_RE.fullmatch(p.stem):
                             watched.by_hash.setdefault(p.stem, set()).add(None)
 
+    def addresses(self, prefix: str) -> list[str]:
+        """The addresses that start with `prefix` (`<root>/`) and hold versions, found by the `address` file of each folder."""
+        found = []
+        if self.dir.is_dir():
+            for folder in self.dir.iterdir():
+                key = read_small(folder / _ADDRESS_FILE)
+                address = self._prefix + key if key is not None and self._root is not None else key
+                if address is not None and address.startswith(prefix):
+                    found.append(address)
+        return sorted(found)
+
     def forget_prefix(self, prefix: str):
         """Drop the versions of every document whose address starts with `prefix` (`<root>/`),
         found by the `address` file of each folder. A document that was opened and never

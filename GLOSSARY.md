@@ -320,6 +320,18 @@ _Avoid_: block note, block annotation
 Where the hub keeps the Comments of a page whose source cannot hold them, that is every source reached through a Source service, each tied to its document and Block. A Markdown file never uses it: its Comments stay in the file. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 16.)
 _Avoid_: comment database, sidecar, hub-side store
 
+**Version**:
+A state of a rectoverso's text that its version list shows: a commit of the file in a root that commits, an entry of the Versions store otherwise, or a version its Source service lists. A save that changes only comments is none. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 17.)
+_Avoid_: revision, snapshot, history entry
+
+**Named version**:
+A Version a member or an agent gave a name, shown when the version list shows named ones only, and never pruned. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 17.)
+_Avoid_: checkpoint, tag, milestone
+
+**Compare mode**:
+The page showing a rectoverso as it was at a chosen Version, with that Version's Block changes marked in their authors' colours, against the Version before it or against the current page. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 17.)
+_Avoid_: diff view, track changes, suggestion mode
+
 **Source service**:
 A program the owner of a source runs beside it, which holds the source's credentials, turns its documents into blocks and back, checks its rules and names the commit's author; the hub reaches it through the remote adapter and holds no key to the source. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 13.)
 _Avoid_: backend, adapter server, connector

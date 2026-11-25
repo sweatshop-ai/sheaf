@@ -402,3 +402,28 @@ def test_a_sigterm_in_a_route_callback_lets_the_callback_finish_before_it_is_rai
         assert d.dead and steps == ["callback finished", "dispatcher went on"]
     finally:
         signal.signal(signal.SIGTERM, before)
+
+
+def test_a_second_sigterm_in_a_route_callback_that_never_switches_away_reaches_the_test_at_once():
+    # Ticket 192: a callback that never switches away (a loop, a call that never comes back to the browser) would hold the
+    # first signal for good; the second one is raised where the test stands, as before ticket 192.
+    greenlet = pytest.importorskip("greenlet")
+    if threading.current_thread() is not threading.main_thread():
+        pytest.skip("a signal handler is set on the main thread only")
+    steps = []
+
+    def dispatcher():
+        def route_callback():
+            leakguard._terminated(signal.SIGTERM, None)
+            steps.append("first held")
+            leakguard._terminated(signal.SIGTERM, None)
+            steps.append("callback finished")
+        greenlet.greenlet(route_callback).switch()
+
+    before = signal.signal(signal.SIGTERM, leakguard._terminated)
+    try:
+        with pytest.raises(KeyboardInterrupt, match="SIGTERM"):
+            greenlet.greenlet(dispatcher).switch()
+        assert steps == ["first held"] and not leakguard._deferred and greenlet.gettrace() is None
+    finally:
+        signal.signal(signal.SIGTERM, before)

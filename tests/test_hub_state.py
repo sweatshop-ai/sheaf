@@ -543,5 +543,7 @@ def test_a_pin_of_a_roots_own_store_with_no_time_beside_it_is_not_believed(tmp_p
     at.symlink_to(tmp_path / "elsewhere")
     assert v.get("r/plan.md", h) is None
     at.unlink()
+    at.write_text(str(time.time_ns() + 30 * 86400 * 10**9))    # a clock ahead, or a hand-set number: no age to trust either
+    assert v.get("r/plan.md", h) is None
     v.pin("r/plan.md", "pinned\n")
     assert v.get("r/plan.md", h) == "pinned\n"

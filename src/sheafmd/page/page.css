@@ -73,6 +73,7 @@
 /* The room under a box held at the foot of a short page (roomBelow). */
 .rd-room{position:absolute;left:0;width:1px;visibility:hidden;pointer-events:none}
 #rd-popover .rd-msg{box-sizing:border-box;width:fit-content;max-width:85%;margin:0 0 8px;padding:6px 10px;border-radius:14px;background:rgba(127,127,127,.14)}
+#rd-popover .rd-install-hint code{overflow-wrap:anywhere}
 #rd-popover .rd-msg.rd-mine{margin-left:auto;background:rgba(59,130,246,.18)}
 #rd-popover .rd-who{font:600 12px ui-monospace,monospace}
 #rd-popover .rd-who-ask,#rd-panel .rd-who-ask{color:#1d4ed8}

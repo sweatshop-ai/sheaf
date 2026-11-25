@@ -2486,7 +2486,7 @@ var create = function (ROOT, CFG, opts) {
   }
   var DOTS = '<span class="rd-dots" aria-hidden="true"><i></i><i></i><i></i></span>';
   // Said under a laptop Tell that waits: what the Claude Code plugin is for and how to install it (a laptop without it never polls).
-  var INSTALL_HINT = ' <span class="rd-install">The Sheaf plugin lets a Claude session on your laptop receive what you send from a Sheaf page. ' +
+  var INSTALL_HINT = ' <span class="rd-install-hint">The Sheaf plugin lets a Claude session on your laptop receive what you send from a Sheaf page. ' +
     'If it is not installed, install it (<a href="https://github.com/sweatshop-ai/sheaf#agents" target="_blank" rel="noopener">instructions</a>): ' +
     '<code>claude plugin marketplace add sweatshop-ai/sheaf &amp;&amp; claude plugin install sheaf@sheaf --scope user</code></span>';
   // A Tell that waits for an agent: said in the thread, with no spinner and no clock, across a reload and a restart.

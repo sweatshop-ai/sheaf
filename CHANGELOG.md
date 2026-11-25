@@ -23,6 +23,7 @@ Everything merged since 1.2.1 (#472), up to #534. Version 1.2.1 was never tagged
 
 ### Added
 
+- A Tell that waits for a laptop session says, on the page, what the Sheaf plugin does and how to install it (the README link and the two commands), so a Tell that waits because the plugin was never installed says why.
 - A page a job generates can be marked as generated, read-only for text edits: the mark is set, shown and guarded by the door (#486, #503, #534, ticket 156). The hub refuses a save, a tick or a share on such a page with a sentence that names who generated it; comments, replies and resolve stay open.
 - The comment box moves by its band, with a mouse or a finger (#501, ticket 174).
 - Resolve in the comment box is a check mark, not a minus (#500, ticket 175).

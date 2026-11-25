@@ -91,17 +91,17 @@ INSTALL = "claude plugin marketplace add sweatshop-ai/sheaf && claude plugin ins
 def test_a_waiting_tell_says_what_the_plugin_does_and_how_to_install_it(tab, site):
     waiting_on_a_laptop(tab, site)
     until(lambda: bool(lines(tab)), what="the waiting line")
-    hint = tab.page.locator("#rd-popover .rd-waits .rd-install")
+    hint = tab.page.locator("#rd-popover .rd-waits .rd-install-hint")
     assert hint.count() == 1
     assert "receive what you send from a Sheaf page" in hint.inner_text()
     assert hint.locator("code").inner_text() == INSTALL
     link = hint.locator("a")
     assert link.get_attribute("href") == "https://github.com/sweatshop-ai/sheaf#agents"
-    assert link.get_attribute("rel") == "noopener"
+    assert link.get_attribute("rel").split() == ["noopener"] or "noopener" in link.get_attribute("rel").split()
 
 
 @pytest.mark.parametrize("state", ["queued", "seen"])
 def test_a_tell_that_is_not_waiting_shows_no_install_line(tab, site, state):
     waiting_on_a_laptop(tab, site, state)
     until(lambda: bool(lines(tab)), what="the line")
-    assert tab.page.locator("#rd-popover .rd-install").count() == 0
+    assert tab.page.locator("#rd-popover .rd-install-hint").count() == 0

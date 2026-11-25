@@ -547,3 +547,17 @@ def test_a_pin_of_a_roots_own_store_with_no_time_beside_it_is_not_believed(tmp_p
     assert v.get("r/plan.md", h) is None
     v.pin("r/plan.md", "pinned\n")
     assert v.get("r/plan.md", h) == "pinned\n"
+
+
+def test_a_pins_time_stays_out_of_git_so_two_clones_pinning_one_version_never_conflict(tmp_path):
+    """Ticket 192: the versions sweep commits what git lists in a root's own store (8.11). Each hub writes its own pin
+    time, so a time in git would differ between two clones that pin one version and their sync would conflict; the
+    pin itself, named by its text, is the same on both and goes to git as before."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    v = state.Versions(tmp_path, "r")
+    h = v.pin("r/plan.md", "pinned\n")
+    listed = subprocess.run(["git", "-C", str(tmp_path), "ls-files", "--others", "--exclude-standard", "--",
+                             str(state.INSIDE)], capture_output=True, text=True, check=True).stdout.split()
+    assert any(p.endswith(f"pins/{h}.md") for p in listed)
+    assert not [p for p in listed if p.endswith(".at") or p.endswith(".gitignore")]
+    assert v.get("r/plan.md", h) == "pinned\n"

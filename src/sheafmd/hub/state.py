@@ -41,6 +41,7 @@ _PINS_DIR = "pins"              # in each versions folder: the versions pages ke
 _MEMBER_PINS = "m-"             # in `pins/`: the prefix of a member's own folder (`member_key`)
 _PIN_CLOCK_AHEAD = 60           # seconds a pin time may lie ahead of this clock (another clone's)
 _PINNED_AT = ".at"              # in a root's own store, beside a pin `<hash>.md`: when it was last pinned, ns since the epoch
+_LOCAL_ONLY = f"*{_PINNED_AT}\n.gitignore\n"   # `.gitignore` of a root's own store: each hub's pin times stay out of git
 INSIDE = Path(".sheaf") / "versions"    # a root's own versions store, inside it (7.4)
 
 
@@ -242,13 +243,15 @@ class Versions:
         is not a version (`get` would not believe it) and takes no slot. A pin of a root's own store
         has its time in a file beside it (`_pinned_at`)."""
         h = md_hash(text)
+        if pinned and self._root is not None:      # first: a pin with no time is never believed
+            if not (self.dir / ".gitignore").is_file():
+                write_text_private(self.dir / ".gitignore", _LOCAL_ONLY, True)
+            write_text_private(folder / f"{h}{_PINNED_AT}", str(int(time.time() * 1e9)), True)
         f = folder / f"{h}.md"
         if f.is_file():
             os.utime(f, follow_symlinks=False)
         else:
             write_text_private(f, text, self._root is not None)
-        if pinned and self._root is not None:
-            write_text_private(folder / f"{h}{_PINNED_AT}", str(int(time.time() * 1e9)), True)
         files = []
         for p in folder.glob("*.md"):
             if _HASH_RE.fullmatch(p.stem) and p.is_file():
@@ -268,8 +271,9 @@ class Versions:
     @staticmethod
     def _pinned_at(pin: Path) -> int:
         """When the pin `pin` of a root's own store was last pinned, in ns: the file beside it says, since the store goes to git
-        (8.11) and a clone or checkout writes every file with its own time (ticket 192). None there, or no number: 0, a pin
-        never believed; nor a time more than a minute to come."""
+        (8.11) and a clone or checkout writes every file with its own time (ticket 192). That file is this hub's alone: the
+        store's `.gitignore` keeps it out of git, so two clones pinning one version never conflict, and a pin another clone
+        made is not believed here. None there, or no number: 0, a pin never believed; nor a time more than a minute to come."""
         try:
             at = int((read_small(pin.with_suffix(_PINNED_AT), 32) or "").strip())   # never a link or a FIFO (7.4)
         except ValueError:

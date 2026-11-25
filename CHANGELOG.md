@@ -11,7 +11,7 @@ changes whenever an asset does. The entries name pull requests of sweatshop-ai/s
 - A conflict copy (`FILE.tiroir.md`) is never overwritten: a second conflict leaves the next free name, `FILE.tiroir-2.md`, `-3`, and the same text reuses the copy already there; `pull` does the same.
 - A send whose folder git cannot place (git missing, timed out, dubious ownership, unsafe repository) stops with the cause instead of sending the page as a loose one.
 - A failure after a write no longer says "Nothing was sent": it says whether the page arrived is not known, and the next run takes up a page that did arrive.
-- A pin in a root's own versions store keeps its age through a clone or checkout: its time is in `<hash>.at` beside it, so a pin older than 7 days is not believed again. A pin written before has no such file and counts once it is pinned again.
+- A pin in a root's own versions store keeps its age through a clone or checkout: its time is in `<hash>.at` beside it, kept out of git by `.sheaf/versions/.gitignore`, so a pin older than 7 days is not believed again. A pin written before has no such file: after the upgrade it counts only once pinned again, so a page that holds its reload across the hub's restart can get "version no longer known" (409) on its save until its next daily pin.
 - `sheaf connect` checks that `config.toml` can be written before it stores the token.
 - A page opened on its own address keeps the link of its byline's session name (the session kit moved to `session.js`, loaded by the page script and the mount bundle).
 

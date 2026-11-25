@@ -195,3 +195,32 @@ def test_the_sweep_runs_only_a_clone_whose_toml_names_another_tiroir(hub, tmp_pa
     (hub.repos.dest / ".sheaf.toml").write_text(f'tiroir = "{HERE}/"\n')
     hub.repos.moved = None
     assert root_sender.sweep(hub, post=post, moves=moves) == {}
+
+
+def test_the_owner_is_matched_without_regard_to_case(hub, tmp_path):
+    hub.repos._records["a.md"]["owner"] = "ALICE"
+    post = Receiver(ok("a.md", "b.md"))
+    assert run(hub, tmp_path, post) == "moved"
+    assert "a.md" in [p["path"] for p in post.calls[0][2]["pages"]]
+
+
+def test_a_move_that_confirmed_pages_before_ends_when_nothing_is_left_to_send(hub, tmp_path):
+    state = root_moves.Moves(tmp_path / "state")
+    hub.repos.sleep_moved = lambda repo, to: False
+    assert root_sender.run(hub, "o/r", THERE, post=Receiver(ok("a.md", "b.md")), moves=state) == "partial"
+    hub.repos._records.clear()
+    hub.writes.addresses = lambda prefix: []
+    hub.versions._texts.clear()
+    hub.repos.sleep_moved = lambda repo, to: True
+    assert root_sender.run(hub, "o/r", THERE, post=Receiver(), moves=state) == "moved"
+    assert state.get("o/r") is None
+
+
+def test_an_unpaired_target_is_written_to_the_diagnostics_once_across_sweeps(hub, tmp_path, monkeypatch):
+    monkeypatch.setattr(root_moves, "paired", lambda to, store=None: False)
+    monkeypatch.setattr(root_sender, "DIAG", root_moves.Diag())
+    rows = []
+    monkeypatch.setattr(root_moves.diagnostics, "record", lambda *a, **k: rows.append(a))
+    for _ in range(3):
+        root_sender.sweep(hub, post=Receiver(), moves=root_moves.Moves(tmp_path / "state"))
+    assert len(rows) == 1

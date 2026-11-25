@@ -14,10 +14,11 @@ import uuid
 from pathlib import Path
 
 from .. import connect, diagnostics, paths
-from . import incoming, outgoing, root_moves, roots as roots_mod
+from . import incoming, outgoing, root_moves, roots as roots_mod, visibility
 from . import repos as repos_mod
 
 NO_BRANCH = "no_branch"
+DIAG = root_moves.Diag()        # one for the hub's life: its once-only memory is what keeps `unpaired` from being written at every sweep
 STATES = ("unpaired", "held", "partial", "moved")
 
 
@@ -30,7 +31,7 @@ def _git(clone: Path, *args: str) -> str | None:
 
 
 def _member(hub, name: str):
-    return next((m for m in hub.proxy.members.values() if (m.short or m.id) == name), None)
+    return next((m for m in hub.proxy.members.values() if visibility.owner_key(m).casefold() == name.casefold()), None)
 
 
 def _pages(hub, repo: str, prefix: str) -> list[str]:
@@ -73,7 +74,7 @@ def run(hub, repo: str, to: str, *, post=outgoing.call, moves: root_moves.Moves 
     why), `partial` (some pages are confirmed and forwarded, others wait), or `moved` (every page has its Forward and the
     clone sleeps)."""
     moves = moves or root_moves.Moves(paths.state_dir())
-    diag = diag or root_moves.Diag()
+    diag = diag or DIAG
     if hub.repos.moved_to(repo) == to:
         return "moved"
     if not root_moves.paired(to):
@@ -84,7 +85,8 @@ def run(hub, repo: str, to: str, *, post=outgoing.call, moves: root_moves.Moves 
     tip = _git(dest, "rev-parse", f"origin/{branch}") if branch else None
     if tip is None:
         moves.start(repo, to, uuid.uuid4().hex)
-        moves.hold(repo, {"": NO_BRANCH})
+        if moves.hold(repo, {"": NO_BRANCH}):
+            diag.held(repo, to, {"": NO_BRANCH})
         return "held"
     if moves.get(repo) is None:
         diag.started(repo, to)
@@ -98,13 +100,14 @@ def run(hub, repo: str, to: str, *, post=outgoing.call, moves: root_moves.Moves 
         outgoing.send_root(post, moves, repo, to, head, rows, diag=diag)
     _forward(hub, repo, to, prefix, moves)
     row = moves.get(repo) or {}
-    held = {**leaving, **no, **({p: w for p, w in row.get("held", {}).items() if p not in row.get("sent", [])})}
+    held = {**leaving, **no, **({p: w for p, w in row.get("held", {}).items() if p not in row.get("sent", [])} if rows else {})}
     if held or not {r["path"] for r in rows} <= set(row.get("sent", [])):
         moves.hold(repo, held)
         return "partial" if row.get("sent") else "held"
     if _sleep(hub, repo, to, diag, len(row.get("sent", []))) != "moved":
         return "partial"                # the move stays as it is: the next try asks the clone to sleep, and sends nothing twice
-    moves.done(repo) if rows else moves.cancel(repo)
+    if rows or not moves.cancel(repo):      # a move that sent nothing now is dropped; one that sent pages before ends
+        moves.done(repo)
     return "moved"
 
 

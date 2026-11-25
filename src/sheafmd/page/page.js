@@ -4981,6 +4981,6 @@ var create = function (ROOT, CFG, opts) {
 };
 
 window.sheafPage = Object.freeze({ create: create });
-var meta = document.querySelector('script#rd-edit-meta[type="application/json"]');      // the JSON block alone: another element of that id in a client's HTML is no meta (ticket 190)
+var meta = Array.prototype.find.call(document.querySelectorAll('script[type="application/json"]'), function (el) { return el.id === 'rd-edit-meta'; });      // the JSON block alone: another element of that id in a client's HTML is no meta (ticket 190)
 if (meta) create(document, JSON.parse(meta.textContent));
 })();

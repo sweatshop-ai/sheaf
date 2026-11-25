@@ -92,6 +92,7 @@ class Entry:
     log: list = field(default_factory=list)        # the render log of the last build
     warnings: list = field(default_factory=list)   # link-rule warnings not yet handed to a command
     first: bool = True                             # no build has run yet
+    rebuild_due: bool = False                      # a render's rebuild for new settings failed: the next render rebuilds (199)
     images_scope: tuple | None = None              # the image rule its last build read: `Hub._image_scope` (9.9)
 
     where: Callable[[], tuple] | None = None     # (the root's folder, the path in it) of its file now: what is opened beneath
@@ -992,13 +993,15 @@ class Hub:
             try:
                 got = ("answer", self._render_held(address, md, settings, target))
             except Exception as ex:                # the request's, while it waits; else written down
-                got = ("error", ex)
+                got, trace = ("error", ex), traceback.format_exc()[-1900:]
             with gate:
                 out[got[0]] = got[1]
                 late = out.get("late", False)
                 done.set()
             if late and got[0] == "error":
-                self.record("render-failed", address, error=f"{type(got[1]).__name__}: {got[1]}"[:500])
+                known = isinstance(got[1], (RenderError, config.ConfigError))    # a bug keeps its traceback (`record_exception`)
+                self.record("render-failed", address, error=f"{type(got[1]).__name__}: {got[1]}"[:500],
+                            **({} if known else {"traceback": trace}))
         # `place.held` is bound to the thread that takes it, so the worker takes every lock itself.
         threading.Thread(target=work, name=f"render {address}", daemon=True).start()
         if not done.wait(RENDER_ANSWER_WITHIN):
@@ -1027,8 +1030,11 @@ class Hub:
                     self._refreshed(e)
                 if rebuild and kept:
                     # A render of the page (pandoc, up to 120 s) waits for the document's lock, and every request that needs
-                    # the hub would wait with it were the hub's lock still held.
+                    # the hub would wait with it were the hub's lock still held. The settings are recorded already: one that
+                    # fails leaves the next render to rebuild, or a later `sheaf open` with them would serve the old page (199).
+                    e.rebuild_due = True
                     e.live.rebuild()
+                    e.rebuild_due = False
             except FileNotFoundError:          # deleted after the look above
                 raise gone from None
             with self._lock:
@@ -1067,7 +1073,7 @@ class Hub:
         old, new = self.docs.change(address, settle)
         existed = address in self.entries
         e = self.entry(address)
-        rebuild = existed and (any(old.get(k) != new[k] for k in SETTING_KEYS)
+        rebuild = existed and (e.rebuild_due or any(old.get(k) != new[k] for k in SETTING_KEYS)
                                or old.get("target") != new.get("target"))
         return e, rebuild, existed
 

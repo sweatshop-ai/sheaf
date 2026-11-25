@@ -9,7 +9,8 @@ import pytest
 import sheafmd.comments as rdc
 from helpers import NOW, PLAN, hub_rows, make_repo, thread, with_threads
 from sheafmd.agents.base import State
-from sheafmd.hub import client as hub_client
+from sheafmd.hub import client as hubclient
+from sheafmd.hub import core
 from sheafmd.hub import index as index_mod
 
 
@@ -297,25 +298,25 @@ def test_a_new_render_clears_opened(world, work):
     assert row(world, "work/start.md")["opened"] is False
 
 
-def _render_threads():
-    """The threads the hub renders a page on (199): `Hub.render` names them `render <address>`."""
-    return [t for t in threading.enumerate() if t.name.startswith("render ")]
+def _join_renders():
+    """Wait for the threads the hub renders a page on (199): `Hub.render` names them `render <address>`."""
+    for t in [t for t in threading.enumerate() if t.name.startswith("render ")]:
+        t.join(10)
 
 
 def test_a_render_behind_a_lock_held_past_120_s_renders_the_page_whose_own_pandoc_runs_are_fast(world, work, monkeypatch):
     """199 G (198 G, round 2 of #669): the time a render waits for the document's lock (behind a save, a refresh or another
-    render) is never counted against pandoc's 120 s; only pandoc's own running time is. The lock is held past 120 s of
-    the clock while the render waits for it, and its pandoc runs are fast: the page is rendered, and no run is cut."""
+    render) is never counted against pandoc's 120 s; only pandoc's own running time is. The lock is held while the render
+    waits for it, and every pandoc run of the render is then given its whole 120 s: the page is rendered, no run is cut."""
     from sheafmd import _pandoc
     world.hub.render(work / "start.md", {}, None)
-    now, limits, real = [1000.0], [], subprocess.run
+    limits, real = [], subprocess.run
 
     def timed(cmd, timeout=None, **kw):
         if cmd[0] == _pandoc.pypandoc.get_pandoc_path():
             limits.append(timeout)
         return real(cmd, timeout=timeout, **kw)
     monkeypatch.setattr(_pandoc.subprocess, "run", timed)
-    monkeypatch.setattr(_pandoc, "_clock", lambda: now[0], raising=False)   # the clock 198 D read: it must not count
     started, taken, failed = threading.Event(), threading.Event(), []
     entered = world.hub._render_entry
 
@@ -325,12 +326,11 @@ def test_a_render_behind_a_lock_held_past_120_s_renders_the_page_whose_own_pando
         return got
     monkeypatch.setattr(world.hub, "_render_entry", entry_then_tell)
 
-    def hold():                                # a save that holds the document's lock for 130 s of the clock
+    def hold():                                # a save that holds the document's lock while the render waits for it
         with world.hub.page_lock("work/start.md"):
             taken.set()
             if not started.wait(10):
                 failed.append("the render never began")
-            now[0] += 130.0
     holder = threading.Thread(target=hold)
     holder.start()
     assert taken.wait(10)
@@ -344,31 +344,28 @@ def test_a_render_behind_a_lock_held_past_120_s_renders_the_page_whose_own_pando
 
 
 def test_a_render_longer_than_sheaf_open_waits_answers_pending_and_publishes_the_finished_page(world, work, monkeypatch):
-    """199 H (198 H, round 2 of #669): a render whose pandoc runs together take longer than `sheaf open` waits (2 x 70 s
-    of the clock, each under its 120 s) is no failure. The hub answers `pending` before the client's wait runs out, the
+    """199 H (198 H, round 2 of #669): a render whose pandoc runs together take longer than `sheaf open` waits, each under
+    its own 120 s, is no failure. The hub answers `pending` before the client's wait runs out, the
     render goes on and publishes the finished page, never a failed one, and the next render with the same settings
-    serves that page without running pandoc again."""
+    serves that page without running pandoc again. The runs are held until the hub has answered, and each is given its
+    whole 120 s."""
     from sheafmd import _pandoc
-    from sheafmd.hub import core
-    now, limits, real, go = [1000.0], [], subprocess.run, threading.Event()
+    limits, real, go = [], subprocess.run, threading.Event()
 
-    def slow(cmd, timeout=None, **kw):         # every pandoc run takes 70 s of the clock
+    def slow(cmd, timeout=None, **kw):         # every pandoc run outlasts the hub's answer limit
         if cmd[0] != _pandoc.pypandoc.get_pandoc_path():
             return real(cmd, timeout=timeout, **kw)
         limits.append(timeout)
         go.wait(10)                            # held until the request has answered
-        now[0] += 70.0
         return real(cmd, timeout=timeout, **kw)
     monkeypatch.setattr(_pandoc.subprocess, "run", slow)
-    monkeypatch.setattr(_pandoc, "_clock", lambda: now[0], raising=False)
     monkeypatch.setattr(core, "RENDER_ANSWER_WITHIN", 0.5)   # the hub's answer limit, below the client's wait
     got = world.hub.render(work / "start.md", {}, None)
-    assert core.RENDER_ANSWER_WITHIN < hub_client.RENDER_TIMEOUT
+    assert core.RENDER_ANSWER_WITHIN < hubclient.RENDER_TIMEOUT
     assert got.get("pending") is True, got
     assert (got["doc"], got["url"]) == ("work/start.md", world.hub.url("work/start.md")), got
     go.set()
-    for t in _render_threads():
-        t.join(10)
+    _join_renders()
     assert len(limits) >= 2 and all(t == _pandoc.TIMEOUT for t in limits), limits
     runs = len(limits)
     again = world.hub.render(work / "start.md", {}, None)
@@ -388,10 +385,33 @@ def test_a_render_the_hub_answers_in_time_raises_its_error_in_the_request(world,
         world.hub.render(work / "start.md", {}, None)
 
 
+def test_a_render_whose_rebuild_for_new_settings_failed_is_rebuilt_by_the_next_render_with_the_same_settings(world, work,
+                                                                                                         monkeypatch):
+    """199 (spec review): the settings of a render are recorded before its rebuild runs, so a rebuild that failed (after
+    the hub answered `pending`, nobody heard of it) left the next `sheaf open` with the same settings serving the page of
+    the old ones. The next render rebuilds instead, until one rebuild goes through."""
+    from sheafmd.render import RenderError
+    world.hub.render(work / "start.md", {}, None)
+    live = world.hub.entries["work/start.md"].live
+    real, calls = live.rebuild, []
+
+    def once_broken():
+        calls.append(1)
+        if len(calls) == 1:
+            raise RenderError("pandoc could not read this document")
+        return real()
+    monkeypatch.setattr(live, "rebuild", once_broken)
+    with pytest.raises(RenderError):
+        world.hub.render(work / "start.md", {"title": "New"}, None)
+    world.hub.render(work / "start.md", {"title": "New"}, None)
+    world.hub.render(work / "start.md", {"title": "New"}, None)
+    assert len(calls) == 2, calls
+    assert "New" in world.get("/work/start.md").body.decode()
+
+
 def test_a_render_that_fails_after_the_hub_answered_pending_is_written_down(world, work, monkeypatch):
     """199: a render that fails after the request was answered `pending` has nobody to tell; its failure is a
     `render-failed` row, and the next open meets it in its own render."""
-    from sheafmd.hub import core
     from sheafmd.render import RenderError
     go = threading.Event()
 
@@ -402,8 +422,7 @@ def test_a_render_that_fails_after_the_hub_answered_pending_is_written_down(worl
     monkeypatch.setattr(core, "RENDER_ANSWER_WITHIN", 0.2)
     assert world.hub.render(work / "start.md", {}, None).get("pending") is True
     go.set()
-    for t in _render_threads():
-        t.join(10)
+    _join_renders()
     assert [r["error"] for r in hub_rows("render-failed")] == ["RenderError: pandoc could not read this document"]
 
 

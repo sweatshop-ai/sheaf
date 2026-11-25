@@ -1352,10 +1352,9 @@ class Handler:
         into.update(team=team, team_me=me)
         return json.dumps(got)
 
-    def _agency_owned(self, op: str, body: str, doc: str) -> str:
-        """A client page's meta block, or its mount's config, with what the page acts on said by this hub (`readthrough.agency_config`)."""
-        if op == "page":
-            return readthrough.agency_meta(body, doc)
+    @staticmethod
+    def _agency_mount(body: str, doc: str) -> str:
+        """A client page's mount answer with its config's say on what the page acts on taken by this hub (`readthrough.agency_config`)."""
         got = json.loads(body)              # `_own_build` already refused a mount body that is no object
         if isinstance(got.get("config"), dict):
             got["config"] = readthrough.agency_config(got["config"], doc)
@@ -1381,8 +1380,10 @@ class Handler:
             body = self._own_build(body)
         if op == "doc" and status == 200:     # what an older client tiroir still says of its agents is not shown here (9.9)
             body = self._read_only_doc(body)
-        if op in ("page", "mount") and status == 200 and doc is not None:     # what the page acts on is this hub's to say (9.9)
-            body = self._agency_owned(op, body, doc)
+        if env.get("type") == "html":          # what the page acts on is this hub's to say, whatever status the client chose (9.9)
+            body = readthrough.agency_meta(body, doc)
+        elif op == "mount" and status == 200 and doc is not None:
+            body = self._agency_mount(body, doc)
         if status == 200 and doc is not None and self.hub.team is not None:
             body = self._with_team(op, body, doc, req.member.name)
         if env.get("type") == "html":

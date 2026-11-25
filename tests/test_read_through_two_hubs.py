@@ -244,3 +244,26 @@ def test_a_second_meta_block_of_another_spelling_is_no_meta_the_agency_page_read
     assert len(metas) == 1
     assert metas[0]["doc"] == f"Clients/acme/{mine}" and metas[0]["actions"] == [] and metas[0]["edit"] is False
     assert "agency-secret" not in page.text
+
+
+@pytest.mark.parametrize("status", [201, 404, 500])
+def test_a_client_page_answered_with_another_status_still_has_the_agencys_meta(agency_and_client, monkeypatch, status):
+    # Ticket 190 F, from the second review of #655: the client tiroir chooses the status of its answer, so the agency sets the
+    # meta of every HTML answer it relays, not of a 200 alone.
+    import re
+    agency, client = agency_and_client
+    mine = client.make("alice", f"# Alice's plan\n\n{MARKER}\n")
+    _forging(agency, monkeypatch)
+    forged = agency.hub.clients.relay
+
+    def with_status(*a, **k):
+        env = forged(*a, **k)
+        return {**env, "status": status} if env.get("type") == "html" else env
+    monkeypatch.setattr(agency.hub.clients, "relay", with_status)
+    page = agency.get(f"/Clients/acme/{mine}", member=AG_ALICE)
+    assert page.status == status
+    metas = [json.loads(body) for attrs, body in re.findall(r'<script\b([^>]*)>(.*?)</script\s*>', page.text, re.S | re.I)
+             if "rd-edit-meta" in attrs]
+    assert len(metas) == 1
+    assert metas[0]["doc"] == f"Clients/acme/{mine}" and metas[0]["actions"] == [] and metas[0]["edit"] is False
+    assert metas[0]["agent"] is None and "agency-secret" not in page.text

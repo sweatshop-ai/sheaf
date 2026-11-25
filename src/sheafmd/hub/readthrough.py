@@ -86,18 +86,19 @@ def agency_config(config: dict, doc: str) -> dict:
             "editable": [], "agent": None, "can": [], "targets": [], "lines": {}}
 
 
-def agency_meta(html: str, doc: str) -> str:
-    """A client page with its meta block set by this hub (`agency_config`): every script `adopt` keeps as the data block, by
-    the same matcher, whatever spelling of the tag the client hub chose. The first is the one the page script reads, and it
-    becomes the agency's block in the form the hub writes; the others go. A first block that is no JSON object gives the
-    agency's block from nothing (ticket 190, from the review of #655)."""
+def agency_meta(html: str, doc: str | None) -> str:
+    """A client's HTML answer, of any status, with its meta block set by this hub (`agency_config`): every script `adopt` keeps
+    as the data block, by the same matcher, whatever spelling of the tag the client hub chose. The first is the one the page
+    script reads, and it becomes the agency's block in the form the hub writes; the others go. A first block that is no JSON
+    object gives the agency's block from nothing, and an answer to no page (`doc` None) keeps no block at all (ticket 190,
+    from the reviews of #655)."""
     first = True
 
     def one(m):
         nonlocal first
         if m.group(1).strip() != _META_ATTRS:
             return m.group(0)
-        if not first:
+        if not first or doc is None:
             return ""
         first = False
         try:

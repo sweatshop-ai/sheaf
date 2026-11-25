@@ -9,6 +9,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 import uuid
 from pathlib import Path
@@ -372,3 +373,32 @@ def test_a_sigterm_in_another_greenlet_is_raised_where_the_test_stands_and_leave
 def test_a_sigterm_in_the_first_greenlet_is_raised_there():
     with pytest.raises(KeyboardInterrupt, match="SIGTERM"):
         leakguard._terminated(signal.SIGTERM, None)
+
+
+def test_a_sigterm_in_a_route_callback_lets_the_callback_finish_before_it_is_raised_where_the_test_stands():
+    # Ticket 192: Playwright runs a synchronous route callback in a greenlet of its own, a child of the dispatcher. Thrown
+    # past it into the first greenlet, the interrupt left the callback suspended for good, its future never resolved and
+    # `Page._on_route` stayed pending. The callback finishes first; the interrupt then reaches the test, and the dispatcher
+    # stays alive for the teardown's calls.
+    greenlet = pytest.importorskip("greenlet")
+    if threading.current_thread() is not threading.main_thread():
+        pytest.skip("a signal handler is set on the main thread only")
+    steps = []
+
+    def dispatcher():
+        def route_callback():
+            leakguard._terminated(signal.SIGTERM, None)
+            steps.append("callback finished")
+        greenlet.greenlet(route_callback).switch()
+        steps.append("dispatcher went on")
+
+    before = signal.signal(signal.SIGTERM, leakguard._terminated)
+    try:
+        d = greenlet.greenlet(dispatcher)
+        with pytest.raises(KeyboardInterrupt, match="SIGTERM"):
+            d.switch()
+        assert steps == ["callback finished"] and not d.dead
+        d.switch()                          # the next call into the browser
+        assert d.dead and steps == ["callback finished", "dispatcher went on"]
+    finally:
+        signal.signal(signal.SIGTERM, before)

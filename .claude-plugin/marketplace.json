@@ -1,0 +1,14 @@
+{
+  "name": "sheaf",
+  "description": "Claude Code plugins that come with Sheaf.",
+  "owner": { "name": "sweatshop.ai", "url": "https://github.com/sweatshop-ai" },
+  "plugins": [
+    {
+      "name": "sheaf",
+      "source": "./plugin/sheaf",
+      "description": "Delivers Tells from a shared Sheaf into this Claude Code session",
+      "category": "productivity",
+      "homepage": "https://github.com/sweatshop-ai/sheaf"
+    }
+  ]
+}

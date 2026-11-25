@@ -54,6 +54,14 @@ read is left as it is, and it says why and what to do.
 Tell from the page works with Claude Code. The other agents reach sheaf through the MCP
 door; adapters for them come later.
 
+For a Tell pressed on a shared Sheaf to reach a Claude Code session on your laptop, install the
+plugin that comes with this repository:
+
+    claude plugin marketplace add sweatshop-ai/sheaf
+    claude plugin install sheaf@sheaf
+
+It stays quiet until the session has sent a page to a shared Sheaf.
+
 For an agent that has no skills, or a project that wants the instruction in the repository, put
 this in the project's `AGENTS.md` (sheaf never writes that file):
 

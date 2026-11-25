@@ -914,6 +914,12 @@ class TheList:
         return r is not None and r.name == name and r.path == Path(config.realpath(self.cfg.root))
 
     def data(self, member, show: str) -> dict:
+        # Each row is judged against the same few folders: git is asked once per folder for the page, not ~20 times per row
+        # (60 rows: 1,200 `git rev-parse` runs, 5 s on the box; ticket 52). The answers end with the page (SPEC 8.2).
+        with config.git_places_remembered():
+            return self._data(member, show)
+
+    def _data(self, member, show: str) -> dict:
         """The list as `member` reads it, as data: {show, filters, sections}, each section {key, title, count, groups},
         each group {name, rows}, each row {title, href, assistant, meta, actions}. The page of its own is drawn from
         this and the front mounts it (#116): both show the same rows, and the mount carries text, never markup."""

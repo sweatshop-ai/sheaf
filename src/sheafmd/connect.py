@@ -100,6 +100,7 @@ def _credential_file(url: str) -> str | None:
     try:
         text = (Path(folder) / name).read_text()
     except OSError:
+        _said_old_name(folder, url, name)
         return None
     except UnicodeDecodeError:       # a corrupted file is a missing one; the warning names the file, never what is in it
         if name not in _WARNED:      # said once per process: the hub asks on every send
@@ -108,6 +109,19 @@ def _credential_file(url: str) -> str | None:
         return None
     token = text.strip()
     return token if _TOKEN.fullmatch(token) else None
+
+
+def _said_old_name(folder: str, url: str, name: str):
+    """A file left under the name a port had before ticket 190 (`sheaf-peer-<host>-<port>`) is never read, since that name was
+    also another host's: say once which file to write again, and nothing of what is in it."""
+    port = urllib.parse.urlsplit(origin_of(url)).port
+    if not port:
+        return
+    old = name[:-len(f"_p{port}")] + f"-{port}"
+    if old not in _WARNED and (Path(folder) / old).is_file():
+        _WARNED.add(old)
+        print(f"sheaf: the credential file {old} has the name of before, which is not read; keep the token again with "
+              f"`sheaf peer use --store file`, as {name}", file=sys.stderr)
 
 
 def peer_token_for(url: str, store=None) -> str | None:

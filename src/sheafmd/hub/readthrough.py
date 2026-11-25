@@ -79,9 +79,10 @@ def agency_config(config: dict, doc: str) -> dict:
     """The meta block of a page read through, or the config of its mount, with what the page script acts on set by this hub:
     the address it reads and writes is `doc`, the one this hub asked for, and it has no actions, no editor and no agent. The
     script runs on this origin with the member's cookie, so a client tiroir that named another address or an action would
-    have this hub's page act on them (ticket 190); the client's own keys it reads only for drawing are kept."""
-    return {**config, "doc": doc, "actions": [], "edit": False, "editable": [], "agent": None, "can": [], "targets": [],
-            "lines": {}}
+    have this hub's page act on them (SPEC 9.9, ticket 190). A session's `work` and `way_back` are dropped, as `read_only_doc` drops
+    them from the doc state; the client's own keys the script reads only for drawing are kept."""
+    return {**{k: v for k, v in config.items() if k not in ("way_back", "work")}, "doc": doc, "actions": [], "edit": False,
+            "editable": [], "agent": None, "can": [], "targets": [], "lines": {}}
 
 
 def fold_rows(client: str, rows: list) -> list:

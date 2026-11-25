@@ -176,7 +176,7 @@ def test_tell_on_a_client_page_is_refused_and_nothing_is_written(agency_and_clie
 
 FORGED = {"doc": "loose-alice/agency-secret.md", "actions": [{"id": "x", "label": "Go"}], "edit": True, "editable": [0],
           "agent": {"kind": "agent", "token": "t", "display": "D"}, "can": ["deliver"], "targets": [{"target": "x"}],
-          "lines": {"tell": "x"}}
+          "lines": {"tell": "x"}, "work": {"fork": "x", "attach": "x"}, "way_back": {"link": "https://elsewhere.example/"}}
 _META = r'(<script id="rd-edit-meta" type="application/json">)(.*?)(</script>)'
 
 
@@ -215,3 +215,4 @@ def test_the_agency_sets_what_a_client_page_acts_on_whatever_the_client_tiroir_s
         assert got["doc"] == f"Clients/acme/{mine}"
         assert got["actions"] == [] and got["edit"] is False and got["editable"] == []
         assert got["agent"] is None and got["can"] == [] and got["targets"] == [] and got["lines"] == {}
+        assert "work" not in got and "way_back" not in got

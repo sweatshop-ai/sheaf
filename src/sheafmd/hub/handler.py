@@ -478,7 +478,7 @@ class Handler:
             framed = req is not None and req.via == "proxy"     # the front's own pages may frame it (9.5)
             h["Content-Security-Policy"] = auth.csp(res.nonce, "'self'" if framed else "'none'")
             h["Permissions-Policy"] = "microphone=(self), camera=(), geolocation=()"
-        if res.status >= 400 and req is not None and res.row is not False:     # False: not written
+        if res.status >= 400 and req is not None and res.row is not False:     # False: counted, not written
             error = res.error or ""
             seen = self._on_clients(req)          # what a client page is called is the client's: no address on this disk (9.9)
             if not error and not seen and h.get("Content-Type") == "application/json":
@@ -1381,7 +1381,7 @@ class Handler:
             body = self._own_build(body)
         if op == "doc" and status == 200:     # what an older client tiroir still says of its agents is not shown here (9.9)
             body = self._read_only_doc(body)
-        if op in ("page", "mount") and status == 200 and doc is not None:     # what the page acts on is this hub's to say (190)
+        if op in ("page", "mount") and status == 200 and doc is not None:     # what the page acts on is this hub's to say (9.9)
             body = self._agency_owned(op, body, doc)
         if status == 200 and doc is not None and self.hub.team is not None:
             body = self._with_team(op, body, doc, req.member.name)

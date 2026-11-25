@@ -449,7 +449,8 @@ class Repos:
         """What a row says of the page's last writer: the session of the latest report, else the `Sheaf-Session:` and
         `Sheaf-Host:` trailers of the page's last commit, else `git · <author>`. What git said is kept for the record's
         commit, the caller's `stamp` (the page file's mtime) and the clone's FETCH_HEAD mtime (a fetch that brings a commit of
-        trailers only moves it), so a listing
+        trailers only moves it; the window between a pull's fetch and its move of HEAD is left, and a page asked about in it
+        keeps git's answer until the next fetch), so a listing
         starts no `git log` for a page it has already asked about."""
         with self._records:
             row = self._read().get(repo, {}).get(path) or {}
@@ -834,7 +835,7 @@ class Repos:
                 for item in items:
                     if (n := queued.get(item[:3])) is not None:
                         if queue[n][4] is None and item[4] is not None:     # the retry of a report that was refused is the one that leaves the line
-                            queue[n] = queue[n][:4] + (item[4],)
+                            queue[n] = queue[n][:3] + item[3:]       # with its declared: a clone-only report queued first must not swallow the row
                     elif not cap or len(queue) < MAX_QUEUED:
                         queue.append(item)
                         queued[item[:3]] = len(queue) - 1

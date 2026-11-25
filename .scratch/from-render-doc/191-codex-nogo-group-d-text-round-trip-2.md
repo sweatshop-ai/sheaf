@@ -28,10 +28,17 @@ finding's own input) before anything was changed.
   (ticket 137): `_emoji_as_tokens` takes the first token character the fragment does not hold, and the link's
   text is read through the tokens only when there are emoji.
 - [ ] [SERIOUS] #594: in a changed part too long to diff, a typed `:smile:` beside a source `\:smile:` saved as
-  `\:smile:`. `_places_by_order` now places a literal by its 12 characters of neighbours where the counts of its
-  name differ, and leaves the rest bare. Tests: `test_a_typed_shortcode_in_a_long_change_stays_an_emoji_beside_an_escaped_one`,
-  `test_places_by_order_where_the_counts_differ_keeps_a_literal_by_its_neighbours`; the ticket 137 test that
-  asserted the old rule now asserts the new one.
+  `\:smile:`. Where the counts of a name differ, `_places_by_order` now diffs the two texts' words (`_by_words`,
+  same `_DIFF_BOUND`, about forty times the reach of the character diff): a literal in a matched word keeps its
+  place, a typed shortcode is a new word and stays the emoji. Past that bound, by its 12 characters of neighbours.
+  The first fix (neighbours only) turned the failure round, a source `\:smile:` whose neighbours both changed
+  became an emoji; the review round caught it. Left: on a change of over about 80 000 words around a name typed or
+  deleted beside it, a literal placed by neither is written bare. Tests:
+  `test_a_typed_shortcode_in_a_long_change_stays_an_emoji_beside_an_escaped_one`,
+  `test_an_escaped_shortcode_whose_neighbours_changed_stays_text_in_a_long_change`,
+  `test_places_by_order_where_the_counts_differ_keeps_a_literal_by_its_words`,
+  `test_places_by_order_past_the_word_diff_keeps_a_literal_by_its_neighbours`; the ticket 137 test that asserted
+  the old rule now asserts the word placement.
 - [ ] [SERIOUS] #594: `<div>\</div>:smile:` escaped the shortcode across the block boundary.
   `_typed_slash_before` now checks the backslash's own ancestors up to the one it shares with the shortcode. Test:
   `test_a_backslash_ending_a_block_does_not_escape_the_shortcode_after_it`.
@@ -39,4 +46,10 @@ finding's own input) before anything was changed.
   escape. Test: `test_an_escaped_quote_in_a_quoted_value_ends_no_declaration`.
 - [ ] [SERIOUS] #595: `lighter` inside `font-weight:900` lifted out of the bold. `bolder` and `lighter` are now
   read against the inherited weight (`_inherited_weight`, CSS Fonts 4 table), taken before `_unwrap_strays`
-  unwraps any span. Tests: `test_lighter_inside_a_heavy_span_stays_bold`, `test_lighter_inside_a_bold_span_is_plain`.
+  unwraps any span. `bolder` goes by the same table (inside a 300 it is 400, plain), and a `<b>` or `<strong>`
+  counts as `bolder` for what it holds, as the HTML rendering defaults say. Tests:
+  `test_lighter_inside_a_heavy_span_stays_bold`, `test_lighter_inside_a_bold_span_is_plain`,
+  `test_bolder_inside_a_light_span_is_plain`.
+- [ ] [MINOR] #581, a variant found in review: an address holding a backslash and a line break is still left to
+  pandoc, which writes `\%0A`. Left open: no link address can hold a line break in markdown, and a browser's URL
+  parser drops it from an `href`, so only a pasted `<a>` with one in its attribute reaches it.

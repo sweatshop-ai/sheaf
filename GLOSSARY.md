@@ -312,6 +312,14 @@ _Avoid_: connector, driver, backend, plugin
 One insertion, move, removal or edit of a single Block, as core finds it by comparing a save with the version it was based on. A change of type or attributes is an edit; a drag into another container is a move. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 14.)
 _Avoid_: diff entry, operation (an agent's request is an op; a block change is what core finds)
 
+**Block comment**:
+A Comment on a whole Block rather than on a passage of its text, for a Block that has no text to select (an image, an App, columns) or when the remark is about the Block as a whole. It moves with its Block and becomes an orphan when its Block is removed. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 16.)
+_Avoid_: block note, block annotation
+
+**Comment store**:
+Where the hub keeps the Comments of a page whose source cannot hold them, that is every source reached through a Source service, each tied to its document and Block. A Markdown file never uses it: its Comments stay in the file. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 16.)
+_Avoid_: comment database, sidecar, hub-side store
+
 **Source service**:
 A program the owner of a source runs beside it, which holds the source's credentials, turns its documents into blocks and back, checks its rules and names the commit's author; the hub reaches it through the remote adapter and holds no key to the source. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 13.)
 _Avoid_: backend, adapter server, connector

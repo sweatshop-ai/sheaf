@@ -7,11 +7,10 @@ and a <b> whose own style sets its weight.
 import html.parser
 
 import pytest
-
-from sheafmd import edit as rde
 from test_edit_191 import saved_as
 from test_edit_inline_html import saved
 
+from sheafmd import edit as rde
 
 # 634: after stepping over a comment between two elements it climbs out of, the tag goes on climbing.
 
@@ -76,8 +75,9 @@ def test_a_bold_tag_whose_own_style_says_lighter_is_read_from_its_parent():
     assert rde.html_block_to_md(html, source="Old words") == "plain words"
 
 
-def test_a_bold_tag_whose_own_style_says_bolder_is_read_from_its_parent():
-    html = ('<p><b style="font-weight:bolder"><span style="font-weight:lighter">plain</span></b>'
-            ' words</p>')
-    # The <b> is 700 (bolder than 400, once, not twice), and lighter than 700 is 400.
-    assert rde.html_block_to_md(html, source="Old words") == "plain words"
+def test_a_bold_tag_whose_own_style_says_bolder_is_bolder_once():
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup('<p><b style="font-weight:bolder"><span>x</span></b></p>', "html.parser")
+    # bolder than the 400 around it, once: 700, not bolder than its own default 700 (900).
+    assert rde._inherited_weight(soup.span) == 700

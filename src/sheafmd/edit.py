@@ -15,6 +15,7 @@ front matter and hand-aligned tables intact when you edit one paragraph elsewher
 import bisect
 import contextvars
 import difflib
+import html.parser as _html_parser
 import os
 import re
 from collections import Counter
@@ -305,17 +306,19 @@ def _weight_value(style: str, inherited: int):
 
 def _inherited_weight(el) -> int:
     """The weight `el` inherits: 400 at the top, `bolder` for a <b> or <strong> and bold for a heading (the HTML
-    rendering section's defaults), each ancestor's own style over that."""
+    rendering section's defaults), each ancestor's own style in place of its default, read from its parent's weight
+    as CSS reads a relative one: `<b style="font-weight:lighter">` inside 500 is 100, not lighter than 700."""
     w = 400
     for p in reversed(list(el.parents)):
         if not getattr(p, "name", None) or p.name == "[document]":
             continue
-        if p.name in ("b", "strong"):
+        own = _weight_value(p.get("style", ""), w)
+        if own is not None:
+            w = own
+        elif p.name in ("b", "strong"):
             w = _bolder(w)
         elif p.name in _HEADINGS:
             w = 700
-        own = _weight_value(p.get("style", ""), w)
-        w = own if own is not None else w
     return w
 
 
@@ -620,14 +623,14 @@ SHORTCODE_RE = re.compile(r":[a-z0-9_+-]+:")
 _START_TAG_RE = re.compile(
     r'<[A-Za-z][^\s>/]*'
     r'(?:[\s/]|(?<=["\'\s/])[^\s/>][^\s/=>]*(?:\s*=+\s*(?:"[^"]*"|\'[^\']*\'|(?!["\'])[^\s>]*))?+)*+>')
-# One attribute of a start tag, name and optional value, a quoted value taken whole; or a lone `/` between them. A name
-# follows white space, or straight after a quote or a `/`, as the page's parser reads `<a b="x"data-y="z">`. A name
-# and a bare value may hold a quote, as they do to that parser (`attrfind_tolerant`).
-_ATTR_RE = re.compile(r'(?:\s+|(?<=["\'/]))([^\s/>][^\s/=>]*)(?:\s*=+\s*(?:"[^"]*"|\'[^\']*\'|(?!["\'])[^\s>]*))?|\s*/')
+# The name a start tag opens with (after its `<`), and one attribute of it (name, optional value, and the white space
+# or `/` after it), read with the patterns of the page's parser itself: `_sanitize` reads the fragment with
+# html.parser, and how many `=` a value indicator takes, or where a name may follow a quote, changed between
+# Python releases.
+_TAG_NAME_RE = _html_parser.tagfind_tolerant
+_ATTR_RE = _html_parser.attrfind_tolerant
 # An HTML comment, kept whole (tag-shaped text in it is no tag: `_sanitize` keeps it as it is), or a start tag.
 _COMMENT_OR_START_TAG_RE = re.compile(r"<!--[\s\S]*?-->|" + _START_TAG_RE.pattern)
-# The name a start tag opens with; its attributes follow it.
-_TAG_NAME_RE = re.compile(r"<[A-Za-z][^\s>/]*")
 # A name `_sanitize` strips from the page fragment: every `data-` one, the page's own (`data-rd-`) too. The page's
 # parser lowercases names, so `DATA-x` is one too.
 _DATA_NAME_RE = re.compile(r"data-", re.I)
@@ -635,15 +638,25 @@ _DATA_NAME_RE = re.compile(r"data-", re.I)
 
 def _strip_tag_data(tag: str) -> str:
     """The start tag `tag` without its `data-` attributes. Its attributes are read one after another from the tag
-    name on, so whitespace then `data-` inside a quoted value (`title="the data-sheet"`) is never taken for one."""
-    pos = _TAG_NAME_RE.match(tag).end()
-    kept = [tag[:pos]]
+    name on, so whitespace then `data-` inside a quoted value (`title="the data-sheet"`) is never taken for one. One
+    is dropped with the white space after it: the white space, quote or `/` before it stays, and keeps the name of
+    the one after it apart (`<div data-x="1"title=t>` is `<div title=t>`); after a quote, its white space stays too."""
+    pos = _TAG_NAME_RE.match(tag, 1).end()
+    out, dropped, bare = tag[:pos], False, False
     while (m := _ATTR_RE.match(tag, pos)) and m.end() > pos:
-        if not (m.group(1) and _DATA_NAME_RE.match(m.group(1))):
-            kept.append(m.group(0))
+        if _DATA_NAME_RE.match(m.group(1)):
+            dropped = True
+            if out[-1] in "'\"":
+                out += tag[m.end(2) if m.group(2) else m.end(1):m.end()]
+        else:
+            out += m.group(0)
+            bare = m.group(2) is not None and m.group(3)[:1] not in ("'", '"')
         pos = m.end()
-    kept.append(tag[pos:])
-    return "".join(kept)
+    # The white space a dropped attribute leaves at the end, gone; before a `/>` after a bare value it stays, or the
+    # value would take the `/` (`<img src=a.png />`).
+    if dropped and (tag.startswith(">", pos) or not bare):
+        out = out.rstrip()
+    return out + tag[pos:]
 
 
 def strip_data_attrs(html: str) -> str:
@@ -1462,6 +1475,32 @@ def _by_words(old: str, new: str):
     return pairs
 
 
+def _in_its_gap(old: str, new: str, words: dict):
+    """A function (start, at) -> place: the place in `new` of the literal at `start` in `old`, which the word diff
+    `words` (`_by_words`) matched to the `:name:` at `at`. Where the words around it changed, that match can be any
+    `:name:` between the words that still match on either side, the first the diff finds, which may be one the reader
+    typed (#658). Of the `:name:` there that no other word of `old` matched, it is the one at the same share of the
+    way between those words, the first on a tie."""
+    a, b = list(_DIFF_WORD.finditer(old)), list(_DIFF_WORD.finditer(new))
+    ia, ib = {m.start(): k for k, m in enumerate(a)}, {m.start(): k for k, m in enumerate(b)}
+    matched = {ia[o]: ib[n] for o, n in words.items()}
+    order, taken = sorted(matched), Counter(matched.values())
+
+    def place(start, at):
+        i = ia[start]
+        k = bisect.bisect_left(order, i)
+        lo = order[k - 1] if k > 0 else -1
+        hi = order[k + 1] if k + 1 < len(order) else len(a)
+        nlo, nhi = matched.get(lo, -1), matched.get(hi, len(b))
+        share = (i - lo) / (hi - lo)
+        here = [n for n in range(nlo + 1, nhi) if b[n].group() == a[i].group() and (n == ib[at] or not taken[n])]
+        if not here:
+            return at
+        return b[min(here, key=lambda n: abs((n - nlo) / (nhi - nlo) - share))].start()
+
+    return place
+
+
 def _places_by_order(old: str, new: str, olds) -> set:
     """The places in `new` of the literals `olds`, (place in `old`, name) pairs, by order: the k-th `:name:` of
     `old` is the k-th of `new` where both hold as many of that name. Where they do not, by a diff of the two texts'
@@ -1484,12 +1523,15 @@ def _places_by_order(old: str, new: str, olds) -> set:
             continue
         if words is False:
             words, word_starts = _by_words(old, new), [m.start() for m in _DIFF_WORD.finditer(old)]
+            gap = _in_its_gap(old, new, words) if words is not None else None
         if words is not None:
             # The word the literal is in starts at the last word start at or before it; `old[start]` is its `:`. It is
             # the literal itself unless a shortcode-like word took its first colon (`:b:smile:`): then it is placed
             # only where `new` holds it at the same distance.
             word = word_starts[bisect.bisect_right(word_starts, start) - 1]
             at = words[word] + start - word if word in words else None
+            if at is not None and word == start:
+                at = gap(start, at)
             if at is not None and new.startswith(f":{name}:", at):
                 places.add(at)
             continue
@@ -2485,20 +2527,28 @@ def _lone_as_text(soup, lone, doc, token, comments: dict) -> dict:
         else:
             anchor, after_it = t, j > 0
             # Beside a tag placed already there is nothing to climb out of: it stands where this one goes.
-            for _ in range(0 if str(t) in placed else climb):
+            left, split = 0 if str(t) in placed else climb, False
+            while True:
+                while left:
+                    sib = anchor.next_sibling if after_it else anchor.previous_sibling
+                    if sib is not None or anchor.parent is None or anchor.parent.name == "[document]":
+                        break
+                    anchor, left = anchor.parent, left - 1
+                # Out of the element, past the comments still to step over on its other side. A text that holds
+                # only such comments is crossed whole, and the climb goes on out of the element around it (#634).
                 sib = anchor.next_sibling if after_it else anchor.previous_sibling
-                if sib is not None or anchor.parent is None or anchor.parent.name == "[document]":
+                if not (want and anchor is not t and type(sib) is NavigableString):
                     break
-                anchor = anchor.parent
-            # Out of the element, past the comments still to step over on its other side.
-            sib = anchor.next_sibling if after_it else anchor.previous_sibling
-            if want and anchor is not t and type(sib) is NavigableString:
                 at = step_over(str(sib), 0 if after_it else len(sib), want, not after_it)
                 if 0 < at < len(sib):
                     sib.replace_with(NavigableString(sib[:at]), NavigableString(p), NavigableString(sib[at:]))
-                    continue
-                if at != (0 if after_it else len(sib)):
-                    anchor = sib
+                    split = True
+                    break
+                if at == (0 if after_it else len(sib)):
+                    break
+                anchor = sib
+            if split:
+                continue
         if anchor is None:
             anchor = next(x for x in _texts(soup) if str(x) == p)
             out = _enclosing(anchor)

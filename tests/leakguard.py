@@ -204,16 +204,42 @@ def _terminated(signum, frame):
     every call into the browser after it (the teardown) switched to a dead greenlet, which returns at once, and spun
     at full CPU (ticket 137: 15 minutes), and the loop's tasks were left pending ("Task was destroyed but it is
     pending! ... Page._on_route()"). It is raised in the thread's first greenlet instead, where the test stands; the
-    dispatcher stays where it was and goes on at the next call."""
+    dispatcher stays where it was and goes on at the next call. A greenlet the dispatcher runs, a synchronous route
+    callback's (`RouteGreenlet`), would be left suspended for good by that throw, its future never resolved (ticket 192):
+    there the signal is raised again once that greenlet switches away by itself, so it lands in the dispatcher as above;
+    a second SIGTERM before that is raised where the test stands at once."""
     greenlet = sys.modules.get("greenlet")     # only a run that loaded it (Playwright's) has greenlets to mind
     if greenlet is not None:
         here = root = greenlet.getcurrent()
         while root.parent is not None:
             root = root.parent
+        if here is not root and here.parent is not root and not _deferred:
+            _again_when_it_leaves(greenlet, here, signum)
+            return
+        if _deferred:                       # a second SIGTERM while one waits: that greenlet may never switch away
+            greenlet.settrace(_deferred.pop())
         if here is not root:
             root.throw(KeyboardInterrupt("SIGTERM"))
             return
     raise KeyboardInterrupt("SIGTERM")
+
+
+_deferred = []          # while a SIGTERM waits for a greenlet to switch away: the trace function to put back
+
+
+def _again_when_it_leaves(greenlet, here, signum):
+    """Raise `signum` again at the first switch away from `here`: its own call into the browser, or its end."""
+    before = greenlet.gettrace()
+
+    def trace(event, args):
+        if before is not None:
+            before(event, args)
+        if event in ("switch", "throw") and args[0] is here:
+            greenlet.settrace(before)
+            _deferred.clear()
+            signal.raise_signal(signum)
+    _deferred.append(before)
+    greenlet.settrace(trace)
 
 
 @pytest.fixture(scope="session", autouse=True)

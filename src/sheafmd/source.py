@@ -132,9 +132,11 @@ class file_lock:
 CHECKS_THE_NAMES = os.name != "nt"
 
 
-def _holds_bytes(name: Path, data: bytes) -> bool:
+def _holds_bytes(name: Path, data: bytes, mode: int | None = None) -> bool:
     """Does the name hold a regular file, not a link, whose bytes are `data`? Opened without
-    waiting, so a pipe put at the name answers no instead of hanging the write."""
+    waiting, so a pipe put at the name answers no instead of hanging the write. With `mode`, the
+    file it said yes of gets those bits, through the descriptor it read: a mode that leaves the
+    owner no read is put on after the read, never before it."""
     try:
         fd = os.open(name, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
     except PermissionError:
@@ -149,14 +151,29 @@ def _holds_bytes(name: Path, data: bytes) -> bool:
         os.close(fd)
         return False
     with os.fdopen(fd, "rb") as f:
-        return f.read(len(data) + 1) == data
+        if f.read(len(data) + 1) != data:
+            return False
+        if mode is not None:
+            _set_mode(f.fileno(), name, mode)
+        return True
 
 
-def _replace_if_ours(tmp: Path, target: Path, data: bytes, look_after: bool = True):
+def _set_mode(fd: int, name: Path, mode: int):
+    """The bits `mode` on the open file `fd`, by its `name` where os.fchmod is missing (Windows before Python 3.13)."""
+    fchmod = getattr(os, "fchmod", None)
+    if fchmod:
+        fchmod(fd, mode)
+    else:
+        os.chmod(name, mode)
+
+
+def _replace_if_ours(tmp: Path, target: Path, data: bytes, look_after: bool = True, mode: int | None = None,
+                     check: Callable[[], None] | None = None):
     """os.replace(tmp, target), where tmp was written with `data` and closed: refused when tmp's
     name no longer holds those bytes in a regular file, not a link, and failed when target's does
     not just after (unless `look_after` is False: a writer without the flock cannot tell a swap from
-    another writer's replace).
+    another writer's replace). `mode`, when given, is put on tmp once it was read back. `check`, when given, is called
+    after that read, the last step before the replace, and refuses by raising (198 A: the read takes as long as the file).
 
     By the bytes, not by the inode: the file is closed before the rename, so that an error only the
     close reports (an upload that failed, on an rclone mount) comes before the document is touched;
@@ -164,13 +181,15 @@ def _replace_if_ours(tmp: Path, target: Path, data: bytes, look_after: bool = Tr
     rclone mount) number a file by its name. A file of someone else's holding exactly those bytes
     costs nothing."""
     try:
-        ours = _holds_bytes(tmp, data)
+        ours = _holds_bytes(tmp, data, mode)
     except PermissionError:
         raise OSError(f"{tmp} cannot be read back to check it, because the file's mode leaves its owner "
                       f"no read, so {target} is left as it was") from None
     if not ours:
         raise OSError(f"{tmp} was replaced while the new text was written to it, "
                       f"so {target} is left as it was")
+    if check is not None:
+        check()
     os.replace(tmp, target)
     if look_after and not _holds_bytes(target, data):
         raise OSError(f"{target} is not the file just written (its folder changed "
@@ -201,19 +220,27 @@ def _write_atomic(p: Path, text: str, mode: int | None = None, check: Callable[[
     On Windows the replace is made as before.
 
     `mode` is the bits the file gets (default: the document's own). `check` is called once the new
-    file is whole, just before it takes the old one's place, and refuses by raising. With `locked`
+    file is whole and read back, just before it takes the old one's place, and refuses by raising. With `locked`
     False the caller holds no flock, so the path is written as given (a link there is replaced, not
     followed, and the file need not exist yet) and the sibling is a fresh `.<name>.<random>.sheaf-tmp`
     of its own, made with O_EXCL by mkstemp, so that two writes at once never share it, and the target is
     not looked at after the replace: another process can write it then, and the last writer wins, as before.
 
-    Where os.fchmod is missing (Windows before Python 3.13) the mode is set by name once the file is closed."""
-    fchmod = getattr(os, "fchmod", None)
+    The sibling is the owner's alone (0o600) while the text goes into it, so one a crash leaves half
+    written is nobody else's to read; `mode` is put on it once it is whole and read back, through the
+    descriptor of that read (`_holds_bytes`), so a mode that leaves the owner no read is given too. A
+    document is the exception: its look after the replace reads it, so such a mode is refused there
+    before anything is written. Where os.fchmod is missing (Windows before Python 3.13) the mode is
+    set by name."""
+    data = text.encode("utf-8")            # before anything is opened: a text that cannot be written leaves nothing
     if locked:
         target = p.resolve()
         tmp = target.with_name("." + target.name + ".sheaf-tmp")
         if mode is None:
             mode = stat.S_IMODE(target.stat().st_mode)
+        if CHECKS_THE_NAMES and not mode & stat.S_IRUSR:
+            raise OSError(f"{target} could not be read back once written, because its mode leaves its owner "
+                          f"no read, so it is left as it was")
     else:
         target, tmp = p, None
     try:
@@ -222,24 +249,20 @@ def _write_atomic(p: Path, text: str, mode: int | None = None, check: Callable[[
                 os.unlink(tmp)
             except FileNotFoundError:
                 pass
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), mode)
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
         else:
             fd, name = tempfile.mkstemp(dir=target.parent, prefix=f".{target.name}.", suffix=".sheaf-tmp")
             tmp = Path(name)
-        data = text.encode("utf-8")
         with os.fdopen(fd, "wb") as f:
-            if fchmod:
-                fchmod(f.fileno(), mode)       # open() applies the umask, mkstemp gives 0o600
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
-        if not fchmod:
-            os.chmod(tmp, mode)
-        if check is not None:
-            check()
         if CHECKS_THE_NAMES:
-            _replace_if_ours(tmp, target, data, look_after=locked)
+            _replace_if_ours(tmp, target, data, look_after=locked, mode=mode, check=check)
         else:
+            os.chmod(tmp, mode)
+            if check is not None:
+                check()
             os.replace(tmp, target)
     except BaseException:
         if tmp is not None:
@@ -320,7 +343,8 @@ def create_file(top, rel: str, text: str, judge=None):
     cannot carry the write elsewhere. The text goes into a hidden sibling first and is linked into
     place: a reader never sees half a page, and the link fails (FileExistsError) when the name is
     taken by anything, a dangling link included, even one that appeared a moment ago. The file gets
-    the mode the umask gives a new file. A missing folder is FileNotFoundError. `judge`: see `_folder_of`."""
+    the mode the umask gives a new file. A missing folder is FileNotFoundError. `judge`: see `_folder_of`.
+    Returns (st_dev, st_ino) of the file made, so a take-back deletes that file and never one that replaced it."""
     fd, name = _folder_of(top, rel, judge=judge)
     try:
         tmp = f".{name}.sheaf-new-{secrets.token_hex(6)}"
@@ -330,6 +354,7 @@ def create_file(top, rel: str, text: str, judge=None):
                 f.write(text.encode("utf-8"))
                 f.flush()
                 os.fsync(f.fileno())
+                st = os.fstat(f.fileno())
             os.link(tmp, name, src_dir_fd=fd, dst_dir_fd=fd)
         finally:
             try:
@@ -338,6 +363,7 @@ def create_file(top, rel: str, text: str, judge=None):
                 pass
     finally:
         os.close(fd)
+    return st.st_dev, st.st_ino
 
 
 def check_create(top, rel: str, judge=None):

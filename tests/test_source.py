@@ -402,7 +402,7 @@ def test_the_sibling_is_closed_at_the_replace_and_looked_at_except_on_windows(tm
 
     monkeypatch.setattr(os, "replace", spy)
     names = []
-    monkeypatch.setattr(rds, "_holds_bytes", lambda name, data: names.append((name, data)) or True)
+    monkeypatch.setattr(rds, "_holds_bytes", lambda name, data, mode=None: names.append((name, data)) or True)
     rds.update_file(p, lambda _: "replacement\n")
     assert seen == [False] and p.read_text(encoding="utf-8") == "replacement\n"
     target = p.resolve()

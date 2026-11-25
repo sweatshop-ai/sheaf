@@ -45,6 +45,7 @@ def kept_headers(headers) -> dict:
 _PLAIN_VALUE = re.compile(r"[\t\x20-\x7e\x80-\xff]*")          # a header value: no line break, no NUL, and what a latin-1 header line can hold
 _SCRIPT_RE = re.compile(r"<script\b([^>]*)>(.*?)</script\s*>", re.S | re.I)
 _NONCE_ATTR = re.compile(r'\s+nonce="([^"]*)"')
+_META_ATTRS = 'id="rd-edit-meta" type="application/json"'     # the page's data block, as `adopt` keeps it
 
 
 def adopt(html: str, client_nonce, nonce: str) -> str:
@@ -56,7 +57,7 @@ def adopt(html: str, client_nonce, nonce: str) -> str:
 
     def one(m):
         attrs, body = m.group(1), m.group(2)
-        if attrs.strip() == 'id="rd-edit-meta" type="application/json"':
+        if attrs.strip() == _META_ATTRS:
             return m.group(0)
         if client_nonce and _NONCE_ATTR.fullmatch(attrs) and _NONCE_ATTR.fullmatch(attrs).group(1) == client_nonce and body == own:
             return f'<script nonce="{nonce}">{own}</script>'
@@ -73,6 +74,41 @@ def read_only_doc(got: dict) -> dict:
     a client is read and commented on here, and what its client tiroir says of its agents is that tiroir's."""
     return {**{k: v for k, v in got.items() if k not in ("way_back", "work")},
             "target": None, "targets": [], "capabilities": [], "lines": {}, "telling": []}
+
+
+def agency_config(config: dict, doc: str) -> dict:
+    """The meta block of a page read through, or the config of its mount, with what the page script acts on set by this hub:
+    the address it reads and writes is `doc`, the one this hub asked for, and it has no actions, no editor and no agent. The
+    script runs on this origin with the member's cookie, so a client tiroir that named another address or an action would
+    have this hub's page act on them (SPEC 9.9, ticket 190). A session's `work` and `way_back` are dropped, as `read_only_doc` drops
+    them from the doc state; the client's own keys the script reads only for drawing are kept."""
+    return {**{k: v for k, v in config.items() if k not in ("way_back", "work")}, "doc": doc, "actions": [], "edit": False,
+            "editable": [], "agent": None, "can": [], "targets": [], "lines": {}}
+
+
+def agency_meta(html: str, doc: str | None) -> str:
+    """A client's HTML answer, of any status, with its meta block set by this hub (`agency_config`): every script `adopt` keeps
+    as the data block, by the same matcher, whatever spelling of the tag the client hub chose. The first is the one the page
+    script reads, and it becomes the agency's block in the form the hub writes; the others go. A first block that is no JSON
+    object gives the agency's block from nothing, and an answer to no page (`doc` None) keeps no block at all (ticket 190,
+    from the reviews of #655)."""
+    first = True
+
+    def one(m):
+        nonlocal first
+        if m.group(1).strip() != _META_ATTRS:
+            return m.group(0)
+        if not first or doc is None:
+            return ""
+        first = False
+        try:
+            meta = json.loads(m.group(2))
+        except ValueError:
+            meta = {}
+        if not isinstance(meta, dict):
+            meta = {}
+        return f'<script {_META_ATTRS}>' + json.dumps(agency_config(meta, doc)).replace("<", "\\u003c") + "</script>"
+    return _SCRIPT_RE.sub(one, html)
 
 
 def fold_rows(client: str, rows: list) -> list:

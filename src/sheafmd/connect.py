@@ -81,9 +81,13 @@ _WARNED: set[str] = set()      # the credential files already warned about, by n
 
 def peer_credential_name(url: str) -> str:
     """The name of the file that holds the token for the peer tiroir at `url`, in a service's credentials folder (systemd
-    `LoadCredential=NAME:PATH` makes it `$CREDENTIALS_DIRECTORY/NAME`): one safe word per origin and port."""
-    netloc = urllib.parse.urlsplit(origin_of(url)).netloc
-    return "sheaf-peer-" + re.sub(r"[^A-Za-z0-9._-]", "-", netloc)
+    `LoadCredential=NAME:PATH` makes it `$CREDENTIALS_DIRECTORY/NAME`): one safe word per origin and port, `sheaf-peer-<host>`
+    then `_p<port>` when the origin names one. No two origins share it, or the token kept for one peer would be sent to the
+    other (ticket 190): a character of the host outside `[a-z0-9.-]` is written `_` and two hex digits for each of its bytes."""
+    parts = urllib.parse.urlsplit(origin_of(url))
+    host = parts.netloc[:-len(f":{parts.port}")] if parts.port else parts.netloc
+    word = "".join(c if re.fullmatch(r"[a-z0-9.-]", c) else "".join(f"_{b:02x}" for b in c.encode()) for c in host)
+    return "sheaf-peer-" + word + (f"_p{parts.port}" if parts.port else "")
 
 
 def _credential_file(url: str) -> str | None:
@@ -96,6 +100,7 @@ def _credential_file(url: str) -> str | None:
     try:
         text = (Path(folder) / name).read_text()
     except OSError:
+        _said_old_name(folder, url, name)
         return None
     except UnicodeDecodeError:       # a corrupted file is a missing one; the warning names the file, never what is in it
         if name not in _WARNED:      # said once per process: the hub asks on every send
@@ -104,6 +109,19 @@ def _credential_file(url: str) -> str | None:
         return None
     token = text.strip()
     return token if _TOKEN.fullmatch(token) else None
+
+
+def _said_old_name(folder: str, url: str, name: str):
+    """A file under the name the peer had before ticket 190 (every character outside `[A-Za-z0-9._-]` written `-`: a port, an
+    IPv6 address) is never read for it, since that name may be another host's own today: say once that it is there, and
+    nothing of what is in it."""
+    netloc = urllib.parse.urlsplit(origin_of(url)).netloc
+    old = "sheaf-peer-" + re.sub(r"[^A-Za-z0-9._-]", "-", netloc)
+    if old != name and old not in _WARNED and (Path(folder) / old).is_file():
+        _WARNED.add(old)
+        print(f"sheaf: no credential file {name} for {origin_of(url)}; the file {old} has the name this peer had before, which "
+              f"may also be another host's, so it is not read for it: if it holds this peer's token, keep it again with "
+              f"`sheaf peer use --store file`", file=sys.stderr)
 
 
 def peer_token_for(url: str, store=None) -> str | None:
@@ -319,9 +337,16 @@ def check_config(origin: str) -> None:
     """The laptop's config.toml reads and can take the default, before the token is stored: a file `make_default`
     cannot write would stop the command after the token was already written."""
     try:
-        _with_default(origin)
+        out = _with_default(origin)
     except config.ConfigError as e:
         raise ConnectError(f"{e}. Mend that file and run the command again. Nothing was written.") from None
+    if out is not None:
+        folder = paths.config_file().parent
+        while not folder.exists() and folder != folder.parent:
+            folder = folder.parent
+        if not folder.is_dir() or not os.access(folder, os.W_OK | os.X_OK):
+            raise ConnectError(f"{paths.config_file()} cannot be written: {folder} is not a folder this laptop can write "
+                               "into. Make it writable and run the command again. Nothing was written.")
 
 
 def connect(url: str, token: str, out=print) -> None:

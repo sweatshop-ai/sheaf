@@ -4,6 +4,19 @@ sheafmd is released by merging a pull request that sets `__version__` in `src/sh
 Its page assets are cached by version (`/_/mount.css?v=<version>`, immutable), so the version
 changes whenever an asset does. The entries name pull requests of sweatshop-ai/sheaf.
 
+## Unreleased
+
+### Fixed
+
+- `sheaf open` gets its answer on a slow page: the pandoc runs of one hub render share 120 seconds, within the 130 the client waits, instead of 120 each.
+- `sheaf FILE.md` calls a tiroir's tools under the names the server lists in `tools/list` (`sheaf_create` on a door that prefixes them, `create` on a laptop hub), instead of always sending the bare name, which a door refused with 403. A 403 now shows the door's own words instead of the sentence about a revoked token (a revoked token still answers 401).
+- A conflict copy (`FILE.tiroir.md`) is never overwritten: a second conflict leaves the next free name, `FILE.tiroir-2.md`, `-3`, and the same text reuses the copy already there; `pull` does the same.
+- A send whose folder git cannot place (git missing, timed out, dubious ownership, unsafe repository) stops with the cause instead of sending the page as a loose one.
+- A failure after a write no longer says "Nothing was sent": it says whether the page arrived is not known, and the next run takes up a page that did arrive.
+- A pin in a root's own versions store keeps its age through a clone or checkout: its time is in `<hash>.at` beside it, kept out of git by `.sheaf/versions/.gitignore`, so a pin older than 7 days is not believed again. A pin written before has no such file: after the upgrade it counts only once pinned again, so a page that holds its reload across the hub's restart can get "version no longer known" (409) on its save until its next daily pin.
+- `sheaf connect` checks that `config.toml` can be written before it stores the token.
+- A page opened on its own address keeps the link of its byline's session name (the session kit moved to `session.js`, loaded by the page script and the mount bundle).
+
 ## 1.3.0 (2026-11-20)
 
 Everything merged since 1.2.1 (#472), up to #534. Version 1.2.1 was never tagged; this release carries it.

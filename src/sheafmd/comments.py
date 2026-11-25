@@ -605,9 +605,21 @@ def _may_hold_table(block: str) -> bool:
                                 for ln in block.split("\n"))
 
 
-@functools.lru_cache(maxsize=16384)
 def _read_tables(block: str):
-    """(rows, code, raw, heads) as pandoc reads `block`, or None when pandoc fails: `rows` the lines (from 0) that carry a
+    """`_read_tables_kept`, or None when pandoc fails; a failure is not kept (198 F): a render whose pandoc time is
+    spent fails its runs at once, and a cached None would stay for every later reading of the same text."""
+    try:
+        return _read_tables_kept(block)
+    except AnchorError:
+        return None
+
+
+_read_tables.cache_clear = lambda: _read_tables_kept.cache_clear()
+
+
+@functools.lru_cache(maxsize=16384)
+def _read_tables_kept(block: str):
+    """(rows, code, raw, heads) as pandoc reads `block` (AnchorError when pandoc fails, which is not cached): `rows` the lines (from 0) that carry a
     cell of a table, `code` the (start, end) offsets of every inline code span, backticks included, `heads` the
     (start, end) offsets of every heading, from the first to the last range pandoc gives it, `raw` the
     starts of the comments that pandoc writes as raw HTML in a span (or, for one that is a block of its own, their heads, `_head_of`): one that it reads as code, drops with
@@ -618,10 +630,7 @@ def _read_tables(block: str):
 
     keep = [i for i, ch in enumerate(block) if ch != "\r"]
     plain = block.replace("\r", "") if len(keep) < len(block) else block
-    try:
-        html = _sourcepos_html(plain)
-    except AnchorError:
-        return None
+    html = _sourcepos_html(plain)
     off = _offset_fn(plain)
     back = (lambda o: keep[o] if o < len(keep) else len(block)) if plain is not block else (lambda o: o)
     rows, code, heads = set(), [], []

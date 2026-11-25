@@ -70,11 +70,12 @@ jobs:
     # runners: today every member is an admin of this repository. Before a member without write access joins, set the
     # approval to every fork pull request, or restrict the runner group to this workflow (SPEC 18).
     runs-on: ${{ matrix.os == 'ubuntu-24.04' && (github.event_name != 'pull_request' || (github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.user.login != 'dependabot[bot]')) && fromJSON('["self-hosted","linux","sheaf-ci"]') || matrix.os }}
-    # An ubuntu run takes about 25 minutes; 45 still stops a hang. A macOS runner (3 cores, an M1 VM) runs the
+    # An ubuntu run took 30 to 45 minutes in November 2026 on the shared self-hosted machine (runs 45507325535, 45572817529); 90
+    # still stops a hang, and the page step below is cut at 60 inside it. A macOS runner (3 cores, an M1 VM) runs the
     # same suite about four times slower: a process start costs 50 ms there and pandoc's 210 ms, against 1 and
     # 4 ms on ubuntu (run 40997993309), and the tests start thousands. Its non-page tests alone take about
     # 45 minutes, so macOS gets 120; stall_watch still ends a hang 10 quiet minutes after it starts.
-    timeout-minutes: ${{ startsWith(matrix.os, 'ubuntu') && 60 || 120 }}
+    timeout-minutes: ${{ startsWith(matrix.os, 'ubuntu') && 90 || 120 }}
     strategy:
       fail-fast: false
       matrix:
@@ -167,8 +168,10 @@ jobs:
 
       - name: Page tests (Playwright)
         if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'
-        # The page tests take 4 to 8 minutes; the install is bounded below. A step that runs past 40 is stuck.
-        timeout-minutes: 40
+        # On the self-hosted runners the page tests took 25 to 38 minutes on passing runs of main (2026-11-25: runs 45507325535 25m,
+        # 45515828869 27m, 45572817529 37m), the machine being shared by three runners at a load above its cores; the install is
+        # bounded below. A step that runs past 60 is stuck.
+        timeout-minutes: 60
         # A page test that stalls (PageStalled, or a timeout in the Playwright driver) leaves its evidence here:
         # tests/page/stall_evidence.py, ticket 173 O. Set, it also gives the session's Chromium a DevTools port on the loopback,
         # open to any process of the machine for the step: that browser holds only the test hubs' throwaway pages and

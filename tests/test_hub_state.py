@@ -362,12 +362,12 @@ def test_a_members_pins_older_than_7_days_go_when_the_hub_starts_and_their_folde
 
 
 @pytest.mark.parametrize("member", ["", "bea"], ids=["the hub's person", "a member"])
-@pytest.mark.parametrize("inside", [False, True], ids=["state folder", "root's own store"])
-def test_a_pin_last_pinned_more_than_7_days_ago_is_not_believed_before_any_prune(tmp_path, member, inside):
+def test_a_pin_last_pinned_more_than_7_days_ago_is_not_believed_before_any_prune(member):
     """Pins expire in memory after PINS_MAX_AGE (137); the disk copy, which the hub reads when memory has none,
-    must not bring one back. Only the state folder is pruned, at hub start: a root's own store never is."""
-    v = state.Versions(tmp_path, "r") if inside else state.Versions()
-    address = "r/plan.md" if inside else ADDR
+    must not bring one back. Only the state folder is pruned, at hub start: a root's own store never is, and its
+    pins have their age beside them (the next test)."""
+    v = state.Versions()
+    address = ADDR
     h = v.pin(address, "pinned\n", member=member)
     f = next(v.dir.rglob(f"pins/**/{h}.md"))
     eight_days = time.time() - 8 * 86400
@@ -512,3 +512,52 @@ def test_a_rename_from_an_address_with_nothing_drops_what_the_new_address_held()
     docs.rename("work/never-opened.md", new)
     assert v.get(new, md_hash("# Old text of the name\n")) is None
     assert docs.get(new) == {}
+
+
+@pytest.mark.parametrize("member", ["", "bea"], ids=["the hub's person", "a member"])
+def test_a_pin_of_a_roots_own_store_keeps_its_age_through_a_clone_or_checkout(tmp_path, monkeypatch, member):
+    """Ticket 192: a root's own store goes to git (8.11), and a clone or checkout writes every file with the time of the
+    checkout. A pin last pinned 8 days before is not believed for it; pinned again, it counts from then."""
+    v = state.Versions(tmp_path, "r")
+    real = time.time
+    monkeypatch.setattr(time, "time", lambda: real() - 8 * 86400)
+    h = v.pin("r/plan.md", "pinned\n", member=member)
+    monkeypatch.setattr(time, "time", real)
+    for f in v.dir.rglob("*"):
+        if f.is_file():
+            os.utime(f)                                         # what the checkout leaves on disk
+    assert v.get("r/plan.md", h) is None
+    v.pin("r/plan.md", "pinned\n", member=member)
+    assert v.get("r/plan.md", h) == "pinned\n"
+
+
+def test_a_pin_of_a_roots_own_store_with_no_time_beside_it_is_not_believed(tmp_path):
+    """Ticket 192: a pin an older hub wrote, or one whose time file is a link or holds no number, has no age anyone can
+    trust, so it is not believed; pinned again, it is."""
+    v = state.Versions(tmp_path, "r")
+    h = v.pin("r/plan.md", "pinned\n")
+    at = next(v.dir.rglob(f"pins/{h}.at"))
+    at.unlink()
+    assert v.get("r/plan.md", h) is None
+    (tmp_path / "elsewhere").write_text(str(time.time_ns()))
+    at.symlink_to(tmp_path / "elsewhere")
+    assert v.get("r/plan.md", h) is None
+    at.unlink()
+    at.write_text(str(time.time_ns() + 30 * 86400 * 10**9))    # a clock ahead, or a hand-set number: no age to trust either
+    assert v.get("r/plan.md", h) is None
+    v.pin("r/plan.md", "pinned\n")
+    assert v.get("r/plan.md", h) == "pinned\n"
+
+
+def test_a_pins_time_stays_out_of_git_so_two_clones_pinning_one_version_never_conflict(tmp_path):
+    """Ticket 192: the versions sweep commits what git lists in a root's own store (8.11). Each hub writes its own pin
+    time, so a time in git would differ between two clones that pin one version and their sync would conflict; the
+    pin itself, named by its text, is the same on both and goes to git as before."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    v = state.Versions(tmp_path, "r")
+    h = v.pin("r/plan.md", "pinned\n")
+    listed = subprocess.run(["git", "-C", str(tmp_path), "ls-files", "--others", "--exclude-standard", "--",
+                             str(state.INSIDE)], capture_output=True, text=True, check=True).stdout.split()
+    assert any(p.endswith(f"pins/{h}.md") for p in listed)
+    assert not [p for p in listed if p.endswith(".at") or p.endswith(".gitignore")]
+    assert v.get("r/plan.md", h) == "pinned\n"

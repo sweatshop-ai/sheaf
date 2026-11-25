@@ -91,6 +91,16 @@ class Unreachable(SendError):
 
 # ── the network: the two places a test stands in for the tiroir ─────────────
 
+def _refusal_text(e: urllib.error.HTTPError) -> str:
+    """What a 4xx answer says, as one short printable line (the door's own words), or "" when it says nothing usable."""
+    try:
+        raw = e.read(1024)
+    except (OSError, ValueError):
+        return ""
+    line = " ".join(raw.decode("utf-8", "replace").split())
+    return "".join(c for c in line if c.isprintable())[:200]
+
+
 def _request(req, timeout: float = TIMEOUT) -> tuple[int, dict | None, dict]:
     try:
         with connect._NO_REDIRECT.open(req, timeout=timeout) as r:
@@ -99,7 +109,7 @@ def _request(req, timeout: float = TIMEOUT) -> tuple[int, dict | None, dict]:
         if e.code >= 500:
             raise Unreachable(f"{req.full_url.split('/', 3)[2]} answered with an error ({e.code}). "
                               "Nothing was sent.") from None
-        return e.code, None, {}
+        return e.code, None, {"refusal": _refusal_text(e)}
     except (urllib.error.URLError, OSError) as e:
         # A URLError carries its cause as `reason`; an SSLError read from the socket is its own cause (its `reason` is a word).
         why = e.reason if isinstance(e, urllib.error.URLError) else e
@@ -218,12 +228,18 @@ def declared(environ=None, session=...) -> dict:
 _RESULT_TEXT = {"create": ("doc", "hash"), "update": ("doc", "hash"), "read": ("hash", "text")}
 
 
+# The hub's tools that the CLI calls: the names a door may list under a prefix.
+_HUB_TOOLS = ("create", "update", "read", "render_report")
+
+
 class Door:
     """One tiroir's library door, with the token: `initialize` first (a door may keep a session), then each tool call."""
 
     def __init__(self, origin: str, token: str, headers: dict):
         self.origin, self.token, self.headers, self.n = origin, token, dict(headers), 0
         self.started = False
+        self.names: dict[str, str] | None = None     # the tool names the server lists, by the bare name (see `_name`)
+        self.landed = False  # a create or update was answered 200: the tiroir holds the text, whatever comes after
         self.wrote = False   # a create or update has been sent: from then on the tiroir may hold the text
 
     def _post(self, message: dict) -> tuple[int, dict | None, dict]:
@@ -232,12 +248,16 @@ class Door:
         except Unreachable as e:
             if not self.wrote:
                 raise
-            raise SendError(f"{e} The write may have reached {self.origin}: run sheaf again: if the page arrived, "
-                            "the answer is that a page of that name exists already, and it is this one. Nothing was "
-                            "changed on this laptop.") from None
+            cause = str(e).replace(" Nothing was sent.", "")
+            raise SendError(f"{cause} Whether the write reached {self.origin} is not known: it may have reached it. Nothing "
+                            "was changed on this laptop. Run sheaf again: a page that did arrive is taken up as this "
+                            "file's, and a page of that name with other text is refused.") from None
 
     def _post_checked(self, message: dict) -> tuple[int, dict | None, dict]:
         status, got, back = post(self.origin + connect.DOOR_PATH, self.token, message, self.headers)
+        if status == 403 and back.get("refusal"):       # the door says why: a token that was revoked says 401
+            raise TokenRefused(f"{self.origin} answered 403: {back['refusal']}."
+                               + ("" if self.landed else " Nothing was sent."))
         if status in (401, 403):
             raise TokenRefused(f"{self.origin} refused the token (it was revoked, or it is not a token of that address): "
                             "make a new one with Connect a laptop and run sheaf connect. Nothing was sent.")
@@ -256,14 +276,49 @@ class Door:
             self.headers["Mcp-Session-Id"] = sid
         self._post({"jsonrpc": "2.0", "method": "notifications/initialized"})
 
+    def _name(self, name: str) -> str:
+        """The name the server gives the tool `name`: the hub's own tools are bare (`create`), a door in front of the hub
+        lists them under a prefix (`sheaf_create`). Read once from its `tools/list`, never assumed; a list that cannot
+        be read leaves the bare name, which is what a server that has no such tool answers for."""
+        if self.names is None:
+            self.names = {}
+            listed: set[str] = set()
+            cursor = None
+            for _ in range(5):                      # a door may page its list; five pages is far more than it has tools
+                self.n += 1
+                message = {"jsonrpc": "2.0", "id": self.n, "method": "tools/list"}
+                if cursor:
+                    message["params"] = {"cursor": cursor}
+                try:
+                    status, got, _ = self._post_checked(message)   # a refusal or an error here is the call's own to raise
+                except SendError:
+                    return name
+                result = got.get("result") if isinstance(got, dict) else None
+                tools = result.get("tools") if isinstance(result, dict) else None
+                if status != 200 or not isinstance(tools, list):
+                    break
+                listed |= {t["name"] for t in tools if isinstance(t, dict) and isinstance(t.get("name"), str)}
+                cursor = result.get("nextCursor")
+                if not isinstance(cursor, str) or not cursor:
+                    break
+            # A door lists the hub's `create`, `update` and `read` under one prefix (`<prefix>create`...) and may list a tool of
+            # its own that keeps a bare name, `read` among them: so the prefix is the one under which all three stand.
+            prefixes = [n[:-len("create")] for n in listed if n.endswith("_create")
+                        if {n[:-len("create")] + "update", n[:-len("create")] + "read"} <= listed]
+            if len(prefixes) == 1:                  # every tool of the hub is then called under it, listed or not
+                self.names = {bare: prefixes[0] + bare for bare in _HUB_TOOLS}
+        return self.names.get(name, name)
+
     def tool(self, name: str, arguments: dict) -> tuple[bool, object]:
         """(is it an error, the parsed result or the sentence of the error) of one tool call."""
         if not self.started:
             self._start()
-        self.n += 1
+        sent = self._name(name)
         self.wrote = self.wrote or name in ("create", "update")
+        self.n += 1
         status, got, _ = self._post({"jsonrpc": "2.0", "id": self.n, "method": "tools/call",
-                                     "params": {"name": name, "arguments": arguments}})
+                                     "params": {"name": sent, "arguments": arguments}})
+        self.landed = self.landed or (status == 200 and name in ("create", "update"))
         result = got.get("result") if isinstance(got, dict) else None
         content = result.get("content") if isinstance(result, dict) else None
         if status != 200 or not isinstance(content, list) or not content:
@@ -388,14 +443,33 @@ def credential(origin: str) -> str | None:
 
 # ── send and pull ────────────────────────────────────────────────────────────
 
-def _beside(md: Path) -> Path:
-    return md.with_name(md.stem + ".tiroir" + md.suffix)
+def _beside(md: Path, n: int = 1) -> Path:
+    return md.with_name(md.stem + (".tiroir" if n == 1 else f".tiroir-{n}") + md.suffix)
+
+
+def _copy_for(md: Path, text: str) -> Path:
+    """Where the tiroir's text goes beside `md`: `FILE.tiroir.md` when it is free or already holds exactly this text, else
+    the next free `FILE.tiroir-2.md`, `-3`...; never over a file that is there (it may be a copy the person has begun to
+    merge from, or a file of their own). Two commands at the very same instant can still choose one name."""
+    n = 1
+    while True:
+        beside = _beside(md, n)
+        if os.path.lexists(beside):
+            try:
+                if beside.is_file() and beside.read_text(encoding="utf-8") == text:
+                    return beside
+            except (OSError, UnicodeDecodeError):
+                pass
+            n += 1
+            continue
+        return beside
 
 
 def _leave_theirs(md: Path, row: dict, now: dict, sending: bool = True) -> SendError:
     """The tiroir's text, written beside the file and recorded as read; the error that tells the agent what to do."""
-    beside = _beside(md)
-    write_text_atomic(beside, now["text"])
+    beside = _copy_for(md, now["text"])
+    if not beside.exists():
+        write_text_atomic(beside, now["text"])
     keep_row(md, {**row, "hash": now["hash"]})
     nothing = "so nothing was sent" if sending else "and the file has changes of yours"
     return SendError(f"{row['doc']} has changed on the shared Sheaf since you last read it, {nothing}. Its text is in "
@@ -427,6 +501,11 @@ def _create(door: Door, md: Path, text: str, args, origin: str) -> dict:
     if args.keep:
         arguments["keep"] = True
     bad, got = door.tool("create", arguments)
+    if bad and "exists already" in got and args.folder is None:
+        arrived = _arrived(door, md, text, got.split(" exists already", 1)[0].strip(), origin)
+        if arrived is not None:
+            keep_row(md, {"tiroir": origin, "doc": arrived["doc"], "hash": arrived["hash"], "local": md_hash(text)})
+            return arrived
     if bad and "exists already" in got:
         raise SendError(f"a page named {md.name} exists already on the shared Sheaf and was not sent from this file. "
                         f"Rename {md} and run sheaf again. Nothing was sent.")
@@ -434,6 +513,23 @@ def _create(door: Door, md: Path, text: str, args, origin: str) -> dict:
         raise SendError(f"{got} Nothing was sent.")
     keep_row(md, {"tiroir": origin, "doc": got["doc"], "hash": got["hash"], "local": md_hash(text)})
     return got
+
+
+def _arrived(door: Door, md: Path, text: str, address: str, origin: str) -> dict | None:
+    """The page at `address` (the one the door's "exists already" named) when the tiroir holds exactly this file's text there: a
+    create whose answer was lost took effect, and the run after it finds its own page. {doc, hash} of it, else None.
+    None also when the state row of another local file that still exists holds that address: the page is that file's."""
+    mine = str(md.resolve())
+    if any(k != mine and Path(k).exists() and isinstance(r, dict) and r.get("tiroir") == origin and r.get("doc") == address
+           for k, r in read_state().items()):
+        return None
+    try:
+        bad, now = door.tool("read", {"doc": address})
+    except (SendError, Moved):
+        return None
+    if bad or md_hash(now["text"]) != md_hash(text):
+        return None
+    return {"doc": address, "hash": now["hash"]}
 
 
 def _update(door: Door, md: Path, text: str, row: dict) -> dict:
@@ -478,6 +574,35 @@ def _git(top: Path, *args) -> subprocess.CompletedProcess:
                               encoding="utf-8", errors="replace", timeout=30)
     except (OSError, subprocess.SubprocessError) as e:
         return subprocess.CompletedProcess(args, 1, "", str(e))
+
+
+def _git_probe(folder: Path) -> subprocess.CompletedProcess:
+    """`git rev-parse` in `folder`, with git's messages in English; raises OSError or SubprocessError when git does not run."""
+    return subprocess.run(["git", "-C", str(folder), "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True,
+                          encoding="utf-8", errors="replace", timeout=10, env={**os.environ, "LC_ALL": "C"})
+
+
+# git's own words for a folder under no repository; a broken repository says `not a git repository: <path>`, which is not this
+NOT_A_REPO = re.compile(r"fatal: not a git repository \(or any (?:of the )?parent[^)]*\)")
+
+
+def require_known_place(md: Path):
+    """Return when git says the page's folder is inside a repository or plainly outside any: SendError for any other
+    answer (git missing, a timeout, "dubious ownership", a repository git names as broken). The page is then not sent as a loose
+    page, since a repository's page must never go up as one."""
+    folder = md.resolve().parent
+    try:
+        done = _git_probe(folder)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise SendError(f"cannot tell whether {md} is in a git repository: git did not run ({e}). Nothing was sent.") from None
+    if done.returncode == 0:
+        return
+    why = (done.stderr or "").strip().splitlines()
+    if why and NOT_A_REPO.match(why[0]) and not any("ownership" in l or "unsafe" in l for l in why):
+        return
+    raise SendError(f"cannot tell whether {md} is in a git repository: git said {why[0] if why else 'nothing'!r}. "
+                    "Fix that (for dubious ownership: `git config --global --add safe.directory <folder>`) and run sheaf "
+                    "again. Nothing was sent.")
 
 
 class Local(Exception):
@@ -578,6 +703,7 @@ def send_page(md: Path, args, out, err, environ=None) -> int | None:
         token = credential(origin) if origin else None
         if token is None:
             return None
+        require_known_place(md)
         if (top := config.git_place(md.resolve().parent).top) is not None:
             return report_page(md, top, origin, token, args, out, err, environ)
         text = _read_local(md)

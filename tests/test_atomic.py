@@ -52,6 +52,33 @@ def test_the_check_runs_once_the_new_file_is_whole(tmp_path):
     assert target.read_text() == "new"
 
 
+def test_the_check_runs_after_the_new_file_is_read_back_just_before_the_replace(tmp_path, monkeypatch):
+    """198 A (Codex on #624): the check ran before the new file was read back whole, a read as long as the file; an editor's
+    save during that read was overwritten all the same. It runs after that read, the last step before the replace."""
+    from sheafmd import source
+    tmp_path = tmp_path / "dir"
+    tmp_path.mkdir()
+    target = tmp_path / "f"
+    target.write_text("old")
+    holds = source._holds_bytes
+
+    def read_back(name, data, mode=None):
+        ours = holds(name, data, mode)
+        if Path(name).name != "f":
+            target.write_text("the editor's save")       # saved while the temp file is read back
+        return ours
+    monkeypatch.setattr(source, "_holds_bytes", read_back)
+
+    def unchanged():
+        if target.read_text() != "old":
+            raise RuntimeError("changed meanwhile")
+
+    with pytest.raises(RuntimeError, match="changed meanwhile"):
+        write_text_atomic(target, "new", check=unchanged)
+    assert target.read_text() == "the editor's save"
+    assert os.listdir(tmp_path) == ["f"]
+
+
 def _swap_our_temp_at_fsync(monkeypatch, folder, put, swap=True):
     """While the new text is written, something else takes the temp file's name, as a user who can write the
     folder can at any moment. With swap False nothing is made: the control."""
@@ -152,3 +179,58 @@ def test_a_write_another_process_replaces_right_after_still_returns(tmp_path, mo
     monkeypatch.setattr(os, "replace", then_theirs)
     write_text_atomic(target, "mine")
     assert target.read_text() == "theirs"
+
+
+# ── ticket 194 A, B, C (#570) ────────────────────────────────────────────────
+
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="owner bits mean nothing to root; Windows has none")
+def test_a_mode_that_leaves_the_owner_no_read_is_still_given(tmp_path):
+    """The read-back of the temp file is made before its mode is set, so a mode without the owner's read is the
+    file's, as any other mode is."""
+    target = tmp_path / "f"
+    target.write_text("old\n")
+    write_text_atomic(target, "new\n", mode=0o200)
+    assert stat.S_IMODE(target.stat().st_mode) == 0o200
+    os.chmod(target, 0o600)
+    assert target.read_text() == "new\n"
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith(".sheaf-tmp")]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="no owner-only mode on Windows")
+@pytest.mark.parametrize("locked", [False, True], ids=["file", "document"])
+def test_the_temp_file_is_the_owners_alone_until_its_text_is_whole(tmp_path, monkeypatch, locked):
+    """A temp file a crash leaves half written is never readable by the group or others, whatever mode the file gets."""
+    from sheafmd import source
+    target = tmp_path / "f.md"
+    target.write_text("old\n")
+    os.chmod(target, 0o644)
+    real, modes = os.fsync, []
+
+    def hook(fd):
+        modes.append(stat.S_IMODE(os.fstat(fd).st_mode))
+        return real(fd)
+    monkeypatch.setattr(os, "fsync", hook)
+    if locked:
+        source._write_atomic(target, "new\n")
+    else:
+        write_text_atomic(target, "new\n", mode=0o644)
+    assert modes and all(m == 0o600 for m in modes), oct(modes[0]) if modes else modes
+    assert stat.S_IMODE(target.stat().st_mode) == 0o644 and target.read_text() == "new\n"
+
+
+@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="counts descriptors through /proc")
+@pytest.mark.parametrize("locked", [False, True], ids=["file", "document"])
+def test_a_text_that_cannot_be_encoded_leaves_no_descriptor_and_no_temp_file(tmp_path, locked):
+    """A lone surrogate fails the encoding before anything is opened, so no descriptor leaks and no temp file is
+    left; the file keeps its old text (194 C)."""
+    from sheafmd import source
+    target = tmp_path / "f.md"
+    target.write_text("old\n")
+    before = len(os.listdir("/proc/self/fd"))
+    with pytest.raises(UnicodeEncodeError):
+        if locked:
+            source._write_atomic(target, "bad \ud800\n")
+        else:
+            write_text_atomic(target, "bad \ud800\n")
+    assert len(os.listdir("/proc/self/fd")) == before
+    assert not [p for p in tmp_path.iterdir() if p.name.endswith(".sheaf-tmp")] and target.read_text() == "old\n"

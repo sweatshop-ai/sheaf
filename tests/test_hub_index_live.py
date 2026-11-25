@@ -1287,6 +1287,41 @@ def test_a_forget_whose_registry_write_fails_leaves_the_roots_documents_as_they_
     assert world.hub.versions.get("work/a.md", md_hash(text)) == text
 
 
+def test_a_forget_whose_roots_json_cannot_be_written_keeps_the_root_in_the_hub_too(world, put, monkeypatch):
+    """Ticket 196 C (from #626): the registry's file is not written. The root is still in roots.json, so the hub holds it
+    too and the forget fails: the documents are not popped and their versions stay, where a registry that had already
+    taken the root out of its memory read as one that let the name go."""
+    put("a.md")
+    e = world.hub.entry("work/a.md")
+    write = state.write_json
+
+    def failing(path, data, *args, **kwargs):
+        if path.name == "roots.json":
+            raise OSError("no space left on device")
+        return write(path, data, *args, **kwargs)
+    monkeypatch.setattr(state, "write_json", failing)
+    with pytest.raises(OSError):
+        world.hub.forget_root("work")
+    assert world.hub.roots.get("work") is not None
+    assert world.hub.entries.get("work/a.md") is e and not state.Versions._claims
+    assert not any(r.get("kind") == "forget-failed" for r in diagnostics.read())
+
+
+def test_a_private_roots_forget_that_fails_before_the_registry_let_go_keeps_its_documents(world, put, monkeypatch):
+    """Ticket 196 C (from #626): `Roots.get` answers None for a private root, which has no address. A forget of one that
+    fails while the registry still holds it is a failure, never a name let go."""
+    put("a.md")
+    e = world.hub.entry("work/a.md")
+    monkeypatch.setattr(world.hub.roots, "hidden", lambda root: root.name == "work")
+
+    def failing(*args, **kwargs):
+        raise OSError("no space left on device")
+    monkeypatch.setattr(roots_mod, "forget", failing)
+    with pytest.raises(OSError):
+        world.hub.forget_root("work")
+    assert world.hub.entries.get("work/a.md") is e and not state.Versions._claims
+
+
 def test_a_forget_that_fails_after_the_registry_let_go_goes_on_with_its_documents_detached(world, put, monkeypatch):
     """Ticket 182, follow-up of #611: the registry let the name go and an entry store then failed. Another folder may take the
     name now, so the documents are not reattached: the forget goes on, and the failure is a row in the diagnostics log."""
@@ -1339,3 +1374,24 @@ def test_a_late_forget_leaves_the_versions_of_the_folder_that_took_the_name(worl
         forgetting.join(5)
     assert not forgetting.is_alive()
     assert world.hub.versions.get("work/a.md", md_hash(text)) == text
+
+
+def test_a_render_whose_root_is_forgotten_after_its_entry_is_looked_at_tells_no_change_after_gone(lock_order, world, put, monkeypatch):
+    """Ticket 195 A (from #618): a forget of the root takes no name lock, so it can pop the entry and publish `gone` after the
+    render saw its entry still there and before the render takes in the write on disk and rebuilds. The page hears nothing
+    after `gone`."""
+    f = put("a.md")
+    world.hub.render(f, {"title": "One"}, None)
+    e = world.hub.entry("work/a.md")
+    sub = e.bus.subscribe()
+    sub.drain()
+    edit(f, "# Written on disk since\n")
+    real = world.hub._refreshed
+
+    def forgotten_first(entry):
+        world.hub.forget_root("work")
+        return real(entry)
+    monkeypatch.setattr(world.hub, "_refreshed", forgotten_first)
+    world.hub.render(f, {"title": "Two"}, None)
+    names = [name for name, _ in sub.drain()]
+    assert "gone" in names and "changed" not in names[names.index("gone"):], names

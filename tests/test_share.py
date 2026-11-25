@@ -635,6 +635,19 @@ def test_an_error_text_swaps_only_the_whole_address_it_names_for_the_opaque_name
     assert got == f"{doc}.bak is not {name}, nor x{doc}, nor {doc}y; see {name}."
 
 
+@pytest.mark.parametrize("longer", ["{doc}+copy.md", "{doc}~", "{doc}#2", "{doc}=x"])
+def test_an_error_text_leaves_a_longer_name_with_other_punctuation_alone(team, longer):
+    """Ticket 188 I: a name that goes on past the address in a character a file name may hold is another file; any
+    other character after the address ends it, and the address is swapped."""
+    doc = deep(team)
+    name = told(team, BOB, doc)
+    caller = Caller("Claude Code (Bob)", token=next(r for r in Tokens().list() if r.name == "bob-claude"))
+    other = longer.format(doc=doc)
+    text = f"{other} is not ({doc}), nor '{doc}'; {doc}:3: {doc}'s {doc},x {doc}>; see {doc}"
+    got = team.door.handler.door._told_text(text, {"doc": name}, caller)
+    assert got == f"{other} is not ({name}), nor '{name}'; {name}:3: {name}'s {name},x {name}>; see {name}"
+
+
 def test_a_recipients_update_is_told_by_the_opaque_name_and_written_to_the_log_by_the_real_one(team):
     doc = deep(team)
     name = told(team, BOB, doc)
@@ -1160,3 +1173,34 @@ def test_the_row_button_ticks_the_text_it_wrote_not_a_later_read_of_the_page(tea
     monkeypatch.setattr(the_list, "share_edit", lambda text: (seen.append(text), real_edit(text))[1])
     team.post("/_/share", {"doc": doc, "hash": md_hash(read(team, doc))}, member=ALICE)
     assert seen and "Alice's notes" in seen[0]
+
+
+# ── a CRLF page whose last line is its heading ────────────────────────────────────────────────────────────────────
+
+import re
+
+BARE_CR = re.compile(rb"\r(?!\n)")
+HEADING_LAST = "---\nowner: alice\n---\n# Alice's notes".replace("\n", "\r\n")
+
+
+FRONT_ONLY = "---\r\nowner: alice\r\n---"
+CASES = [(HEADING_LAST, ["bob"]), (HEADING_LAST, []), (FRONT_ONLY, ["bob"]), (FRONT_ONLY, [])]   # a page with no \r\n is an LF page
+
+
+@pytest.mark.parametrize("page,names", CASES,
+                         ids=["front+heading, names", "front+heading, none", "front only, names", "front only, none"])
+def test_a_share_line_added_to_a_crlf_page_leaves_every_line_end_a_crlf(page, names):
+    from sheafmd.hub.visibility import with_share_line
+    raw = with_share_line(page, names).encode()
+    assert b"Share" in raw
+    assert not BARE_CR.search(raw), raw
+    assert raw.count(b"\n") == raw.count(b"\r\n"), raw
+
+
+def test_a_crlf_page_whose_last_line_is_its_heading_shared_through_the_button_has_clean_line_ends(team):
+    doc = made(team, "alice", PRIVATE)["doc"]
+    team.hub.file(doc).write_bytes(HEADING_LAST.encode())
+    row = {r["doc"]: r for r in shared_rows(team, ALICE)["rows"]}[doc]
+    assert team.post("/_/share", {"doc": doc, "hash": row["share"]}, member=ALICE).status == 200
+    raw = team.hub.file(doc).read_bytes()
+    assert b"Share" in raw and not BARE_CR.search(raw) and raw.count(b"\n") == raw.count(b"\r\n"), raw

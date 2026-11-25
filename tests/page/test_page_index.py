@@ -106,6 +106,36 @@ def shared(chromium, site):
     close_context(c)
 
 
+def test_a_join_whose_answer_is_lost_leaves_no_stream_on_the_hub(site, shared):
+    """The hub took the index's join, and its answer never reached the browser (a network error after the hub had it).
+    The page asks for a new stream under a new key; the first key got no leave, and the hub counted two index tabs for
+    the life of the connection (ticket 189 A). The leader leaves a key whose join had no answer."""
+    lost, joins = [], []
+
+    def once(route):
+        index = route.request.post_data_json.get("doc") == ""
+        if index:
+            joins.append(1)
+        if index and not lost:
+            route.fetch()                # the hub takes the join
+            lost.append(1)
+            route.abort("connectionreset")   # and the browser hears no answer
+        else:
+            route.continue_()
+    shared.route("**/_/live/join", once)
+    tab = IndexTab.__new__(IndexTab)
+    tab.page, tab.errors = shared.new_page(), []
+    tab.page.on("pageerror", lambda e: tab.errors.append(str(e)))
+    tab.page.goto(f"{site.base}/")
+    tab.page.wait_for_selector("#roots", state="attached")
+    until(lambda: lost, what="the index's first join taken by the hub and its answer lost")
+    until(lambda: len(joins) >= 2 and tab.hub_line() == "", timeout=15, what="the index joined again")
+    until(lambda: site.hub.index_bus.count() == 1, timeout=15, what="one index stream on the hub, not two")
+    tab.page.wait_for_timeout(2500)      # a ghost would stay: the count holds at one (not time.sleep: routes)
+    assert site.hub.index_bus.count() == 1
+    assert tab.errors == []
+
+
 def test_the_index_page_joins_again_after_its_join_is_refused(site, shared):
     """A join the hub does not take (429, a network error, a 404 at a rollover) closes the index's stream for good
     (readyState 2), and the page said "Reconnecting to the hub…" for ever. It asks for a new stream, as the document

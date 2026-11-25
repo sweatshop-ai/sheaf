@@ -179,6 +179,11 @@ class WriteLog:
         except Exception:
             pass
 
+    def addresses(self, prefix: str) -> list[str]:
+        """The addresses that start with `prefix` and hold lines."""
+        with self._lock:
+            return sorted(a for a, kept in self._lines.items() if kept and a.startswith(prefix))
+
     def lines(self, address: str) -> list[Line]:
         """The kept lines of `address`, oldest first."""
         with self._lock:

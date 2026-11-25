@@ -51,7 +51,7 @@ Area: hub-core (repos.py), size S. Claim true: repos.py:278-284 updates a sleepi
 
 ### 306 (PR 444)
 
-Area: mcp-door, size S. SPEC section 8.7 text for a sleeping clone says a door call by a token that may see the page is answered with the asleep line. mcp.py:477 returns None for every unbound token (member None), though `_sees` can judge it from the last read front matter (mcp.py:570-572: visibility project, not private) and `self.hub.judged(address)` is already known non-None at mcp.py:476. Fix: for member None, return None only when `not self._sees(judged[0], address, caller)`; add a door test for an unbound token on a sleeping clone page.
+Area: mcp-door, size S. SPEC section 8.6 text for a sleeping clone says a door call by a token that may see the page is answered with the asleep line. mcp.py:477 returns None for every unbound token (member None), though `_sees` can judge it from the last read front matter (mcp.py:570-572: visibility project, not private) and `self.hub.judged(address)` is already known non-None at mcp.py:476. Fix: for member None, return None only when `not self._sees(judged[0], address, caller)`; add a door test for an unbound token on a sleeping clone page.
 
 ### 339 (PR 452)
 
@@ -179,8 +179,8 @@ Evidence: src/sheafmd/hub/repos.py:224-232.
 ### 103 (PR 400)
 
 The unlocked write is harmless (single dict set under the GIL, repos.py:493-495, worst case two ssh -G calls). The never-expiring cache is real. Options:
-- A (recommended): key the cache on ~/.ssh/config mtime, no TTL guess.
-- B: TTL of 5 minutes.
+- A (withdrawn, ticket 190 H): key the cache on ~/.ssh/config mtime. It misses `Include` files and the system config, which `ssh -G` reads too, so a stale name stays.
+- B (recommended): TTL of 5 minutes.
 - C: leave; restart picks it up.
 Evidence: src/sheafmd/hub/repos.py:200, 493-495.
 
@@ -195,8 +195,8 @@ Evidence: src/sheafmd/tells_poll.py:46-60.
 ### 115 (PR 402)
 
 Still true: register.ts:177-182 session.start calls restore(m.p, sent, ...) before checking p.armedFor. Options:
-- A (recommended): skip restore when m.p.armedFor is non-empty and differs from id (the next tick's leave() re-arms and the id restores on its next session.start).
-- B: call leave(m) first when armedFor differs, then restore.
+- A (withdrawn, ticket 190 G): skip restore when m.p.armedFor is non-empty and differs from id. It leaves the resumed session unarmed: session.start arms only while p.doors is empty, and leave() clears state without arming again, so Tell polling stops until another declaration.
+- B (recommended): call leave(m) first when armedFor differs, then restore and arm.
 - C: leave; the effect is a possible repeat Tell, the accepted direction.
 Evidence: plugin/sheaf/hooks/register.ts:176-185, core.ts:105-115.
 
@@ -302,9 +302,9 @@ Claim true: `restore_trash` uses `os.link` (archive.py:261) and answers with a `
 ### 192 (PR 415)
 
 Claim true: `adopt` (readthrough.py:56-57) keeps the `rd-edit-meta` JSON block of a client page verbatim. It is data, not script, but the agency page's script reads it.
-- A: filter it to the keys the page script reads, drop the rest (RECOMMENDED; hardening, the client hub is a separate trust domain).
+- A: filter it to the keys the page script reads, drop the rest. Withdrawn (ticket 190 F): the keys the script reads (`doc`, `actions`, `edit`, the agent) are the ones a client hub can forge.
 - B: keep; the client tiroirs are the agency's own and the block is read as JSON only.
-- C: replace the block with one the agency hub builds.
+- C: replace the block with one the agency hub builds. Done in ticket 190 F for what the script acts on: the agency sets `doc` and empties actions, editor and agent.
 
 ### 214 (PR 422)
 
@@ -334,7 +334,7 @@ Options: (a) skip the write when the clone is awake and last_used is under an ho
 ### 286 (PR 440)
 
 Claim true: connect.py:82 maps every character outside [A-Za-z0-9._-] to "-", so `a.example:8443` and `a.example-8443` share a file name; the token for one would be sent to the other.
-Options: (a) leave: both would have to be peers of one owner, contrived (recommended); (b) encode ':' as '_' and read the old name as a fallback in `_credential_file` (connect.py:93-98), M; (c) keep the name and refuse to store when two origins collide.
+Options: (a) leave: both would have to be peers of one owner, contrived. Withdrawn (ticket 190 E): it sends one peer's token to another, so it was fixed with a name no two origins share; (b) encode ':' as '_' and read the old name as a fallback in `_credential_file` (connect.py:93-98), M; (c) keep the name and refuse to store when two origins collide.
 
 ### 297 (PR 442)
 

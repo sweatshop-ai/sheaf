@@ -2095,6 +2095,35 @@ def test_enter_at_the_start_of_a_heading_or_in_a_table_cell_keeps_the_block_what
         assert md in f.read_text() and "<table" not in f.read_text()
 
 
+def test_enter_after_a_headings_last_word_and_before_its_comment_makes_a_paragraph(frozen):
+    """Ticket 188 F: the words after the caret were read with the page's own UI in them, the comment's numbered badge,
+    so Enter at the end of the words of a heading with a comment on its last word marked the line a half of the heading,
+    and the line typed under it was saved as a heading."""
+    p, f = frozen.page, frozen.site.file
+    blk, s, e = rdc.find_quote(HEADED, "here")
+    rewrite(f, rdc.add_comment(HEADED, blk, s, e, "here", "Why here?", "Ada", "2026-10-18T10:00")[0])
+    mark(p)
+    reloaded(p)
+    p.wait_for_selector("main h2 .rd-anchor")
+    p.keyboard.press("e")
+    p.click("main h2")
+    p.evaluate("""() => {
+        const a = document.querySelector('main h2 .rd-anchor'), r = document.createRange();
+        r.setStartBefore(a); r.collapse(true);
+        const sel = getSelection(); sel.removeAllRanges(); sel.addRange(r);
+    }""")
+    before = f.read_text()
+    p.keyboard.press("Enter")
+    p.keyboard.type("Under it.")
+    p.keyboard.press("Control+s")
+    until(lambda: "Under it." in f.read_text(), what="the save in the file")
+    settled(p)
+    got = f.read_text()
+    # The comment's anchor stood after the caret, so it goes down with the new line: where it lands is no part of this.
+    assert "## A heading here\n\nUnder it." in got and "# Under it." not in got, got
+    assert got.count("## ") == before.count("## "), got
+
+
 # The answer of a reply, an edit, a status or a delete that cannot be taken in place (here a comment written in the
 # file while it was out, whose anchor the page does not have) reloaded the page at once. Edits typed in the text
 # meanwhile raised the leave question then, and Leave lost them but for the draft. They are saved first, as they are

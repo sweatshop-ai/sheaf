@@ -12,8 +12,10 @@ the exact bytes that were read, which is what keeps chart fences, image lines,
 front matter and hand-aligned tables intact when you edit one paragraph elsewhere.
 """
 
+import bisect
 import contextvars
 import difflib
+import html.parser as _html_parser
 import os
 import re
 from collections import Counter
@@ -46,7 +48,7 @@ def _sanitize(fragment: str, source=None, strays=None, comments=frozenset()) -> 
     # Rendering-only wrappers and artefacts of edit mode itself
     for div in soup.select("div.tblwrap"):
         div.unwrap()
-    _lines_as_paragraphs(soup)
+    _lines_as_paragraphs(soup, comments)
     _lines_as_items(soup, comments)
     _drop_empty_task_items(soup)
     if source is not None:
@@ -108,6 +110,8 @@ def _unwrap_strays(soup, source: str, strays) -> None:
     had = Counter(key(el) for el in BeautifulSoup(source, "html.parser").find_all(True))
     pasted_marks = {}   # the marks `_styled_marks` made, by id: a span that says normal inside one ends it
     new_br = set()      # the <br> the source did not have: two in a row make a paragraph break (`_split_at_double_breaks`)
+    # The weight each element inherits on the page, read before the loop unwraps a styled span around it.
+    inherits = {id(el): _inherited_weight(el) for el in soup.find_all(True)}
     for el in soup.find_all(True):
         if _page_own(el):
             continue
@@ -117,7 +121,7 @@ def _unwrap_strays(soup, source: str, strays) -> None:
             continue
         if el.name == "br":
             new_br.add(id(el))
-        plain_b = el.name in ("b", "strong") and _weight(el.get("style", "")) is False
+        plain_b = el.name in ("b", "strong") and _weight(el.get("style", ""), inherits[id(el)]) is False
         if el.name == "br" and _beside_a_block(el):
             # An empty line a paste writes as a <br> beside a paragraph is no line of the markdown:
             # pandoc would write it as a paragraph holding a lone backslash.
@@ -126,7 +130,7 @@ def _unwrap_strays(soup, source: str, strays) -> None:
                 strays.append("br")
             continue
         if el.name == "span":
-            _styled_marks(soup, el, pasted_marks)
+            _styled_marks(soup, el, pasted_marks, inherits[id(el)])
         if el.name in ("div", "span") or plain_b:
             if el.name == "div":
                 # A line: its words stay apart from the text around it. A block beside it keeps them apart already:
@@ -148,43 +152,90 @@ def _unwrap_strays(soup, source: str, strays) -> None:
             del el[a]
         if drop and strays is not None:
             strays.append(el.name)
-    _split_at_double_breaks(soup, new_br)
+    _split_at_double_breaks(soup, new_br, source)
 
 
-def _split_at_double_breaks(soup, new_br) -> None:
+def _break_runs(kids, counts):
+    """Each run of two <br> or more among `kids` that `counts` takes, white space between them, as (first, last)."""
+    out, run = [], []
+    for k, c in enumerate(kids):
+        if getattr(c, "name", None) == "br" and counts(c):
+            run.append(k)
+        elif not (run and getattr(c, "name", None) is None and not str(c).strip()):
+            if len(run) >= 2:
+                out.append((run[0], run[-1]))
+            run = []
+    if len(run) >= 2:
+        out.append((run[0], run[-1]))
+    return out
+
+
+def _run_key(kids, first, last):
+    """A run of breaks told by its length and the words of the lines on each side of it."""
+    def line(cs):
+        return "".join(c.get_text() if getattr(c, "name", None) else str(c) for c in cs).strip()
+
+    before = next((k for k in range(first - 1, -1, -1) if getattr(kids[k], "name", None) == "br"), -1)
+    after = next((k for k in range(last + 1, len(kids)) if getattr(kids[k], "name", None) == "br"), len(kids))
+    n = sum(1 for c in kids[first:last + 1] if getattr(c, "name", None) == "br")
+    return n, line(kids[before + 1:first]), line(kids[last + 1:after])
+
+
+def _source_break_runs(source) -> list:
+    """The runs of two breaks or more the source's paragraphs have (`_run_key`): a markdown hard break (`\\` or two
+    spaces at the end of a line) is a <br> of the render, never one of the source's text."""
+    from bs4 import BeautifulSoup
+
+    html = _render_source(source) if source and source.strip() else None
+    if html is None:
+        return []
+    runs = []
+    for p in BeautifulSoup(html, "html.parser").find_all("p"):
+        kids = list(p.children)
+        runs += [_run_key(kids, a, b) for a, b in _break_runs(kids, lambda c: True)]
+    return runs
+
+
+def _split_at_double_breaks(soup, new_br, source=None) -> None:
     """Two <br> in a row, none of them in the source, inside a paragraph with words on both sides (an online word
     processor's Shift+Enter twice, each <br> in a span of its own): a blank line, so the paragraph is two. Pandoc
-    would write them as two lines of a lone backslash. One <br> stays a line break."""
+    would write them as two lines of a lone backslash. One <br> stays a line break. A run the source's render has
+    too (markdown hard breaks: `Alpha\\` `\\` `Beta`), told by its length and a line beside it, stays as it is."""
     def blank(c):
         return getattr(c, "name", None) is None and not str(c).strip()
+
+    def words(c):
+        return _shows(str(c)) or getattr(c, "name", None) in ("img", "a", "b", "i", "strong", "em", "code")
+
+    had = None      # the source's runs, read once a run with words on both sides is found
+
+    def kept(kids, first, last):
+        nonlocal had
+        if had is None:
+            had = _source_break_runs(source)
+        n, before, after = _run_key(kids, first, last)
+        old = next((r for r in had if r[0] == n and (r[1] == before or r[2] == after)), None)
+        if old is not None:
+            had.remove(old)
+        return old is not None
 
     for p in soup.find_all("p"):
         if _page_own(p):
             continue
         while True:
             kids = list(p.children)
-            run, first_br = [], None
-            for k, c in enumerate(kids):
-                if getattr(c, "name", None) == "br" and id(c) in new_br:
-                    if first_br is None:
-                        first_br = k
-                    run.append(k)
-                elif blank(c) and first_br is not None:
-                    continue
-                elif first_br is not None and len(run) >= 2:
-                    break
-                else:
-                    run, first_br = [], None
-            else:
-                if len(run) < 2:
-                    break
-            if len(run) < 2 or not any(_shows(str(c)) or getattr(c, "name", None) in ("img", "a", "b", "i", "strong", "em", "code")
-                                        for c in kids[:first_br]) or run[-1] + 1 >= len(kids) or all(blank(c) for c in kids[run[-1] + 1:]):
+            # The first run with words on both sides; a run before the first words, or after the last, stays as it is
+            # and the scan goes on past it.
+            cut = next(((a, b) for a, b in _break_runs(kids, lambda c: id(c) in new_br)
+                        if any(words(c) for c in kids[:a]) and not all(blank(c) for c in kids[b + 1:])
+                        and not kept(kids, a, b)), None)
+            if cut is None:
                 break
+            first, last = cut
             tail = soup.new_tag("p")
-            for c in kids[run[-1] + 1:]:
+            for c in kids[last + 1:]:
                 tail.append(c.extract())
-            for c in kids[first_br:run[-1] + 1]:
+            for c in kids[first:last + 1]:
                 c.extract()
             p.insert_after(tail)
             p = tail
@@ -209,10 +260,15 @@ _HEADINGS = ("h1", "h2", "h3", "h4", "h5", "h6")     # a heading is bold already
 
 def _declarations(style: str) -> dict:
     """A style attribute as {property: value}, both lowercase, `!important` dropped: `--font-weight:bold`, a custom
-    property, is no `font-weight`, and a declaration's words inside another's value are no declaration."""
-    out, parts, quote, start = {}, [], None, 0
+    property, is no `font-weight`, and a declaration's words inside another's value are no declaration. A backslash
+    escapes the character after it (`"x\\";y"` is one string), as CSS reads it."""
+    out, parts, quote, start, escaped = {}, [], None, 0, False
     for k, ch in enumerate(style):
-        if quote:
+        if escaped:
+            escaped = False
+        elif ch == "\\":
+            escaped = True
+        elif quote:
             quote = None if ch == quote else quote
         elif ch in "'\"":
             quote = ch
@@ -227,16 +283,50 @@ def _declarations(style: str) -> dict:
     return out
 
 
-def _weight(style: str):
-    """True when the style says bold, False when it says a normal weight, None when it says neither."""
+def _bolder(w: int) -> int:
+    """The weight `bolder` gives inside `w` (CSS Fonts 4, 2.2), as a <b> and a <strong> do by default."""
+    return 400 if w < 350 else 700 if w < 550 else 900
+
+
+def _lighter(w: int) -> int:
+    """The weight `lighter` gives inside `w` (CSS Fonts 4, 2.2)."""
+    return 100 if w < 550 else 400 if w < 750 else 700
+
+
+def _weight_value(style: str, inherited: int):
+    """The numeric weight the style gives an element that inherits `inherited`, or None when it says none. `bolder`
+    and `lighter` are relative to the inherited weight, by the table of CSS Fonts 4, 2.2."""
     v = _declarations(style).get("font-weight")
-    if not v:
-        return None
-    if v in ("bold", "bolder") or re.fullmatch(r"[6-9]00", v):
-        return True
-    if v in ("normal", "lighter") or re.fullmatch(r"[1-5]00", v):
-        return False
-    return None
+    if v in ("bolder", "lighter"):
+        return _bolder(inherited) if v == "bolder" else _lighter(inherited)
+    if v in ("normal", "bold"):
+        return 400 if v == "normal" else 700
+    return int(v) if v and re.fullmatch(r"[1-9]00", v) else None
+
+
+def _inherited_weight(el) -> int:
+    """The weight `el` inherits: 400 at the top, `bolder` for a <b> or <strong> and bold for a heading (the HTML
+    rendering section's defaults), each ancestor's own style in place of its default, read from its parent's weight
+    as CSS reads a relative one: `<b style="font-weight:lighter">` inside 500 is 100, not lighter than 700."""
+    w = 400
+    for p in reversed(list(el.parents)):
+        if not getattr(p, "name", None) or p.name == "[document]":
+            continue
+        own = _weight_value(p.get("style", ""), w)
+        if own is not None:
+            w = own
+        elif p.name in ("b", "strong"):
+            w = _bolder(w)
+        elif p.name in _HEADINGS:
+            w = 700
+    return w
+
+
+def _weight(style: str, inherited: int):
+    """True when the style says bold (600 or more), False when it says a lighter weight, None when it says neither.
+    `bolder` and `lighter` go by `inherited` (`_inherited_weight`): `lighter` inside a 900 is 700, still bold."""
+    w = _weight_value(style, inherited)
+    return None if w is None else w >= 600
 
 
 def _slant(style: str):
@@ -312,15 +402,16 @@ def _lift_out(soup, node, mark, pasted_marks: dict) -> None:
         child = mid
 
 
-def _styled_marks(soup, span, pasted_marks: dict) -> None:
+def _styled_marks(soup, span, pasted_marks: dict, inherited: int) -> None:
     """A word processor writes bold and italic as a <span> with a style, and no <b> or <i>: the span's words go
     inside a <strong> or an <em>, or pandoc would drop the style and the words would lose it. Inside a mark of the
     same kind the words are marked already, and a heading's are bold already. A span that says normal inside a mark
     made here (`pasted_marks`) ends that mark around its words, as its own style wins on the page; an authored mark and a
-    heading stay as they are."""
+    heading stay as they are. `inherited` is the weight the span inherits on the page, by which a relative
+    `lighter` or `bolder` is read."""
     style = span.get("style", "")
     for says, name, same in ((_slant(style), "em", ("em", "i")),
-                             (_weight(style), "strong", ("strong", "b", *_HEADINGS))):
+                             (_weight(style, inherited), "strong", ("strong", "b", *_HEADINGS))):
         mark = next((p for p in span.parents if p.name in same), None)
         if says is False and mark is not None and id(mark) in pasted_marks and _liftable(span, mark):
             _lift_out(soup, span, mark, pasted_marks)
@@ -532,12 +623,14 @@ SHORTCODE_RE = re.compile(r":[a-z0-9_+-]+:")
 _START_TAG_RE = re.compile(
     r'<[A-Za-z][^\s>/]*'
     r'(?:[\s/]|(?<=["\'\s/])[^\s/>][^\s/=>]*(?:\s*=+\s*(?:"[^"]*"|\'[^\']*\'|(?!["\'])[^\s>]*))?+)*+>')
-# One attribute of a start tag, name and optional value, a quoted value taken whole; or a lone `/` between them. A name
-# follows white space, or straight after a quote or a `/`, as the page's parser reads `<a b="x"data-y="z">`. A name
-# and a bare value may hold a quote, as they do to that parser (`attrfind_tolerant`).
-_ATTR_RE = re.compile(r'(?:\s+|(?<=["\'/]))([^\s/>][^\s/=>]*)(?:\s*=+\s*(?:"[^"]*"|\'[^\']*\'|(?!["\'])[^\s>]*))?|\s*/')
-# The name a start tag opens with; its attributes follow it.
-_TAG_NAME_RE = re.compile(r"<[A-Za-z][^\s>/]*")
+# The name a start tag opens with (after its `<`), and one attribute of it (name, optional value, and the white space
+# or `/` after it), read with the patterns of the page's parser itself: `_sanitize` reads the fragment with
+# html.parser, and how many `=` a value indicator takes, or where a name may follow a quote, changed between
+# Python releases.
+_TAG_NAME_RE = _html_parser.tagfind_tolerant
+_ATTR_RE = _html_parser.attrfind_tolerant
+# An HTML comment, kept whole (tag-shaped text in it is no tag: `_sanitize` keeps it as it is), or a start tag.
+_COMMENT_OR_START_TAG_RE = re.compile(r"<!--[\s\S]*?-->|" + _START_TAG_RE.pattern)
 # A name `_sanitize` strips from the page fragment: every `data-` one, the page's own (`data-rd-`) too. The page's
 # parser lowercases names, so `DATA-x` is one too.
 _DATA_NAME_RE = re.compile(r"data-", re.I)
@@ -545,21 +638,33 @@ _DATA_NAME_RE = re.compile(r"data-", re.I)
 
 def _strip_tag_data(tag: str) -> str:
     """The start tag `tag` without its `data-` attributes. Its attributes are read one after another from the tag
-    name on, so whitespace then `data-` inside a quoted value (`title="the data-sheet"`) is never taken for one."""
-    pos = _TAG_NAME_RE.match(tag).end()
-    kept = [tag[:pos]]
+    name on, so whitespace then `data-` inside a quoted value (`title="the data-sheet"`) is never taken for one. One
+    is dropped with the white space after it: the white space, quote or `/` before it stays, and keeps the name of
+    the one after it apart (`<div data-x="1"title=t>` is `<div title=t>`); after a quote or `/`, its white space stays too."""
+    pos = _TAG_NAME_RE.match(tag, 1).end()
+    out, dropped, bare = tag[:pos], False, False
     while (m := _ATTR_RE.match(tag, pos)) and m.end() > pos:
-        if not (m.group(1) and _DATA_NAME_RE.match(m.group(1))):
-            kept.append(m.group(0))
+        if _DATA_NAME_RE.match(m.group(1)):
+            dropped = True
+            if out[-1] in "'\"/":
+                out += tag[m.end(2) if m.group(2) else m.end(1):m.end()]
+        else:
+            out += m.group(0)
+            bare = m.group(2) is not None and m.group(3)[:1] not in ("'", '"')
         pos = m.end()
-    kept.append(tag[pos:])
-    return "".join(kept)
+    # The white space a dropped attribute leaves at the end, gone; before a `/>` after a bare value it stays, or the
+    # value would take the `/` (`<img src=a.png />`), and after a `/` it stays, or `<div/data-x >` would close
+    # itself (`<div/>`).
+    if dropped and (tag.startswith(">", pos) or not bare) and not out.rstrip().endswith("/"):
+        out = out.rstrip()
+    return out + tag[pos:]
 
 
 def strip_data_attrs(html: str) -> str:
     """`html` without the `data-` attributes of its tags that `_sanitize` strips from the page: the emoji pandoc draws
     for a shortcode (`data-emoji`), and any that raw HTML in the source carries."""
-    return _START_TAG_RE.sub(lambda m: _strip_tag_data(m.group(0)), html)
+    return _COMMENT_OR_START_TAG_RE.sub(lambda m: m.group(0) if m.group(0).startswith("<!--") else _strip_tag_data(m.group(0)),
+                                       html)
 
 
 def _cut(t, end: bool) -> None:
@@ -572,14 +677,15 @@ def _cut(t, end: bool) -> None:
         t.replace_with(t[1:])
 
 
-def _lines_as_paragraphs(soup):
+def _lines_as_paragraphs(soup, comments=frozenset()):
     """Each line typed after Enter in a paragraph or a heading, as a paragraph after it. The block is the
     element being edited, so the browser cannot split it, and writes every new line as a <div> with no
     attributes inside it; pandoc would keep those as raw <div> lines in the .md. A render never puts a
     <div> in a <p> or a heading. Words after such a line, outside any, go into a paragraph of their own.
     Enter at the start of a heading writes the new lines before its words: they are paragraphs above it,
     and the words stay the heading. A line the page marks `data-rd-split` (Enter inside the heading's words,
-    not at their end) is the heading's second half: a heading of the same level, unless it has no words."""
+    not at their end) is the heading's second half: a heading of the same level, unless it has no words; a comment
+    (one of `comments`, the placeholders of the block's comments) is none."""
     from bs4 import NavigableString
 
     def is_line(el):
@@ -595,6 +701,19 @@ def _lines_as_paragraphs(soup):
 
     def blank(el):
         return isinstance(el, NavigableString) and not el.strip()
+
+    def said(el):
+        # The words of a line, without the placeholders of its comments: a line that holds only a comment has none.
+        text = el.get_text()
+        for t in comments:
+            text = text.replace(t, "")
+        return bool(text.strip())
+
+    def remnant(el):
+        # What an emptied half leaves: white space, or a mark the browser kept with no text in it (`<em></em>`,
+        # `<em><br></em>`). An image, a box or a comment's placeholder is something.
+        return blank(el) or (getattr(el, "name", None) not in (None, "img", "input") and not is_line(el)
+                             and not el.get_text().strip() and el.find(["img", "input"]) is None)
 
     def trim(el, end):
         # Only the cut: a no-break space at the start of the paragraph, at the end of its last line or in code
@@ -639,11 +758,16 @@ def _lines_as_paragraphs(soup):
         if not any(is_line(c) for c in host.children):
             continue
         kids = list(host.children)
-        if host.name != "p" and all(is_line(c) or blank(c) for c in kids):
-            # The heading's own words were all deleted: the half split off from them is the heading now.
-            # Lines before it were typed above the heading, and stay above it.
-            half = next((c for c in kids if is_line(c) and c.has_attr(_SPLIT) and c.get_text(strip=True)), None)
+        if host.name != "p" and all(is_line(c) or remnant(c) for c in kids):
+            # The heading's own words were all deleted: the half split off from them is the heading now, without the
+            # no-break space Enter left at its cut and without what the emptied words left. Lines before it were
+            # typed above the heading, and stay above it.
+            half = next((c for c in kids if is_line(c) and c.has_attr(_SPLIT) and said(c)), None)
             if half is not None:
+                for c in kids:
+                    if not is_line(c) and not blank(c):
+                        c.decompose()
+                trim(half, end=False)
                 half.unwrap()
                 kids = list(host.children)
         # Where the host's own words start: the first child that is neither a line nor white space (0, none
@@ -659,7 +783,7 @@ def _lines_as_paragraphs(soup):
         last, loose, made = host, None, above + [host]
         for c in list(host.children):
             if is_line(c):
-                half = bool(host.name != "p" and c.has_attr(_SPLIT) and c.get_text(strip=True))
+                half = bool(host.name != "p" and c.has_attr(_SPLIT) and said(c))
                 c.extract().name = host.name if half else "p"
                 del c[_SPLIT]
                 last.insert_after(c)
@@ -811,6 +935,16 @@ _EMPTY_SHELL = {"br", "p", "div", "span", "ul", "ol", "li", "blockquote", "b", "
 _BREAK_ENDS = (_EMPTY_SHELL - {"br", "span", "b", "strong", "i", "em", "u"}) | {"td", "th", "dt", "dd"}
 
 
+def _text_after(br):
+    """The text that follows the break on the page: its next sibling, or past the end of the marks the break
+    ends (`<b>x<br></b>\u00a0`), the text after them. None when an element comes first. It walks the page, not the
+    cell: the text may sit in the next cell, so a caller that cuts it first checks it is in the break's own cell."""
+    from bs4 import NavigableString
+
+    x = br.next_element
+    return x if type(x) is NavigableString else None
+
+
 def _ends_its_cell(br, cell) -> bool:
     """Whether a break shows nothing after it in its table cell: nothing but white space and breaks follow it there;
     a comment node is something the cell holds. The page's white space is not Python's: a no-break space shows,
@@ -864,11 +998,11 @@ def _without_placeholder_breaks(fragment: str) -> str:
         if block is not None and block.name in ("td", "th") and not br.find_parent(["code", "pre"]):
             if table_is_taken:
                 # _cell_breaks takes the table (no backslash or shortcode in it) and sorts the cut from a typed one.
-                if type(br.next_sibling) is NavigableString and br.next_sibling.startswith("\xa0"):
+                if (after := _text_after(br)) is not None and any(p is block for p in after.parents) and after.startswith("\xa0"):
                     continue
             elif not _ends_its_cell(br, block):
                 # The table goes as raw HTML with its breaks: the typed line stays, without Enter's cut.
-                for t, end in ((br.previous_sibling, True), (br.next_sibling, False)):
+                for t, end in ((br.previous_sibling, True), (_text_after(br), False)):
                     if type(t) is NavigableString:
                         _cut(t, end)
                 continue
@@ -938,13 +1072,14 @@ def _cell_breaks(fragment: str):
     if token is None:
         return fragment, None
     for br in breaks:
-        if _ends_its_cell(br, br.find_parent(["td", "th"])):
+        cell = br.find_parent(["td", "th"])
+        if _ends_its_cell(br, cell):
             # The no-break space Enter leaves at the cut ends with the break.
-            if type(br.next_sibling) is NavigableString:
-                _cut(br.next_sibling, False)
+            if (after := _text_after(br)) is not None and any(p is cell for p in after.parents):
+                _cut(after, False)
             br.decompose()
             continue
-        for t, end in ((br.previous_sibling, True), (br.next_sibling, False)):
+        for t, end in ((br.previous_sibling, True), (_text_after(br), False)):
             if type(t) is NavigableString:
                 _cut(t, end)
         br.replace_with(token)
@@ -1103,7 +1238,9 @@ def _restore_dropped_hrefs(fragment: str, source, emoji=()) -> str:
 def _hrefs_as_words(fragment: str):
     """(the fragment with each link address pandoc would write wrong as a word, {word: the address}). Pandoc's
     writer leaves an address as it is, so a backslash in it reads back as an escape and a `)` it does not balance
-    ends it. An address with white space or a bracket is left to pandoc, which writes it between `<` and `>`."""
+    ends it. An address with white space or a bracket is left to pandoc, which writes it between `<` and `>`, unless
+    it holds a backslash: pandoc keeps that unescaped there too (`<a\\ b>` reads back as `a b`), so it is a word
+    as well, written back between `<` and `>` by `_link_destination`."""
     from bs4 import BeautifulSoup
 
     def unbalanced(href):
@@ -1119,7 +1256,9 @@ def _hrefs_as_words(fragment: str):
     soup, put = BeautifulSoup(fragment, "html.parser"), {}
     for a in soup.find_all("a", href=True):
         href = a["href"]
-        if re.search(r"[\s<>]", href) or not ("\\" in href or unbalanced(href)) or a.find_parent(["code", "pre"]):
+        # A line break cannot be written in a link's address at all, `<` and `>` or not: pandoc decides that one.
+        left_to_pandoc = _POINTY.search(href) and ("\\" not in href or re.search(r"[\r\n]", href))
+        if left_to_pandoc or not ("\\" in href or unbalanced(href)) or a.find_parent(["code", "pre"]):
             continue
         if "\\" not in href and a.get_text() == href and not a.find(True) and _PANDOC_AUTOLINK.match(href):
             continue                    # pandoc writes it as `<address>`, which takes no escape and holds the `)`
@@ -1127,6 +1266,18 @@ def _hrefs_as_words(fragment: str):
         put[word] = href
         a["href"] = word
     return (str(soup), put) if put else (fragment, {})
+
+
+# What makes a link's address one written between `<` and `>`.
+_POINTY = re.compile(r"[\s<>]")
+
+
+def _link_destination(href: str) -> str:
+    """A link's address as GFM reads it back: every backslash, parenthesis and pipe escaped; one with white space or a
+    bracket between `<` and `>`, where a backslash and a bracket are escaped (CommonMark, link destination)."""
+    if _POINTY.search(href):
+        return "<" + re.sub(r"([\\<>|])", r"\\\1", href) + ">"
+    return re.sub(r"([\\()|])", r"\\\1", href)
 
 
 # A bare URL that may end in a `)` GFM keeps.
@@ -1302,24 +1453,95 @@ _DIFF_MARGIN = 32
 _DIFF_BOUND = 2_000_000
 
 
+# The characters on either side by which `_places_by_order` finds a literal past the reach of its word diff.
+_NEIGHBOURS = 12
+
+
+# A word of `_by_words`.
+_DIFF_WORD = re.compile(r":[a-z0-9_+-]+:|\w+|[^\w\s]")
+
+
+def _by_words(old: str, new: str):
+    """{start of a word of `old`: start of the same word in `new`} for the words a diff of the two word lists
+    matches, or None where the lists are too long for it (`_DIFF_BOUND`). A word is a shortcode, a run of letters and
+    digits, or one other character that is not white space (`_DIFF_WORD`): a `(` glued to a literal, or a letter
+    typed beside it, leaves the literal a word of its own that still matches."""
+    a, b = list(_DIFF_WORD.finditer(old)), list(_DIFF_WORD.finditer(new))
+    if len(a) * len(b) > _DIFF_BOUND:
+        return None
+    pairs = {}
+    for i, j, size in difflib.SequenceMatcher(None, [m.group() for m in a], [m.group() for m in b],
+                                              autojunk=False).get_matching_blocks():
+        pairs.update((a[i + k].start(), b[j + k].start()) for k in range(size))
+    return pairs
+
+
+def _in_its_gap(old: str, new: str, words: dict):
+    """A function (start, at) -> place: the place in `new` of the literal at `start` in `old`, which the word diff
+    `words` (`_by_words`) matched to the `:name:` at `at`. Where the words around it changed, that match can be any
+    `:name:` between the words that still match on either side, the first the diff finds, which may be one the reader
+    typed (#658). Of the `:name:` there that no other word of `old` matched, it is the one at the same share of the
+    way between those words, the first on a tie."""
+    a, b = list(_DIFF_WORD.finditer(old)), list(_DIFF_WORD.finditer(new))
+    ia, ib = {m.start(): k for k, m in enumerate(a)}, {m.start(): k for k, m in enumerate(b)}
+    matched = {ia[o]: ib[n] for o, n in words.items()}
+    order, taken = sorted(matched), Counter(matched.values())
+
+    def place(start, at):
+        i = ia[start]
+        k = bisect.bisect_left(order, i)
+        lo = order[k - 1] if k > 0 else -1
+        hi = order[k + 1] if k + 1 < len(order) else len(a)
+        nlo, nhi = matched.get(lo, -1), matched.get(hi, len(b))
+        share = (i - lo) / (hi - lo)
+        here = [n for n in range(nlo + 1, nhi) if b[n].group() == a[i].group() and (n == ib[at] or not taken[n])]
+        if not here:
+            return at
+        return b[min(here, key=lambda n: abs((n - nlo) / (nhi - nlo) - share))].start()
+
+    return place
+
+
 def _places_by_order(old: str, new: str, olds) -> set:
     """The places in `new` of the literals `olds`, (place in `old`, name) pairs, by order: the k-th `:name:` of
-    `old` is the k-th of `new` where both hold as many of that name. Where they do not, every `:name:` of `new`
-    stays text: a shortcode the reader typed then shows as its words, rather than one the source wrote as text
-    as its emoji. Linear, for a changed part too long to diff."""
+    `old` is the k-th of `new` where both hold as many of that name. Where they do not, by a diff of the two texts'
+    words (`_by_words`), whose bound reaches as many words as the characters' diff reaches characters: a literal in a word
+    the diff matches keeps its place, and a shortcode the reader typed is a new word, which stays the emoji (#594).
+    Past that bound, by the literal's neighbours: the `_NEIGHBOURS` characters before it, or after it, with it, found
+    once in `new`. A literal placed by none of these is written bare: one the source escaped then shows as its emoji,
+    on a change of over about 1 400 words on each side around a name typed or deleted beside it."""
     def starts(text):
         by_name = {}
         for m in _SHORTCODE_TEXT.finditer(text):
             by_name.setdefault(m.group(1), []).append(m.start())
         return by_name
 
-    was, now, places = starts(old), starts(new), set()
+    was, now, places, words = starts(old), starts(new), set(), False
     for start, name in olds:
         before, after = was.get(name, []), now.get(name, [])
         if len(before) == len(after) and start in before:
             places.add(after[before.index(start)])
-        else:
-            places.update(after)
+            continue
+        if words is False:
+            words, word_starts = _by_words(old, new), [m.start() for m in _DIFF_WORD.finditer(old)]
+            gap = _in_its_gap(old, new, words) if words is not None else None
+        if words is not None:
+            # The word the literal is in starts at the last word start at or before it; `old[start]` is its `:`. It is
+            # the literal itself unless a shortcode-like word took its first colon (`:b:smile:`): then it is placed
+            # only where `new` holds it at the same distance.
+            word = word_starts[bisect.bisect_right(word_starts, start) - 1]
+            at = words[word] + start - word if word in words else None
+            if at is not None and word == start:
+                at = gap(start, at)
+            if at is not None and new.startswith(f":{name}:", at):
+                places.add(at)
+            continue
+        code, end = f":{name}:", start + len(name) + 2
+        before_it, after_it = old[max(0, start - _NEIGHBOURS):start], old[end:end + _NEIGHBOURS]
+        for probe, offset in ((before_it + code, len(before_it)), (code + after_it, 0)):
+            if len(probe) > len(code) and new.count(probe) == 1:
+                places.add(new.index(probe) + offset)
+                break
     return places
 
 
@@ -1374,6 +1596,12 @@ def _typed_slash_before(t, slash: str) -> bool:
             if el.name not in _INLINE_TAGS:
                 return False
         elif isinstance(el, NavigableString) and not isinstance(el, Comment) and str(el):
+            # The tags that close after the backslash, between it and t, are its own ancestors up to the one it
+            # shares with t: a <div> that ends there ends the line too.
+            shared = {id(u) for u in t.parents}
+            closed = (u for u in el.parents if id(u) not in shared)
+            if any(u.name not in _INLINE_TAGS for u in closed):
+                return False
             return str(el).endswith(slash) and not _in_code(el)
     return False
 
@@ -1581,8 +1809,7 @@ def html_block_to_md(fragment: str, source=None, strays=None, comments=frozenset
         out = re.sub(word, lambda m, url=url: url if _gfm_links_bare(m.string, m.start(), m.end(), url) else f"<{url}>",
                      out)
     for word, href in hrefs.items():
-        # An address in a link: every backslash, parenthesis and pipe escaped, so that it reads back as it is.
-        out = out.replace(word, re.sub(r"([\\()|])", r"\\\1", href))
+        out = out.replace(word, _link_destination(href))
     return copyblock.restore(out).strip("\n")
 
 
@@ -2301,20 +2528,28 @@ def _lone_as_text(soup, lone, doc, token, comments: dict) -> dict:
         else:
             anchor, after_it = t, j > 0
             # Beside a tag placed already there is nothing to climb out of: it stands where this one goes.
-            for _ in range(0 if str(t) in placed else climb):
+            left, split = 0 if str(t) in placed else climb, False
+            while True:
+                while left:
+                    sib = anchor.next_sibling if after_it else anchor.previous_sibling
+                    if sib is not None or anchor.parent is None or anchor.parent.name == "[document]":
+                        break
+                    anchor, left = anchor.parent, left - 1
+                # Out of the element, past the comments still to step over on its other side. A text that holds
+                # only such comments is crossed whole, and the climb goes on out of the element around it (#634).
                 sib = anchor.next_sibling if after_it else anchor.previous_sibling
-                if sib is not None or anchor.parent is None or anchor.parent.name == "[document]":
+                if not (want and anchor is not t and type(sib) is NavigableString):
                     break
-                anchor = anchor.parent
-            # Out of the element, past the comments still to step over on its other side.
-            sib = anchor.next_sibling if after_it else anchor.previous_sibling
-            if want and anchor is not t and type(sib) is NavigableString:
                 at = step_over(str(sib), 0 if after_it else len(sib), want, not after_it)
                 if 0 < at < len(sib):
                     sib.replace_with(NavigableString(sib[:at]), NavigableString(p), NavigableString(sib[at:]))
-                    continue
-                if at != (0 if after_it else len(sib)):
-                    anchor = sib
+                    split = True
+                    break
+                if at == (0 if after_it else len(sib)):
+                    break
+                anchor = sib
+            if split:
+                continue
         if anchor is None:
             anchor = next(x for x in _texts(soup) if str(x) == p)
             out = _enclosing(anchor)

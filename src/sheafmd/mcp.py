@@ -19,6 +19,7 @@ import errno
 import json
 import os
 import re
+import secrets
 import sys
 import time
 from collections import Counter
@@ -26,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import __version__, beneath, paths
+from . import __version__, beneath, diagnostics, paths
 from . import comments as rdc
 from .agents import detect
 from .hub.auth import clean_display
@@ -534,7 +535,10 @@ class Door:
         told = self.hub.alias(member, real) if root is not None and self.hub.shared_with(member, root, real) else doc
         if told == real:
             return text
-        return re.sub(rf"(?<![\w/-]){re.escape(real)}(?![\w/-]|\.\w)", lambda _: told, text)    # the whole address, not the start of a longer name
+        # The whole address, not the start of a longer name: one that goes on in a character a file name holds
+        # (`plan.md.bak`, `plan.md~`, `plan.md+copy.md`, `plan.md#2`). Anything else after it (`plan.md:3:`,
+        # `plan.md's`, `plan.md,`) ends it, and the owner's folders are never left in the text.
+        return re.sub(rf"(?<![\w/-]){re.escape(real)}(?![\w/~+#=-]|\.\w)", lambda _: told, text)
 
     def _told(self, address: str, caller: Caller) -> dict:
         """`doc` and `url` of the page at `address` as `caller` is told of it: a page Shared with its member by another is told
@@ -834,8 +838,11 @@ class Door:
                 if more >= roots_mod.COUNT_LIMIT:
                     break                                      # the count stops at the limit
                 if time.monotonic() > deadline:
-                    # Past the limit every page the caller may see was listed: only the count of the rest is cut short.
-                    if not giving and seen < roots_mod.COUNT_LIMIT:
+                    # Past the limit with some of the rest counted, the `more` row says pages were left out, and only
+                    # its count is cut short. With none counted (the files after the limit were the caller's to judge,
+                    # and none it may see came before the time ran out), a page it may see can still lie ahead: the
+                    # listing says it stopped.
+                    if not giving and (seen < roots_mod.COUNT_LIMIT or not more):
                         late.add(root.name)
                     break
                 consider(src, found, None)
@@ -998,8 +1005,13 @@ class Door:
             if not on:
                 entry.pop("generated", None)
             else:
-                entry["generated"] = ({"by": caller.display, "id": None, "at": now(), "key": True} if caller.is_key
-                                      else {"by": caller.token_name, "id": caller.token.id, "at": now()})
+                # `set` is this setting's own (ticket 196 E): the time has the minute's grain, so the same setter marking
+                # again within it would write an equal mark, and a compare-and-clear (`_put_back_mark`, a create's clear
+                # of a left mark) would take the newer mark for the one it meant
+                own = secrets.token_hex(8)
+                entry["generated"] = ({"by": caller.display, "id": None, "at": now(), "key": True, "set": own}
+                                      if caller.is_key
+                                      else {"by": caller.token_name, "id": caller.token.id, "at": now(), "set": own})
             return entry
         return self.hub.docs.change(address, settle)
 
@@ -1017,7 +1029,7 @@ class Door:
             else:
                 entry.pop("generated", None)
             return entry
-        with contextlib.suppress(OSError):
+        with contextlib.suppress(OSError, paths.PathError):
             self.hub.docs.change(address, settle)
 
     def _render_report(self, args: dict, caller: Caller) -> dict:
@@ -1031,9 +1043,12 @@ class Door:
             raise ToolError("A render report is made with the token of a member: this one acts for nobody.", "no member")
         privates = [(visibility.owner_key(m), m.private_root) for m in self.hub.proxy.members.values() if m.private_root]
         try:
-            return repos.report(visibility.owner_key(member), args["repo"], args["path"], args["commit"], privates, caller.declared)
+            place, declared = written_from(caller)      # the Write log line is left when the record is made, by the hub (`Repos._settle`)
+            said = repos.report(visibility.owner_key(member), args["repo"], args["path"], args["commit"], privates, caller.declared,
+                                who=(caller.display, place, declared))
         except repos_mod.Refused as e:
             raise ToolError(str(e), "refused") from None
+        return said
 
     # ── create and update: a row in the diagnostics log for every call (SPEC 9.7, 15) ─
     def _run(self, name: str, args: dict, caller: Caller):
@@ -1315,7 +1330,7 @@ class Door:
             # also where the name's lock holds nothing (a page the hub does not place) (ticket 183 BD).
             try:
                 marked = self._mark_generated(address, True, caller)
-            except OSError:
+            except (OSError, paths.PathError):     # a state folder sheaf will not use refuses it as a full disk does
                 raise ToolError(f"{address} was not made: its generated mark could not be written.",
                                 "not written") from None
         # A mark on an address with no page (ticket 183 BR), read now: the clear after the file takes this one only.
@@ -1327,9 +1342,9 @@ class Door:
                 with place.folders_lock(top, name):     # so no move's tidying takes them before the file is in
                     made.folders = _missing_folders(top, rel)
                     os.close(place.make_folders(top, rel, judge)[0])
-                    create_file(top, rel, text, judge)
+                    made.ident = create_file(top, rel, text, judge)
             else:
-                create_file(top, rel, text, judge)
+                made.ident = create_file(top, rel, text, judge)
         except BaseException as e:
             self._take_back(address, made, written=False)      # a page that was not made leaves nothing behind
             if isinstance(e, Private) or not isinstance(e, OSError):
@@ -1358,8 +1373,15 @@ class Door:
         home, the mark it set. The list's row that `assignees` dropped stays dropped: it was of a file no longer there,
         which is what the address holds again."""
         if written:
+            # The file it made, known by its inode (ticket 195 E): one that replaced it at the name since (an editor's save,
+            # a sync) stays. What comes between this look and the unlink is not covered; the name's lock keeps the hub's
+            # own writers out of it.
             with contextlib.suppress(OSError):
-                os.unlink(made.top / made.rel)
+                st = os.lstat(made.top / made.rel)
+                if made.ident is not None and (st.st_dev, st.st_ino) == made.ident:
+                    os.unlink(made.top / made.rel)
+                else:       # replaced, or a filesystem whose inode numbers do not hold (some FUSE mounts): left, and said
+                    diagnostics.record("mcp", "take-back-left-file", address)
         self.hub.writes.told(address)
         if made.folders:
             with place.folders_lock(made.top, made.name):
@@ -1605,6 +1627,7 @@ class _Made:
     judge: object
     folders: list
     marked: tuple[dict, dict] | None
+    ident: tuple[int, int] | None = None     # (st_dev, st_ino) of the file `create_file` made: the one a take-back deletes
 
 
 def _unmake(top: Path, made: list, judge=None):

@@ -262,7 +262,23 @@ class _SharedStream(events.Shared):
         super().__init__(owner)
         self._handler, self._sid = handler, sid
         self.seq = 0                     # set when it is listed: a newer stream has a higher one
-        self.had: set = set()            # every key joined here, left or not: an older stream takes none of them
+        # Keys a newer stream of the same owner took: a late join of one here is dropped (ticket 193). Kept here, on
+        # the stream that must refuse, so the newer stream closing or coming back under its id takes no bar away.
+        # Bounded, the oldest dropped first: a late join comes seconds after the hand-over, not BARRED_MAX tabs later.
+        self.barred: dict = {}           # key -> None, an ordered set: the oldest bar first
+
+    BARRED_MAX = 1000                    # keys barred on one stream at most
+
+    def bars(self, key: str) -> bool:
+        """Whether a join of `key` here comes late: a newer stream of the same owner took the key."""
+        return key in self.barred
+
+    def taken_by_newer(self, key: str):
+        """A newer stream of the same owner took `key`: a join of it here is dropped from now on."""
+        self.barred.pop(key, None)
+        self.barred[key] = None
+        while len(self.barred) > self.BARRED_MAX:
+            del self.barred[next(iter(self.barred))]
 
     def close(self):
         super().close()
@@ -312,6 +328,19 @@ def _document_events(name: str, data):
     if name not in proxy.DOCUMENT_EVENTS:
         return None
     return proxy.for_member(data) if isinstance(data, dict) else data
+
+
+def _meta_of_page(body: str, change) -> str:
+    """`body`, a client page, with its meta block an object `change(meta)` gives; a block that is no object is left as it came."""
+    def one(m):
+        try:
+            meta = json.loads(m.group(2))
+        except ValueError:
+            return m.group(0)       # as the doc and mount branches leave a body they cannot read
+        if not isinstance(meta, dict):
+            return m.group(0)       # valid JSON that is not an object (183 AL): left as one that does not parse
+        return m.group(1) + json.dumps(change(meta)).replace("<", "\\u003c") + m.group(3)
+    return _META_RE.sub(one, body)
 
 
 class Handler:
@@ -653,7 +682,7 @@ class Handler:
             raise Refuse(404, "no such route", row="peer-refused", fields={"reason": why})
         req.token = row
         verb = req.path.removeprefix("/_/tiroir/")
-        self._read_body(req, self._body(req, raw, channel.MAX_TRANSFER if verb == "transfer" else channel.MAX_ASK))
+        self._read_body(req, self._body(req, raw, channel.MAX_TRANSFER if verb in ("transfer", "root") else channel.MAX_ASK))
         return getattr(self, f"_peer_{verb}")(req)
 
     def _peer_resolve(self, req: Req) -> Response:
@@ -680,6 +709,15 @@ class Handler:
     def _peer_comment(self, req: Req) -> Response:
         """A comment of an agency member written here under their name (ticket 23)."""
         return _json(*readthrough.comment_answer(self, req.body))
+
+    def _peer_root(self, req: Req) -> Response:
+        """Land a root moved here: `incoming.land_root`. The origin it comes from is the one the token names, never the
+        body's `from`. A body that is not a root's move is a 400."""
+        try:
+            status, answer = incoming.land_root(self.hub, req.body, req.token.peer)
+        except ValueError as e:
+            raise Refuse(400, str(e)) from None
+        return _json(status, answer)
 
     def _unalias(self, req: Req) -> None:
         """A page Shared with the member is told to them under an opaque name (`Hub.alias`, 9.11): the one they send back, in
@@ -1057,15 +1095,16 @@ class Handler:
         # A key names one tab. After a leader hand-over the tab joins the new connection while the old one, whose tab
         # closed, is still open here until a write to it fails: drop the key there, or the hub counts the tab twice.
         # The old leader's own join of the key can reach the hub after that (ticket 181 D): once a newer connection
-        # had the key, held still or left since, the late join is dropped.
+        # had the key, held still, left, closed or opened again since (ticket 193), the late join is dropped.
         with self._join_lock:
-            with self._shared_lock:
-                others = [s for s in self._shared.values() if s is not stream and s.owner == stream.owner]
-            if not any(s.seq > stream.seq and key in s.had for s in others):
-                stream.had.add(key)
+            if not stream.bars(key):
+                with self._shared_lock:
+                    others = [s for s in self._shared.values() if s is not stream and s.owner == stream.owner]
                 stream.join(key, sub)
                 for other in others:
                     other.leave(key)
+                    if other.seq < stream.seq:
+                        other.taken_by_newer(key)
                 return _ok()
         if not isinstance(sub, int):
             sub.close()
@@ -1319,15 +1358,7 @@ class Handler:
         member's name on this hub, which signs a Team comment: the page's own `me` is the one the client tiroir gave."""
         team = self.hub.team.list(doc)
         if op == "page":
-            def with_team(m):
-                try:
-                    meta = json.loads(m.group(2))
-                except ValueError:
-                    return m.group(0)       # as the doc and mount branches leave a body they cannot read
-                if not isinstance(meta, dict):
-                    return m.group(0)       # valid JSON that is not an object (183 AL): left as one that does not parse
-                return m.group(1) + json.dumps({**meta, "team": team, "team_me": me}).replace("<", "\\u003c") + m.group(3)
-            return _META_RE.sub(with_team, body)
+            return _meta_of_page(body, lambda meta: {**meta, "team": team, "team_me": me})
         try:
             got = json.loads(body)
         except ValueError:
@@ -1336,6 +1367,14 @@ class Handler:
         if not isinstance(into, dict):
             return body                     # valid JSON the list cannot join (183 AL): left as a body that does not parse
         into.update(team=team, team_me=me)
+        return json.dumps(got)
+
+    @staticmethod
+    def _agency_mount(body: str, doc: str) -> str:
+        """A client page's mount answer with its config's say on what the page acts on taken by this hub (`readthrough.agency_config`)."""
+        got = json.loads(body)              # `_own_build` already refused a mount body that is no object
+        if isinstance(got.get("config"), dict):
+            got["config"] = readthrough.agency_config(got["config"], doc)
         return json.dumps(got)
 
     def _relayed(self, req: Req, client: str, op: str, ask, doc: str | None = None) -> Response:
@@ -1358,6 +1397,10 @@ class Handler:
             body = self._own_build(body)
         if op == "doc" and status == 200:     # what an older client tiroir still says of its agents is not shown here (9.9)
             body = self._read_only_doc(body)
+        if env.get("type") == "html":          # what the page acts on is this hub's to say, whatever status the client chose (9.9)
+            body = readthrough.agency_meta(body, doc)
+        elif op == "mount" and status == 200 and doc is not None:
+            body = self._agency_mount(body, doc)
         if status == 200 and doc is not None and self.hub.team is not None:
             body = self._with_team(op, body, doc, req.member.name)
         if env.get("type") == "html":

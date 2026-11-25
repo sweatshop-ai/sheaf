@@ -75,12 +75,15 @@ var create = function (ROOT, CFG, opts) {
   }
   // What can be seen, in the client coordinates a rectangle is measured in: the window, or the part of it the
   // mounted page's scroller shows. `winW` and `winH` measure it in a window of that size instead of the window as it is.
-  function viewRect(winW, winH) {
+  // With `held` (a moved box's sizes, sizesOf()), the area as it was in the window and the host it was held in, where the host
+  // is now: a host the front made smaller since is measured at its old size (198 C).
+  function viewRect(winW, winH, held) {
     var w = winW === undefined ? document.documentElement.clientWidth : winW, h = winH === undefined ? window.innerHeight : winH;
     if (!MOUNTED) return { left: 0, top: 0, right: w, bottom: h };
     var b = BODY.getBoundingClientRect();
+    var bw = held && held.hostW != null ? held.hostW : BODY.clientWidth, bh = held && held.hostH != null ? held.hostH : BODY.clientHeight;
     return { left: Math.max(0, b.left), top: Math.max(0, b.top),
-             right: Math.min(w, b.left + BODY.clientWidth), bottom: Math.min(h, b.top + BODY.clientHeight) };
+             right: Math.min(w, b.left + bw), bottom: Math.min(h, b.top + bh) };
   }
   // What turns a client coordinate into the place of an absolutely positioned part of the page.
   function pageOrigin() {
@@ -2156,10 +2159,12 @@ var create = function (ROOT, CFG, opts) {
     room.style.height = MOVE_EDGE + 'px';
     if (room.previousSibling !== pop) pop.parentNode.insertBefore(room, pop.nextSibling);
   }
-  // The sizes a moved box was held against: the window's, the visible area's and the box's own.
+  // The sizes a moved box was held against: the window's, the visible area's, the box's own and, on the mounted page, the
+  // host's own (unclipped), which the area of the window it was held in is measured with.
   function sizesOf(v) {
     return { winW: document.documentElement.clientWidth, winH: window.innerHeight, w: v.right - v.left, h: v.bottom - v.top,
-             boxW: pop.offsetWidth, boxH: pop.offsetHeight };
+             boxW: pop.offsetWidth, boxH: pop.offsetHeight,
+             hostW: MOUNTED ? BODY.clientWidth : null, hostH: MOUNTED ? BODY.clientHeight : null };
   }
   function sameSizes(a, b) {
     return !!a && a.winW === b.winW && a.winH === b.winH && a.w === b.w && a.h === b.h && a.boxW === b.boxW && a.boxH === b.boxH;
@@ -2170,13 +2175,13 @@ var create = function (ROOT, CFG, opts) {
   // the reader scrolled out of view with the text keeps its height in the page, also when the area changes size on its own (a
   // phone's URL bar that hides or shows, the mounted page's host clipped to the window as the page scrolls; 183 BN); it is
   // only held inside the area's width. It is out of view when it meets neither the area now nor the area measured, where the
-  // text is now, in the window it was held in. A window made smaller brings back a box that lay inside the larger one, even
+  // text is now, in the window and the host it was held in. A window made smaller brings back a box that lay inside the larger one, even
   // when it now lies wholly past the area's new edge.
   function clampMoved() {
     if (!pop || !pop._moved || pop.classList.contains('rd-docked')) return;
     var v = viewRect(), held = pop._held, now = sizesOf(v);
     if (sameSizes(held, now)) return;
-    var r = pop.getBoundingClientRect(), was = held ? viewRect(held.winW, held.winH) : v;
+    var r = pop.getBoundingClientRect(), was = held ? viewRect(held.winW, held.winH, held) : v;
     putInside(r.left, r.top, !meets(r, v) && !meets(r, was));
   }
   function dropped(e) {
@@ -3699,8 +3704,11 @@ var create = function (ROOT, CFG, opts) {
     rest.setStart(range.endContainer, range.endOffset);
     rest.setEnd(line, line.childNodes.length);
     var words = rest.cloneContents();
-    Array.prototype.forEach.call(words.querySelectorAll('div'), function (d) { d.parentNode.removeChild(d); });
-    if (words.textContent.replace(/[\s\u200b-\u200d\u2060\ufeff]/g, '')) splitIn = h;   // the other lines are not its words
+    // The other lines are not its words, nor is the page's own UI (a comment's anchor and its numbered badge).
+    Array.prototype.forEach.call(words.querySelectorAll('div, [data-rd-ui]'), function (d) {
+      if (d.parentNode) d.parentNode.removeChild(d);
+    });
+    if (words.textContent.replace(/[\s\u200b-\u200d\u2060\ufeff]/g, '')) splitIn = h;
   });
   // The mark is set, or taken off, on every Enter in a heading: the browser copies a marked line's attributes to the line
   // it splits off from it, so Enter at the end of a half would otherwise make the line under it a heading too.
@@ -4981,6 +4989,6 @@ var create = function (ROOT, CFG, opts) {
 };
 
 window.sheafPage = Object.freeze({ create: create });
-var meta = document.getElementById('rd-edit-meta');
+var meta = Array.prototype.find.call(document.querySelectorAll('script[type="application/json"]'), function (el) { return el.id === 'rd-edit-meta'; });      // the JSON block alone: another element of that id in a client's HTML is no meta (ticket 190)
 if (meta) create(document, JSON.parse(meta.textContent));
 })();

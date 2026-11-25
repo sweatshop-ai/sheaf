@@ -403,14 +403,33 @@ def test_a_sheaf_folder_that_is_a_link_out_of_the_root_gets_no_versions(box, rec
     assert list(away.iterdir()) == []
 
 
-def test_a_slow_push_does_not_hold_up_the_next_save(box, rectoversos, remote):
-    import time
-    git(rectoversos, "config", "remote.origin.receivepack", "sleep 3; git-receive-pack")
+def test_a_slow_push_does_not_hold_up_the_next_save(box, rectoversos, remote, tmp_path):
+    # The push is held at a gate the test opens, not timed: a save is some 16 git runs in a row, and on a
+    # loaded macOS runner (ticket 173 S, run 45262482442) they alone took 3.9 s, over a bound of 2 s.
+    import threading
+    started, gate = tmp_path / "push-started", tmp_path / "push-gate"
+    git(rectoversos, "config", "remote.origin.receivepack",
+        f"touch {shlex.quote(str(started))}; until [ -e {shlex.quote(str(gate))} ]; do sleep 0.05; done; "
+        "git-receive-pack")
     edit(box, rectoversos)
-    time.sleep(0.5)                                      # the push is under way
-    t = time.monotonic()
-    edit(box, rectoversos, words="Second, edited while it pushed.")
-    assert time.monotonic() - t < 2
+    done = []
+    def second_save():
+        try:
+            done.append(edit(box, rectoversos, words="Second, edited while it pushed."))
+        except BaseException as e:                        # the test's thread reads it, not the thread's own hook
+            done.append(e)
+    try:
+        end = time.monotonic() + 60
+        while not started.exists():                       # the push is under way, and held
+            assert time.monotonic() < end, "the push never started"
+            time.sleep(0.01)
+        second = threading.Thread(target=second_save, daemon=True)
+        second.start()
+        second.join(60)
+        assert not second.is_alive(), "the save waited for the push"
+        assert not isinstance(done[0], BaseException), done[0]
+    finally:
+        gate.touch()                                      # lets the push go on, whatever happened above
     assert box.hub.commits.settle()
 
 

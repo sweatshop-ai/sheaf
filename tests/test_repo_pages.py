@@ -222,6 +222,29 @@ def test_the_first_report_keeps_the_page_a_later_report_by_another_member_does_n
     assert hub_repos.hub.repos.owner_of(REPO, "docs/plan.md") == "bea"
 
 
+def test_a_report_without_a_row_makes_the_clone_and_records_no_owner(hub_repos, origin):
+    repos = hub_repos.hub.repos
+    repos.report("bea", REPO, "docs/plan.md", sh(origin, "rev-parse", "main"), (), {}, row=False)
+    assert repos.settle(), "the tiroir's thread did not finish"
+    assert repos.owner_of(REPO, "docs/plan.md") is None and (the_clone(hub_repos) / ".git").exists()
+
+
+def test_a_report_without_a_row_still_fetches_a_tip_the_clone_lacks_and_records_nothing(modern_git, hub_repos, tmp_path, origin):
+    repos = hub_repos.hub.repos
+    first = sh(origin, "rev-parse", "main")
+    repos.report("bea", REPO, "docs/plan.md", first, (), {}, row=False)
+    assert repos.settle()
+    pusher = laptop_clone(tmp_path, origin, "pusher")
+    (pusher / "docs" / "plan.md").write_text("# Plan\n\nChanged.\n", encoding="utf-8")
+    sh(pusher, "commit", "-qam", "change")
+    sh(pusher, "push", "-q", "origin", "HEAD:main")
+    new = sh(pusher, "rev-parse", "HEAD")
+    assert repos.report("bea", REPO, "docs/plan.md", new, (), {}, row=False)["commit_known"] is False
+    assert repos.settle()
+    assert repos.report("bea", REPO, "docs/plan.md", new, (), {}, row=False)["commit_known"] is True     # the queued item fetched it: no 202 loop
+    assert repos.settle() and repos.owner_of(REPO, "docs/plan.md") is None
+
+
 def test_front_matter_owner_wins_over_the_record(hub_repos, tmp_path, origin):
     pusher = laptop_clone(tmp_path, origin, "pusher")
     (pusher / "docs" / "plan.md").write_text("---\nowner: cal\n---\n# Plan\n", encoding="utf-8")
@@ -1225,3 +1248,167 @@ def test_whether_a_repo_has_a_queue_is_asked_under_the_guard(tmp_path, origin):
     repos._queues = _Guarded(repos._guard)
     assert repos.refusal("bea", REPO) == repos_mod.NO_APP
     assert repos.report("bea", REPO, "docs/plan.md", "a" * 40)["clone"] == repos_mod.NO_APP
+
+
+# ── a repo page's row, and the report's Write log line (the handler's listing, local bare repo) ──
+
+def repo_row(hub_repos, member=BEA, path="docs/plan.md"):
+    got = hub_repos.get("/_/mount?sheaf=1", member=member)
+    assert got.status == 200, got.text
+    rows = {r["doc"]: r for r in got.json()["sheaf"]["rows"]}
+    return rows[f"{repos_mod.root_name(REPO)}/{path}"]
+
+
+def test_a_repo_pages_row_names_the_session_and_host_of_the_latest_report(hub_repos):
+    report(hub_repos, session=SESSION, host="bea-laptop")
+    row = repo_row(hub_repos)
+    assert row["session"] == "Claude Code (Bea)" and row["session_tip"] == f"{SESSION} on bea-laptop"
+    assert row["write"] == "Claude Code (Bea) · laptop"
+
+
+def test_a_repo_pages_row_without_a_report_session_names_the_commit_trailers(hub_repos, tmp_path, origin):
+    pusher = laptop_clone(tmp_path, origin, "pusher")
+    (pusher / "docs" / "plan.md").write_text("# Plan\n\nTrailed.\n", encoding="utf-8")
+    sh(pusher, "commit", "-qam", f"change\n\nSheaf-Session: {SESSION}\nSheaf-Host: bea-laptop")
+    sh(pusher, "push", "-q", "origin", "HEAD:main")
+    report(hub_repos)
+    assert hub_repos.hub.writes.lines(f"{repos_mod.root_name(REPO)}/docs/plan.md")[-1].session == ""   # the report named none: the trailer answered
+    row = repo_row(hub_repos)
+    assert row["session"] == f"session {SESSION}"
+    assert row["session_tip"] == f"{SESSION} on bea-laptop"
+
+
+def test_a_repo_pages_row_with_no_report_session_and_no_trailer_says_git_and_the_author_never_an_empty_cell(hub_repos):
+    report(hub_repos)
+    hub_repos.hub.writes._lines.clear()         # a page reported before reports left a Write log line (its record stays)
+    row = repo_row(hub_repos)
+    assert row["write"] == "git · Dee Dev"
+
+
+def test_a_repo_page_has_a_row_for_its_owner_and_none_for_a_member_it_is_not_shared_with(hub_repos):
+    report(hub_repos, session=SESSION)
+    address = f"{repos_mod.root_name(REPO)}/docs/plan.md"
+    got = {m: [r["doc"] for r in hub_repos.get("/_/mount?sheaf=1", member=m).json()["sheaf"]["rows"]] for m in (BEA, CAL)}
+    assert address in got[BEA]
+    assert address not in got[CAL]
+    assert not any(d.startswith(repos_mod.root_name(REPO)) for d in got[CAL])
+    told = hub_repos.get("/_/mount?sheaf=1", member=CAL).json()["sheaf"]
+    assert repos_mod.root_name(REPO) not in str(told["tree"]) and repos_mod.root_name(REPO) not in told["more"]
+
+
+def test_a_render_report_leaves_one_write_log_line_with_the_fields_a_door_write_leaves(hub_repos):
+    report_once(hub_repos, session=SESSION, host="bea-laptop", link="https://claude.ai/code/session_01ABC")
+    assert hub_repos.hub.repos.settle()
+    lines = hub_repos.hub.writes.lines(f"{repos_mod.root_name(REPO)}/docs/plan.md")
+    assert len(lines) == 1
+    line = lines[0]
+    assert (line.via, line.place, line.session, line.host, line.link) == (
+        "report", "laptop", SESSION, "bea-laptop", "https://claude.ai/code/session_01ABC")
+    assert line.writer == "Claude Code (Bea)"
+
+
+def test_a_report_the_tiroir_refuses_leaves_no_write_log_line(hub_repos):
+    hub_repos.app.installed.clear()
+    report_once(hub_repos, session=SESSION)
+    assert hub_repos.hub.writes.lines(f"{repos_mod.root_name(REPO)}/docs/plan.md") == []
+
+
+# ── ticket 44: what a row costs, what a Write log line means, who is told "and N more" ──
+
+def count_git_logs(hub_repos, monkeypatch) -> list:
+    calls, real = [], Repos._git
+
+    def spy(self, at, *args, **kw):
+        if args[:1] == ("log",):
+            calls.append(args)
+        return real(self, at, *args, **kw)
+    monkeypatch.setattr(Repos, "_git", spy)
+    return calls
+
+
+def test_a_listing_of_a_page_whose_write_log_names_a_session_starts_no_git_log(hub_repos, monkeypatch):
+    report(hub_repos)                           # a record with no session of its own
+    hub_repos.hub.writes.add(f"{repos_mod.root_name(REPO)}/docs/plan.md", "Claude Code (Bea)", "laptop", "write", session=SESSION)
+    calls = count_git_logs(hub_repos, monkeypatch)
+    for _ in range(3):
+        assert repo_row(hub_repos)["session"] == "Claude Code (Bea)"
+    assert calls == []
+
+
+def test_a_listing_asks_git_once_for_a_page_with_no_session_until_its_commit_changes(hub_repos, monkeypatch):
+    report(hub_repos)
+    hub_repos.hub.writes._lines.clear()
+    calls = count_git_logs(hub_repos, monkeypatch)
+    for _ in range(3):
+        assert repo_row(hub_repos)["write"] == "git · Dee Dev"
+    assert len(calls) == 1
+
+
+def test_a_duplicate_report_leaves_one_write_log_line_not_one_per_report(hub_repos):
+    hub_repos.hub.repos.FETCH_EVERY = 3600.0
+    report(hub_repos, session=SESSION)
+    address = f"{repos_mod.root_name(REPO)}/docs/plan.md"
+    before = len(hub_repos.hub.writes.lines(address))
+    repos = hub_repos.hub.repos
+    gate = threading.Event()
+    real = repos._wake
+    repos._wake = lambda *a, **k: (gate.wait(5), real(*a, **k))[1]      # the thread is held, so the next reports queue behind it
+    report_once(hub_repos, session=SESSION)
+    end = time.monotonic() + 5
+    while repos._queues.get(REPO) != [] and time.monotonic() < end:
+        time.sleep(0.01)                        # the thread has taken the first report and waits at the gate
+    report_once(hub_repos, session=SESSION)
+    report_once(hub_repos, session=SESSION)     # the same as the one queued: dropped
+    gate.set()
+    assert repos.settle()
+    assert len(hub_repos.hub.writes.lines(address)) == before + 2       # the one taken and the one queued, not the dropped
+
+
+def test_a_report_for_a_path_the_commit_does_not_hold_leaves_no_write_log_line(hub_repos):
+    report_once(hub_repos, path="docs/missing.md", session=SESSION)
+    assert hub_repos.hub.repos.settle()
+    assert hub_repos.hub.writes.lines(f"{repos_mod.root_name(REPO)}/docs/missing.md") == []
+
+
+def two_pages_cut_off(hub_repos, monkeypatch):
+    from sheafmd.hub import roots
+    report(hub_repos, session=SESSION)
+    report(hub_repos, path="notes/idea.md", session=SESSION)
+    monkeypatch.setattr(roots, "LIST_CAP", 2)
+    return repos_mod.root_name(REPO)
+
+
+def test_a_member_with_a_visible_row_in_a_cut_off_clone_is_told_how_many_pages_were_left_out(hub_repos, monkeypatch):
+    name = two_pages_cut_off(hub_repos, monkeypatch)
+    told = hub_repos.get("/_/mount?sheaf=1", member=BEA).json()["sheaf"]
+    assert any(r["doc"].startswith(name) for r in told["rows"]) and told["more"].get(name, 0) >= 1
+
+
+def test_a_member_with_no_visible_row_in_a_cut_off_clone_learns_nothing_of_it(hub_repos, monkeypatch):
+    name = two_pages_cut_off(hub_repos, monkeypatch)
+    told = hub_repos.get("/_/mount?sheaf=1", member=CAL).json()["sheaf"]
+    assert not any(r["doc"].startswith(name) for r in told["rows"])
+    assert name not in told["more"] and name not in str(told["tree"])
+    assert name not in str(hub_repos.get("/_/index.json", member=CAL).json())
+
+
+def test_a_report_refused_for_a_failed_clone_leaves_no_write_log_line_when_the_clone_then_succeeds(hub_repos):
+    repos = hub_repos.hub.repos
+    repos._failed[REPO] = "the clone failed"
+    bad, got = report_once(hub_repos, session=SESSION)
+    assert bad and "failed" in got
+    assert repos.settle()
+    assert hub_repos.hub.writes.lines(f"{repos_mod.root_name(REPO)}/docs/plan.md") == []
+
+
+def test_a_report_sent_again_after_a_refused_one_is_the_one_that_leaves_the_line(hub_repos):
+    repos = hub_repos.hub.repos
+    gate = threading.Event()
+    real = repos._wake
+    repos._wake = lambda *a, **k: (gate.wait(5), real(*a, **k))[1]
+    repos._failed[REPO] = "the clone failed"
+    report_once(hub_repos, session=SESSION)                 # refused, queued without a line
+    report_once(hub_repos, session=SESSION)                 # the retry: the same member, path and commit
+    gate.set()
+    assert repos.settle()
+    assert len(hub_repos.hub.writes.lines(f"{repos_mod.root_name(REPO)}/docs/plan.md")) == 1

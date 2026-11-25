@@ -818,14 +818,31 @@ def test_the_sweep_keeps_the_marks_of_a_page_its_listing_did_not_see(agents, clo
     assert _marks_of(root, rel) == ALL_MARKS
 
 
+def test_the_keep_marks_of_many_addresses_with_no_page_go_in_one_write(tmp_path, monkeypatch):
+    """198 B (Codex on #635): a sweep that drops the marks of N addresses rewrote and synced the whole keep file once per
+    address, N writes under the moves lock. They go in one."""
+    rels = [f"p{i}.md" for i in range(5)]
+    for rel in [*rels, "kept.md"]:
+        loose.keep(tmp_path, rel)
+    writes = []
+    put = loose._put
+    monkeypatch.setattr(loose, "_put", lambda root, name, data, what: (writes.append(name), put(root, name, data, what)))
+
+    class Root:
+        path = tmp_path
+    archive.Archive._unmark(Root, rels)
+    assert writes.count(loose.KEEP.name) == 1
+    assert loose.marks(tmp_path) == ["kept.md"]
+
+
 def test_a_mark_file_that_cannot_be_written_leaves_the_sweep_archiving_the_roots_other_pages(agents, clock, monkeypatch):
     doc, root, rel = _marked_everywhere(agents, clock)
     os.unlink(agents.hub.file(doc))
     other = made(agents, "bea-claude", doc="other.md")
 
-    def keep_held(*a, **k):
+    def unkeep_held(*a, **k):
         raise loose.Refused("the keep marks of the loose root cannot be written")
-    monkeypatch.setattr(archive.loose, "keep_held", keep_held)
+    monkeypatch.setattr(archive.loose, "unkeep_held", unkeep_held)
     sweep(agents)                                   # the other page's first seen
     clock.now += 31 * DAY
     sweep(agents)

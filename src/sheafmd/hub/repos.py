@@ -61,6 +61,7 @@ COMMIT_RE = re.compile(r"[0-9a-f]{7,40}")
 GIT_SECONDS = 300.0
 FETCH_SECONDS = 10.0        # the one fetch a report whose commit the clone lacks may cost
 LOOK_SECONDS = 5.0          # a look at what the clone holds, on the request path
+LOOKED_KEPT = 4096          # pages whose `git log` answer is kept; past it the memory starts again
 MAX_QUEUED = 64             # reports waiting for a repo's thread; a report past it is answered and not queued
 SLEEP_DAYS = 30             # a clone nobody reported a page of for this long sleeps
 SLEEP_WAIT = 60.0           # how long one round of `sleep_idle` waits for the clones' threads; the rest finish behind it
@@ -68,6 +69,7 @@ GITHUB_HOSTS = ("github.com", "ssh.github.com", "www.github.com")
 
 NO_CLONES = "none"
 OK, PRIVATE_ROOT, NO_APP, NOT_CLONED, CLONING = "ok", "private-root", "no-app", "not-cloned", "cloning"
+NO_ROW = "_no_row"          # in a report's `declared`: the thread makes the clone and writes no row for the page
 MOVED = "moved"             # the clone's root went to another tiroir: its answer carries the new origin (`moved_to`)
 NO_LAZY_FETCH_FROM = (2, 44)    # the git that honours GIT_NO_LAZY_FETCH; an older one ignores it without an error
 
@@ -194,6 +196,8 @@ class Repos:
         self.remote_url = remote_url or (lambda repo: f"https://github.com/{repo}.git")
         self._records = threading.RLock()       # the records file, held for a read or a read-modify-write, never across git
         self._guard = threading.Lock()          # the queues below, never held across git
+        self._looked: dict = {}                 # (repo, path, record commit, page mtime, FETCH_HEAD mtime) -> what `git log` said of a page, under the guard
+        self.recorded = lambda repo, path, who: None   # the hub's: called once a report's record is made (`_settle`), never under a lock
         self._queues: dict[str, list] = {}      # repo -> reports waiting for its thread; a repo with a key has one running
         self._threads: set = set()
         self._failed: dict[str, str] = {}       # repo -> why its last clone failed, told once to the next report
@@ -422,9 +426,25 @@ class Repos:
         r = self._git(self.clone_dir(repo), "show", f"{_clean_commit(commit)}:{_clean_path(path)}", look=True, seconds=LOOK_SECONDS)
         return r.stdout if r.returncode == 0 else None
 
+    def root_toml(self, repo: str, commit: str) -> str | None:
+        """The text of the root's `.sheaf.toml` at `commit`, read from git as `page_text` reads a page (nothing is fetched); None
+        when the clone does not hold it. `page_text` takes markdown pages' paths only, so the root file has its own door."""
+        r = self._git(self.clone_dir(_clean_repo(repo)), "show", f"{_clean_commit(commit)}:.sheaf.toml", look=True, seconds=LOOK_SECONDS)
+        return r.stdout if r.returncode == 0 else None
+
     def clone_dir(self, repo: str) -> Path:
         owner, name = repo.split("/")
         return self.base / "clones" / owner / name
+
+    def records(self, repo: str) -> dict:
+        """The rows of the pages reports made in `repo`, `{path: row}` (a copy)."""
+        with self._records:
+            return {p: dict(r) for p, r in self._read().get(repo, {}).items() if isinstance(r, dict)}
+
+    def clones(self) -> list[str]:
+        """The repos this hub holds a clone of."""
+        with self._records:
+            return sorted(self._usage())
 
     def owner_of(self, repo: str, path: str) -> str | None:
         """The member of a repo page: the `owner` of its front matter at the commit of the latest report when it names
@@ -435,14 +455,36 @@ class Repos:
             return None
         return row["named"] if isinstance(row.get("named"), str) and row["named"] else row["owner"]
 
-    def attribution(self, repo: str, path: str) -> dict:
+    def attribution(self, repo: str, path: str, stamp=None) -> dict:
         """What a row says of the page's last writer: the session of the latest report, else the `Sheaf-Session:` and
-        `Sheaf-Host:` trailers of the page's last commit, else `git · <author>`."""
+        `Sheaf-Host:` trailers of the page's last commit, else `git · <author>`. What git said is kept for the record's
+        commit, the caller's `stamp` (the page file's mtime) and the clone's FETCH_HEAD mtime (a fetch that brings a commit of
+        trailers only moves it; the window between a pull's fetch and its move of HEAD is left, and a page asked about in it
+        keeps git's answer until the next fetch), so a listing
+        starts no `git log` for a page it has already asked about."""
         with self._records:
             row = self._read().get(repo, {}).get(path) or {}
         if row.get("session"):
             return {"session": row["session"], "host": row.get("host"), "link": row.get("link"),
                     "label": f"session {row['session']}"}
+        try:        # a fetch that brings a commit touching the page's trailers only leaves its bytes as they were: it moves FETCH_HEAD
+            fetched = (self.clone_dir(repo) / ".git" / "FETCH_HEAD").stat().st_mtime_ns
+        except OSError:
+            fetched = None
+        key = (repo, path, row.get("commit"), stamp, fetched)
+        if stamp is not None:
+            with self._guard:
+                if key in self._looked:
+                    return dict(self._looked[key])
+        got = self._trailers(repo, path)
+        if stamp is not None:
+            with self._guard:
+                if len(self._looked) >= LOOKED_KEPT:
+                    self._looked.clear()
+                self._looked[key] = got
+        return dict(got)
+
+    def _trailers(self, repo: str, path: str) -> dict:
         r = self._git(self.clone_dir(repo), "log", "-1", "--format=%an%x00%(trailers:key=Sheaf-Session,valueonly,"
                       "separator=%x01)%x00%(trailers:key=Sheaf-Host,valueonly,separator=%x01)", "--", path)
         author, session, host = (r.stdout.rstrip("\n").split("\x00") + ["", "", ""])[:3] if r.returncode == 0 else ("",) * 3
@@ -450,6 +492,33 @@ class Repos:
         if session:
             return {"session": session, "host": host or None, "link": None, "label": f"session {session}"}
         return {"session": None, "host": None, "link": None, "label": f"git · {author}" if author else "git"}
+
+    def land_record(self, repo: str, path: str, owner: str, commit: str, record: dict) -> dict | None:
+        """Write the row of a page that landed from another tiroir, as `_settle` writes one (`owner`, `commit`, and the
+        `session`, `host`, `link` of `record` that are set; never its `named`, which only a report reads, from the page's own front matter; the `named` a report read at this same commit is kept). Returns the row it replaced, or None, for `drop_record`."""
+        repo = _clean_repo(repo)        # the key a report writes under
+        with self._records:
+            data = self._read()
+            prior = data.get(repo, {}).get(path)
+            named = prior.get("named") if isinstance(prior, dict) and prior.get("commit") == commit else None    # read by a report from this commit's own front matter
+            data.setdefault(repo, {})[path] = {
+                "owner": owner, "commit": commit, **({"named": named} if isinstance(named, str) and named else {}),
+                **{k: v for k, v in record.items() if k in ("session", "host", "link") and v}}
+            self._write(data)
+        return prior if isinstance(prior, dict) else None
+
+    def drop_record(self, repo: str, path: str, prior: dict | None):
+        """Undo `land_record`: put back the row it returned, or take the page's row away when there was none."""
+        repo = _clean_repo(repo)
+        with self._records:
+            data = self._read()
+            if prior is None:
+                data.get(repo, {}).pop(path, None)
+                if repo in data and not data[repo]:
+                    del data[repo]
+            else:
+                data.setdefault(repo, {})[path] = prior
+            self._write(data)
 
     # ── git ──────────────────────────────────────────────────────────────────
     def _git(self, at, *args, token: str | None = None, seconds: float = GIT_SECONDS, look: bool = False):
@@ -682,7 +751,7 @@ class Repos:
         return True, named if isinstance(named, str) and named else None
 
     # ── the report ───────────────────────────────────────────────────────────
-    def report(self, member: str, repo, path, commit, private_roots=(), declared=None) -> dict:
+    def report(self, member: str, repo, path, commit, private_roots=(), declared=None, row: bool = True, who=None) -> dict:
         """The tiroir hears that `member` works on the page `path` of `repo` at `commit`. Raises `Refused` for a name
         that is none, and for a clone that failed since the last report; otherwise the answer: `clone` (`ok`,
         `cloning`, `private-root`, `not-cloned`, `no-app`, `moved`), `commit_known`, for `no-app` the link that adds the
@@ -690,7 +759,11 @@ class Repos:
         nothing. `private_roots` are (member, folder) pairs. A repo that is the caller's own private root is told so;
         one that is another member's is `not-cloned` and nothing else: no clone, no record, no owner named (SPEC 9.11).
         A repo that became a private root after it was cloned keeps its clone and its records, takes no more.
-        Nothing here clones or fetches: that is the repo's thread's (see the top of the file)."""
+        `who` is what the hub's `recorded` is given when this report's record is made (`_settle`): a report that is dropped
+        as a duplicate, or whose page the commit does not hold, makes no record and calls nothing.
+        Nothing here clones or fetches: that is the repo's thread's (see the top of the file). With `row` False the report
+        only makes the clone held and written nowhere: the thread settles it without a row for the page."""
+        declared = {**(declared or {}), **({} if row else {NO_ROW: True})}
         repo, path, commit = _clean_repo(repo), _clean_path(path), _clean_commit(commit)
         if (private := self._private(member, repo, private_roots)) is not None:
             return {"repo": repo, "path": path, "clone": private, "commit_known": None}
@@ -699,7 +772,7 @@ class Repos:
         with self._guard:
             failed = self._failed.pop(repo, None)
         if failed:
-            self._enqueue(repo, (member, path, commit, declared or {}))     # this report starts the clone again
+            self._enqueue(repo, (member, path, commit, declared or {}, None))     # this report starts the clone again; it is refused, so it leaves no line
             raise Refused(failed)
         dest = self.clone_dir(repo)
         held = (dest / ".git").exists()
@@ -708,12 +781,39 @@ class Repos:
             if token is None:
                 return {"repo": repo, "path": path, "clone": NO_APP, "commit_known": None,
                         "install": self.provider.install_url(repo)}
-        item = (member, path, commit, declared or {})
+        item = (member, path, commit, declared or {}, who)
         self._use(repo)
         self._enqueue(repo, item)
         if not held:
             return {"repo": repo, "path": path, "clone": CLONING, "commit_known": None}
         return {"repo": repo, "path": path, "clone": OK, "commit_known": self._look_is_safe() and self._on_branch(dest, commit)}
+
+    def report_rest(self, repo: str, commit: str, owned, private_roots=()) -> dict:
+        """The reports of the rest of a root's owned pages, after `report` of the first told the clone is held: each `(member,
+        path)` of `owned` is queued for its member at `commit`, as `report` queues one, but all of them, whatever `MAX_QUEUED` says
+        (a root has up to thousands of pages, and a page left out keeps no row of its owner), and with one look at the clone
+        and one date of use for the lot. Returns `{path: answer}` for each page a member may not have (`private-root`,
+        `not-cloned`) or whose path is no markdown page's (`refused`); those are not queued. Raises `Refused` for a repo name that is none."""
+        repo, commit = _clean_repo(repo), _clean_commit(commit)
+        refused, items = {}, []
+        with self._records:
+            rows = self._read().get(repo, {})
+        for member, path in owned:
+            try:
+                _clean_path(path)
+            except Refused:         # a path that is no markdown page's is refused alone, never the whole call
+                refused[path] = "refused"
+                continue
+            if (private := self._private(member, repo, private_roots)) is not None:
+                refused[_clean_path(path)] = private
+            elif not (isinstance(row := rows.get(_clean_path(path)), dict) and row.get("commit") == commit):
+                # a page whose row is at this commit already was settled by an earlier try of the same check: asked again, a big root
+                # would redo every page each time and never get past the wait
+                items.append((member, _clean_path(path), commit, {}, None))
+        if items:
+            self._use(repo)
+            self._enqueue(repo, *items, cap=False)
+        return refused
 
     def _private(self, member: str, repo: str, private_roots) -> str | None:
         """`private-root` for the member whose private root `repo` is, `not-cloned` when it is another member's, else None."""
@@ -740,14 +840,22 @@ class Repos:
         with self._guard:
             return repo in self._queues
 
-    def _enqueue(self, repo: str, item: tuple):
+    def _enqueue(self, repo: str, *items: tuple, cap: bool = True):
+        """Queue the reports `items` for the repo's thread, which is started when there is none. A report whose member, path and
+        commit are queued already is not queued twice; past `MAX_QUEUED` a report is dropped, unless `cap` is False."""
         with self._guard:
             queue = self._queues.get(repo)
             if queue is not None:
-                if len(queue) < MAX_QUEUED and not any(q[:3] == item[:3] for q in queue):
-                    queue.append(item)
+                queued = {q[:3]: n for n, q in enumerate(queue)}
+                for item in items:
+                    if (n := queued.get(item[:3])) is not None:
+                        if queue[n][4] is None and item[4] is not None:     # the retry of a report that was refused is the one that leaves the line
+                            queue[n] = queue[n][:3] + item[3:]       # with its declared: a clone-only report queued first must not swallow the row
+                    elif not cap or len(queue) < MAX_QUEUED:
+                        queue.append(item)
+                        queued[item[:3]] = len(queue) - 1
                 return
-            self._queues[repo] = [item]
+            self._queues[repo] = list(items)
             self._start(repo, self._drain, repo)           # under the guard, as in sleep()
 
     def _start(self, repo: str, target, *args) -> threading.Thread:
@@ -764,12 +872,14 @@ class Repos:
             raise
         return t
 
-    def settle(self, seconds: float = 120.0) -> bool:
-        """Wait until no repo's thread is left working; whether that came before `seconds` ran out."""
+    def settle(self, seconds: float = 120.0, repo: str | None = None) -> bool:
+        """Wait until no repo's thread is left working, or only `repo`'s when it is given (another repo's slow clone is not its
+        business); whether that came before `seconds` ran out."""
         end = time.monotonic() + seconds
+        name = f"repos-{_clean_repo(repo)}" if repo is not None else None
         while True:
             with self._guard:
-                threads = list(self._threads)
+                threads = [t for t in self._threads if name is None or t.name == name]
             if not threads:
                 return True
             for t in threads:
@@ -811,12 +921,14 @@ class Repos:
                     self._queues[repo] = []     # what waited for the clone waits no more: the next report asks again
                 return
         self._wake(repo, dest, token)
-        for member, path, commit, declared in batch:
+        for member, path, commit, declared, who in batch:
             folder = path.rpartition("/")[0]
             if token is not None:
                 self._widen(dest, folder, token)
             if not self._knows(dest, repo, commit, token) or not self._holds(dest, commit, path):
                 continue
+            if declared.get(NO_ROW):
+                continue            # looked at (the fetch above), written nowhere
             readable, named = self._named_owner(dest, commit, path, token)
             with self._records:
                 data = self._read()
@@ -829,6 +941,11 @@ class Repos:
                 data[repo][path] = {"owner": owner, "commit": commit, **({"named": named} if named else {}),
                                     **{k: v for k, v in declared.items() if k in ("session", "host", "link") and v}}
                 self._write(data)
+            if who is not None:
+                try:
+                    self.recorded(repo, path, who)      # the record is made: the hub says so, outside the records' lock
+                except Exception:
+                    pass                                # a line that cannot be left must not stop the batch
         if token is not None:
             self.serve(repo, token)
 

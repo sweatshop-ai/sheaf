@@ -22,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from .. import __version__, beneath, config, diagnostics, paths
+from .. import __version__, _pandoc, beneath, config, diagnostics, paths
 from ..agents import registry
 from ..agents.base import Adapter, Target
 from ..render import RenderError, render_file
@@ -370,9 +370,16 @@ class Hub:
             repos.roots = self.roots
             repos.mover = self.commits.moved
             repos.holding = self.commits._repo_lock
+            repos.recorded = self._report_recorded
             for root in self.roots.all():
                 if root.clone:
                     repos.credential(root.clone)
+
+    def _report_recorded(self, repo: str, path: str, who: tuple) -> None:
+        """A render report's record was made: its Write log line, as a door write leaves one. `who` is (writer, place, declared)."""
+        from . import repos as repos_mod
+        writer, place_, declared = who
+        self.writes.add(f"{repos_mod.root_name(repo)}/{path}", writer, place_, "report", **declared)
 
     def clone_of(self, address: str) -> str:
         """The repo whose clone serves `address`, or "" for any other page."""
@@ -971,7 +978,8 @@ class Hub:
             address = self.roots.address(md)       # a file of a private root has no address of its own (9.11)
         except roots_mod.NotFound:
             raise RenderError(f"{md} is not in a root the hub serves.") from None
-        with place.held(self, address):                    # the name's lock first (9.11), as `entry` takes it
+        # Every pandoc run of this render shares the one limit (198 D): `sheaf open` waits RENDER_TIMEOUT, a little more.
+        with _pandoc.budget(), place.held(self, address):  # the name's lock first (9.11), as `entry` takes it
             with self._lock:
                 e, rebuild, existed = self._render_entry(address, md, settings, target)
             # A delete, move or forget between the two parts under the hub's lock has taken the entry: its page is not read
@@ -1089,12 +1097,12 @@ class Hub:
             # then for the late forget to leave them (`LiveDocument.detach`).
             for a in held:
                 self.entries[a].live.detach()   # no wait for its lock here: a render holds it for up to 120 s
-            known = self.roots.get(name)
+            known = self.roots.held(name)     # a private root too, which `get` hides
             try:
                 root = roots_mod.forget(self.roots, self.docs, self.seen, self.versions, name,
                                         members=self.member_seen)
             except Exception:
-                if self.roots.get(name) is not None:
+                if self.roots.held(name) is not None:
                     for a in held:      # the registry still holds the root: it stays, and so do its documents' versions
                         self.entries[a].live.reattach()
                     raise
@@ -1891,11 +1899,7 @@ class Hub:
         if e is not None:
             try:
                 st = e.stat()
-                if moved:
-                    e.live.rebuild()
-                    got = None
-                else:
-                    got = e.live.refresh()
+                got = e.live.rebuild() if moved else e.live.refresh()
                 if got is not RETRY:         # one it could not decide is left to the watcher, which looks again
                     e.last_stat = (st.st_mtime_ns, st.st_size)
             except Exception as ex:

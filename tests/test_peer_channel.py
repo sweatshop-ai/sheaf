@@ -11,6 +11,7 @@ import pytest
 from helpers import BEA, CAL
 
 from sheafmd import connect, paths
+from sheafmd.hub import channel as chan
 from sheafmd.hub.state import Tokens
 
 PEER = "https://other.example.com"
@@ -351,6 +352,39 @@ def test_a_credential_name_is_one_safe_word_per_origin_and_port():
     assert connect.peer_credential_name("HTTPS://Other.Example.com") == a
 
 
+def test_no_two_peer_origins_share_a_credential_name():
+    # A shared file name would send the token kept for one peer to the other (ticket 190 E).
+    origins = ["https://a.example:8443", "https://a.example-8443", "https://a.example_p8443", "https://a.example",
+               "https://[::1]:8443", "https://[::1]", "https://a_3a.example",
+               "https://a.example:443", "https://a.example:44"]
+    names = [connect.peer_credential_name(o) for o in origins]
+    assert len(set(names)) == len({connect.origin_of(o) for o in origins})
+    assert all(re.fullmatch(r"[A-Za-z0-9._-]+", n) for n in names)
+
+
+def test_a_credential_file_of_the_old_port_name_is_not_read_for_the_other_peer(monkeypatch, tmp_path):
+    (tmp_path / "sheaf-peer-a.example-8443").write_text(FAKE)
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+    assert connect._credential_file("https://a.example:8443") is None
+    assert connect._credential_file("https://a.example-8443") == FAKE
+
+
+
+def test_a_credential_file_left_under_the_old_port_name_is_said_once(monkeypatch, tmp_path, capsys):
+    (tmp_path / "sheaf-peer-b.example-8443").write_text(FAKE)
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+    assert connect._credential_file("https://b.example:8443") is None
+    assert connect._credential_file("https://b.example:8443") is None
+    err = capsys.readouterr().err
+    assert err.count("sheaf-peer-b.example-8443") == 1 and "sheaf-peer-b.example_p8443" in err and FAKE not in err
+    (tmp_path / "sheaf-peer----1--8443").write_text(FAKE)
+    assert connect._credential_file("https://[::1]:8443") is None
+    assert "sheaf-peer----1--8443" in capsys.readouterr().err
+    (tmp_path / "sheaf-peer----1-").write_text(FAKE)                # an IPv6 origin with no port was renamed too
+    assert connect._credential_file("https://[::1]") is None
+    assert "sheaf-peer----1-" in capsys.readouterr().err
+
+
 def test_the_hub_reads_the_peer_token_from_the_credentials_folder_before_the_keyring(keyring, monkeypatch, tmp_path):
     keyring.set("sheaf-peer", PEER, "sheaf_mcp_" + "k" * 43)
     (tmp_path / connect.peer_credential_name(PEER)).write_text(FAKE + "\n")
@@ -463,3 +497,48 @@ def test_a_corrupt_credential_file_is_warned_about_once_per_process(keyring, mon
     keyring.set("sheaf-peer", "https://third.example.com", FAKE)
     connect.peer_token_for("https://third.example.com")               # another peer's file is another warning
     assert len(capsys.readouterr().err.strip().splitlines()) == 1
+
+
+# ── the root verb ────────────────────────────────────────────────
+
+ROOT_BODY = {"id": "m1", "repo": "o/r", "branch": "dev", "tip": "abc", "from": {"origin": "https://third.example", "by": "bea"},
+             "pages": []}
+
+
+@pytest.fixture
+def landed(monkeypatch):
+    """What `incoming.land_root` is called with; it answers an empty landing."""
+    seen = []
+    monkeypatch.setattr("sheafmd.hub.incoming.land_root",
+                        lambda hub, body, peer=None: (seen.append((body, peer)), (200, {"pages": {}}))[1])
+    return seen
+
+
+def test_a_peer_with_the_transfer_scope_reaches_the_root_verb_and_is_the_peer_the_token_names(members, landed):
+    res = channel(members, "root", ROOT_BODY, peer_token())
+    assert res.status == 200 and res.json() == {"pages": {}}
+    assert landed == [(ROOT_BODY, PEER)]          # the body says the root comes from third.example: only the token's origin counts
+
+
+def test_anyone_else_gets_the_answer_of_an_unknown_route_on_the_root_verb(members, landed):
+    unknown = channel(members, "nothing", {})
+    assert channel(members, "root", ROOT_BODY).body == unknown.body
+    assert channel(members, "root", ROOT_BODY, "sheaf_mcp_" + "x" * 43).body == unknown.body
+    assert channel(members, "root", ROOT_BODY, peer_token(), headers={"X-Forwarded-For": "8.8.8.8"}).body == unknown.body
+    assert channel(members, "root", ROOT_BODY, peer_token(["read"])).body == unknown.body
+    assert landed == []
+
+
+def test_a_root_body_may_be_as_big_as_a_transfer_and_no_bigger(members, landed):
+    token = peer_token()
+    h = {**TAILNET, "Authorization": f"Bearer {token}"}
+    ok = json.dumps({**ROOT_BODY, "pad": "x" * (64 * 1024)}).encode()
+    assert members.request("POST", "/_/tiroir/root", member=None, raw=ok, headers=h).status == 200
+    big = json.dumps({**ROOT_BODY, "pad": "x" * (chan.MAX_TRANSFER + 1)}).encode()
+    assert members.request("POST", "/_/tiroir/root", member=None, raw=big, headers=h).status == 413
+    assert len(landed) == 1
+
+
+def test_a_body_that_is_not_a_root_is_a_400(members):
+    res = channel(members, "root", {"id": "m1"}, peer_token())
+    assert res.status == 400

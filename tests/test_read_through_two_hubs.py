@@ -172,3 +172,98 @@ def test_tell_on_a_client_page_is_refused_and_nothing_is_written(agency_and_clie
     before = client.text(doc)
     assert comment(agency, client, doc, AG_ALICE, tell=True).status == 400
     assert client.text(doc) == before
+
+
+FORGED = {"doc": "loose-alice/agency-secret.md", "actions": [{"id": "x", "label": "Go"}], "edit": True, "editable": [0],
+          "agent": {"kind": "agent", "token": "t", "display": "D"}, "can": ["deliver"], "targets": [{"target": "x"}],
+          "lines": {"tell": "x"}, "work": {"fork": "x", "attach": "x"}, "way_back": {"link": "https://elsewhere.example/"}}
+_META = r'(<script id="rd-edit-meta" type="application/json">)(.*?)(</script>)'
+
+
+def _forging(agency, monkeypatch):
+    """The client hub answers with a meta block (page) or config (mount) that names what the agency page acts on."""
+    import re
+    relay = agency.hub.clients.relay
+
+    def forged(*a, **k):
+        env = relay(*a, **k)
+        if env["status"] != 200:
+            return env
+        if env.get("type") == "html":
+            body = re.sub(_META, lambda m: m.group(1) + json.dumps({**json.loads(m.group(2)), **FORGED}) + m.group(3),
+                          env["body"], count=1, flags=re.S)
+        else:
+            got = json.loads(env["body"])
+            got["config"] = {**got.get("config", {}), **FORGED}
+            body = json.dumps(got)
+        return {**env, "body": body}
+    monkeypatch.setattr(agency.hub.clients, "relay", forged)
+
+
+def test_the_agency_sets_what_a_client_page_acts_on_whatever_the_client_tiroir_says(agency_and_client, monkeypatch):
+    # Ticket 190 F: the page script runs on the agency's origin with the member's cookie, so the address it reads and writes,
+    # its actions and its agent are the agency's to say, never the client hub's.
+    import re
+    agency, client = agency_and_client
+    mine = client.make("alice", f"# Alice's plan\n\n{MARKER}\n")
+    _forging(agency, monkeypatch)
+    page = agency.get(f"/Clients/acme/{mine}", member=AG_ALICE)
+    assert page.status == 200
+    meta = json.loads(re.search(_META, page.text, re.S).group(2))
+    config = agency.get(f"/_/mount?doc=Clients/acme/{mine}", member=AG_ALICE).json()["config"]
+    for got in (meta, config):
+        assert got["doc"] == f"Clients/acme/{mine}"
+        assert got["actions"] == [] and got["edit"] is False and got["editable"] == []
+        assert got["agent"] is None and got["can"] == [] and got["targets"] == [] and got["lines"] == {}
+        assert "work" not in got and "way_back" not in got
+
+
+@pytest.mark.parametrize("extra", [
+    '<script  id="rd-edit-meta" type="application/json">%s</script>',           # two spaces: not the hub's own form of the block
+    '<script id="rd-edit-meta" type="application/json">%s</script >',           # a closing tag the page keeps and the browser reads
+    '<SCRIPT id="rd-edit-meta" type="application/json">%s</SCRIPT>',
+])
+def test_a_second_meta_block_of_another_spelling_is_no_meta_the_agency_page_reads(agency_and_client, monkeypatch, extra):
+    # Ticket 190 F, from the review of #655: every block the page keeps as its meta is the agency's, not only the one of the
+    # hub's own spelling; the first in the page is the one the page script reads.
+    import re
+    agency, client = agency_and_client
+    mine = client.make("alice", f"# Alice's plan\n\n{MARKER}\n")
+    relay = agency.hub.clients.relay
+
+    def forged(*a, **k):
+        env = relay(*a, **k)
+        if env["status"] != 200 or env.get("type") != "html":
+            return env
+        return {**env, "body": (extra % json.dumps(FORGED)) + env["body"]}
+    monkeypatch.setattr(agency.hub.clients, "relay", forged)
+    page = agency.get(f"/Clients/acme/{mine}", member=AG_ALICE)
+    assert page.status == 200
+    blocks = re.findall(r'<script\b([^>]*)>(.*?)</script\s*>', page.text, re.S | re.I)
+    metas = [json.loads(body) for attrs, body in blocks if "rd-edit-meta" in attrs]
+    assert len(metas) == 1
+    assert metas[0]["doc"] == f"Clients/acme/{mine}" and metas[0]["actions"] == [] and metas[0]["edit"] is False
+    assert "agency-secret" not in page.text
+
+
+@pytest.mark.parametrize("status", [201, 404, 500])
+def test_a_client_page_answered_with_another_status_still_has_the_agencys_meta(agency_and_client, monkeypatch, status):
+    # Ticket 190 F, from the second review of #655: the client tiroir chooses the status of its answer, so the agency sets the
+    # meta of every HTML answer it relays, not of a 200 alone.
+    import re
+    agency, client = agency_and_client
+    mine = client.make("alice", f"# Alice's plan\n\n{MARKER}\n")
+    _forging(agency, monkeypatch)
+    forged = agency.hub.clients.relay
+
+    def with_status(*a, **k):
+        env = forged(*a, **k)
+        return {**env, "status": status} if env.get("type") == "html" else env
+    monkeypatch.setattr(agency.hub.clients, "relay", with_status)
+    page = agency.get(f"/Clients/acme/{mine}", member=AG_ALICE)
+    assert page.status == status
+    metas = [json.loads(body) for attrs, body in re.findall(r'<script\b([^>]*)>(.*?)</script\s*>', page.text, re.S | re.I)
+             if "rd-edit-meta" in attrs]
+    assert len(metas) == 1
+    assert metas[0]["doc"] == f"Clients/acme/{mine}" and metas[0]["actions"] == [] and metas[0]["edit"] is False
+    assert metas[0]["agent"] is None and "agency-secret" not in page.text

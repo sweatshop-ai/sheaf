@@ -121,10 +121,12 @@ BEING_STOPPED = (f"the hub is being stopped; this is {__version__}. "
 
 def stays_down(reason, service: bool) -> bool:
     """Whether a hub ended by `reason` stays down, so a newer command starts none behind it (8.4): a stop does, a
-    signal too unless the hub runs under the service, whose unit starts a signalled hub again on the new code
-    (14.3). A `systemctl stop` or a logout is a signal the unit does not restart, and reads the same: the
+    signal too unless the hub runs under the systemd unit, which starts a signalled hub again on the new code
+    (14.3). launchd starts again only a hub that exits with a failure, and a signal exits 0, so on macOS a
+    signal stays down under the service too. A `systemctl stop`, a logout or a unit of an older sheaf
+    (`Restart=on-failure`) is a signal the unit does not restart, and reads the same as one it does: the
     command then waits UPGRADE_WAIT for a hub that does not come and says it did not come back."""
-    return reason == "stop" or (reason == "signal" and not service)
+    return reason == "stop" or (reason == "signal" and (not service or sys.platform == "darwin"))
 
 
 class HubChanged(Impostor):

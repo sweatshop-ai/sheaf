@@ -132,6 +132,8 @@ class Archive:
                 self.purge()
                 if getattr(self.hub, "repos", None) is not None:
                     self.hub.repos.sleep_idle()     # a clone nobody used for thirty days sleeps (13)
+                    from . import root_sender
+                    root_sender.sweep(self.hub)     # a root whose `.sheaf.toml` names another tiroir moves there
             except Exception:
                 self.hub.record_exception("archive-failed")
 
@@ -323,8 +325,8 @@ class Archive:
         be written; then the first refusal is raised (`Refused`). The caller holds `loose-keep.lock`."""
         failed = None
         clears = [lambda: loose.stamp_held(root.path, ARCHIVED, {rel: None for rel in rels}),
-                  lambda: loose.stamp_held(root.path, SEEN, {rel: None for rel in rels})]
-        clears += [lambda rel=rel: loose.keep_held(root.path, rel, False) for rel in rels]
+                  lambda: loose.stamp_held(root.path, SEEN, {rel: None for rel in rels}),
+                  lambda: loose.unkeep_held(root.path, rels)]       # one write for every address (198 B)
         for clear in clears:
             try:
                 clear()

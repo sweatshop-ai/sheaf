@@ -1,6 +1,7 @@
 """The index data: every document of every root with its dot, read state and tabs, in
 `/_/index.json` (SPEC 8.5, 8.6, 8.7). The page made from it is in test_hub_index_page.py."""
 import os
+import subprocess
 
 import pytest
 
@@ -292,6 +293,31 @@ def test_a_new_render_clears_opened(world, work):
     assert row(world, "work/start.md")["opened"] is True
     world.hub.render(work / "start.md", {}, None)
     assert row(world, "work/start.md")["opened"] is False
+
+
+def test_the_pandoc_runs_of_one_render_share_one_time_limit_shorter_than_the_clients_wait(world, work, monkeypatch):
+    """198 D (Codex on #640): a render runs pandoc more than once, and each run had its own 120 s, so a render that the
+    hub carried to its end could take longer than `sheaf open` waits (RENDER_TIMEOUT) and fail there. The runs of one
+    render share 120 s, and a run with none of it left fails at once: the hub answers in time, with the page's error."""
+    from sheafmd import _pandoc
+    from sheafmd.hub import client
+    now, limits = [1000.0], []
+
+    real = subprocess.run
+
+    def slow(cmd, timeout=None, **kw):         # every pandoc run takes 70 s of the clock
+        if cmd[0] != _pandoc.pypandoc.get_pandoc_path():
+            return real(cmd, timeout=timeout, **kw)
+        limits.append(timeout)
+        now[0] += min(timeout, 70.0)
+        if timeout < 70.0:
+            raise subprocess.TimeoutExpired(cmd, timeout)
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+    monkeypatch.setattr(_pandoc.subprocess, "run", slow)
+    monkeypatch.setattr(_pandoc, "_clock", lambda: now[0])
+    world.hub.render(work / "start.md", {}, None)       # the page it serves says pandoc did not finish
+    assert len(limits) >= 2, limits
+    assert now[0] - 1000.0 <= _pandoc.TIMEOUT < client.RENDER_TIMEOUT, limits
 
 
 def test_a_document_opened_from_the_index_is_opened_but_not_rendered(world):

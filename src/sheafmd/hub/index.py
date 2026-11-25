@@ -625,7 +625,8 @@ class Index:
             if gone is not None and gone():
                 raise Abandoned
             giver = None                            # the member whose loose root this is, when it is another's
-            if member is not None and not hub.owns(member, root):
+            served = bool(root.clone) and hub.repos is not None     # a served clone: every member may be shown its pages, each by `visible`
+            if member is not None and not hub.owns(member, root) and not served:
                 giver = hub.giver(member, root)     # only a loose root that Shares a page with this member is listed
                 if giver is None:
                     continue
@@ -681,10 +682,10 @@ class Index:
                             and (giver is None or hub.member_owns(member, address)):
                         if row := self._row(address, path, os.fstat(op.fd), waiting, running, member, op, private_ok=board):
                             rows.append(row)
-            if (rendered or giver is not None) and not rows:
+            if (rendered or giver is not None or (served and member is not None)) and not rows:
                 continue                        # a root that Shares nothing with this member is not told of
             rows.sort(key=lambda r: (RANK[r["dot"]], -r["mtime"], r["doc"]))
-            if listing.more and giver is None:      # the owner's page count is the owner's
+            if listing.more and giver is None and (member is None or not served or rows):      # a served clone: told to a member who is shown a row of it, to none else (the `continue` above)
                 more[root.name] = listing.more
             # A member is told the root's name, never its folder on the hub's disk (9.9).
             folder = {"path": str(root.path)} if member is None else {}

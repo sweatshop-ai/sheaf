@@ -124,6 +124,7 @@ _Avoid_: back, thread panel
 
 **Root's tiroir**:
 The tiroir every page of a root goes to, named in its root config; a root that names none sends its pages to the person's default tiroir. A root moved to another tiroir takes its pages with it, versions and comments, and their old addresses lead to the new ones. (Decided 2026-11-15, wayfinder `sheaf-in-open-webui` ticket 04; partly built: a root's `tiroir` is read by `sheaf FILE.md` since #397, and the pieces of a root's move (the notice, the check, `send_root`, `check_root`, the sleeping clone) are in #416 and #428, but nothing calls them yet, so a root does not move; a loose page's old address forwards since #411 and #422.)
+Built for the receiving end: a moved root's pages land on the tiroir its `.sheaf.toml` names, each whole or not at all, by the channel's `root` verb (SPEC 9.9); the sending end runs in the archive sweep (`root_sender`): it sends the pages the hub keeps something of, writes a Forward per confirmed page and then puts the clone to sleep.
 _Avoid_: binding, target
 
 **Client tiroir**:

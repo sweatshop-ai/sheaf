@@ -16,7 +16,7 @@ Every rectoverso gets a **version list** and a **Compare mode** that shows, bloc
 
 ## Considered options
 
-- **Changes since the member's last visit only, with no list and no restore.** Rejected by Thierry: the list, restore and named versions are what members know from Google Docs.
+- **Changes since the member's last visit only, with no list and no restore.** Rejected by the owner: the list, restore and named versions are what members know from Google Docs.
 - **A history store of its own in the hub, for every kind of root.** Rejected: a committing root already has git, and a remote source has its own history. A third copy costs disk and can disagree with the source.
 - **Text diffs of the Markdown (git) only.** Rejected: a moved Block shows as a removal plus an insertion, and the fenced-div syntax shows through.
 - **Every save as its own row, or named versions only.** Rejected: autosave makes hundreds of rows in half an hour, and listing only named versions hides everything nobody named.

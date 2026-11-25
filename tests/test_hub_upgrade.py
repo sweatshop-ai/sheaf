@@ -718,3 +718,19 @@ def test_a_stop_decided_after_an_upgrade_stop_is_what_the_tabs_are_told_when_the
     for reason in calls:                     # the upgrade's callback first, as the race delivers it
         real(reason)
     assert sub.get(5) == ("hub-stopping", {"reason": "stop"})
+
+
+def test_a_signal_that_wins_under_launchd_starts_no_hub_and_is_said_at_once(
+        port, thread_hub, quick_stop, monkeypatch, upgrade_spawns):
+    """Ticket 194 G (#606): launchd starts again only a hub that exits with a failure (`KeepAlive.SuccessfulExit=false`),
+    and a signal exits 0 (14.3): on macOS a signalled service hub stays down, so the command says so at once and waits
+    for no hub, which another command could start meanwhile and this one would then act on."""
+    monkeypatch.setattr(hubclient.sys, "platform", "darwin")
+    hub = thread_hub(OLD)
+    hub.service = True
+    waited = []
+    monkeypatch.setattr(hubclient, "wait_for_start", lambda *a, **k: waited.append(a) or {"boot": "new", "version": __version__})
+    patch_the_stop_to_end_with(monkeypatch, hub, {"ok": True, "reason": "upgrade"}, "signal")
+    with pytest.raises(hubclient.HubBeingStopped):
+        hubclient.ensure_hub("cli", lambda s: None, lambda s: None)
+    assert upgrade_spawns == [] and waited == []

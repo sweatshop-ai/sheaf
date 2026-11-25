@@ -1380,3 +1380,34 @@ def test_the_documents_count_limit_is_one_for_a_root_and_the_private_root_listed
     is_error, rows = call(w.door, "documents", token=w.tokens["tok-a"], open_only=False)
     assert not is_error
     assert len([r for r in rows if "doc" in r]) == 3 and rows[3:] == [{"root": w.root.name, "more": 3}]
+
+
+def test_a_time_budget_that_runs_out_past_the_count_limit_among_hidden_files_says_the_listing_stopped(world, monkeypatch):
+    """Ticket 194 F (#610): the count limit is reached, then the time runs out while the files the caller may not see are
+    opened to be judged. A page the caller may see is still ahead and none was counted as `more`, so the answer says it
+    stopped; it never leaves the rest out without a word."""
+    import types
+
+    import sheafmd.hub.roots as roots
+    from sheafmd import mcp
+    w = world
+    monkeypatch.setattr(roots, "COUNT_LIMIT", 1)
+    (w.two.list_repo / "acme/blog/a-open.md").write_text(PROJECT_WIDE, encoding="utf-8")
+    for i in range(3):
+        (w.two.list_repo / f"acme/blog/hidden{i}.md").write_text(PRIVATE, encoding="utf-8")
+    (w.two.list_repo / "acme/blog/open.md").write_text(PROJECT_WIDE, encoding="utf-8")
+    late = [0.0]
+    clock = types.SimpleNamespace(**{k: getattr(time, k) for k in dir(time) if not k.startswith("_")})
+    clock.monotonic = lambda: time.monotonic() + late[0]
+    monkeypatch.setattr(mcp, "time", clock)
+    real = mcp.Door._open_in
+
+    def opening(self, address, *a, **k):
+        if "hidden" in address:
+            late[0] = 1000.0              # the budget runs out while a hidden file is opened to be judged
+        return real(self, address, *a, **k)
+    monkeypatch.setattr(mcp.Door, "_open_in", opening)
+    is_error, rows = call(w.door, "documents", token=w.tokens["loose"], open_only=False)
+    assert not is_error
+    assert rows == [{**rows[0], "doc": f"{w.root.name}/acme/blog/a-open.md"},
+                    {"root": w.root.name, "stopped": "time budget reached"}], rows

@@ -157,3 +157,16 @@ def test_enter_twice_at_the_end_of_code_among_words_in_a_cell_leaves_the_words_o
     assert "<table" not in out
     row = out.splitlines()[-1]
     assert re.search(r"`red`<br><br>\s*now\s*\|$", row), row
+
+
+# Ticket 194 D, E (#607): a break at the end of a mark has no next sibling; the text after the mark is what follows it.
+def test_two_no_break_spaces_after_a_break_at_the_end_of_bold_keep_the_break():
+    row = saved_cell("<b>x<br></b>  ")
+    assert "<br>" in row and row.count(" ") == 1
+
+
+def test_two_no_break_spaces_after_a_break_at_the_end_of_bold_in_a_table_with_a_backslash_keep_one():
+    src = "| a | b |\n|---|---|\n| x | a\\b |"
+    html = pandoc(["-f", "gfm", "-t", "html5", "--no-highlight"], src).strip().replace(">x<", "><b>x<br></b>  <")
+    out = saved_table(html, src)
+    assert "<table" in out and "<br" in out and out.count(" ") == 1 and "a\\b" in out

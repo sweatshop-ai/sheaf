@@ -386,6 +386,146 @@ def test_a_revoked_token_fails_loudly_and_renders_nothing_on_the_laptop(tiroir, 
     assert "refused" in err and "sheaf connect" in err
 
 
+# ── the names of the door's tools ────────────────────────────────────────────
+
+LAPTOP_ONLY_SHEAF = "a laptop token reaches only the sheaf_* tools"
+
+
+@pytest.fixture
+def prefixed_door(tiroir, monkeypatch):
+    """The tiroir's door in front of the hub: its tools are named `sheaf_<tool>` and a call under any other name is a
+    403 whose text says so. `prefixed_door.wire` is the name of every tool the CLI called or listed."""
+    inner = send.post
+    tiroir.wire = []
+
+    def post(url, bearer, message, headers):
+        method, passed = message.get("method"), message
+        if method == "tools/call":
+            name = message["params"]["name"]
+            tiroir.wire.append(name)
+            if not name.startswith("sheaf_"):
+                return 403, None, {"refusal": LAPTOP_ONLY_SHEAF}
+            passed = {**message, "params": {**message["params"], "name": name[len("sheaf_"):]}}
+        elif method == "tools/list":
+            tiroir.wire.append(method)
+        status, got, back = inner(url, bearer, passed, headers)
+        if method == "tools/list" and status == 200:
+            for t in got["result"]["tools"]:
+                t["name"] = "sheaf_" + t["name"]
+        return status, got, back
+
+    monkeypatch.setattr(send, "post", post)
+    return tiroir
+
+
+def test_a_door_that_names_its_tools_sheaf_underscore_is_called_by_those_names(prefixed_door, scratch, capsys):
+    code, out, err = run(capsys, scratch)
+    assert code == 0, err
+    assert prefixed_door.wire == ["tools/list", "sheaf_create"]
+    assert on_the_tiroir(prefixed_door, f"loose-bea/{loose.month()}/notes.md") == TEXT
+    code, _, err = run(capsys, scratch)
+    assert code == 0, err
+    assert prefixed_door.wire.count("tools/list") == 2 and "sheaf_update" in prefixed_door.wire
+    assert not [n for n in prefixed_door.wire if n in ("create", "update", "read")]
+
+
+def test_a_hub_that_names_its_tools_bare_is_called_by_bare_names_after_listing_them_once(tiroir, scratch, capsys):
+    code, _, err = run(capsys, scratch)
+    assert code == 0, err
+    calls = [m["method"] if m["method"] != "tools/call" else m["params"]["name"] for _, _, m in tiroir.seen if m]
+    assert calls.count("tools/list") == 1 and "create" in calls and not any(c.startswith("sheaf_") for c in calls)
+
+
+def test_a_door_whose_tool_list_cannot_be_read_is_called_by_the_bare_name(tiroir, scratch, capsys, monkeypatch):
+    inner = send.post
+
+    def post(url, bearer, message, headers):
+        if message.get("method") == "tools/list":
+            return 404, None, {}
+        return inner(url, bearer, message, headers)
+
+    monkeypatch.setattr(send, "post", post)
+    code, _, err = run(capsys, scratch)
+    assert code == 0, err
+    assert [m["params"]["name"] for _, _, m in tiroir.seen if m and m["method"] == "tools/call"] == ["create"]
+
+
+def test_a_door_that_pages_its_tool_list_is_read_to_the_end(prefixed_door, scratch, capsys, monkeypatch):
+    inner = send.post
+
+    def post(url, bearer, message, headers):
+        status, got, back = inner(url, bearer, message, headers)
+        if message.get("method") == "tools/list":
+            tools = got["result"]["tools"]
+            cursor = (message.get("params") or {}).get("cursor")
+            got["result"] = ({"tools": tools[:1], "nextCursor": "p2"} if not cursor else {"tools": tools[1:]})
+        return status, got, back
+
+    monkeypatch.setattr(send, "post", post)
+    code, _, err = run(capsys, scratch)
+    assert code == 0, err
+    assert "sheaf_create" in prefixed_door.wire and "create" not in prefixed_door.wire
+
+
+def test_a_tool_list_that_errors_leaves_the_call_to_say_what_is_wrong(tiroir, scratch, capsys, monkeypatch):
+    inner = send.post
+
+    def post(url, bearer, message, headers):
+        if message.get("method") == "tools/list":
+            raise send.Unreachable("the list timed out.")
+        return inner(url, bearer, message, headers)
+
+    monkeypatch.setattr(send, "post", post)
+    code, _, err = run(capsys, scratch)
+    assert code == 0, err
+    assert [m["params"]["name"] for _, _, m in tiroir.seen if m and m["method"] == "tools/call"] == ["create"]
+
+
+def test_a_403_after_a_write_does_not_say_that_nothing_was_sent(tiroir, monkeypatch):
+    door_ = send.Door(FRONT, tiroir.token, {})
+    door_.landed = True
+    monkeypatch.setattr(send, "post", lambda *a: (403, None, {"refusal": "no"}))
+    with pytest.raises(send.TokenRefused) as e:
+        door_._post_checked({"method": "x"})
+    assert "Nothing was sent" not in str(e.value) and "no" in str(e.value)
+
+
+def test_a_403_shows_what_the_door_said_and_not_that_the_token_was_revoked(tiroir, scratch, local, capsys, monkeypatch):
+    inner = send.post
+
+    def post(url, bearer, message, headers):
+        if message.get("method") == "tools/call":
+            return 403, None, {"refusal": LAPTOP_ONLY_SHEAF}
+        return inner(url, bearer, message, headers)
+
+    monkeypatch.setattr(send, "post", post)
+    code, out, err = run(capsys, scratch)
+    assert code == 1 and local == [] and out == ""
+    assert LAPTOP_ONLY_SHEAF in err and "revoked" not in err and "Nothing was sent" in err
+    assert tiroir.token not in err
+
+
+def test_a_403_with_no_text_keeps_the_sentence_about_the_token(tiroir, scratch, local, capsys, monkeypatch):
+    monkeypatch.setattr(send, "post", lambda url, bearer, message, headers: (403, None, {}))
+    code, _, err = run(capsys, scratch)
+    assert code == 1 and "revoked" in err and "sheaf connect" in err
+
+
+def test_the_text_of_a_refusal_is_one_short_printable_line(monkeypatch):
+    class Refused(urllib.error.HTTPError):
+        def read(self, n=-1):
+            return b"no\x1b[31m way\nsecond line " + b"x" * 500
+
+    def opener(req, timeout=None):
+        raise Refused("https://front.example/mcp", 403, "Forbidden", {}, None)
+
+    monkeypatch.setattr(connect._NO_REDIRECT, "open", opener)
+    status, got, back = send._request(urllib.request.Request("https://front.example/mcp"))
+    assert status == 403 and got is None
+    text = back["refusal"]
+    assert text.isprintable() and "\n" not in text and len(text) <= 200 and text.startswith("no")
+
+
 # ── where the state lives, and what is never written ─────────────────────────
 
 def test_the_state_is_in_the_clis_state_folder_and_nothing_is_written_beside_the_file(tiroir, scratch, capsys):

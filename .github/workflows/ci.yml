@@ -167,8 +167,10 @@ jobs:
 
       - name: Page tests (Playwright)
         if: hashFiles('tests/page/**') != '' && steps.page.outputs.run == 'true'
-        # The page tests take 4 to 8 minutes; the install is bounded below. A step that runs past 40 is stuck.
-        timeout-minutes: 40
+        # On the self-hosted runners the page tests took 25 to 38 minutes on passing runs of main (2026-11-25: runs 45507325535 25m,
+        # 45515828869 27m, 45572817529 37m), the machine being shared by three runners at a load above its cores; the install is
+        # bounded below. A step that runs past 60 is stuck.
+        timeout-minutes: 60
         # A page test that stalls (PageStalled, or a timeout in the Playwright driver) leaves its evidence here:
         # tests/page/stall_evidence.py, ticket 173 O. Set, it also gives the session's Chromium a DevTools port on the loopback,
         # open to any process of the machine for the step: that browser holds only the test hubs' throwaway pages and

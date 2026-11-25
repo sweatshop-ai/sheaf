@@ -449,7 +449,15 @@ def test_a_ready_page_writes_its_record_versions_and_write_log_under_the_roots_a
     assert incoming.land_root(h, b) == (200, {"pages": {"a.md": {"ok": True, "hash": blob}}})
     assert h.repos.rows == {("o/r", "a.md"): ("al", b["tip"], {"session": "s1", "host": "box"})}
     assert h.versions.puts == [("o--r/a.md", "# old\n")]
-    assert h.writes.carried == [("o--r/a.md", [{"time": "t", "writer": "w"}], "https://there.example", "alice")]
+    assert h.writes.carried == [("o--r/a.md", [{"time": "t", "writer": "w"}], "", "alice")]
+
+
+def test_the_write_log_line_of_a_landed_root_names_the_tokens_peer_never_the_bodys_origin(clone):
+    h = land_hub(clone)
+    b = body(clone, ("a.md", "alice@example.com", None))
+    b["from"]["origin"] = "https://liar.example"
+    incoming.land_root(h, b, peer="https://peer.example")
+    assert h.writes.carried[0][2] == "https://peer.example"
 
 
 def test_a_landed_version_brings_back_no_audience(clone):
@@ -483,6 +491,15 @@ def test_a_second_id_for_the_same_path_lands_again(clone):
     incoming.land_root(h, body(clone, ("a.md", "alice@example.com", None)))
     incoming.land_root(h, body(clone, ("a.md", "alice@example.com", None), id="m2"))
     assert len(h.writes.carried) == 2
+
+
+def test_two_peers_sending_the_same_id_and_path_each_land_their_own(clone):
+    h = land_hub(clone)
+    b = body(clone, ("a.md", "alice@example.com", None))
+    incoming.land_root(h, b, peer="https://one.example")
+    incoming.land_root(h, b, peer="https://two.example")
+    incoming.land_root(h, b, peer="HTTPS://Two.example/")        # the same peer again, spelled otherwise: answered, not landed
+    assert [c[2] for c in h.writes.carried] == ["https://one.example", "https://two.example"]
 
 
 def test_a_failing_store_leaves_nothing_and_answers_failed_for_that_page(clone):

@@ -325,8 +325,8 @@ class Archive:
         be written; then the first refusal is raised (`Refused`). The caller holds `loose-keep.lock`."""
         failed = None
         clears = [lambda: loose.stamp_held(root.path, ARCHIVED, {rel: None for rel in rels}),
-                  lambda: loose.stamp_held(root.path, SEEN, {rel: None for rel in rels})]
-        clears += [lambda rel=rel: loose.keep_held(root.path, rel, False) for rel in rels]
+                  lambda: loose.stamp_held(root.path, SEEN, {rel: None for rel in rels}),
+                  lambda: loose.unkeep_held(root.path, rels)]       # one write for every address (198 B)
         for clear in clears:
             try:
                 clear()

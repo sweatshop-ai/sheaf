@@ -167,11 +167,13 @@ def _set_mode(fd: int, name: Path, mode: int):
         os.chmod(name, mode)
 
 
-def _replace_if_ours(tmp: Path, target: Path, data: bytes, look_after: bool = True, mode: int | None = None):
+def _replace_if_ours(tmp: Path, target: Path, data: bytes, look_after: bool = True, mode: int | None = None,
+                     check: Callable[[], None] | None = None):
     """os.replace(tmp, target), where tmp was written with `data` and closed: refused when tmp's
     name no longer holds those bytes in a regular file, not a link, and failed when target's does
     not just after (unless `look_after` is False: a writer without the flock cannot tell a swap from
-    another writer's replace). `mode`, when given, is put on tmp once it was read back.
+    another writer's replace). `mode`, when given, is put on tmp once it was read back. `check`, when given, is called
+    after that read, the last step before the replace, and refuses by raising (198 A: the read takes as long as the file).
 
     By the bytes, not by the inode: the file is closed before the rename, so that an error only the
     close reports (an upload that failed, on an rclone mount) comes before the document is touched;
@@ -186,6 +188,8 @@ def _replace_if_ours(tmp: Path, target: Path, data: bytes, look_after: bool = Tr
     if not ours:
         raise OSError(f"{tmp} was replaced while the new text was written to it, "
                       f"so {target} is left as it was")
+    if check is not None:
+        check()
     os.replace(tmp, target)
     if look_after and not _holds_bytes(target, data):
         raise OSError(f"{target} is not the file just written (its folder changed "
@@ -216,7 +220,7 @@ def _write_atomic(p: Path, text: str, mode: int | None = None, check: Callable[[
     On Windows the replace is made as before.
 
     `mode` is the bits the file gets (default: the document's own). `check` is called once the new
-    file is whole, just before it takes the old one's place, and refuses by raising. With `locked`
+    file is whole and read back, just before it takes the old one's place, and refuses by raising. With `locked`
     False the caller holds no flock, so the path is written as given (a link there is replaced, not
     followed, and the file need not exist yet) and the sibling is a fresh `.<name>.<random>.sheaf-tmp`
     of its own, made with O_EXCL by mkstemp, so that two writes at once never share it, and the target is
@@ -253,12 +257,12 @@ def _write_atomic(p: Path, text: str, mode: int | None = None, check: Callable[[
             f.write(data)
             f.flush()
             os.fsync(f.fileno())
-        if check is not None:
-            check()
         if CHECKS_THE_NAMES:
-            _replace_if_ours(tmp, target, data, look_after=locked, mode=mode)
+            _replace_if_ours(tmp, target, data, look_after=locked, mode=mode, check=check)
         else:
             os.chmod(tmp, mode)
+            if check is not None:
+                check()
             os.replace(tmp, target)
     except BaseException:
         if tmp is not None:

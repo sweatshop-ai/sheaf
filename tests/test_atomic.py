@@ -52,6 +52,33 @@ def test_the_check_runs_once_the_new_file_is_whole(tmp_path):
     assert target.read_text() == "new"
 
 
+def test_the_check_runs_after_the_new_file_is_read_back_just_before_the_replace(tmp_path, monkeypatch):
+    """198 A (Codex on #624): the check ran before the new file was read back whole, a read as long as the file; an editor's
+    save during that read was overwritten all the same. It runs after that read, the last step before the replace."""
+    from sheafmd import source
+    tmp_path = tmp_path / "dir"
+    tmp_path.mkdir()
+    target = tmp_path / "f"
+    target.write_text("old")
+    holds = source._holds_bytes
+
+    def read_back(name, data, mode=None):
+        ours = holds(name, data, mode)
+        if Path(name).name != "f":
+            target.write_text("the editor's save")       # saved while the temp file is read back
+        return ours
+    monkeypatch.setattr(source, "_holds_bytes", read_back)
+
+    def unchanged():
+        if target.read_text() != "old":
+            raise RuntimeError("changed meanwhile")
+
+    with pytest.raises(RuntimeError, match="changed meanwhile"):
+        write_text_atomic(target, "new", check=unchanged)
+    assert target.read_text() == "the editor's save"
+    assert os.listdir(tmp_path) == ["f"]
+
+
 def _swap_our_temp_at_fsync(monkeypatch, folder, put, swap=True):
     """While the new text is written, something else takes the temp file's name, as a user who can write the
     folder can at any moment. With swap False nothing is made: the control."""

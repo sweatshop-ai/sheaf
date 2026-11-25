@@ -268,6 +268,31 @@ def test_on_the_mounted_page_a_box_the_front_scrolled_out_of_view_stays_where_it
     assert f.js(box + "return [b.offsetLeft, b.offsetTop];") == before
 
 
+def test_on_the_mounted_page_a_box_inside_a_host_that_shrinks_with_the_window_is_held_inside_the_smaller_host(front):
+    """198 C (Codex on #628): the area a moved box was held in was measured with the host's height of now, so a host the
+    front sizes to the window (a pane of `100vh` less its header) that shrank with it made the box, which lay inside the
+    larger host and lies wholly past the smaller one's foot, look scrolled away, and it was left out of reach."""
+    f = front.open()
+    f.page.evaluate("document.getElementById('pane').style.height = 'calc(100vh - 60px)'")
+    f.page.evaluate("new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))")
+    f.drag(f.point("main", "about", end=False), f.point("main", "apples", end=True))
+    until(lambda: f.has("#rd-popover textarea"), what="the box, opened by the selection")
+    box = "const b = root.querySelector('#rd-popover'); "
+    x, y = f.centre("#rd-popover .rd-head .rd-quote")
+    m = f.page.mouse
+    m.move(x, y)
+    m.down()
+    m.move(x, y + 2500, steps=8)                 # held at the host's foot, inside the window
+    m.up()
+    small = 360
+    top = f.js(box + "return b.getBoundingClientRect().top;")
+    assert top >= small, ("the test's own premise: the box lies wholly past the smaller window's foot", top)
+    f.page.set_viewport_size({"width": 1100, "height": small})
+    # its head in the smaller host (a box taller than the host keeps its head in it, its foot below)
+    until(lambda: f.js(box + "const r = b.getBoundingClientRect(); return r.top >= 60 && r.top < innerHeight - 20;"),
+          what="the moved box back inside the smaller host")
+
+
 def test_a_real_ctrl_c_in_the_mounted_boxs_empty_field_puts_the_passage_on_the_clipboard(any_front):
     f = any_front.open()
     f.drag(f.point("main", "about", end=False), f.point("main", "apples", end=True))

@@ -385,6 +385,24 @@ def test_a_render_the_hub_answers_in_time_raises_its_error_in_the_request(world,
         world.hub.render(work / "start.md", {}, None)
 
 
+def test_the_warnings_of_a_render_that_answered_pending_go_to_the_next_open(world, work, monkeypatch):
+    """199 (review round 1): a render answered `pending` hands its link-rule warnings to nobody; they stay with the
+    document, and the next `sheaf open` gets them."""
+    go, held = threading.Event(), world.hub._render_held
+
+    def late(*a, **kw):
+        go.wait(10)
+        got = held(*a, **kw)
+        return {**got, "warnings": ["a link that no longer leads anywhere"]}
+    monkeypatch.setattr(world.hub, "_render_held", late)
+    monkeypatch.setattr(core, "RENDER_ANSWER_WITHIN", 0.2)
+    assert world.hub.render(work / "start.md", {}, None).get("pending") is True
+    go.set()
+    _join_renders()
+    monkeypatch.setattr(world.hub, "_render_held", held)
+    assert world.hub.render(work / "start.md", {}, None)["warnings"] == ["a link that no longer leads anywhere"]
+
+
 def test_a_render_whose_rebuild_for_new_settings_failed_is_rebuilt_by_the_next_render_with_the_same_settings(world, work,
                                                                                                          monkeypatch):
     """199 (spec review): the settings of a render are recorded before its rebuild runs, so a rebuild that failed (after

@@ -992,12 +992,17 @@ class Hub:
         def work():
             try:
                 got = ("answer", self._render_held(address, md, settings, target))
-            except Exception as ex:                # the request's, while it waits; else written down
+            except BaseException as ex:            # the request's, while it waits; else written down
                 got, trace = ("error", ex), traceback.format_exc()[-1900:]
             with gate:
                 out[got[0]] = got[1]
                 late = out.get("late", False)
                 done.set()
+            if late and got[0] == "answer" and got[1].get("warnings"):
+                with self._lock:                   # nobody took this answer: the next open is handed its warnings
+                    e = self.entries.get(address)
+                    if e is not None:
+                        e.warnings = [*got[1]["warnings"], *e.warnings]
             if late and got[0] == "error":
                 known = isinstance(got[1], (RenderError, config.ConfigError))    # a bug keeps its traceback (`record_exception`)
                 self.record("render-failed", address, error=f"{type(got[1]).__name__}: {got[1]}"[:500],

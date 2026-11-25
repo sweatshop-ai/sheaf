@@ -263,3 +263,22 @@ def test_a_reply_with_crlf_in_its_body_is_read_back(doc, crlf):
 def sel_of(md, quote):
     from test_anchoring import sel
     return sel(md, quote)
+
+
+def test_a_pandoc_run_that_fails_is_not_kept_so_the_next_read_of_the_block_asks_pandoc_again(monkeypatch):
+    """198 F: a render's pandoc runs share one time limit, so a run can fail at once when the render's time is spent;
+    the block's reading must not stay None for every later render and save of the same text."""
+    real = rdc._sourcepos_html
+    fail = [True]
+
+    def flaky(block):
+        if fail[0]:
+            raise rdc.AnchorError("pandoc: did not finish")
+        return real(block)
+
+    monkeypatch.setattr(rdc, "_sourcepos_html", flaky)
+    rdc._read_tables.cache_clear()
+    block = "> | a | b |\n> |---|---|\n> | `x | %s | y` |\n" % fz.C
+    assert rdc._read_tables(block) is None
+    fail[0] = False
+    assert rdc._read_tables(block) is not None

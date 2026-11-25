@@ -91,6 +91,16 @@ class Unreachable(SendError):
 
 # ── the network: the two places a test stands in for the tiroir ─────────────
 
+def _refusal_text(e: urllib.error.HTTPError) -> str:
+    """What a 4xx answer says, as one short printable line (the door's own words), or "" when it says nothing usable."""
+    try:
+        raw = e.read(1024)
+    except (OSError, ValueError):
+        return ""
+    line = " ".join(raw.decode("utf-8", "replace").split())
+    return "".join(c for c in line if c.isprintable())[:200]
+
+
 def _request(req, timeout: float = TIMEOUT) -> tuple[int, dict | None, dict]:
     try:
         with connect._NO_REDIRECT.open(req, timeout=timeout) as r:
@@ -99,7 +109,7 @@ def _request(req, timeout: float = TIMEOUT) -> tuple[int, dict | None, dict]:
         if e.code >= 500:
             raise Unreachable(f"{req.full_url.split('/', 3)[2]} answered with an error ({e.code}). "
                               "Nothing was sent.") from None
-        return e.code, None, {}
+        return e.code, None, {"refusal": _refusal_text(e)}
     except (urllib.error.URLError, OSError) as e:
         # A URLError carries its cause as `reason`; an SSLError read from the socket is its own cause (its `reason` is a word).
         why = e.reason if isinstance(e, urllib.error.URLError) else e
@@ -218,12 +228,17 @@ def declared(environ=None, session=...) -> dict:
 _RESULT_TEXT = {"create": ("doc", "hash"), "update": ("doc", "hash"), "read": ("hash", "text")}
 
 
+# The hub's tools that the CLI calls: the names a door may list under a prefix.
+_HUB_TOOLS = ("create", "update", "read", "render_report")
+
+
 class Door:
     """One tiroir's library door, with the token: `initialize` first (a door may keep a session), then each tool call."""
 
     def __init__(self, origin: str, token: str, headers: dict):
         self.origin, self.token, self.headers, self.n = origin, token, dict(headers), 0
         self.started = False
+        self.names: dict[str, str] | None = None     # the tool names the server lists, by the bare name (see `_name`)
         self.wrote = False   # a create or update has been sent: from then on the tiroir may hold the text
 
     def _post(self, message: dict) -> tuple[int, dict | None, dict]:
@@ -239,6 +254,8 @@ class Door:
 
     def _post_checked(self, message: dict) -> tuple[int, dict | None, dict]:
         status, got, back = post(self.origin + connect.DOOR_PATH, self.token, message, self.headers)
+        if status == 403 and back.get("refusal"):       # the door says why: a token that was revoked says 401
+            raise TokenRefused(f"{self.origin} answered 403: {back['refusal']}. Nothing was sent.")
         if status in (401, 403):
             raise TokenRefused(f"{self.origin} refused the token (it was revoked, or it is not a token of that address): "
                             "make a new one with Connect a laptop and run sheaf connect. Nothing was sent.")
@@ -257,14 +274,35 @@ class Door:
             self.headers["Mcp-Session-Id"] = sid
         self._post({"jsonrpc": "2.0", "method": "notifications/initialized"})
 
+    def _name(self, name: str) -> str:
+        """The name the server gives the tool `name`: the hub's own tools are bare (`create`), a door in front of the hub
+        lists them under a prefix (`sheaf_create`). Read once from its `tools/list`, never assumed; a list that cannot
+        be read leaves the bare name, which is what a server that has no such tool answers for."""
+        if self.names is None:
+            self.names = {}
+            self.n += 1
+            status, got, _ = self._post({"jsonrpc": "2.0", "id": self.n, "method": "tools/list"})
+            result = got.get("result") if isinstance(got, dict) else None
+            tools = result.get("tools") if isinstance(result, dict) else None
+            listed = {t["name"] for t in tools if isinstance(t, dict) and isinstance(t.get("name"), str)} \
+                if status == 200 and isinstance(tools, list) else set()
+            # A door lists the hub's `create`, `update` and `read` under one prefix (`<prefix>create`...) and may list a tool of
+            # its own that keeps a bare name, `read` among them: so the prefix is the one under which all three stand.
+            prefixes = [n[:-len("create")] for n in listed if n.endswith("_create")
+                        if {n[:-len("create")] + "update", n[:-len("create")] + "read"} <= listed]
+            if len(prefixes) == 1:
+                self.names = {bare: prefixes[0] + bare for bare in _HUB_TOOLS if prefixes[0] + bare in listed}
+        return self.names.get(name, name)
+
     def tool(self, name: str, arguments: dict) -> tuple[bool, object]:
         """(is it an error, the parsed result or the sentence of the error) of one tool call."""
         if not self.started:
             self._start()
-        self.n += 1
         self.wrote = self.wrote or name in ("create", "update")
+        sent = self._name(name)
+        self.n += 1
         status, got, _ = self._post({"jsonrpc": "2.0", "id": self.n, "method": "tools/call",
-                                     "params": {"name": name, "arguments": arguments}})
+                                     "params": {"name": sent, "arguments": arguments}})
         result = got.get("result") if isinstance(got, dict) else None
         content = result.get("content") if isinstance(result, dict) else None
         if status != 200 or not isinstance(content, list) or not content:

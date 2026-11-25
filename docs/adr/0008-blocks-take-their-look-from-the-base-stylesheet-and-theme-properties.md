@@ -6,7 +6,7 @@ The structure of every Block type (the column grid, alignment, padding, image an
 
 ## Decisions
 
-- **Sizes without `style`.** `size`, `align` and `pad` reach the screen through attribute selectors on the `data-*` attributes pandoc writes, one rule per allowed step (image 25/50/75/100 %, column split 15 to 85 % in 5 % steps, App height 60 to 800 px in 20 px steps, pad none/S/M/L), generated from the Block type declarations. A value off its steps is refused on write (ADR 0002), so no stored value can lack a rule.
+- **Sizes without `style`.** `size`, `align` and `pad` reach the screen through attribute selectors on the `data-*` attributes pandoc writes, one rule per allowed step (image 25/50/75/100 %, column split 15 to 85 % in 5 % steps, App height 60 to 800 px in 20 px steps, pad none/S/M/L), generated from the Block type declarations. A value off its steps is refused on write (ADR 0003), so no stored value can lack a rule.
 - **Narrow screens and print.** Below 600 px wide, columns stack in source order and their split is ignored; on wider screens, in print and in the PDF they stay side by side at their stored split. An image keeps its share of its column at every width.
 - **One look everywhere.** The same block CSS serves the reading view, the edit view, the share copy and the PDF. The **editor chrome** (gutter, add and drag handles, block toolbar, slash menu, selection outline) is sheaf's own stylesheet, apart from it: it takes the Theme's font and accent through properties, and a Theme cannot restyle it.
 - **Stubs.** In reading, the share copy and the PDF a Stub's content renders as ordinary content with no frame. In the edit view it gets a dashed frame labelled with its type and a lock.
@@ -19,7 +19,7 @@ The structure of every Block type (the column grid, alignment, padding, image an
 - **Block CSS in plain only.** Rejected: a Theme replaces plain's stylesheet, so every Theme would have to restyle every Block type or show broken columns and sizes.
 - **Block look fixed, not themeable.** Rejected: an organisation's pages would carry its fonts and colours around blocks drawn in sheaf's.
 - **Block colours and sizes as keys in `theme.toml`.** Rejected: a second way to say what CSS already says, and one sheaf would have to grow with every Block type.
-- **Free size values rendered as inline `style`.** Rejected: reopens what ADR 0002 closed.
+- **Free size values rendered as inline `style`.** Rejected: reopens what ADR 0003 closed.
 - **A Source service sends its site's CSS, sanitised and scoped by sheaf.** Rejected for now: a page on the front's origin would carry CSS from outside the hub (remote `url()` fetches, overlays over sheaf's controls), and the sanitiser would be a new attack surface to build and keep. A hand-written Theme gets close enough to the site's look.
 - **A sanitiser for `theme.css`.** Rejected: only the hub's admin writes a Theme, the same person who could change sheaf itself.
 

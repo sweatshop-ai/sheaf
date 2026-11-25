@@ -1,6 +1,6 @@
 # Blocks cross a whole-document source adapter as a tree
 
-Status: accepted (2026-11-24, block-editor design, decision 07)
+Status: accepted (2026-11-24, block-editor design, decision 07); Consequences amended by ADR 0007 (2026-11-25)
 
 The block editor reaches its source only through a **source adapter**, and the adapter knows nothing of block operations. It offers `read() → (blocks, base)` and `write(blocks, base, author, note) → outcome` on one whole document, where `base` is an opaque string the adapter alone interprets (today a content hash, a git blob sha for a file in a repo, a `modified` time for a CMS post). Inserting, moving, removing and editing one block happen in sheaf's core on the block list, which then writes the whole document. The reason is that the sources this must fit write whole documents and store no block id: a Markdown file, an Astro site's content files (one file per commit, the file's sha as base) and a WordPress post (`content.raw` as one string, no conflict check of its own). An interface with per-block operations would be faked by every adapter.
 

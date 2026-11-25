@@ -1,6 +1,6 @@
 # Markdown with fenced divs as the stored form of blocks
 
-Status: accepted (2026-11-23, block-editor design, decision 04)
+Status: accepted (2026-11-23, block-editor design, decision 04); amended 2026-11-24 (see Amendments below)
 
 A rectoverso that learns richer blocks (callout, columns, button) keeps its recto a Markdown file. A Rich block is a pandoc fenced div carrying its type as a class, its id and its attributes, `::: {#b-intro .callout tone="info"}` … `:::`, read and written with `gfm+fenced_divs`. Raw HTML stays only for a future free-HTML block type and stays locked until the rules for HTML on the front's origin are set. The reason is that the `.md` must stay readable to any agent or system that does not know the editor: with the extension pandoc 3.9 renders the div to `<div id="b-intro" class="callout" data-tone="info">` and writes it back unchanged, and a reader without it still sees every word, only with the `:::` lines as text.
 

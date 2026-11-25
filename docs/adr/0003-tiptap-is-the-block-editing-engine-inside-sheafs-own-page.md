@@ -2,7 +2,7 @@
 
 Status: accepted (2026-11-24, block-editor design, decision 11)
 
-Editing a rectoverso block by block needs rich text inside a block, selection, undo, a drag handle, alignment and image resizing. sheaf does not write that machinery itself: it runs TipTap (all `@tiptap/*` packages used are MIT) inside its existing vanilla `page.js`, with no UI framework. The stored form stays Markdown with pandoc fenced divs (ADR 0001): sheaf writes its own reader and writer between that Markdown and TipTap's document, in the per-node `parseMarkdown`/`renderMarkdown` hooks, with pandoc's exact spelling and only declared attributes (ADR 0002). sheaf builds what TipTap leaves open: the slash menu and block toolbar, the column, callout, button and Stub nodes, column widths and padding. TipTap's own Markdown container syntax (`:::name {attrs}`) is not used, because pandoc does not read it.
+Editing a rectoverso block by block needs rich text inside a block, selection, undo, a drag handle, alignment and image resizing. sheaf does not write that machinery itself: it runs TipTap (all `@tiptap/*` packages used are MIT) inside its existing vanilla `page.js`, with no UI framework. The stored form stays Markdown with pandoc fenced divs (ADR 0001): sheaf writes its own reader and writer between that Markdown and TipTap's document, in the per-node `parseMarkdown`/`renderMarkdown` hooks, with pandoc's exact spelling and only declared attributes (ADR 0004). sheaf builds what TipTap leaves open: the slash menu and block toolbar, the column, callout, button and Stub nodes, column widths and padding. TipTap's own Markdown container syntax (`:::name {attrs}`) is not used, because pandoc does not read it.
 
 ## Considered options
 

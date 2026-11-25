@@ -330,6 +330,13 @@ class LiveDocument:
             got = {}
 
             def change(text):
+                token = rde.DOC.set(self._file())       # for the edit alone: the seam and the Versions record run after it, as before
+                try:
+                    return decide(text)
+                finally:
+                    rde.DOC.reset(token)
+
+            def decide(text):
                 if base_hash and rds.md_hash(text) != base_hash:
                     # Saved against an older version: merge it onto this one.
                     base = self._known(base_hash)
@@ -343,12 +350,7 @@ class LiveDocument:
                 return guard(text, new, got["report"]["toggled"]) if guard is not None else new
             # The version check happens inside change(), under the file lock: the CLI and an
             # Tell job write this file from other processes.
-            md = self._file()
-            token = rde.DOC.set(md)
-            try:
-                _, new_text = self._update(lambda t, op: change(t), move=move, remember=True)
-            finally:
-                rde.DOC.reset(token)
+            _, new_text = self._update(lambda t, op: change(t), move=move, remember=True)
             report = got["report"]
             if report["changed"]:
                 self._rerender()

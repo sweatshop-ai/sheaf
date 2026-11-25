@@ -93,10 +93,16 @@ class MarkdownFileAdapter:
         return Tree(text), rds.md_hash(text)
 
     def write(self, tree, base, author: str = "", note: str = "", move=None) -> dict:
-        name = self._beneath()[1] if self._beneath is not None else self._file().name
+        here = self
+        if self._beneath is not None:
+            where = self._beneath()          # asked once: the name judged is the file written
+            here = MarkdownFileAdapter(beneath=lambda: where)
+            name = where[1]
+        else:
+            name = self._file().name
         if not self.accepts(name):
             return refused(f"{name} is not a .md file")
-        out, _, _ = self.apply(lambda t, opened: tree.text, expected=base, move=move, author=author, note=note)
+        out, _, _ = here.apply(lambda t, opened: tree.text, expected=base, move=move, author=author, note=note)
         return out
 
     def apply(self, change: Callable, *, expected: str | None = None, move=None, author: str = "", note: str = "",

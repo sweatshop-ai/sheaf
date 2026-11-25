@@ -1,6 +1,6 @@
 # Every source other than a Markdown file is reached through one remote adapter
 
-Status: accepted (2026-11-25, block-editor design, decision 13). Amends ADR 0005.
+Status: accepted (2026-11-25, block-editor design, decision 13). Amends ADR 0005. Amended by ADR 0010 (optional `versions` call).
 
 sheaf has two source adapters and no plug-in mechanism: the **Markdown-file adapter** for folder roots, and one generic **remote adapter** that speaks a small HTTP protocol to a **source service**, a program the source's owner runs beside the source. The source service holds the source's credentials, maps its own format to the block tree, checks its own rules and maps members to commit authors; the hub holds one bearer per source and never a key to the site. The reason is that a hub reachable from the front's origin and from laptop tokens is the wrong place for a key that can change someone's website, and that a site already written by its owner's tools keeps one key and one set of checks only when sheaf goes through those tools instead of beside them.
 

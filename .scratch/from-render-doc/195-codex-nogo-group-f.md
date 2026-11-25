@@ -45,3 +45,17 @@ Each box is fixed test-first: a red test on main, then the fix.
 - #617 SERIOUS (`page/page.js`, a scrolled-away moved box snaps back when the visible area changes size): fixed by 1cbf75f3 and 09eb60d4 (#628, ticket 183 BN), `clampMoved` keeps the top of a box that meets neither the area now nor the one it was held in.
 - #617 MINOR (`page/page.js`, the `ResizeObserver` of a moved box is never disconnected): fixed by 1cbf75f3 (#628, ticket 183 BO), disconnected when the box closes.
 - #617 SERIOUS (`page/sheaf.js`, `"old  "` renames the folder `"old "` to `"old"`): fixed by 1cbf75f3 (#628, ticket 183 BQ), a field with white space typed around it is compared with the trimmed name.
+
+## Review round (one, on #662)
+
+`mattpocock-skills:code-review` (standards and spec), then the bug hunt. Codex was out of tokens on both accounts (runner exit 7), so the Opus fallback ran instead. All three returned GO. Minors fixed in the same push:
+
+- `rebuild` returns RETRY when a write moved the file under its read, and `Hub.wrote(moved=True)` then keeps no stat key, as it does for a refresh (spec review). Test: `test_a_rebuild_that_a_write_moved_under_tells_the_tabs_the_text_they_hold`, `test_a_settled_rebuild_returns_the_snapshot_it_told`.
+- A take-back that leaves the file (replaced, or a filesystem whose inode numbers do not hold) writes `take-back-left-file` to the diagnostics log (Opus P2).
+- The `_UNSEEN` sentinel is gone; the `refresh` and `rebuild` docstrings name the forgotten case (standards).
+
+## Left open
+
+- [ ] **F** (minor, spec review): `Hub.forget_document` (a page deleted to the trash) publishes `gone` without `live.forget()`, so a render that holds the entry can still send `changed` after it: the race of A on a path no Codex finding named. Not fixed here: `forget_document` keeps the document's versions, and making it call `forget` needs its own look at what a delete keeps.
+- [ ] **G** (minor, Opus P2, older than this ticket): in `_rerender_settled`, when the second render of the kept text raises, the page served (`e.html`) is the one rendered from the torn read while `_text` and `_hash` are the old ones, until the next refresh. The same shape was in `refresh` before; `rebuild` now reaches it too.
+- [ ] **H** (minor, standards): the generated-mark seeding line is repeated in four tests of `tests/test_hub_place.py`; a helper would do.

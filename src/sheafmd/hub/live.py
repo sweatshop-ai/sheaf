@@ -36,7 +36,6 @@ BY_ID = f"{UNKNOWN}, so this comment may not be the one on the page"
 # What `LiveDocument.refresh` returns when it could not decide what the file holds (a write in flight, a file it could not
 # stat): it kept what the tabs hold and published nothing, and the caller must look at the file again, even unchanged.
 RETRY = object()
-_UNSEEN = object()      # `_rerender_settled` with no stamp given: it takes one
 
 
 class NotAuthor(Exception):
@@ -277,17 +276,19 @@ class LiveDocument:
 
     def rebuild(self):
         """Render the page again from the file as it is and tell the tabs: the render settings
-        changed, so what they show is not the same page (`textSame` false)."""
+        changed, so what they show is not the same page (`textSame` false). Returns the snapshot told; RETRY when a write
+        moved the file under the read, so the page was rendered from the text the tabs hold and the caller must look at the
+        file again; None for a forgotten document, which tells nothing."""
         with self._hold(), self._held():
             if self._forgotten:
                 return None
             # Read as a refresh reads (ticket 195 C): a read that a write moved under is not what the tabs are told of. The
             # page is rendered again from the text they hold, with the new settings, and the write is the next refresh's.
-            self._rerender_settled()
+            settled = self._rerender_settled(self._stamp())
             snap = self._snapshot(self._text)
             snap["textSame"] = False
             self._publish_telling("changed", snap)
-            return snap
+            return snap if settled else RETRY
 
     def save(self, base_hash, edits, rid=None, guard=None, move=None):
         """Apply a page's block edits, made against the text named by base_hash.
@@ -721,7 +722,7 @@ class LiveDocument:
         `changed` and returns its snapshot, returns None when nothing moved, and RETRY when it could not decide (look again).
 
         force: render whatever the file holds and return the snapshot, publishing nothing: the
-        caller announces the result itself."""
+        caller announces the result itself. A forgotten document (its tabs heard `gone`) returns None, forced or not."""
         with self._hold(), self._held():
             if self._forgotten:         # its tabs heard `gone` (ticket 195 A)
                 return None
@@ -739,13 +740,11 @@ class LiveDocument:
                 return RETRY
             return self._announce(self._snapshot(self._text), before)
 
-    def _rerender_settled(self, seen=_UNSEEN) -> bool:
+    def _rerender_settled(self, seen) -> bool:
         """Render the page from the file, and keep that text only when the file held still while it was read and rendered
-        (`seen`: its stamp taken before, else now). An editor's truncate-then-write that landed meanwhile may have given a
+        (`seen`: its stamp taken before the read). An editor's truncate-then-write that landed meanwhile may have given a
         torn file: the text the tabs hold is kept and rendered again, and False says so; the watcher sees the file move and
         comes back. A file that cannot be stat-ed is not known to have held still."""
-        if seen is _UNSEEN:
-            seen = self._stamp()
         kept = (self._text, self._hash, self._branch)
         self._rerender(remember=False)      # a read that may be torn is no version: kept once the file has not moved under it
         if seen is None or self._stamp() != seen:

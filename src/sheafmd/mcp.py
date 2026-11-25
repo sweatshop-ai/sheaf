@@ -26,7 +26,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from . import __version__, beneath, paths
+from . import __version__, beneath, diagnostics, paths
 from . import comments as rdc
 from .agents import detect
 from .hub.auth import clean_display
@@ -1371,6 +1371,8 @@ class Door:
                 st = os.lstat(made.top / made.rel)
                 if made.ident is not None and (st.st_dev, st.st_ino) == made.ident:
                     os.unlink(made.top / made.rel)
+                else:       # replaced, or a filesystem whose inode numbers do not hold (some FUSE mounts): left, and said
+                    diagnostics.record("mcp", "take-back-left-file", address)
         self.hub.writes.told(address)
         if made.folders:
             with place.folders_lock(made.top, made.name):

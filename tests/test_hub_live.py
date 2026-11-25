@@ -1247,13 +1247,19 @@ def test_a_rebuild_that_a_write_moved_under_tells_the_tabs_the_text_they_hold(ma
     writes = iter([lambda: md.write_text(whole, encoding="utf-8")])
     served = []
     doc._render = lambda text: (served.append(text), next(writes, lambda: None)())[1]
-    snap = doc.rebuild()
+    assert doc.rebuild() is rdl.RETRY       # the caller looks at the file again (`Hub.wrote` keeps no stat key)
     assert served == [torn, DOC]
     assert doc.current() == (rds.md_hash(DOC), DOC)
-    assert [n for n, _ in events] == ["changed"] and events[0][1]["hash"] == rds.md_hash(DOC) == snap["hash"]
+    assert [n for n, _ in events] == ["changed"] and events[0][1]["hash"] == rds.md_hash(DOC)
     assert rds.md_hash(torn) not in doc._versions
     events.clear()
     assert doc.refresh()["hash"] == rds.md_hash(whole) and [n for n, _ in events] == ["changed"]
+
+
+def test_a_settled_rebuild_returns_the_snapshot_it_told(made):
+    doc, md, rendered, events, _ = made()
+    snap = doc.rebuild()
+    assert snap["hash"] == rds.md_hash(DOC) and snap["textSame"] is False and [n for n, _ in events] == ["changed"]
 
 
 # Ticket 195 A (from #618): a forgotten document tells its tabs nothing more: `gone` comes after its forget, so a refresh or a

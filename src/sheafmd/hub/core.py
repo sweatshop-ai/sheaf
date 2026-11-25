@@ -1898,11 +1898,7 @@ class Hub:
         if e is not None:
             try:
                 st = e.stat()
-                if moved:
-                    e.live.rebuild()
-                    got = None
-                else:
-                    got = e.live.refresh()
+                got = e.live.rebuild() if moved else e.live.refresh()
                 if got is not RETRY:         # one it could not decide is left to the watcher, which looks again
                     e.last_stat = (st.st_mtime_ns, st.st_size)
             except Exception as ex:

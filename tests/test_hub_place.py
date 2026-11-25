@@ -17,7 +17,7 @@ import pytest
 from bs4 import BeautifulSoup
 from helpers import FRONT, Front, call, hub_rows
 
-from sheafmd import _pandoc
+from sheafmd import _pandoc, diagnostics
 from sheafmd.blocks import split_md_blocks
 from sheafmd.hub import place, projects, proxy, the_list, work as work_mod
 from sheafmd.hub.state import INSIDE, Tokens, doc_key
@@ -194,6 +194,8 @@ def test_a_door_create_taken_back_leaves_a_file_that_replaced_the_one_it_made(te
     is_error, got = call(browser, "create", token=tokens["alice"], doc=address, text=OPEN)
     assert is_error and "not made" in got, got
     assert (work / SHARED).read_text(encoding="utf-8") == "# Someone else's\n"
+    assert any(r.get("kind") == "take-back-left-file" and r.get("doc") == address for r in diagnostics.read()), \
+        "a file left behind by a take-back is said in the diagnostics log"
 
 
 def test_a_door_create_taken_back_deletes_the_file_it_made(team, work, browser, tokens, monkeypatch):

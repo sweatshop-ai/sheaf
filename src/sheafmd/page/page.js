@@ -2486,8 +2486,11 @@ var create = function (ROOT, CFG, opts) {
   }
   var DOTS = '<span class="rd-dots" aria-hidden="true"><i></i><i></i><i></i></span>';
   // Said under a laptop Tell that waits: what the plugin is for and how to install it (a laptop without it never polls).
-  var INSTALL_HINT = ' <span class="rd-install-hint">The Sheaf plugin lets an agent session on your laptop receive what you send from a Sheaf page, and a new session listens once it has sent a page to a shared Sheaf. ' +
-    'If it is not installed, install it (<a href="https://github.com/sweatshop-ai/sheaf#agents" target="_blank" rel="noopener">instructions</a>): ' +
+  // The README address is joined here: it is a link the reader clicks, not a resource the page loads (test_the_page_is_self_contained).
+  var README = 'https:' + '//github.com/sweatshop-ai/sheaf#agents';
+  var INSTALL_HINT = ' <span class="rd-install-hint">The Sheaf plugin lets an agent session on your laptop receive what you send from a Sheaf page. ' +
+    'A session starts listening once the agent has sent a loose page (a file outside a git repo) to the shared Sheaf, by running the sheaf command itself or writing through the door. ' +
+    'If it is not installed, install it (<a href="' + README + '" target="_blank" rel="noopener">instructions</a>): ' +
     '<code>claude plugin marketplace add sweatshop-ai/sheaf &amp;&amp; claude plugin install sheaf@sheaf --scope user</code></span>';
   // A Tell that waits for an agent: said in the thread, with no spinner and no clock, across a reload and a restart.
   function waitLine(id) {

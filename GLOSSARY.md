@@ -20,7 +20,7 @@ An organisation's additions on top of the core, made of a theme, a root config, 
 _Avoid_: plugin, extension
 
 **Theme**:
-A folder of data that gives pages their look: stylesheet, fonts, wordmark, PDF footer. `plain` is built in.
+A folder of data that gives pages and their Blocks their look: stylesheet, fonts, wordmark, PDF footer. `plain` is built in. Only the hub's admin writes one.
 _Avoid_: skin, brand
 
 **Root config**:
@@ -319,3 +319,11 @@ _Avoid_: backend, adapter server, connector
 **Stub**:
 A Block whose type the page does not know. It is shown locked and written back byte for byte, never dropped and never refused.
 _Avoid_: invalid block, unknown block error
+
+**Theme property**:
+One named value of a Block's look (a callout tone, a button colour, a padding step, a radius) that a Theme may set; a Theme that leaves one out gets sheaf's default. The names are a promise kept across versions. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 15.)
+_Avoid_: theme variable, token, design token
+
+**Editor chrome**:
+The controls the block editor draws around Blocks while a member edits: gutter, add and drag handles, block toolbar, slash menu, selection outline. It is sheaf's own; a Theme gives it a font and an accent colour and nothing else. (Decided 2026-11-25, wayfinder `sheaf-modular-editor` ticket 15.)
+_Avoid_: editor UI, toolbar (for the whole), editor skin

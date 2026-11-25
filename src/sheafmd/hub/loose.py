@@ -148,6 +148,16 @@ def keep_held(root_path: Path, rel: str, on: bool = True) -> None:
     _put(root_path, KEEP.name, sorted([*held, rel] if on else [h for h in held if h != rel]), "keep marks")
 
 
+def unkeep_held(root_path: Path, rels) -> None:
+    """Take the keep marks of every address of `rels` off in one write, for a caller that holds `loose-keep.lock` (the
+    sweep's addresses with no page: one write per address would rewrite and sync the file N times under the lock)."""
+    held = marks(root_path)
+    gone = set(rels)
+    left = [h for h in held if h not in gone]
+    if len(left) != len(held):
+        _put(root_path, KEEP.name, sorted(left), "keep marks")
+
+
 def stamp(root_path: Path, name: str, changes: dict, only_new: bool = False) -> None:
     """Set (or, for a None, take off) the times of pages in the mark file `.sheaf/<name>`; with `only_new` a page that has one
     keeps it. Nothing is written when nothing changes."""

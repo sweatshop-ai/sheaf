@@ -207,5 +207,54 @@ def test_an_empty_paragraph_before_a_block_the_editor_keeps_does_not_shift_its_i
     p.keyboard.press("ArrowUp")
     p.keyboard.press("Enter")                       # an empty paragraph, then the text moves down
     ids = p.evaluate("window.sheafBlockEditor.last.ids()")
-    assert ids[:len(before) - 1] == before[:-1]
-    assert len(ids) == len(before) + 1
+    assert ids == before                            # an empty paragraph is no block of the Markdown
+
+
+PASTE = """(html) => {
+  const dt = new DataTransfer(); dt.setData('text/html', html);
+  document.querySelector('#rd-be .ProseMirror').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }));
+}"""
+
+
+def test_enter_at_the_start_of_a_paragraph_leaves_the_ids_of_the_blocks_as_they_were(doc, site):
+    p = open_editor(doc, site)
+    before = p.evaluate("window.sheafBlockEditor.last.ids()")
+    p.click(f"{DOC} p >> text=Last paragraph.")
+    p.keyboard.press(key("Home"))
+    p.keyboard.press("Enter")
+    assert p.evaluate("window.sheafBlockEditor.last.ids()") == before
+
+
+def test_html_only_clipboard_pasted_in_a_cell_is_its_text_and_a_range_of_cells_is_left_alone(doc, site):
+    p = open_editor(doc, site)
+    p.click(f"{DOC} td >> text=a")
+    p.keyboard.press(key("End"))
+    p.evaluate(PASTE, "<ul><li>x</li><li>y</li></ul>")
+    got = p.evaluate("window.sheafBlockEditor.last.markdown()")
+    assert "| axy | 1 |" in got
+    p.evaluate("""(() => {
+      const ed = window.sheafBlockEditor.last.editor; let from = null, to = null;
+      ed.state.doc.descendants((n, pos) => { if (n.isText && n.text === 'axy') from = pos + 1; if (n.isText && n.text === '1' && from !== null && to === null) to = pos + 1; });
+      ed.commands.setTextSelection({ from, to });
+    })()""")                                         # from inside one cell to inside the next
+    p.evaluate(PASTE, "<p>zzz</p>")
+    md = p.evaluate("window.sheafBlockEditor.last.markdown()")
+    assert "| axy | 1 |" in md and "zzz" not in md
+
+
+def test_a_held_escape_after_a_conflict_does_not_discard_the_editor(doc, site):
+    p = open_editor(doc, site)
+    p.click(f"{DOC} p >> text=Last paragraph.")
+    p.keyboard.press(key("End"))
+    p.keyboard.type(" mine")
+    p.keyboard.press(key("Control+s"))
+    answers = server_saves(p)
+    until(lambda: text(site) != SAMPLE, timeout=10, what="the first save")
+    rewrite(site.file, text(site).replace("# Rectoverso sample", "# Theirs"))
+    p.keyboard.type(" more")
+    p.keyboard.press(key("Control+s"))
+    until(lambda: "conflict" in p.inner_text("body").lower() or p.evaluate("window.sheafBlockEditor.last.markdown().includes('more')"), timeout=10, what="the conflict")
+    p.keyboard.press("Escape")                       # arms the discard
+    p.wait_for_timeout(1000)
+    p.evaluate("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', repeat: true, bubbles: true }))")
+    assert p.locator(DOC).count() == 1               # the editor is still there

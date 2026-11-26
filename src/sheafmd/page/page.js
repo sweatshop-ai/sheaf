@@ -3940,6 +3940,7 @@ var create = function (ROOT, CFG, opts) {
     var typing = e.target.isContentEditable ||
                  /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName || '');
     if (e.key === 'Escape') {
+      if (e.repeat) { e.preventDefault(); return; }      // a held key is not a second press
       // One thing per press, the first that applies.
       if (workOpen()) { e.preventDefault(); closeWork(); return; }
       if (pop && !standing()) { e.preventDefault(); leavePopover(); return; }
@@ -4613,7 +4614,7 @@ var create = function (ROOT, CFG, opts) {
   // or edit being typed is asked about too: until it is sent, nothing but the form holds it. A form
   // that holds what the store keeps for it is not: the next page draws that text again (unkept).
   // Mounted, the front's loader asks the page's dirty() before it moves, and holds the tab's own beforeunload with it.
-  function unsavedNow() { return !!((bke && beOwed()) || dirty().length || unkept() || (docGone && storedTexts().length)); }
+  function unsavedNow() { return !!((bke && (beOwed() || beBusy)) || dirty().length || unkept() || (docGone && storedTexts().length)); }
   if (!MOUNTED) listen(window, 'beforeunload', function (e) {
     if (unsavedNow()) { e.preventDefault(); e.returnValue = ''; }
   });
@@ -4934,9 +4935,9 @@ var create = function (ROOT, CFG, opts) {
       // A press's tick counts in `writes`: its reload waits for the press instead (reloadKeep), so that a refusal
       // is said again on the page it brings. Any other write out is waited for, as ever.
       if (writes + parked > (ticking ? 1 : 0)) { afterWrites.push(function () { meetVersion(v); }); return; }
-      if (dirty().length || writingNow({ page: true })) {
+      if (dirty().length || (bke && (beOwed() || beBusy)) || writingNow({ page: true })) {
         showNoticeOverOffer('The sheaf hub was upgraded. ' +
-                            (dirty().length ? 'Save your edits' : 'Send or cancel your comment') +
+                            (dirty().length || bke ? 'Save your edits' : 'Send or cancel your comment') +
                             ', then reload this page to use the new version.');
         return;
       }

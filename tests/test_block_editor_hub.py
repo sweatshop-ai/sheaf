@@ -199,3 +199,9 @@ def test_a_save_cannot_name_the_services_own_comment_session(on, browser, doc):
     ids = [b["id"] for b in j["blocks"]]
     r = save(browser, doc.read_text(encoding="utf-8"), j["hash"], ids, session="\x00comment")
     assert r.status == 400
+
+
+def test_a_markdown_save_without_a_session_is_a_400(on, browser, doc):
+    j = browser.get(f"/_/blocks?doc={DOC}").json()
+    ids = [b["id"] for b in j["blocks"]]
+    assert save(browser, doc.read_text(encoding="utf-8"), j["hash"], ids, session="").status == 400

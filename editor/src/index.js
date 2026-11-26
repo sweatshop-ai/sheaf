@@ -83,12 +83,18 @@ export function mount(host, { lead = '', blocks = [], onChange = () => {} } = {}
       attributes: { class: 'sheaf-be-doc', spellcheck: 'true' },
       // Pasted into a table cell, text goes in as plain text: a pasted list or table would split the table.
       handlePaste: (view, event) => {
-        const { $from } = view.state.selection;
+        const { selection } = view.state;
+        const { $from, $to } = selection;
+        if (selection.$anchorCell) return true;             // a range of cells: nothing is pasted over it
         let inCell = false;
-        for (let d = $from.depth; d > 0; d--) if (['tableCell', 'tableHeader'].includes($from.node(d).type.name)) inCell = true;
-        const t = event.clipboardData && event.clipboardData.getData('text/plain');
-        if (!inCell || t == null) return false;
-        view.dispatch(view.state.tr.insertText(t.replace(/\s*\n\s*/g, ' ')).scrollIntoView());
+        for (let d = $from.depth; d > 0 && !inCell; d--) if (['tableCell', 'tableHeader'].includes($from.node(d).type.name)) inCell = true;
+        if (!inCell) return false;
+        if (!$from.sameParent($to)) return true;             // a range of cells: nothing is pasted over it
+        const cd = event.clipboardData;
+        let t = cd ? cd.getData('text/plain') : '';
+        if (!t && cd && cd.getData('text/html')) t = new DOMParser().parseFromString(cd.getData('text/html'), 'text/html').body.textContent || '';
+        t = t.replace(/\s*\n\s*/g, ' ');
+        if (t) view.dispatch(view.state.tr.insertText(t).scrollIntoView());
         return true;
       },
     },
@@ -126,7 +132,7 @@ export function mount(host, { lead = '', blocks = [], onChange = () => {} } = {}
     editor,
     markdown: () => write(false),
     freshMarkdown: () => write(true),
-    ids: () => { const ids = []; editor.state.doc.forEach((n) => { if (n.attrs.bid == null && n.type.name === 'paragraph' && !n.content.size) return; ids.push(n.attrs.bid || null); }); return ids; },      // an empty paragraph is no block of the Markdown
+    ids: () => { const ids = []; editor.state.doc.forEach((n) => { if (n.type.name === 'paragraph' && !n.content.size) return; ids.push(n.attrs.bid || null); }); return ids; },      // an empty paragraph is no block of the Markdown
     destroy: () => editor.destroy(),
   };
   window.sheafBlockEditor.last = handle;       // the page tests read it

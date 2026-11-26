@@ -1516,7 +1516,7 @@ class Handler:
         _shape(isinstance(md, str), "markdown must be the whole text")
         _shape(ids is None or (isinstance(ids, list) and all(x is None or isinstance(x, str) for x in ids)),
                "ids must be a list of a block's id or null")
-        _shape(isinstance(session, str) and len(session) <= 64 and not session.startswith("\x00"),
+        _shape(isinstance(session, str) and 0 < len(session) <= 64 and not session.startswith("\x00"),
                "session must be the page's own id")      # \x00 is the service's own: a comment's
         rid = b.get("rid")
         _shape(rid is None or (isinstance(rid, str) and _RID_RE.fullmatch(rid)), "rid is not a request id")
@@ -1527,7 +1527,7 @@ class Handler:
             move, moved = self._mover(e, ticked)
             with self._moved_committed(e, req.member, "edit", moved):
                 try:
-                    got = e.live.save_markdown(b["hash"], md, ids, f"{req.member_id}:{session}", rid=rid, guard=guard, move=move)
+                    got = e.live.save_markdown(b["hash"], md, ids, f"{len(req.member_id)}:{req.member_id}:{session}", rid=rid, guard=guard, move=move)
                 except (EditError, StaleError) as ex:
                     raise Refuse(409, str(ex)) from None
                 except UnicodeEncodeError:

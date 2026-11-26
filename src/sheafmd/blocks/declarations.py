@@ -68,6 +68,22 @@ PLAIN_ATTRS = {"heading": (("level", (1, 2, 3, 4, 5, 6), 1),),
                "list": (("ordered", (True, False), False),)}
 
 
+# Attributes that say how a block is laid out, never what a person wrote: the only ones a caller who may not read
+# the page's text (a token without --write, SPEC 9.7) is shown. A declared type's attributes all take one of a
+# fixed list of values, so they are all structural; of the plain types only these are. Everything else
+# (a code fence's language, a Stub's type name and reason, any attribute a type may come to hold text in) is withheld.
+STRUCTURAL_PLAIN = {"heading": ("level",), "list": ("ordered", "start")}
+
+
+def structural(type_: str, attrs: dict) -> dict:
+    """`attrs` of a block of `type_`, cut to what holds no text of the page."""
+    if type_ in DECLARED:
+        keep = {a.name for a in DECLARED[type_].attrs if a.values}
+    else:
+        keep = set(STRUCTURAL_PLAIN.get(type_, ()))
+    return {k: v for k, v in attrs.items() if k in keep}
+
+
 def insertable() -> list:
     """The names of every insertable Block type: the plain ones, then the declared Rich ones."""
     return list(PLAIN) + list(DECLARED)

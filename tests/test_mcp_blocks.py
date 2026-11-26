@@ -151,10 +151,65 @@ def test_every_example_block_types_gives_is_accepted_by_the_document_service(bro
         assert "\n" not in t["description"] and t["description"]
 
 
-def test_the_key_and_a_write_token_see_the_same_tree_as_a_read_only_token(browser, page):
+def test_the_key_and_a_write_token_see_the_same_full_tree(browser, page):
     want = ok(browser, "blocks", doc=DOC)
     assert ok(browser, "blocks", doc=DOC, token=Tokens().add("writer", write=True)) == want
-    assert ok(browser, "blocks", doc=DOC, token=Tokens().add("reader")) == want
+
+
+SECRET = "zqxmarker"
+SECRET_TEXT = (
+    f"# Head {SECRET}h\n\n"
+    f"Para {SECRET}p\n\n"
+    f'::: {{.callout tone="warning"}}\nCallout {SECRET}c\n\n- nested {SECRET}n\n:::\n\n'
+    f"```py{SECRET}l\nprint('{SECRET}code')\n```\n\n"
+    f"> Quote {SECRET}q\n\n"
+    f"3. Third {SECRET}o\n4. Fourth\n\n"
+    f"| a | b |\n|---|---|\n| {SECRET}t | 2 |\n\n"
+    f"::: {{.widget{SECRET}w}}\nraw {SECRET}s\n:::\n"
+)
+
+
+def test_a_token_without_write_gets_the_structure_and_no_text_of_the_page(browser, plan):
+    plan.write_text(SECRET_TEXT, encoding="utf-8")
+    full = ok(browser, "blocks", doc=DOC)
+    assert SECRET in json.dumps(full)                               # the fixture does put text in every type
+    reader = Tokens().add("reader")
+    got = ok(browser, "blocks", doc=DOC, token=reader)
+    assert SECRET not in json.dumps(got)                            # nowhere: markdown, attrs, ids, children
+    assert got["base"] == full["base"]
+
+    def shape(rows):
+        return [(r["id"], r["type"], r["capabilities"], shape(r["children"])) for r in rows]
+    assert shape(got["blocks"]) == shape(full["blocks"])            # the same tree
+    seen = set()
+
+    def walk(rows):
+        for r in rows:
+            assert "markdown" not in r
+            seen.add(r["type"])
+            walk(r["children"])
+    walk(got["blocks"])
+    assert seen >= {"heading", "paragraph", "callout", "code", "quote", "list", "item", "table", "stub"}
+    top = {b["type"]: b for b in got["blocks"]}
+    assert top["callout"]["attrs"] == {"tone": "warning"}           # layout stays
+    assert top["heading"]["attrs"] == {"level": 1}
+    assert top["list"]["attrs"].get("ordered") is True
+    assert top["code"]["attrs"] == {} and top["stub"]["attrs"] == {}
+    for n in ids_only(top):                                         # asking by id gives the same, still no text
+        got = ok(browser, "blocks", doc=DOC, ids=[n], token=reader)
+        assert SECRET not in json.dumps(got)
+
+
+def ids_only(top):
+    return [b["id"] for b in top.values()]
+
+
+def test_the_structural_attributes_are_chosen_per_type_in_one_place():
+    assert decl.structural("callout", {"tone": "info", "align": "left", "pad": "m"}) == {
+        "tone": "info", "align": "left", "pad": "m"}
+    assert decl.structural("code", {"lang": "py"}) == {}
+    assert decl.structural("stub", {"type": "x", "reason": "y"}) == {}
+    assert decl.structural("heading", {"level": 2, "other": "t"}) == {"level": 2}
 
 
 def test_a_rich_block_that_breaks_its_declaration_is_a_stub_with_only_move_and_remove(browser, plan):
@@ -172,3 +227,8 @@ def test_the_attributes_block_types_declares_are_the_ones_blocks_reports(browser
     assert rows["heading"]["attrs"]["level"] in declared["heading"]["level"]["values"]
     assert rows["list"]["attrs"]["ordered"] in declared["list"]["ordered"]["values"]
     assert set(declared["code"]) == {"lang"} and "lang" in rows["code"]["attrs"]
+
+
+def test_an_empty_ids_list_asks_for_no_block(browser, page):
+    got = ok(browser, "blocks", doc=DOC, ids=[])
+    assert got["blocks"] == [] and got["base"] == md_hash(TEXT)

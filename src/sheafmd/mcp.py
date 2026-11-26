@@ -196,7 +196,8 @@ TOOLS = {
     "blocks": {
         "description": "The block tree of a page: per block its `id` (stable: name it in an edit), `type`, `attrs`, "
                        "`capabilities` (edit, move, remove: a locked block, such as a code fence, and a Stub have only "
-                       "move and remove), `markdown` and `children`, and the page's `base`. A Stub is a block of a type "
+                       "move and remove), `markdown` and `children`, and the page's `base`. A token made without "
+                       "`--write` may not read page text: its rows have no `markdown` and only layout attributes. A Stub is a block of a type "
                        "this sheaf does not know or a Rich block that breaks its declaration: `type` is `stub`, "
                        "`attrs.type` its type name and `markdown` its raw source. `depth` limits the levels shown "
                        "(1: the top level; a block cut by it has `more`, the number of children left out); `ids` "
@@ -308,10 +309,11 @@ def _check(name: str, args: dict) -> dict:
         if spec["type"] == "boolean" and not isinstance(v, bool):
             raise ToolError(f"{k} must be true or false.")
         if spec["type"] == "integer":
-            lo, hi = spec.get("minimum", 0), spec.get("maximum", 25)
+            ranged = "minimum" in spec and "maximum" in spec        # the tells wait declares no range: seconds, 0 to 25
+            lo, hi = (spec["minimum"], spec["maximum"]) if ranged else (0, 25)
             if type(v) is not int or not lo <= v <= hi:
-                raise ToolError(f"{k} must be a whole number of seconds, 0 to 25." if "maximum" not in spec
-                                else f"{k} must be a whole number, {lo} to {hi}.")
+                raise ToolError(f"{k} must be a whole number, {lo} to {hi}." if ranged
+                                else f"{k} must be a whole number of seconds, 0 to 25.")
         if spec["type"] == "array" and (not isinstance(v, list) or not all(isinstance(i, str) for i in v)):
             raise ToolError(f"{k} must be a list of text.")
         if "enum" in spec and v not in spec["enum"]:
@@ -1026,7 +1028,7 @@ class Door:
             raise ToolError(f"{address} cannot be read as blocks: pandoc does not read it. `read` gives its text.",
                             "unreadable") from None
         try:
-            rows = describe.rows(tree, args.get("depth"), args.get("ids"))
+            rows = describe.rows(tree, args.get("depth"), args.get("ids"), text=caller.may_write)
         except describe.NotFound as e:
             raise ToolError(f"{address} has no block with the id {e.args[0]}; `blocks` lists the ids.", "no block") from None
         return {"doc": address, "url": self.hub.url(address), "base": md_hash(text), "blocks": rows}

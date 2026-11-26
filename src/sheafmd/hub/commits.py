@@ -333,6 +333,10 @@ def _untrack_pin_times(folder: Path) -> tuple[bool, str | None]:
     own from HEAD less those files: `commit -- paths` would take them back from the work tree. Run under the repo's lock
     before a commit of the store. (made, error): `made`, that commit was made, owed a push whatever comes after;
     `error`, what git refused: the store's versions are then not committed, since its index may still hold a pin time."""
+    try:
+        state.times_out_of_git(folder / state.INSIDE)      # before anything stages the store, here or in the sweep
+    except OSError as e:
+        return False, f"the store's .gitignore could not be set: {e}"[:300]
     head = _git(folder, "rev-parse", "-q", "--verify", "HEAD").stdout.strip()
     listed = _git(folder, "ls-files", "-z", "--", str(state.INSIDE)).stdout.split("\0")
     if head:

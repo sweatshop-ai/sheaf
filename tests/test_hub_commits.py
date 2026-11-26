@@ -2217,6 +2217,48 @@ def test_a_sweep_with_only_pin_times_changed_takes_every_one_git_holds_out_of_it
     assert hub._owed
 
 
+@pytest.mark.parametrize("store", ["no-gitignore", "re-include-elsewhere"])
+@pytest.mark.parametrize("via", ["write", "sweep"])
+def test_pin_times_taken_out_of_git_stay_out_when_this_hub_never_wrote_the_stores_gitignore(tmp_path, store, via):
+    """Ticket 203 C (fallback review of #687, round 8): a clone of a repo whose pin times were committed has no store
+    `.gitignore` until it pins (the file ignores itself), and a `.gitignore` in another document's folder may say
+    `!*.at`. The times taken out of git must not be staged again by the same commit or sweep, nor by the next sweep."""
+    from sheafmd.hub import commits, state
+    from sheafmd.hub.roots import Root
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    (repo / ".sheaf.toml").write_text('commit = true\nversions = "root"\n', encoding="utf-8")
+    v = state.Versions(repo, "r")
+    times = []
+    for name in ("plan.md", "notes.md"):
+        (repo / name).write_text(f"# {name}\n", encoding="utf-8")
+        h = v.pin(f"r/{name}", f"# {name}\n")
+        times.append(next(repo.rglob(f"pins/{h}.at")))
+    git(repo, "add", "-A")
+    git(repo, "add", "-f", *[str(t.relative_to(repo)) for t in times])          # what the old bug let in
+    git(repo, "-c", "user.name=a", "-c", "user.email=a@example.com", "commit", "-q", "-m", "first")
+    store_dir = repo / state.INSIDE
+    if store == "no-gitignore":
+        (store_dir / ".gitignore").unlink()                                   # a fresh clone: git never carried it
+    else:
+        (times[1].parent / ".gitignore").write_text("!*.at\n", encoding="utf-8")
+    made = []
+    hub = commits.Commits(lambda kind, doc, **detail: made.append((kind, doc, detail)), roots=lambda: [])
+    root = Root("r", repo, True)
+    if via == "write":
+        (repo / "plan.md").write_text("# plan, edited\n", encoding="utf-8")
+        hub.saved(root, "plan.md", commits.Author("Bea", "bea@example.com"), "edit")
+    else:
+        hub._sweep(root, commits._repo(repo))
+    hub._sweep(root, commits._repo(repo))
+    assert not [r for r in made if "failed" in r[0]], made
+    assert not [p for p in git(repo, "ls-files").split() if p.endswith(state.PINNED_AT)]
+    assert not [p for p in git(repo, "ls-tree", "-r", "--name-only", "HEAD").split() if p.endswith(state.PINNED_AT)]
+    assert git(repo, "log", "--format=%s").count("versions: pin times out of git") == 1
+    assert all(t.is_file() for t in times)
+
+
 @pytest.mark.parametrize("step", ["commit-tree", "update-index"])
 def test_a_pin_time_that_cannot_leave_git_keeps_the_versions_out_of_the_writes_commit(tmp_path, monkeypatch, step):
     """Ticket 203 C (Codex on #687, rounds 3 and 4): git refuses a step of taking a tracked pin time out. The write's

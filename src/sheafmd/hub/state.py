@@ -182,6 +182,22 @@ class _Claims:
     by_hash: dict = field(default_factory=dict)     # hash -> {writer, ...}; None is a writer that is no document
 
 
+def times_out_of_git(store: Path):
+    """Keep every pin time of a root's own store at `store` out of git, whether or not this hub has pinned there: the
+    store's `.gitignore` is written unless it is a file of its own holding the hub's lines, and any other `.gitignore`
+    in the store, which could say `!*.at`, goes (ticket 203 C, round 8). A clone gets no store `.gitignore` from git:
+    the file ignores itself. Nothing is made when there is no store. OSError: the caller must not stage the store."""
+    if not store.is_dir():
+        return
+    if read_small(store / ".gitignore") != _LOCAL_ONLY:
+        write_text_private(store / ".gitignore", _LOCAL_ONLY, True)
+    for d, dirs, names in os.walk(store):
+        if d != str(store) and ".gitignore" in names + dirs:
+            p = Path(d) / ".gitignore"
+            if not stat.S_ISDIR(os.lstat(p).st_mode):
+                os.unlink(p)
+
+
 class Versions:
     """Every text the hub handed a page, on disk, so a save against a page rendered before a
     restart still merges. `<state>/versions/<doc-key>/<hash>.md`, the newest 60 per document,

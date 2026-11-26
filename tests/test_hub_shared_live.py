@@ -354,3 +354,43 @@ def test_a_tab_that_left_no_longer_wakes_the_writer(world, docs):
     sub = world.hub.entries[docs[0]].bus._subs.copy().pop()
     world.post("/_/live/leave", {"stream": SID, "key": "a"})
     assert sub.on_put is None
+
+
+def test_a_join_that_found_the_old_stream_listed_before_a_reopen_leaves_the_tab_counted_once(world, docs, monkeypatch):
+    """Ticket 211 (Codex on #690): a reopen under the id lists the fresh stream with no `_join_lock` while a join that found
+    the old one listed is between its look and its join. The join lands on the old stream, which the reopen then closes;
+    the browser's leader joins every key again when the fresh connection opens (live.js), and that join needs
+    `_join_lock`, so it comes after: the tab ends counted once, on the fresh stream."""
+    import threading
+    other = shared(world, sid="n" * 24)
+    assert join(world, "t1:1", docs[0], sid="n" * 24).status == 200
+    stale = shared(world)
+    closing, release, fresh, threads, in_window = threading.Event(), threading.Event(), [], [], []
+    real_close = stale.close
+
+    def held_close():                                          # the reopen's close of the old stream waits for the join
+        closing.set()
+        release.wait(30)
+        real_close()
+
+    def reopen_in_the_window(key):                             # after the look at the list, before the join
+        t = threading.Thread(target=lambda: fresh.append(shared(world)))
+        threads.append(t)
+        t.start()
+        in_window.append(closing.wait(30))                     # a limit: the reopen lists the fresh stream and reaches the close
+        return False
+
+    monkeypatch.setattr(stale, "close", held_close)
+    monkeypatch.setattr(stale, "bars", reopen_in_the_window)
+    try:
+        assert join(world, "t1:1", docs[0]).status == 200
+    finally:
+        release.set()
+        for t in threads:
+            t.join(30)
+    assert in_window == [True]                                 # the reopen ran in the join's window: the race was forced
+    assert stale.closed and fresh
+    assert join(world, "t1:1", docs[0]).status == 200          # the leader's join again on the fresh connection
+    assert fresh[0].keys() == ["t1:1"] and other.keys() == [] and world.hub.tabs(docs[0]) == 1
+    fresh[0].close()
+    other.close()

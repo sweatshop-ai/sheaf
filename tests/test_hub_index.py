@@ -865,3 +865,99 @@ def test_a_first_render_that_ends_while_its_page_lands_elsewhere_leaves_no_versi
     os.unlink(work / "held.md")                           # as the move does, before its `finish`
     finish()
     assert not any(HELD_MARK in t for t in store.texts("work/held.md")), store.texts("work/held.md")
+
+
+# ── 213: a render never answers with a page of settings older than its own ───
+def test_a_render_with_the_settings_another_render_just_set_waits_for_a_page_of_them(world, work, monkeypatch):
+    """213 C (Codex round 9 of #679): renders with settings A, then B, then B again, at once. The third found its settings
+    already recorded (old == new), skipped the rebuild and answered while the page was still the one of the settings before
+    A: B's rebuild had not run yet. A render answers with a page built from its settings or newer ones."""
+    world.hub.render(work / "start.md", {}, None)
+    live = world.hub.entries["work/start.md"].live
+    real, calls, a_built, a_go, b_go = live.rebuild, [], threading.Event(), threading.Event(), threading.Event()
+
+    def held():
+        calls.append(1)
+        if len(calls) == 1:                     # A's rebuild: built with A, then held before it says it is done
+            got = real()
+            a_built.set()
+            a_go.wait(20)
+            return got
+        if len(calls) == 2:                     # B's rebuild: held before it begins
+            b_go.wait(20)
+        return real()
+    monkeypatch.setattr(live, "rebuild", held)
+    first, _ = _in_thread(world.hub._render_held, "work/start.md", work / "start.md", {"title": "Apricot"}, None)
+    second = None
+    try:
+        assert a_built.wait(10)
+        second, _ = _in_thread(world.hub._render_held, "work/start.md", work / "start.md", {"title": "Bramble"}, None)
+        for _ in range(200):
+            if len(calls) == 2:
+                break
+            threading.Event().wait(0.05)
+        assert len(calls) == 2, calls
+        a_go.set()
+        first.join(10)
+        assert "Apricot" in world.hub.entries["work/start.md"].html
+        _timed(world.hub._render_held, "work/start.md", work / "start.md", {"title": "Bramble"}, None, within=10)
+        assert "Bramble" in world.hub.entries["work/start.md"].html
+    finally:
+        a_go.set()
+        b_go.set()
+        first.join(10)
+        if second is not None:
+            second.join(10)
+
+
+def test_an_open_after_its_root_was_forgotten_and_its_name_taken_never_waits_for_the_old_roots_render(world, work, put,
+                                                                                                    held_pandoc, tmp_path):
+    """213 D (Codex round 9 of #679): the mark of an entry being made was the address alone. A root forgotten during a
+    held first render, its name taken by another folder holding the same page: the open of that page waited for the
+    forgotten root's render, up to pandoc's whole time."""
+    go, begun, _ = held_pandoc
+    put("held.md", PLAN + f"\n{HELD_MARK}\n")
+    world.hub.roots.for_document(work / "held.md")
+    a, out = _in_thread(world.hub.entry, "work/held.md")
+    assert begun.wait(10)
+    _timed(world.hub.forget_root, "work", within=10)
+    other = tmp_path / "again" / "work" / "held.md"
+    other.parent.mkdir(parents=True)
+    other.write_text(PLAN, encoding="utf-8")
+    assert world.hub.roots.for_document(other).name == "work"
+    e = _timed(world.hub.entry, "work/held.md", within=10)
+    assert e.file() == other and "apples" in e.html
+    go.set()
+    a.join(10)
+
+
+def test_a_first_render_that_fails_after_its_page_landed_elsewhere_leaves_no_watch_behind(world, work, put, monkeypatch):
+    """213 E (Codex round 9 of #679): a landing on another tiroir detached the entry being made without marking it so; a
+    first render that then failed was given up without its forget, and the watch the detach opened in the versions store
+    stayed for the life of the hub."""
+    from sheafmd.hub import state
+    from sheafmd.render import RenderError
+    put("held.md", PLAN)
+    world.hub.roots.for_document(work / "held.md")
+    store = world.hub._versions_of(world.hub.roots.get("work")) or world.hub.versions
+    made, begun, go = world.hub._new_entry, threading.Event(), threading.Event()
+
+    def failing(*a, **kw):
+        e = made(*a, **kw)
+
+        def refresh(force=False):
+            begun.set()
+            go.wait(10)
+            raise RenderError("pandoc could not read this document")
+        e.live.refresh = refresh
+        return e
+    monkeypatch.setattr(world.hub, "_new_entry", failing)
+    a, out = _in_thread(world.hub.entry, "work/held.md")
+    assert begun.wait(10)
+    finish = world.hub.moved_remote("work/held.md", "https://other.example", "work/held.md", "test", "0" * 64)
+    go.set()
+    a.join(10)
+    assert out and isinstance(out[0], RenderError), out
+    os.unlink(work / "held.md")
+    finish()
+    assert store._folder("work/held.md") not in state.Versions._claims

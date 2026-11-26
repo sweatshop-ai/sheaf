@@ -202,7 +202,7 @@ def _split_lines(text):
     return re.findall(r"[^\n]*\n|[^\n]+", text)
 
 
-def _interrupts_para(lines, i):
+def _interrupts_para(lines, i, divs=False):
     """Can this line end the paragraph that is already open above it?
 
     CommonMark is deliberately asymmetric here, and the asymmetry is the whole
@@ -223,7 +223,7 @@ def _interrupts_para(lines, i):
     """
     ln = lines[i]
     if ATX_RE.match(ln) or FENCE_RE.match(ln) or HR_RE.match(ln) \
-       or QUOTE_RE.match(ln) or HTML_RE.match(ln) or DIV_OPEN_RE.match(ln):
+       or QUOTE_RE.match(ln) or HTML_RE.match(ln) or (divs and DIV_OPEN_RE.match(ln)):
         return True
     m = LIST_RE.match(ln)
     if m and len(m.group(1)) < 4 and ln[m.end():].strip():
@@ -232,11 +232,15 @@ def _interrupts_para(lines, i):
     return False
 
 
-def split_md_blocks(text):
+def split_md_blocks(text, divs=False):
     """Split markdown into top-level blocks that tile the source exactly.
 
     Guarantee, enforced by the test suite against every .md in the repo:
         "".join(b.text for b in split_md_blocks(t)) == t
+
+    `divs`: a pandoc fenced div is one block of kind "div", whatever it holds. Only the block tree asks for it: every
+    other reader of the tiles (comments, copy blocks, visibility, the page's edit mode) takes the lines of a div as the
+    blocks they are, so a code fence or a comment inside a div is still code or a comment to them.
     """
     raw = _split_lines(text)
     # pandoc deletes a CR wherever it stands and does not end a line there, so every test below reads the
@@ -288,7 +292,7 @@ def split_md_blocks(text):
             i = emit("indented_code", i, j)
         elif FENCE_RE.match(ln):
             i = emit("fence", i, _scan_fence(lines, i))
-        elif DIV_OPEN_RE.match(ln):
+        elif divs and DIV_OPEN_RE.match(ln):
             i = emit("div", i, _scan_div(lines, i))
         elif ATX_RE.match(ln):
             i = emit("heading", i, i + 1)
@@ -325,7 +329,7 @@ def split_md_blocks(text):
                     j += 1
                     kind = "heading"
                     break
-                if _interrupts_para(lines, j):
+                if _interrupts_para(lines, j, divs):
                     break
                 j += 1
             i = emit(kind, i, j)
@@ -337,7 +341,7 @@ SENTINEL = "MDB"
 SENTINEL_RE = re.compile(r"<!--" + SENTINEL + r":(\d+)-->")
 
 
-def instrument(text):
+def instrument(text, divs=False):
     """Return markdown with an inert HTML-comment sentinel before each block.
 
     Pandoc passes the comments through to the HTML untouched, which is what lets the
@@ -353,7 +357,7 @@ def instrument(text):
     is only ever fed to pandoc. Reassembly on save works from the block list, whose
     gaps are untouched, so the source file keeps its exact spacing.
     """
-    blocks = split_md_blocks(text)
+    blocks = split_md_blocks(text, divs)
     out, first = [], True
     for idx, b in enumerate(blocks):
         if b.kind == "blank" or not b.content.strip():

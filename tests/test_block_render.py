@@ -29,7 +29,9 @@ def test_a_callout_renders_as_a_declared_div_with_its_data_attributes(tmp_path):
 
 
 def test_the_reading_copy_and_the_share_copy_hold_the_same_callout(tmp_path):
-    assert callout_of(render(tmp_path, share=False)) == callout_of(render(tmp_path, share=True))
+    # the reading copy carries the inert block markers the page maps its blocks by; the share copy has none
+    reading = re.sub(r"<!--MDB:\d+-->\n?", "", callout_of(render(tmp_path, share=False)))
+    assert reading == callout_of(render(tmp_path, share=True))
 
 
 def test_an_unknown_div_renders_its_content_in_a_plain_div(tmp_path):

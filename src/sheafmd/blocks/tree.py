@@ -209,7 +209,7 @@ def _nested_fault(content: list):
 
 def read_tree(text: str) -> Tree:
     """The block tree of `text`. Raises `Unreadable` for a text pandoc does not read."""
-    inst, tiles = instrument(text)
+    inst, tiles = instrument(text, divs=True)
     live = [i for i, t in enumerate(tiles) if t.kind not in ("blank", "frontmatter") and t.content.strip()]
     seg = {}
     if live:

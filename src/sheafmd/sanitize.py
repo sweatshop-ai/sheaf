@@ -75,7 +75,8 @@ _STRIP_CONTROL = re.compile(r"[\x00-\x20\x7f]+")
 MAX_PASSES = 3
 
 # Mount mode.
-_BLOCKS = declarations.allow_list()          # {type: {"tag", "attrs": {"data-<name>": [values]}}}: one list for both layers
+_BLOCKS = declarations.allow_list()          # {type: {"tag", "attrs": {<wire name>: [values]}}}: one list for both layers
+_INLINE = frozenset(declarations.INLINE)
 MOUNT_REMOVED = frozenset({
     "video", "audio", "source", "track", "canvas", "portal", "use", "image", "foreignobject", "animate", "set",
     "animatetransform", "animatemotion", "math", "maction", "annotation-xml", "mglyph", "semantics",
@@ -285,11 +286,7 @@ def _mount_img_ok(value: str) -> bool:
 
 
 def _mount_link_ok(value: str) -> bool:
-    v = _STRIP_CONTROL.sub("", value)
-    if "\\" in v:
-        return False
-    m = _SCHEME.match(v)
-    return not m or m.group(1).lower() in _MOUNT_LINK_SCHEMES
+    return declarations.link_ok(value)          # one link rule for a mounted link and for a button's
 
 
 def _mount_attrs(tag, name: str, log: list[str]) -> None:
@@ -334,23 +331,41 @@ def _mount_attrs(tag, name: str, log: list[str]) -> None:
         tag["rel"] = "noopener noreferrer"
 
 
-def _block_attrs(tag, log: list[str]) -> None:
-    """A declared Rich block (`div.<type>`, `blocks.declarations`) keeps its id, its type as the only class and exactly its
-    declared `data-<attr>` with an allowed value. No style, free class, title or handler, whatever the mode."""
-    bt = next((c for c in (tag.get("class") or []) if c in _BLOCKS), None)
-    if tag.name != "div" or bt is None:
+def _block_attrs(tag, log: list[str], mount: bool = False) -> None:
+    """A declared block (`blocks.declarations`: `div.callout`, `span.button`) keeps its id (a button has none), its type as
+    the only class and exactly its declared attributes (`data-<attr>`, or a bare `size`: `Attr.wire`) with an allowed value. No style, free class, title or handler,
+    whatever the mode. The link inside a button keeps its href alone, and only for http, https, mailto or a relative
+    address (`declarations.link_ok`), so no target, no `file:` and no script in either mode."""
+    name = tag.name
+    bt = next((c for c in (tag.get("class") or []) if c in _BLOCKS and _BLOCKS[c]["tag"] == name), None)
+    if bt is None:
+        if name == "a" and (parent := tag.parent) is not None and parent.name == "span" and "button" in (parent.get("class") or []):
+            _button_link(tag, log, mount)
         return
     allowed = _BLOCKS[bt]["attrs"]
     for attr in list(tag.attrs):
         a = attr.lower()
         value = tag[attr]
         value = " ".join(value) if isinstance(value, list) else str(value)
-        if a == "id" or (a in allowed and value in allowed[a]):
+        if (a == "id" and bt not in _INLINE) or (a in allowed and value in allowed[a]):
             continue
         if a != "class":
-            log.append(f"  - {attr} removed from <div class={bt}>: not declared")
+            log.append(f"  - {attr} removed from <{name} class={bt}>: not declared")
         del tag[attr]
     tag["class"] = [bt]
+
+
+def _button_link(tag, log: list[str], mount: bool) -> None:
+    for attr in list(tag.attrs):
+        a = attr.lower()
+        value = tag[attr]
+        value = " ".join(value) if isinstance(value, list) else str(value)
+        if a == "href" and declarations.link_ok(value):
+            continue
+        if a == "rel" and mount and value == "noopener noreferrer":
+            continue
+        log.append(f"  - {attr} removed from the link of a button: not allowed there")
+        del tag[attr]
 
 
 def _comment_ok(text: str) -> bool:
@@ -432,7 +447,7 @@ def _pass(fragment: str, comments: bool, log: list[str], mount: bool = False) ->
                     del tag[attr]
         if mount:
             _mount_attrs(tag, name, log)
-        _block_attrs(tag, log)
+        _block_attrs(tag, log, mount)
     return str(soup)
 
 

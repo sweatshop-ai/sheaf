@@ -185,6 +185,7 @@ class _Claims:
 
 
 _PIN_KEY = "pin-key"             # in the state folder: the key of the marks of this hub's pin times (`Versions._mark`)
+_MARK = re.compile(r"[0-9a-f]{32}")     # a mark: 32 lowercase hex; anything else is none (ticket 214)
 _pin_keys: dict = {}             # the key file -> its key, read once
 
 
@@ -336,8 +337,8 @@ class Versions:
             at = int(at)
         except ValueError:
             return 0
-        if not hmac.compare_digest(mark, self._mark()):
-            return 0
+        if not _MARK.fullmatch(mark) or not hmac.compare_digest(mark.encode("ascii"), self._mark().encode("ascii")):
+            return 0        # a mark is 32 hex, compared as bytes: anything else is no mark, and raises nothing (ticket 214)
         return at if at <= (time.time() + _PIN_CLOCK_AHEAD) * 1e9 else 0          # a time to come is no age either
 
     def _claimed(self, address: str, keep, writer) -> str:

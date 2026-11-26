@@ -55,14 +55,21 @@
 
   const GLOBAL_ATTRS = set('id class title lang dir');
   /* BLOCKS:begin (generated from sheafmd.blocks.declarations: python -m sheafmd.blocks.declarations --write) */
-  const BLOCK_TYPES = {"callout": {"attrs": {"data-align": ["left", "center", "right"], "data-pad": ["none", "s", "m", "l"], "data-tone": ["info", "success", "warning", "danger"]}, "tag": "div"}};
+  const BLOCK_TYPES = {"box": {"attrs": {"data-align": ["left", "center", "right"], "data-pad": ["none", "s", "m", "l"]}, "tag": "div"}, "button": {"attrs": {"data-variant": ["primary", "secondary", "outline"], "size": ["s", "m", "l"]}, "tag": "span"}, "callout": {"attrs": {"data-align": ["left", "center", "right"], "data-pad": ["none", "s", "m", "l"], "data-tone": ["info", "success", "warning", "danger"]}, "tag": "div"}, "column": {"attrs": {"size": ["15", "20", "25", "30", "33", "35", "40", "45", "50", "55", "60", "65", "67", "70", "75", "80", "85"]}, "tag": "div"}, "columns": {"attrs": {}, "tag": "div"}, "image": {"attrs": {"data-align": ["left", "center", "right"], "size": ["25", "50", "75", "100"]}, "tag": "div"}};
   /* BLOCKS:end */
-  // A declared Rich block is a div whose class is its type: it keeps its id, its class (the type alone) and exactly its
-  // declared data-<attr> with an allowed value. No style, free class, title or handler.
+  // A declared block is an element of its type's tag (a div, or the inline span of a button) whose class is its type: it
+  // keeps its id (a button has none), its class (the type alone) and exactly its declared attributes (data-<attr>, or a bare size) with an allowed
+  // value. No style, free class, title or handler.
   function blockType(n) {
-    if (n.localName !== 'div') return null;
-    for (const c of Array.from(n.classList)) if (Object.prototype.hasOwnProperty.call(BLOCK_TYPES, c)) return c;
+    for (const c of Array.from(n.classList)) {
+      if (Object.prototype.hasOwnProperty.call(BLOCK_TYPES, c) && BLOCK_TYPES[c].tag === n.localName) return c;
+    }
     return null;
+  }
+  // The link inside a button keeps its href alone, for http, https, mailto or a relative address: no target, no title.
+  function inButton(n) {
+    const p = n.parentElement;
+    return !!p && p.localName === 'span' && p.classList.contains('button') && blockType(p) === 'button';
   }
   const HTML_ATTRS = {
     a: set('href'),
@@ -302,11 +309,13 @@
         const value = a.value;
         if (value.length > 20000) continue;
         if (bt) {
-          if (name === 'id') htmlAttr(el, local, name, value);
+          if (name === 'id') { if (bt !== 'button') htmlAttr(el, local, name, value); }
           else if (Object.prototype.hasOwnProperty.call(BLOCK_TYPES[bt].attrs, name) && BLOCK_TYPES[bt].attrs[name].includes(value)) el.setAttribute(name, value);
           continue;
         }
-        if (ns === SVG_NS) {
+        if (local === 'a' && inButton(n)) {
+          if (name === 'href') htmlAttr(el, local, name, value);
+        } else if (ns === SVG_NS) {
           if (SVG_ATTRS.has(name)) svgAttr(el, name, value);
         } else if (GLOBAL_ATTRS.has(name) || (HTML_ATTRS[local] && HTML_ATTRS[local].has(name))) {
           htmlAttr(el, local, name, value);

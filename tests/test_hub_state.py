@@ -674,3 +674,14 @@ def test_a_pin_time_is_this_stores_alone_even_on_the_same_hub(tmp_path):
         shutil.copyfile(pins_a / f"{h}{suffix}", pins_b / f"{h}{suffix}")
     assert a.get("r/plan.md", h) == "kept\n"
     assert b.get("r/plan.md", h) is None
+
+
+@pytest.mark.parametrize("mark", ["é" * 32, "0" * 31 + "é", "\udcff", "g" * 32, "0" * 33])
+def test_a_pin_time_whose_mark_is_not_32_hex_is_not_believed(tmp_path, mark):
+    """Ticket 214: a `.at` with a mark that is not 32 hex (corrupted, or carried by git), non-ASCII among them, reads as a
+    pin never believed; it raises nothing."""
+    v = state.Versions(tmp_path, "r")
+    h = v.pin("r/plan.md", "kept\n")
+    at = next(v.dir.rglob("pins")) / f"{h}{state.PINNED_AT}"
+    at.write_bytes(f"{time.time_ns()} {mark}".encode("utf-8", "surrogateescape"))
+    assert v._pinned_at(at.with_suffix(".md")) == 0

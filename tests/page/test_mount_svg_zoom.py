@@ -96,14 +96,13 @@ def test_the_page_script_keeps_an_svg_image_and_nothing_else_of_that_kind(env): 
     assert got == [svg], (env.engine, got)
 
 
-def test_a_large_local_svg_image_is_kept_on_a_mounted_page_and_one_past_the_limit_is_not(env):  # noqa: F811
+def test_a_4_mb_local_svg_image_stays_on_a_mounted_page_within_the_page_budget(env):  # noqa: F811
     import base64
-    body = "<svg xmlns='http://www.w3.org/2000/svg'><!--" + "x" * 60000 + "--></svg>"
+    body = "<svg xmlns='http://www.w3.org/2000/svg'><!--" + "x" * 4_000_000 + "--></svg>"
     big = "data:image/svg+xml;base64," + base64.b64encode(body.encode()).decode()
-    huge = "data:image/svg+xml;base64," + "A" * 4_100_000
-    rebuild_into_page(env, f'<p><img src="{big}" alt="kept"></p><p><img src="{huge}" alt="dropped"></p>')
+    rebuild_into_page(env, f'<p><img src="{big}" alt="kept"></p><p><img src="data:image/svg+xml;base64,{"A" * 8000}" alt="small"></p>')
     got = env.evaluate("Array.from(document.querySelectorAll('#out img')).map(i => i.getAttribute('alt'))")
-    assert got == ["kept"], (env.engine, got)
+    assert got == ["kept", "small"], (env.engine, got)
 
 
 def test_a_legend_that_wraps_in_a_short_pane_leaves_the_chart_inside_the_pane(front, site):  # noqa: F811
@@ -119,3 +118,32 @@ def test_a_legend_that_wraps_in_a_short_pane_leaves_the_chart_inside_the_pane(fr
                            "return {x: r.x, y: r.y, w: r.width, h: r.height}; })()")
     st = rect(f, STAGE)
     assert st["y"] >= pane["y"] - 1 and st["h"] > 20, (st, pane)
+
+
+SHORT_LEGEND = ('# Plan\n\n```chart\n{"type": "bar", "x": ["a", "b"], "series": [{"name": "S", "values": [5, 9]}],\n'
+                ' "bands": [{"from": 0, "to": 4, "color": "green", "label": "first band with a long label"},'
+                ' {"from": 4, "to": 8, "color": "red", "label": "second band with a long label"},'
+                ' {"from": 8, "to": 12, "color": "grey", "label": "third band with a long label"},'
+                ' {"from": 0, "to": 12, "color": "blue", "label": "fourth band with a long label"}]}\n```\n')
+
+
+def test_in_an_80_px_pane_every_legend_label_scrolls_into_view_and_the_chart_starts_inside_the_pane(front, site):  # noqa: F811
+    rewrite(site.file, SHORT_LEGEND)
+    f = front.open()
+    f.page.evaluate("() => { const p = document.getElementById('pane'); p.style.width = '300px'; p.style.height = '80px'; }")
+    f.click("main .chart svg")
+    until(lambda: f.has(VIEWER), what="the viewer")
+    pane = f.page.evaluate("(() => { const r = document.getElementById('pane').getBoundingClientRect(); return {x: r.x, y: r.y, w: r.width, h: r.height}; })()")
+    st = rect(f, STAGE)
+    assert st["y"] >= pane["y"] - 0.5 and st["y"] + st["h"] <= pane["y"] + pane["h"] + 0.5, (st, pane)
+    got = f.js("""const lg = root.querySelector('#rd-zoom .rd-zoom-legend');
+      const cs = getComputedStyle(lg);
+      const out = {oy: cs.overflowY, scrolls: lg.scrollHeight > lg.clientHeight, h: lg.getBoundingClientRect().height, seen: []};
+      for (const sp of lg.querySelectorAll('span')) {
+        sp.scrollIntoView({block: 'nearest'});
+        const a = sp.getBoundingClientRect(), b = lg.getBoundingClientRect();
+        out.seen.push(a.top >= b.top - 1 && a.bottom <= b.bottom + 1);
+      }
+      return out;""")
+    assert got["oy"] == "auto" and got["scrolls"] and got["h"] <= 80 * 0.35 + 1, got
+    assert got["seen"] == [True] * 4, got

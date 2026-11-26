@@ -133,7 +133,7 @@ def test_bands_draw_a_tinted_strip_and_a_legend_for_the_labelled_ones():
                         r'opacity="0.11"/>', out)
     assert strips == ["#16a34a", "#123456"]           # "green" resolved, a hex colour kept
     assert out.count('<div class="bandleg">') == 1
-    assert '<span><i style="background:#16a34a"></i>on target</span>' in out
+    assert '<span><i style="background-color:#16a34a"></i>on target</span>' in out
     assert out.count("<span>") == 1                   # only the labelled band is in the legend
 
 
@@ -282,7 +282,7 @@ def test_a_palette_that_is_not_a_list_is_the_built_in_one(palette):
 def test_a_band_colour_that_is_not_a_colour_is_grey_in_the_strip_and_the_legend(bad):
     out = charts.svg_chart({**BAR, "bands": [{"from": 0, "to": 15, "color": bad, "label": "band"}]})
     assert 'fill="#7a869a" opacity="0.11"/>' in out
-    assert '<span><i style="background:#7a869a"></i>band</span>' in out
+    assert '<span><i style="background-color:#7a869a"></i>band</span>' in out
     assert active_content(out) == []
     assert "alert" not in out and "x.example" not in out and "<script" not in out
 

@@ -401,8 +401,10 @@ var create = function (ROOT, CFG, opts) {
     // Only where the viewer's handlers are installed: a page that stops short of them (below) is a plain copy of the file.
     if (!((!CFG.readonly && (location.protocol === 'http:' || location.protocol === 'https:')) || COMMENTS.length || (CFG.malformed || []).length)) return;
     Array.prototype.forEach.call(main.querySelectorAll('.mermaid-svg svg, .chart svg, img'), function (n) {
-      if (!zoomTarget(n) || inLink(n) || n.querySelector('a[href], a[*|href]')) return;   // a diagram with links in it has them to tab to
-      n.setAttribute('tabindex', '0');
+      // A diagram with a link in it that can be tabbed to has that link to tab to; a link taken out of the order (tabindex -1) leaves
+      // the diagram its own stop. The diagram's own tabindex, when it has one, is the author's and stays.
+      if (!zoomTarget(n) || inLink(n) || n.querySelector('a[href]:not([tabindex="-1"]), a[*|href]:not([tabindex="-1"])')) return;
+      if (!n.hasAttribute('tabindex')) n.setAttribute('tabindex', '0');
       n.setAttribute('role', 'button');
       if (!n.hasAttribute('aria-label')) {          // a name the diagram already has stays
         n.setAttribute('aria-label', ((n.getAttribute('alt') || '').trim() || 'Diagram') + ' (opens in a viewer)');
@@ -867,7 +869,12 @@ var create = function (ROOT, CFG, opts) {
       copy.draggable = false;
     } else {
       copy = src.cloneNode(true);
-      ['style', 'tabindex', 'role', 'aria-label'].forEach(function (a) { copy.removeAttribute(a); });   // the viewer's copy is no button
+      copy.removeAttribute('style');
+      copy.removeAttribute('tabindex');                       // the viewer's copy is no button, nor a tab stop of the page
+      if (copy.getAttribute('role') === 'button') copy.removeAttribute('role');
+      var named = copy.getAttribute('aria-label') || '';
+      if (/ \(opens in a viewer\)$/.test(named)) copy.removeAttribute('aria-label');   // the generated label goes, an author's stays
+      else if (named) copy.setAttribute('role', 'img');       // and a diagram with a name is an image of that name
     }
     stage.style.background = zoomGround(src);
     stage.appendChild(copy);
@@ -904,14 +911,14 @@ var create = function (ROOT, CFG, opts) {
     // The viewer's own box: the window on a page of its own, the pane on a mounted one (the host contains its fixed parts).
     function box() { return el.getBoundingClientRect(); }
     function loc(cx, cy) { var r = box(); return { x: cx - r.left, y: cy - r.top }; }
-    function usableH() { return box().height - (legend ? legend.offsetHeight + 20 : 0); }   // the legend's own band is not the diagram's
+    function usableH() { return Math.max(0, box().height - (legend ? legend.offsetHeight + 20 : 0)); }   // the legend's own band is not the diagram's
     function reset() {
       var r = box(), vw = r.width, vh = usableH();
-      fit = Math.max(0.01, Math.min(vw * 0.94 / w, Math.max(vh - 24, 40) * 0.94 / h));
+      fit = Math.max(0.01, Math.min(vw * 0.94 / w, Math.min(vh, Math.max(vh - 24, 40)) * 0.94 / h));   // never taller than what the legend leaves
       sw = w * fit; sh = h * fit;
       stage.style.width = sw + 'px';
       stage.style.height = sh + 'px';
-      k = 1; x = fitX = (vw - sw) / 2; y = fitY = (vh - sh) / 2;
+      k = 1; x = fitX = (vw - sw) / 2; y = fitY = Math.max(0, (vh - sh) / 2);
       place();
     }
     function mid() { return { x: box().width / 2, y: usableH() / 2 }; }
@@ -930,6 +937,7 @@ var create = function (ROOT, CFG, opts) {
 
     // Wheel (and a trackpad's pinch, which arrives as a wheel with ctrlKey): about the pointer.
     el.addEventListener('wheel', function (e) {
+      if (legend && legend.contains(e.target) && legend.scrollHeight > legend.clientHeight) return;   // the legend scrolls its own rows
       e.preventDefault();
       var d = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
       var at = loc(e.clientX, e.clientY);
@@ -946,7 +954,7 @@ var create = function (ROOT, CFG, opts) {
       return null;
     }
     el.addEventListener('pointerdown', function (e) {
-      if (e.target.closest('.rd-zoom-bar') || (e.pointerType === 'mouse' && e.button !== 0)) return;
+      if (e.target.closest('.rd-zoom-bar') || e.target.closest('.rd-zoom-legend') || (e.pointerType === 'mouse' && e.button !== 0)) return;
       var at = loc(e.clientX, e.clientY);
       ptrs.set(e.pointerId, at);
       try { el.setPointerCapture(e.pointerId); } catch (err) {}
@@ -1016,6 +1024,7 @@ var create = function (ROOT, CFG, opts) {
     if (zoomView.keys(e)) { e.preventDefault(); e.stopPropagation(); }
   }, true);
   listen(window, 'resize', function () { if (zoomView) zoomView.resize(); });
+  BODY.classList.add('rd-zoomable');                                           // the stylesheet shows the zoom cursor only where this is installed
   listen(main, 'click', function (e) {
     if (e.button || zoomView) return;
     var src = zoomTarget(e.target);

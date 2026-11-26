@@ -130,6 +130,13 @@
   const IMAGE_DATA = /^data:image\/(?:png|jpeg|gif|webp)[;,]/i;
   // The one SVG form sheaf writes itself (a local .svg file's image: base64, nothing after it): an image loader runs no script
   // in it and loads nothing from it, and the diagram viewer opens it. Any other SVG data address goes (sanitize.py, the same).
+  // True for a base64 SVG data address whose decoded file is at most `max` bytes: (base64 length * 3 / 4) minus the padding.
+  function svgImageWithin(value, max) {
+    const v = value.replace(CONTROL, '');
+    if (!SVG_DATA.test(v)) return false;
+    const payload = v.length - v.indexOf(',') - 1, pad = v.endsWith('==') ? 2 : v.endsWith('=') ? 1 : 0;
+    return Math.floor(payload * 3 / 4) - pad <= max;
+  }
   const SVG_DATA = /^data:image\/svg\+xml;base64,[A-Za-z0-9+/]*={0,2}$/i;
 
   function linkOk(value) {
@@ -310,9 +317,9 @@
         if (a.namespaceURI) continue;              // xlink:href, xml:*, xmlns:*: none is kept
         const name = ns === SVG_NS ? a.name : a.name.toLowerCase();
         const value = a.value;
-        // A local SVG image is its file, base64: longer than any other attribute, and the one kind the viewer opens (4 MB at most).
-        if (value.length > 20000 && !(local === 'img' && name === 'src' && value.length <= 4000000 &&
-                                      SVG_DATA.test(value.replace(CONTROL, '')))) continue;
+        // A local SVG image is its file, base64: longer than any other attribute, and the one kind the viewer opens. It is
+        // held to the page's own budget (MAX_INPUT, on the file's bytes), with no cap of its own below it.
+        if (value.length > 20000 && !(local === 'img' && name === 'src' && svgImageWithin(value, MAX_INPUT))) continue;
         if (bt) {
           if (name === 'id') { if (bt !== 'button') htmlAttr(el, local, name, value); }
           else if (Object.prototype.hasOwnProperty.call(BLOCK_TYPES[bt].attrs, name) && BLOCK_TYPES[bt].attrs[name].includes(value)) el.setAttribute(name, value);

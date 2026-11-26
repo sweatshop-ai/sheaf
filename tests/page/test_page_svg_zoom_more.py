@@ -119,3 +119,53 @@ def test_a_diagram_taking_the_focus_does_not_make_a_block_dirty(doc):
     p = doc.page
     p.click("#rd-mode button")
     assert p.evaluate("document.querySelector('#rd-state').textContent") == "Editing", "the markings are no edit"
+
+
+NAMED = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100" width="200" height="100" aria-label="Revenue by quarter">'
+         '<rect width="200" height="100" fill="#fde68a"/></svg>')
+QUIET_LINK = ('<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 200 100" '
+              'width="200" height="100" id="quiet"><a xlink:href="#elsewhere" tabindex="-1"><rect width="200" height="100" fill="#bbf7d0"/></a></svg>')
+MD3 = f'# Plan\n\n<div class="mermaid-svg">{NAMED}</div>\n\n<div class="mermaid-svg">{QUIET_LINK}</div>\n\nAfter.\n'
+
+
+@pytest.fixture
+def doc3(tab, site):
+    rewrite(site.file, MD3)
+    return tab.open()
+
+
+def test_an_author_aria_label_survives_in_the_viewer_and_on_the_page(doc3):
+    p = doc3.page
+    assert p.get_attribute("main svg[aria-label]", "aria-label") == "Revenue by quarter"
+    assert p.get_attribute("main svg[aria-label]", "role") == "button"
+    p.focus("main svg[aria-label]")
+    p.keyboard.press("Enter")
+    p.wait_for_selector(VIEWER)
+    assert p.get_attribute("#rd-zoom .rd-zoom-stage svg", "aria-label") == "Revenue by quarter"
+    assert p.get_attribute("#rd-zoom .rd-zoom-stage svg", "role") == "img", "named, and no longer a button"
+    assert p.get_attribute("#rd-zoom .rd-zoom-stage svg", "tabindex") is None
+
+
+def test_a_generated_label_does_not_reach_the_viewer(doc):
+    p = doc.page
+    p.click("main .chart svg")
+    p.wait_for_selector(VIEWER)
+    assert p.get_attribute("#rd-zoom .rd-zoom-stage svg", "aria-label") is None
+    assert p.get_attribute("#rd-zoom .rd-zoom-stage svg", "role") is None
+
+
+def test_a_link_inside_the_diagram_that_is_not_a_tab_stop_leaves_the_diagram_one(doc3):
+    p = doc3.page
+    assert p.get_attribute("main svg#quiet", "tabindex") == "0"
+    p.focus("main svg#quiet")
+    p.keyboard.press("Space")
+    p.wait_for_selector(VIEWER)
+
+
+def test_the_zoom_cursor_belongs_to_a_page_where_the_viewer_is_installed(doc):
+    p = doc.page
+    sel = "main .chart svg"
+    assert p.evaluate("(s) => document.body.classList.contains('rd-zoomable')", sel)
+    assert p.evaluate("(s) => getComputedStyle(document.querySelector(s)).cursor", sel) == "zoom-in"
+    p.evaluate("document.body.classList.remove('rd-zoomable')")
+    assert p.evaluate("(s) => getComputedStyle(document.querySelector(s)).cursor", sel) != "zoom-in"

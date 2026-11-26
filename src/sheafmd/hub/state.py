@@ -186,7 +186,7 @@ def times_out_of_git(store: Path):
     """Keep every pin time of a root's own store at `store` out of git, whether or not this hub has pinned there: the
     store's `.gitignore` is written unless it is a file of its own holding the hub's lines, and any other `.gitignore`
     in the store, which could say `!*.at`, goes (ticket 203 C, round 8). A clone gets no store `.gitignore` from git:
-    the file ignores itself. Nothing is made when there is no store. Nothing is touched through `.sheaf` or a store
+    the file ignores itself. Nothing is made when the store holds no pin time. Nothing is touched through `.sheaf` or a store
     that is a link or a folder of another account (7.4, rounds 9 and 10): `PermissionError`, since nothing then keeps
     pin times out. OSError: the caller must not stage the store."""
     for d in (store.parent, store):
@@ -196,13 +196,18 @@ def times_out_of_git(store: Path):
             return
         if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
             raise PermissionError(f"{d.name} is not a folder of this account; its pin times cannot be kept out of git")
+    planted, timed = [], False
+    for d, dirs, names in os.walk(store):
+        timed = timed or any(n.endswith(_PINNED_AT) for n in names)
+        if d != str(store) and ".gitignore" in names + dirs:
+            planted.append(Path(d) / ".gitignore")
+    if not timed:
+        return              # no pin time to keep out: the store stays as the hub left it
     if read_small(store / ".gitignore") != _LOCAL_ONLY:
         write_text_private(store / ".gitignore", _LOCAL_ONLY, True)
-    for d, dirs, names in os.walk(store):
-        if d != str(store) and ".gitignore" in names + dirs:
-            p = Path(d) / ".gitignore"
-            if not stat.S_ISDIR(os.lstat(p).st_mode):
-                os.unlink(p)
+    for p in planted:
+        if not stat.S_ISDIR(os.lstat(p).st_mode):
+            os.unlink(p)
 
 
 class Versions:

@@ -1516,7 +1516,8 @@ class Handler:
         _shape(isinstance(md, str), "markdown must be the whole text")
         _shape(ids is None or (isinstance(ids, list) and all(x is None or isinstance(x, str) for x in ids)),
                "ids must be a list of a block's id or null")
-        _shape(isinstance(session, str) and len(session) <= 64, "session must be the page's own id")
+        _shape(isinstance(session, str) and len(session) <= 64 and not session.startswith("\x00"),
+               "session must be the page's own id")      # \x00 is the service's own: a comment's
         rid = b.get("rid")
         _shape(rid is None or (isinstance(rid, str) and _RID_RE.fullmatch(rid)), "rid is not a request id")
         read_on = self._read_on(e.address, b.get("branch"))

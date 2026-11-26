@@ -174,3 +174,25 @@ def test_enter_in_a_table_cell_is_a_line_break_and_the_text_after_it_is_saved(do
     p.click(TOGGLE)
     p.wait_for_selector(DOC)
     assert p.evaluate("window.sheafBlockEditor.last.freshMarkdown()") == text(site)      # `<br>` reads back as the line break
+
+
+def test_a_table_cell_with_a_line_break_opens_as_a_table_and_stays_editable(doc, site):
+    rewrite(site.file, SAMPLE.replace("| a | 1 |", "| a<br>more | 1 |"))
+    doc.open()
+    doc.page.click(TOGGLE)
+    doc.page.wait_for_selector(DOC)
+    p = doc.page
+    assert p.locator(f"{DOC} td").count() == 4          # the table is a table, not a block shown as it is
+    p.click(f"{DOC} td >> text=more")
+    p.keyboard.press(key("End"))
+    p.keyboard.type("!")
+    until(lambda: text(site) != SAMPLE.replace("| a | 1 |", "| a<br>more | 1 |"), timeout=10, what="the autosave")
+    assert "| a!<br>more | 1 |" in text(site)      # the click lands on the cell's first line
+
+
+def test_shift_enter_in_a_heading_does_nothing_and_a_pasted_list_in_a_cell_is_paragraphs(doc, site):
+    p = open_editor(doc, site)
+    p.click(f"{DOC} h1")
+    p.keyboard.press(key("End"))
+    p.keyboard.press("Shift+Enter")
+    assert p.evaluate("window.sheafBlockEditor.last.markdown()") == SAMPLE

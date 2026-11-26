@@ -64,8 +64,11 @@ function hash(s) {
 
 // Enter in a table cell is a line break: a Markdown cell is one line, and a second paragraph would be lost.
 const enterBreaks = { addKeyboardShortcuts() { return { Enter: () => (this.editor.isActive(this.name) ? this.editor.commands.setHardBreak() : false) }; } };
-const TableCell = BaseCell.extend(enterBreaks);
-const TableHeader = BaseHeader.extend(enterBreaks);
+// A cell holds paragraphs only (a pasted list becomes paragraphs): a Markdown cell has no blocks.
+const TableCell = BaseCell.extend({ ...enterBreaks, content: 'paragraph+' });
+const TableHeader = BaseHeader.extend({ ...enterBreaks, content: 'paragraph+' });
+// Shift+Enter in a heading does nothing: a heading is one line of Markdown.
+const HeadingOneLine = Extension.create({ name: 'headingOneLine', priority: 1000, addKeyboardShortcuts() { return { 'Shift-Enter': () => this.editor.isActive('heading') }; } });
 
 export function mount(host, { lead = '', blocks = [], onChange = () => {} } = {}) {
   const kit = StarterKit.configure({
@@ -74,7 +77,7 @@ export function mount(host, { lead = '', blocks = [], onChange = () => {} } = {}
   });
   const editor = new Editor({
     element: host,
-    extensions: [kit, Bullets, Ordered, Fenced, Table, TableRow, TableCell, TableHeader, Raw, Own],
+    extensions: [kit, Bullets, Ordered, Fenced, Table, TableRow, TableCell, TableHeader, Raw, Own, HeadingOneLine],
     content: { type: 'doc', content: blocks.length ? blocks.map((b) => nodeOf(b)) : [{ type: 'paragraph' }] },
     editorProps: { attributes: { class: 'sheaf-be-doc', spellcheck: 'true' } },
     onUpdate: () => onChange(),

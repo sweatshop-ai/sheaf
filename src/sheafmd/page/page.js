@@ -1216,11 +1216,17 @@ var create = function (ROOT, CFG, opts) {
       if (bke && md !== bke.markdown() && !stale) beChanged();
     }
   }
+  var beDiscard = false;
   async function blockEditing(on) {
     editing = on;
     BODY.classList.toggle('rd-editing', on);
     var tg = modes.querySelector('button'); if (tg) tg.setAttribute('data-m', on ? 'save' : 'edit');
-    if (on) { await beOpen(); } else if (bke) {
+    if (on) { beDiscard = false; await beOpen(); } else if (bke) {
+      if (stale && !beDiscard) {          // the text typed since the conflict is not on disk: leaving throws it away, so ask once
+        beDiscard = true; editing = true; BODY.classList.add('rd-editing'); if (tg) tg.setAttribute('data-m', 'save');
+        say('The document changed, so your last edits are not saved. Press Done again to discard them and reload.', true);
+        return;
+      }
       if (!stale && !(await beSave(true))) { editing = true; BODY.classList.add('rd-editing'); if (tg) tg.setAttribute('data-m', 'save'); return; }
       beClose();
       reloadWhenFree(popId);          // the page shows the text the editor wrote

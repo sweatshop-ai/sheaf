@@ -192,3 +192,10 @@ def test_a_markdown_save_that_breaks_a_callout_is_a_409_and_the_file_is_unchange
     r = save(browser, text.replace('tone="warning"', 'tone="warning" onclick="x"'), j["hash"], ids)
     assert r.status == 409 and "refused" in r.text
     assert plan.read_text(encoding="utf-8") == text
+
+
+def test_a_save_cannot_name_the_services_own_comment_session(on, browser, doc):
+    j = browser.get(f"/_/blocks?doc={DOC}").json()
+    ids = [b["id"] for b in j["blocks"]]
+    r = save(browser, doc.read_text(encoding="utf-8"), j["hash"], ids, session="\x00comment")
+    assert r.status == 400

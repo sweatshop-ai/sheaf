@@ -52,9 +52,7 @@ export function inline(s, marks = [], out = []) {
       if (s[i + 1] === '\n') { flush(); push(out, { type: 'hardBreak' }); i++; continue; }
       if (ESCAPABLE.test(s[i + 1])) { buf += s[i + 1]; i++; continue; }
     }
-    if (c === '<' && /^<br\s*\/?>/i.test(s.slice(i, i + 8))) {      // a line break inside a table cell
-      flush(); push(out, { type: 'hardBreak' }); i += s.slice(i).match(/^<br\s*\/?>/i)[0].length - 1; continue;
-    }
+    if (c === '<' && s.startsWith('<br>', i)) { flush(); push(out, { type: 'hardBreak' }); i += 3; continue; }      // a line break inside a table cell (a paragraph holding `<br>` stays raw)
     if (c === ' ' && s.startsWith('  \n', i)) {
       flush(); push(out, { type: 'hardBreak' }); i += 2; while (s[i + 1] === ' ') i++; continue;
     }
@@ -195,7 +193,7 @@ function table(lines) {
   const width = head.length;
   if (cells(lines[1]).length !== width) return null;
   const rows = [head, ...lines.slice(2).map(cells)];
-  if (rows.some((r) => r.length !== width) || rows.some((r) => r.some((c) => UNSUPPORTED.test(c)))) return null;
+  if (rows.some((r) => r.length !== width) || rows.some((r) => r.some((c) => UNSUPPORTED.test(c.replace(/<br>/g, ''))))) return null;
   return {
     type: 'table',
     content: rows.map((r, i) => ({
@@ -322,7 +320,7 @@ function listMarkdown(node) {
 export function blockMarkdown(node) {
   switch (node.type) {
     case 'paragraph': return inlineMarkdown(node.content || []);
-    case 'heading': return '#'.repeat(node.attrs.level) + (node.content && node.content.length ? ' ' + inlineMarkdown(node.content) : '');
+    case 'heading': return '#'.repeat(node.attrs.level) + (node.content && node.content.length ? ' ' + inlineMarkdown(node.content).replace(/\\\n/g, ' ') : '');      // a heading is one line
     case 'horizontalRule': return '---';
     case 'raw': return node.attrs.text.replace(/\n+$/, '');
     case 'codeBlock': {
@@ -340,7 +338,7 @@ export function blockMarkdown(node) {
     case 'table': {
       // A cell holds one line of Markdown: its paragraphs and its hard breaks are written as <br>.
       const rows = (node.content || []).map((r) => (r.content || []).map((c) =>
-        (c.content || []).map((p) => inlineMarkdown(p.content || []).replace(/\\\n/g, '<br>')).join('<br>')
+        (c.content || []).map((p) => (p.type === 'paragraph' ? inlineMarkdown(p.content || []) : blockMarkdown(p).replace(/\n+/g, ' ')).replace(/\\\n/g, '<br>')).join('<br>')
           .replace(/(?<!\\)\|/g, '\\|').replace(/\n/g, ' ')));
       const line = (r) => '| ' + r.join(' | ') + ' |';
       return [line(rows[0]), line(rows[0].map(() => '---')), ...rows.slice(1).map(line)].join('\n');

@@ -228,6 +228,26 @@ def test_a_connection_opened_again_under_its_id_is_the_newest(world, docs):
     other.close()
 
 
+def test_a_join_whose_connection_was_opened_again_meanwhile_leaves_the_fresh_one_its_key(world, docs, monkeypatch):
+    """Ticket 206: a join looks its connection up, then makes the tab's stream with no lock held. The same id opened
+    again in that time, and the tab joined the fresh connection first: the stale join must not take the key from it."""
+    from sheafmd.hub.handler import Handler
+    stale = shared(world)
+    made = Handler._joined_sub
+    fresh = []
+
+    def slow(self, req, doc):
+        if not fresh:                                          # the stale join, between its look-up and its lock
+            fresh.append(shared(world))
+            assert join(world, "t1:1", doc).status == 200      # the tab joins the fresh connection first
+        return made(self, req, doc)
+
+    monkeypatch.setattr(Handler, "_joined_sub", slow)
+    assert join(world, "t1:1", docs[0]).status == 200          # dropped, as a late join is
+    assert stale.closed and fresh[0].keys() == ["t1:1"] and world.hub.tabs(docs[0]) == 1
+    fresh[0].close()
+
+
 @pytest.mark.parametrize("key", [None, 7, ["a"], ""])
 def test_a_leave_with_no_stream_of_ours_is_refused_whatever_its_key(world, key):
     assert world.post("/_/live/leave", {"stream": "nope", "key": key}).status == 404

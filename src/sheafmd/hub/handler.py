@@ -1096,10 +1096,13 @@ class Handler:
         # closed, is still open here until a write to it fails: drop the key there, or the hub counts the tab twice.
         # The old leader's own join of the key can reach the hub after that (ticket 181 D): once a newer connection
         # had the key, held still, left, closed or opened again since (ticket 193), the late join is dropped.
+        # So is a join whose own connection was closed, or opened again under its id, since it was looked up above
+        # (ticket 206): the fresh stream never barred this one, and the leave below would take the key from it.
         with self._join_lock:
-            if not stream.bars(key):
-                with self._shared_lock:
-                    others = [s for s in self._shared.values() if s is not stream and s.owner == stream.owner]
+            with self._shared_lock:
+                listed = self._shared.get(stream._sid) is stream and not stream.closed
+                others = [s for s in self._shared.values() if s is not stream and s.owner == stream.owner]
+            if listed and not stream.bars(key):
                 stream.join(key, sub)
                 for other in others:
                     other.leave(key)

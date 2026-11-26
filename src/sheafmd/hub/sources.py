@@ -15,6 +15,7 @@ that says so.
 import threading
 import time
 
+from .. import adapter as rda
 from .. import config
 from ..remote import RemoteSource, SourceError, VersionMismatch
 
@@ -30,6 +31,7 @@ class Source:
         self.shown = ""                 # what a member is told of it: never a path or an OS error
         self.sticky = False             # unserved until the hub restarts (a version mismatch, a declaration that is wrong)
         self.checked = 0.0
+        self.probing = False            # an `info` call is out: no second one is made
 
     @property
     def served(self) -> bool:
@@ -90,8 +92,9 @@ class Sources:
 
     def _check(self, s: Source) -> None:
         with self._lock:
-            if s.sticky or s.decl is None:
+            if s.sticky or s.decl is None or s.probing:
                 return
+            s.probing = True
             s.checked = self._clock()
             decl = s.decl
         try:
@@ -105,11 +108,14 @@ class Sources:
             self._set(s, e.message, e.message, True)
         except SourceError as e:          # Unreachable too: asked again later; the service's `version` code is a mismatch
             mismatch = getattr(e, "code", "") == "version"
-            self._set(s, e.message, f"source {s.name!r} speaks another interface version than this hub" if mismatch
+            self._set(s, e.message, f"source {s.name!r} speaks another interface version, this hub speaks {rda.INTERFACE_VERSION}" if mismatch
                       else f"source {s.name!r} cannot be reached just now", mismatch)
         else:
             self._set(s, "", "", False, client)
 
     def _set(self, s: Source, error: str, shown: str, sticky: bool, client=None) -> None:
         with self._lock:
+            s.probing = False
+            if s.sticky:                  # a refusal is never lifted by a probe that was out meanwhile
+                return
             s.error, s.shown, s.sticky, s.client = error, shown, sticky, client

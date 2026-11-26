@@ -257,3 +257,28 @@ def test_a_source_named_like_a_members_folder_root_leaves_the_folder_served(tmp_
         assert site.hub.roots.held("dora") is not None
     page = get(site, "/dora/")
     assert page.status != 503 and b"is not served" not in page.body
+
+
+def test_a_probe_that_is_out_never_lifts_a_refusal_made_meanwhile(tmp_path):
+    import threading
+    from sheafmd.hub.sources import Sources
+    f = secret(tmp_path)
+    gate, started = threading.Event(), threading.Event()
+
+    class Slow:
+        def __init__(self, name, url, bearer):
+            pass
+
+        def info(self):
+            started.set()
+            gate.wait(5)
+
+    srcs = Sources([config.SourceDecl("shop", "unix:///run/s.sock", f)], make=Slow)
+    t = threading.Thread(target=srcs.ensure, args=("shop",))
+    t.start()
+    assert started.wait(5)
+    srcs.refuse("shop", "a folder root already has this name")
+    assert srcs.ensure("shop").error                 # no second probe is made while one is out
+    gate.set()
+    t.join(5)
+    assert not srcs.get("shop").served and srcs.get("shop").error

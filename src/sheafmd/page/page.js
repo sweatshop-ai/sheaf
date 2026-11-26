@@ -402,7 +402,9 @@ var create = function (ROOT, CFG, opts) {
       if (!zoomTarget(n) || inLink(n)) return;
       n.setAttribute('tabindex', '0');
       n.setAttribute('role', 'button');
-      n.setAttribute('aria-label', ((n.getAttribute('alt') || '').trim() || 'Diagram') + ' (opens in a viewer)');
+      if (!n.hasAttribute('aria-label')) {          // a name the diagram already has stays
+        n.setAttribute('aria-label', ((n.getAttribute('alt') || '').trim() || 'Diagram') + ' (opens in a viewer)');
+      }
     });
   }
   // The link the node sits in, an HTML <a href> or an SVG one (`xlink:href`, or `href` in SVG 2), below main; null if none.
@@ -836,7 +838,11 @@ var create = function (ROOT, CFG, opts) {
     var z = zoomView;
     zoomView = null;
     z.el.remove();
-    if (z.back && z.back.isConnected && z.back !== document.body && z.back !== document.documentElement) { try { z.back.focus({ preventScroll: true }); } catch (e) {} }
+    if (z.ro) z.ro.disconnect();
+    var b = z.back;
+    if (b && b.isConnected && b !== document.body && b !== document.documentElement) {
+      try { b.focus({ preventScroll: true }); } catch (e) {}
+    }
   }
   function openZoom(src) {
     if (zoomView) return;
@@ -896,8 +902,9 @@ var create = function (ROOT, CFG, opts) {
     // The viewer's own box: the window on a page of its own, the pane on a mounted one (the host contains its fixed parts).
     function box() { return el.getBoundingClientRect(); }
     function loc(cx, cy) { var r = box(); return { x: cx - r.left, y: cy - r.top }; }
+    function usableH() { return box().height - (legend ? legend.offsetHeight + 20 : 0); }   // the legend's own band is not the diagram's
     function reset() {
-      var r = box(), vw = r.width, vh = r.height - (legend ? legend.offsetHeight + 20 : 0);
+      var r = box(), vw = r.width, vh = usableH();
       fit = Math.max(0.01, Math.min(vw * 0.94 / w, (vh - 24) * 0.94 / h));
       sw = w * fit; sh = h * fit;
       stage.style.width = sw + 'px';
@@ -905,7 +912,7 @@ var create = function (ROOT, CFG, opts) {
       k = 1; x = (vw - sw) / 2; y = (vh - sh) / 2;
       place();
     }
-    function mid() { var r = box(); return { x: r.width / 2, y: (r.height - (legend ? legend.offsetHeight + 20 : 0)) / 2 }; }
+    function mid() { return { x: box().width / 2, y: usableH() / 2 }; }
     function zoomAt(cx, cy, f) {
       var k2 = Math.max(MIN, Math.min(MAX, k * f));
       f = k2 / k;
@@ -996,7 +1003,9 @@ var create = function (ROOT, CFG, opts) {
       } else return false;
       return true;
     };
-    z.resize = function () { if (k === 1) reset(); };   // a zoom or pan the person made stays when the phone's bars move the window
+    z.resize = function () { if (k === 1) reset(); };
+    // A pane that changes size while the window does not (a side bar opening) fits the diagram again, as a window does.
+    if (typeof ResizeObserver === 'function') { z.ro = new ResizeObserver(function () { z.resize(); }); z.ro.observe(el); }   // a zoom or pan the person made stays when the phone's bars move the window
   }
   // Capture phase, before edit mode's own Escape and arrow keys, and only while the viewer is open.
   listen(PAGE_EV, 'keydown', function (e) {

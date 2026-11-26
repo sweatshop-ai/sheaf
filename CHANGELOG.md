@@ -12,7 +12,10 @@ changes whenever an asset does. The entries name pull requests of sweatshop-ai/s
 
 ### Fixed
 
-- The diagram viewer on a mounted page: Fit, the buttons and zoom about the pointer measure the pane, not the window; a local SVG image is kept by the mount sanitiser (only the base64 form sheaf writes) and opens; a pinch no longer counts the midpoint's movement twice; a chart's legend stays in the viewer; a link written `xlink:href` in an SVG is followed without opening the viewer; Enter or Space opens a focused diagram.
+- The diagram viewer on a mounted page: Fit, the buttons and zoom about the pointer measure the pane, not the window (#708).
+- A local SVG image is kept by the mount sanitiser (only the base64 form sheaf writes) and opens in the viewer (#708).
+- A pinch in the diagram viewer no longer counts the midpoint's movement twice (#708).
+- A chart's legend stays in the diagram viewer; an SVG link written `xlink:href` is followed without opening it; Enter or Space opens a focused diagram (#708).
 - A tab of a page that was deleted hears nothing after `gone`: a grants change or a Tell that had taken the page from before the delete no longer sends an event after it (#700).
 - A door create that is taken back never deletes the file it made while an editor holds it open (a write through the editor's descriptor was lost); where the system cannot tell (macOS), the file is kept in a hidden sibling. A folder put back replaces no empty folder that came to its name (#700).
 - Two shortcodes written as text (`\:smile:`), each in its own long changed stretch of about 1 000 words with unchanged words between the stretches, keep both escapes, instead of showing as their emoji: each stretch is now compared on its own (#691).

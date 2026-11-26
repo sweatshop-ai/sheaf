@@ -31,8 +31,8 @@ A second pass over the result makes sure that what came out is a fixed point.
 
 MOUNT MODE (`sanitize(..., mount=True)`, #116 step 2). The rectoverso page used to run in a frame under a CSP of its own;
 mounted in the front's document it has none, so this module also closes what that CSP closed. Beyond the above:
-audio, video, picture and their sources are removed, an <img> is kept only for a relative path, data:image/(png|jpeg|gif|webp) or the base64 data:image/svg+xml of a local SVG file
-(any other address is a tracking pixel; the alt text stays), svg <use>, <image>, <foreignObject>, animation and links, and all
+audio, video, picture and their sources are removed, an <img> is kept only for a relative path, data:image/(png|jpeg|gif|webp)
+or the base64 data:image/svg+xml of a local SVG file (any other address is a tracking pixel; the alt text stays), svg <use>, <image>, <foreignObject>, animation and links, and all
 MathML, are removed, a link keeps http, https, mailto and relative addresses with rel="noopener noreferrer" and no target,
 a style attribute keeps only the declarations of an allow-list with a strict value grammar, and the names the page itself
 uses (rd- classes and ids, data-rd-*, a name attribute) are removed. The browser rebuilds the tree again from an allow-list

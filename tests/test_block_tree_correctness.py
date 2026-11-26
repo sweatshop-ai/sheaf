@@ -129,3 +129,23 @@ def test_a_callout_never_shares_its_stored_id_with_a_plain_block():
     ids = [b.id for b in tree.walk()]
     assert len(ids) == len(set(ids)), ids
     assert tree.get(tree.blocks[1].id).type == "callout"
+
+
+def test_a_stored_id_is_kept_whichever_block_comes_first():
+    para = read_tree("Hello.\n").blocks[0].id
+    tree = read_tree(f"Hello.\n\n::: {{#{para} .callout}}\nhi\n:::\n")
+    assert tree.blocks[1].id == para and tree.blocks[0].id != para
+    assert tree.get(para).type == "callout"
+
+
+def test_an_unknown_div_keeps_its_stored_id_inside_a_quote():
+    tree = read_tree("> ::: {#legacy .mystery}\n> inside\n> :::\n")
+    assert tree.get("legacy").type == "stub"
+
+
+def test_a_declared_div_inside_an_unknown_div_locks_only_that_div():
+    text = "> before\n>\n> ::: {#m .mystery}\n> ::: {#c .callout}\n> x\n> :::\n> :::\n>\n> after\n"
+    quote = read_tree(text).blocks[0]
+    assert quote.type == "quote" and quote.caps == ALL
+    assert [c.type for c in quote.children] == ["paragraph", "stub", "paragraph"]
+    assert quote.children[1].caps == LOCKED

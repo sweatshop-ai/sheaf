@@ -141,6 +141,7 @@ def _children(blocks: list, api) -> list:
                 classes = b["c"][0][1]
                 content = _source(b, api)
                 t, attrs, caps, ast = "stub", {"type": classes[0] if classes else "", "reason": "unknown type"}, LOCKED, content
+                stored = b["c"][0][0]
         elif b["t"] in ("BulletList", "OrderedList"):
             items = b["c"] if b["t"] == "BulletList" else b["c"][1]
             kids = [("item", {}, [{"t": "Item", "c": item}], _children(item, api), "", ALL, "") for item in items]
@@ -156,6 +157,7 @@ class _Ids:
     def __init__(self):
         self.seen = {}
         self.used = set()           # every id handed out, stored or generated: no two blocks share one
+        self.reserved = set()       # every id written in the file: a generated id never takes one, wherever the block stands
 
     def take(self, stored: str, type_: str, ast: str) -> str:
         """A Rich block keeps the id written in the file; a missing or repeated one falls back to a derived id."""
@@ -169,7 +171,7 @@ class _Ids:
         while True:
             n = self.seen[h] = self.seen.get(h, 0) + 1
             id_ = h if n == 1 else f"{h}-{n}"
-            if id_ not in self.used:
+            if id_ not in self.used and id_ not in self.reserved:
                 self.used.add(id_)
                 return id_
 
@@ -181,6 +183,19 @@ def _build(kids, ids: _Ids) -> tuple:
         out.append(Block(id=ids.take(stored, t, a), type=t, attrs=attrs, caps=caps, content=content, ast=a,
                          children=_build(sub, ids)))
     return tuple(out)
+
+
+def _div_ids(x, out: set) -> set:
+    """Every id written on a div anywhere in the AST `x`."""
+    if isinstance(x, dict):
+        if x.get("t") == "Div" and x["c"][0][0]:
+            out.add(x["c"][0][0])
+        for v in x.values():
+            _div_ids(v, out)
+    elif isinstance(x, list):
+        for v in x:
+            _div_ids(v, out)
+    return out
 
 
 def _segments(doc: dict) -> dict:
@@ -206,7 +221,7 @@ def _rich_found(blocks: list):
             classes = b["c"][0][1]
             if classes and classes[0] in decl.DECLARED:
                 return classes[0]
-            inner = _rich_found(b["c"][1])
+            continue            # an unknown div is a locked Stub of its own: what it holds is no reason to lock its container
         elif t == "BlockQuote":
             inner = _rich_found(b["c"])
         elif t in ("BulletList", "OrderedList"):
@@ -271,6 +286,7 @@ def read_tree(text: str) -> Tree:
         if set(seg) != set(live):
             raise Unreadable("a block of the text is not a top-level block for pandoc")
     ids, blocks, lead = _Ids(), [], ""
+    ids.reserved = _div_ids(list(seg.values()), set())
     for i, tile in enumerate(tiles):
         if tile.kind == "blank":
             lead = tile.gap

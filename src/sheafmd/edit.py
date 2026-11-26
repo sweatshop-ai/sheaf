@@ -209,10 +209,12 @@ def _line_kept(line: str, was: str) -> float:
 def _source_runs_kept(soup, source) -> set:
     """The ids of the <br> in `soup` that make up a run of the source's own (`_source_break_runs`). The page's runs
     and the source's are paired in order, each pair of the same length and with some words of a line beside it still
-    there (`_line_kept`); the pairing has the most pairs, and among those keeps the most of those lines. A run of
-    the source stays the source's when both lines beside it were edited, a new run takes no pair from a run that kept
-    more of its lines, before it or after it, one run close to another's lines takes no pair from two that keep fewer,
-    and a new run with none of the source's words beside it is no run of the source's."""
+    there (`_line_kept`); the pairing has the most pairs, among those the most lines beside them unchanged, and then
+    keeps the most of those lines: a run with one line as it was is the source's over a new run whose two lines are
+    each close to the source's (ticket 210). A run of the source stays the source's when both lines beside it were
+    edited, a new run takes no pair from a run that kept more of its lines, before it or after it, one run close to
+    another's lines takes no pair from two that keep fewer, and a new run with none of the source's words beside it
+    is no run of the source's."""
     page_runs = []
     for p in soup.find_all("p"):
         if _page_own(p):
@@ -223,17 +225,19 @@ def _source_runs_kept(soup, source) -> set:
     had = _source_break_runs(source)
     if not page_runs or not had:
         return set()
-    # best[i][j]: (pairs, lines kept) of the best pairing of page_runs[i:] with had[j:]; paired: whether it pairs i, j
-    best = [[(0, 0.0)] * (len(had) + 1) for _ in range(len(page_runs) + 1)]
+    # best[i][j]: (pairs, lines unchanged, lines kept) of the best pairing of page_runs[i:] with had[j:]; paired:
+    # whether it pairs i, j
+    best = [[(0, 0, 0.0)] * (len(had) + 1) for _ in range(len(page_runs) + 1)]
     paired = [[False] * len(had) for _ in range(len(page_runs))]
     for i in range(len(page_runs) - 1, -1, -1):
         for j in range(len(had) - 1, -1, -1):
             best[i][j] = max(best[i + 1][j], best[i][j + 1])
             (n, before, after), (m, was_before, was_after) = page_runs[i][0], had[j]
             lines = _line_kept(before, was_before) + _line_kept(after, was_after)
-            pairs, kept_lines = best[i + 1][j + 1]
-            if n == m and lines > 0 and (pairs + 1, kept_lines + lines) > best[i][j]:
-                best[i][j] = (pairs + 1, kept_lines + lines)
+            same = (before == was_before) + (after == was_after)
+            pairs, same_lines, kept_lines = best[i + 1][j + 1]
+            if n == m and lines > 0 and (pairs + 1, same_lines + same, kept_lines + lines) > best[i][j]:
+                best[i][j] = (pairs + 1, same_lines + same, kept_lines + lines)
                 paired[i][j] = True
     kept, i, j = set(), 0, 0
     while i < len(page_runs) and j < len(had):
@@ -1644,10 +1648,11 @@ def _places_by_order(old: str, new: str, olds) -> set:
     `old` is the k-th of `new` where both hold as many of that name. Where they do not, by a diff of the two texts'
     words (`_by_words`), whose bound reaches as many words in each changed stretch as the characters' diff reaches
     characters: a literal in a word the diff matches keeps its place, and a shortcode the reader typed is a new word,
-    which stays the emoji (#594). Past that bound, by the literal's neighbours: the `_NEIGHBOURS` characters before it,
-    or after it, with it, found once in `new`. A literal placed by none of these is written bare: one the source
-    escaped then shows as its emoji, on a changed stretch of over about 1 400 words on each side, with no word found
-    once on each side, around a name typed or deleted beside it."""
+    which stays the emoji (#594). Past that bound, or where the diff matched no word to it, by the literal's
+    neighbours: the `_NEIGHBOURS` characters before it, or after it, with it, found once in `new`. A literal placed
+    by none of these is written bare: one the source escaped then shows as its emoji, on a changed stretch of over
+    about 1 400 words on each side, with no word found once on each side, around a name typed or deleted beside
+    it."""
     def starts(text):
         by_name = {}
         for m in _SHORTCODE_TEXT.finditer(text):
@@ -1668,12 +1673,15 @@ def _places_by_order(old: str, new: str, olds) -> set:
             # the literal itself unless a shortcode-like word took its first colon (`:b:smile:`): then it is placed
             # only where `new` holds it at the same distance.
             word = word_starts[bisect.bisect_right(word_starts, start) - 1]
-            at = words[word] + start - word if word in words else None
-            if at is not None and word == start:
-                at = gap(start, at)
-            if at is not None and new.startswith(f":{name}:", at):
-                places.add(at)
-            continue
+            if word in words:
+                at = words[word] + start - word
+                if word == start:
+                    at = gap(start, at)
+                if new.startswith(f":{name}:", at):
+                    places.add(at)
+                continue
+            # A literal no stretch's diff matched (moved across the words a long text was cut at, ticket 210) goes
+            # to its neighbours, as it would if the diff had given None.
         code, end = f":{name}:", start + len(name) + 2
         before_it, after_it = old[max(0, start - _NEIGHBOURS):start], old[end:end + _NEIGHBOURS]
         for probe, offset in ((before_it + code, len(before_it)), (code + after_it, 0)):

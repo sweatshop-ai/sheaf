@@ -688,14 +688,17 @@ def _strip_tag_data(tag: str) -> str:
     name on, so whitespace then `data-` inside a quoted value (`title="the data-sheet"`) is never taken for one. One
     is dropped with the white space after it: the white space, quote or `/` before it stays, and keeps the name of
     the one after it apart (`<div data-x="1"title=t>` is `<div title=t>`); after a quote or `/`, its white space stays too."""
-    pos = _TAG_NAME_RE.match(tag, 1).end()
+    name = _TAG_NAME_RE.match(tag, 1)
+    pos = name.end()
     out, dropped, bare = tag[:pos], False, False
+    kept = name.end(1)                  # where the tag's name, or the last name or value kept, ends in `out`
     while (m := _ATTR_RE.match(tag, pos)) and m.end() > pos:
         if _DATA_NAME_RE.match(m.group(1)):
             dropped = True
             if out[-1] in "'\"/":
                 out += tag[m.end(2) if m.group(2) else m.end(1):m.end()]
         else:
+            kept = len(out) + (m.end(3) if m.group(2) else m.end(1)) - m.start()
             out += m.group(0)
             bare = m.group(2) is not None and m.group(3)[:1] not in ("'", '"')
         pos = m.end()
@@ -704,6 +707,11 @@ def _strip_tag_data(tag: str) -> str:
     # itself (`<div/>`).
     if dropped and (tag.startswith(">", pos) or not bare) and not out.rstrip().endswith("/"):
         out = out.rstrip()
+    # A `/` before a dropped attribute is left last (`<div/data-x>`): it would close a tag the parser read as open.
+    # What follows the last name or value kept goes, not a `/` a bare value ends in, which a space keeps from the `>`
+    # (`<a href=x/ /data-x>` is `<a href=x/ >`).
+    if dropped and tag.startswith(">", pos) and out.endswith("/") and not tag.endswith("/>"):
+        out = out[:kept] + (" " if out[:kept].endswith("/") else "")
     return out + tag[pos:]
 
 
@@ -1542,11 +1550,12 @@ def _in_its_gap(old: str, new: str, words: dict):
     `words` (`_by_words`) matched to the `:name:` at `at`. Where the words around it changed, that match can be any
     `:name:` between the words that still match on either side, the first the diff finds, which may be one the reader
     typed (#658). Of the `:name:` there that no other word of `old` matched, it is the one at the same share of the
-    way between those words, the first on a tie."""
+    way between those words, the first on a tie; one it gives a literal is given to no other (two escaped literals
+    side by side keep two places), and the one the diff matched it to is free again."""
     a, b = list(_DIFF_WORD.finditer(old)), list(_DIFF_WORD.finditer(new))
     ia, ib = {m.start(): k for k, m in enumerate(a)}, {m.start(): k for k, m in enumerate(b)}
     matched = {ia[o]: ib[n] for o, n in words.items()}
-    order, taken = sorted(matched), Counter(matched.values())
+    order, taken, placed = sorted(matched), Counter(matched.values()), set()
 
     def place(start, at):
         i = ia[start]
@@ -1555,10 +1564,15 @@ def _in_its_gap(old: str, new: str, words: dict):
         hi = order[k + 1] if k + 1 < len(order) else len(a)
         nlo, nhi = matched.get(lo, -1), matched.get(hi, len(b))
         share = (i - lo) / (hi - lo)
-        here = [n for n in range(nlo + 1, nhi) if b[n].group() == a[i].group() and (n == ib[at] or not taken[n])]
+        here = [n for n in range(nlo + 1, nhi)
+                if b[n].group() == a[i].group() and n not in placed and (n == ib[at] or not taken[n])]
         if not here:
             return at
-        return b[min(here, key=lambda n: abs((n - nlo) / (nhi - nlo) - share))].start()
+        chosen = min(here, key=lambda n: abs((n - nlo) / (nhi - nlo) - share))
+        taken[ib[at]] -= 1
+        taken[chosen] += 1
+        placed.add(chosen)
+        return b[chosen].start()
 
     return place
 

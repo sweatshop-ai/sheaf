@@ -183,6 +183,7 @@ def test_a_recipient_sees_a_shared_page_in_archived_when_the_owner_has_it_archiv
 
 def test_archive_after_in_the_roots_toml_changes_the_days(agents, clock):
     doc = made(agents, "bea-claude")
+    age(agents, doc, 0, clock)                      # ticket 208: written at the clock, not seconds after it under load
     (root_of(agents, doc).path / ".sheaf.toml").write_text("archive_after = 7\n", encoding="utf-8")
     sweep(agents)
     clock.now += 7 * DAY + 1

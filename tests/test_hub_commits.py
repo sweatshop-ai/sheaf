@@ -1829,6 +1829,19 @@ def test_a_reset_between_the_pull_and_the_push_is_not_forced_over_the_remote(gua
 NEW = "rectoversos/acme/blog/2026-10-30-plan.md"
 
 
+def poll_until_pulled(box, rectoversos, tries=5):
+    """The poll, run again while one of its gits ran out of time (`GIT_SECONDS`) on a loaded machine, as the hub's next
+    poll a minute later would; any other outcome is the poll's own. The poll's rows are said once a cause, so that memory
+    is cleared before each try."""
+    for _ in range(tries):
+        before = len(rows("push-failed"))
+        box.hub.commits._told.clear()
+        poll_now(box, rectoversos)
+        if not any("timed out" in (r.get("error") or "") for r in rows("push-failed")[before:]):
+            return
+    raise AssertionError(f"every one of {tries} polls had a git run out of time")
+
+
 def renamed_on_github(tmp_path, remote, old: str, new: str):
     """`old` renamed to `new` away from the box and pushed to `remote`, as a PR merged on GitHub would."""
     merged_on_github(tmp_path, remote, {"README.md": "# The rectoversos\n"}, "a README")    # makes the away clone
@@ -1848,7 +1861,7 @@ def test_a_rename_that_arrives_on_a_pull_writes_a_forward_and_carries_the_versio
     kept = md_hash((rectoversos / "acme" / "blog" / "2026-10-28-plan.md").read_text(encoding="utf-8"))
     assert versions.get(DOC, kept) is not None
     renamed_on_github(tmp_path, remote, "acme/blog/2026-10-28-plan.md", "acme/blog/2026-10-30-plan.md")
-    poll_now(box, rectoversos)
+    poll_until_pulled(box, rectoversos)         # ticket 208: one poll's git can run out of time under load
     assert (rectoversos / "acme" / "blog" / "2026-10-30-plan.md").exists()
     assert box.hub.forwards.follow(DOC) == NEW
     assert versions.get(NEW, kept) is not None and versions.get(DOC, kept) is None

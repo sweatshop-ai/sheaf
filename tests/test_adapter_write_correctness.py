@@ -487,6 +487,7 @@ def test_an_outside_edit_in_place_between_the_rename_and_the_key_of_a_save_is_se
     assert "Edxted words." in e.html and e.live.current()[1] == f.read_text(encoding="utf-8")
 
 
+@pytest.mark.skipif(not os.path.isdir("/proc/self/fd"), reason="counts descriptors through /proc")
 @pytest.mark.parametrize("fails", ["the status of the new file", "the rename"])
 def test_a_write_that_fails_leaks_no_descriptor_and_leaves_no_temporary_file(tmp_path, monkeypatch, fails):
     """26: the write asks the new file's status of its own descriptor (no duplicate of it is made), and whatever fails, every
@@ -496,11 +497,14 @@ def test_a_write_that_fails_leaks_no_descriptor_and_leaves_no_temporary_file(tmp
     def fds():
         return len(os.listdir("/proc/self/fd"))
     before = fds()
-    real_fstat, real_rename = os.fstat, os.rename
+    real_fstat = os.fstat
+    in_write = []
 
     def fstat(fd):
         if sys._getframe(1).f_code.co_name == "write":
-            raise OSError(24, "too many open files")
+            in_write.append(fd)
+            if len(in_write) == 2:            # the first is the original's mode; the second is the new file's status
+                raise OSError(24, "too many open files")
         return real_fstat(fd)
 
     def rename(*a, **k):
@@ -509,6 +513,7 @@ def test_a_write_that_fails_leaks_no_descriptor_and_leaves_no_temporary_file(tmp
     with pytest.raises(OSError):
         rds.update_beneath(tmp_path, "a.md", lambda t, op: "New.\n")
     monkeypatch.undo()
+    assert fails != "the status of the new file" or len(in_write) == 2    # the case reached the new file's status
     assert fds() == before
     assert (tmp_path / "a.md").read_text(encoding="utf-8") == "Old.\n"
     assert not [p.name for p in tmp_path.iterdir() if "sheaf-tmp" in p.name]

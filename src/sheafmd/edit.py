@@ -212,9 +212,9 @@ def _source_runs_kept(soup, source) -> set:
     there (`_line_kept`); the pairing has the most pairs, among those the most lines beside them unchanged, and then
     keeps the most of those lines: a run with one line as it was is the source's over a new run whose two lines are
     each close to the source's (ticket 210). A run of the source stays the source's when both lines beside it were
-    edited, a new run takes no pair from a run that kept more of its lines, before it or after it, one run close to
-    another's lines takes no pair from two that keep fewer, and a new run with none of the source's words beside it
-    is no run of the source's."""
+    edited, a new run takes no pair from a run with as many lines unchanged that kept more of its words, before it or
+    after it, one run close to another's lines takes no pair from two that keep fewer, and a new run with none of
+    the source's words beside it is no run of the source's."""
     page_runs = []
     for p in soup.find_all("p"):
         if _page_own(p):
@@ -236,9 +236,9 @@ def _source_runs_kept(soup, source) -> set:
             lines = _line_kept(before, was_before) + _line_kept(after, was_after)
             same = (before == was_before) + (after == was_after)
             pairs, same_lines, kept_lines = best[i + 1][j + 1]
-            if n == m and lines > 0 and (pairs + 1, same_lines + same, kept_lines + lines) > best[i][j]:
-                best[i][j] = (pairs + 1, same_lines + same, kept_lines + lines)
-                paired[i][j] = True
+            with_it = (pairs + 1, same_lines + same, kept_lines + lines)
+            if n == m and lines > 0 and with_it > best[i][j]:
+                best[i][j], paired[i][j] = with_it, True
     kept, i, j = set(), 0, 0
     while i < len(page_runs) and j < len(had):
         if paired[i][j]:
@@ -1565,8 +1565,9 @@ def _once_on_both_sides(wa: list, alo: int, ahi: int, wb: list, blo: int, bhi: i
     return run[::-1]
 
 
-def _word_pairs(wa: list, wb: list):
-    """[(i, j)]: the words wa[i] and wb[j] a diff of the two lists matches, or None where it cannot (`_by_words`)."""
+def _word_pairs(wa: list, wb: list, stretches=None):
+    """[(i, j)]: the words wa[i] and wb[j] a diff of the two lists matches, or None where it cannot (`_by_words`).
+    Each stretch it diffs, (alo, ahi, blo, bhi), is appended to `stretches` when given."""
     pairs, spent, todo = [], 0, [(0, len(wa), 0, len(wb), False)]
     while todo:
         alo, ahi, blo, bhi, cut = todo.pop()
@@ -1575,6 +1576,8 @@ def _word_pairs(wa: list, wb: list):
             spent += size
             if spent > _DIFF_TOTAL:
                 return None
+            if stretches is not None:
+                stretches.append((alo, ahi, blo, bhi))
             for i, j, n in difflib.SequenceMatcher(None, wa[alo:ahi], wb[blo:bhi],
                                                    autojunk=False).get_matching_blocks():
                 pairs.extend((alo + i + k, blo + j + k) for k in range(n))
@@ -1598,17 +1601,24 @@ def _word_pairs(wa: list, wb: list):
     return pairs
 
 
-def _by_words(old: str, new: str):
+def _by_words(old: str, new: str, stretches=None):
     """{start of a word of `old`: start of the same word in `new`} for the words a diff of the two word lists
     matches. A word is a shortcode, a run of letters and digits, or one other character that is not white space
     (`_DIFF_WORD`): a `(` glued to a literal, or a letter typed beside it, leaves the literal a word of its own that
     still matches. Lists too long for one diff (`_DIFF_BOUND`) are cut at their common start and end and at the words
     found once on each side, and each stretch between those is diffed on its own (ticket 207): two long changed stretches
     with unchanged words between them are each placed. None where a stretch is still too long and holds no such
-    word, or where the stretches add up past `_DIFF_TOTAL`."""
+    word, or where the stretches add up past `_DIFF_TOTAL`. Each stretch diffed is appended to `stretches` when
+    given, as the characters it spans: (start in `old`, end in `old`, start in `new`, end in `new`)."""
     a, b = list(_DIFF_WORD.finditer(old)), list(_DIFF_WORD.finditer(new))
-    found = _word_pairs([m.group() for m in a], [m.group() for m in b])
-    return None if found is None else {a[i].start(): b[j].start() for i, j in found}
+    cut = [] if stretches is not None else None
+    found = _word_pairs([m.group() for m in a], [m.group() for m in b], cut)
+    if found is None:
+        return None
+    for alo, ahi, blo, bhi in cut or ():
+        stretches.append((a[alo].start() if alo < ahi else len(old), a[ahi - 1].end() if alo < ahi else len(old),
+                          b[blo].start() if blo < bhi else len(new), b[bhi - 1].end() if blo < bhi else len(new)))
+    return {a[i].start(): b[j].start() for i, j in found}
 
 
 def _in_its_gap(old: str, new: str, words: dict):
@@ -1666,7 +1676,8 @@ def _places_by_order(old: str, new: str, olds) -> set:
             places.add(after[before.index(start)])
             continue
         if words is False:
-            words, word_starts = _by_words(old, new), [m.start() for m in _DIFF_WORD.finditer(old)]
+            stretches = []
+            words, word_starts = _by_words(old, new, stretches), [m.start() for m in _DIFF_WORD.finditer(old)]
             gap = _in_its_gap(old, new, words) if words is not None else None
         if words is not None:
             # The word the literal is in starts at the last word start at or before it; `old[start]` is its `:`. It is
@@ -1680,8 +1691,11 @@ def _places_by_order(old: str, new: str, olds) -> set:
                 if new.startswith(f":{name}:", at):
                     places.add(at)
                 continue
-            # A literal no stretch's diff matched (moved across the words a long text was cut at, ticket 210) goes
-            # to its neighbours, as it would if the diff had given None.
+            # A literal the diff did not match is one the reader deleted, unless the stretch of `new` it was diffed
+            # against holds no `:name:` to match it to: then it was moved across the words a long text was cut at
+            # (ticket 210), and goes to its neighbours, as it would if the diff had given None.
+            if any(lo <= start < hi and new.find(f":{name}:", nlo, nhi) >= 0 for lo, hi, nlo, nhi in stretches):
+                continue
         code, end = f":{name}:", start + len(name) + 2
         before_it, after_it = old[max(0, start - _NEIGHBOURS):start], old[end:end + _NEIGHBOURS]
         for probe, offset in ((before_it + code, len(before_it)), (code + after_it, 0)):

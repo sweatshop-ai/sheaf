@@ -31,3 +31,15 @@ def test_an_escape_moved_across_the_anchors_of_a_cut_diff_is_placed_by_its_neigh
     out = saved_as(src, html)
     assert out.count("\\:smile:") == 1, out.count("\\:smile:")
     assert out.endswith("A \\:smile: :smile: end\n"), out[-40:]     # the one the reader typed stays the emoji
+
+
+def test_an_escape_the_reader_deleted_gives_its_escape_to_no_shortcode_typed_after_the_same_characters():
+    # The review of 210: a literal the diff left unmatched within one stretch is one the reader deleted, and a
+    # `:smile:` typed after the same twelve characters elsewhere stays the emoji (#594).
+    later = " ".join(f"v{i}" for i in range(400))
+    for n in range(395, 415):
+        first = " ".join(f"w{i}" for i in range(n))
+        src = f"{first} Mood today: \\:smile: fine. {later} Mood today: sad. end"
+        html = f"<p>{first} Mood today: fine. {later} Mood today: :smile: sad. :smile: end</p>"
+        out = saved_as(src, html)
+        assert "\\:smile:" not in out, (n, out[-50:])

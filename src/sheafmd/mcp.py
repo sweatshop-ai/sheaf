@@ -15,6 +15,7 @@ Not the MCP SDK: the door is small enough to read in one sitting, and runs insid
 server (SPEC 3.2).
 """
 import contextlib
+import ctypes
 import errno
 import json
 import os
@@ -27,6 +28,11 @@ from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
+
+try:
+    import fcntl
+except ImportError:     # no lease to take: a take-back keeps the file it made aside (ticket 212 B)
+    fcntl = None
 
 from . import __version__, beneath, diagnostics, paths
 from . import comments as rdc
@@ -1615,8 +1621,10 @@ def _take_back_file(made: "_Made") -> str | None:
     taken from it in one step, a rename to a hidden sibling, so a file put there between a look and a delete is never the one
     deleted. Only the file made, with the text written, is deleted: its inode (a file that replaced it is another) and its
     bytes (an editor that saves in place keeps the inode). Anything else goes back to its name, never over a file that came
-    there meanwhile; then it stays in the hidden sibling. None when the file made is gone, or nothing was at the name; else
-    the name of the file left, for the caller to say: the page's own, or the hidden sibling's."""
+    there meanwhile; then it stays in the hidden sibling. The file made is deleted only while nobody else holds it open
+    (ticket 212 B): one an editor holds goes back to its name, and where the system cannot say, it stays in the hidden
+    sibling. None when the file made is gone, or nothing was at the name; else the name of the file left, for the caller to
+    say: the page's own, or the hidden sibling's."""
     path = made.top / made.rel
     aside = _hidden_sibling(path)
     try:
@@ -1625,8 +1633,12 @@ def _take_back_file(made: "_Made") -> str | None:
         return None
     except OSError:
         return path.name
-    if made.ident is not None and _delete_if_made(aside, made):
-        return None
+    if made.ident is not None:
+        deleted = _delete_if_made(aside, made)
+        if deleted:
+            return None
+        if deleted is None:
+            return aside.name
     return _put_back(aside, path)
 
 
@@ -1634,25 +1646,34 @@ def _hidden_sibling(path: Path) -> Path:
     return path.with_name(f".{path.name}.sheaf-gone-{secrets.token_hex(6)}")
 
 
-def _delete_if_made(aside: Path, made: "_Made") -> bool:
-    """Delete `aside` when it is the file made for `made`, as it was written: that inode, those bytes. True when deleted;
-    False when it is another (left where it is), a FIFO or a folder among them, opened without waiting. The rename shut out
-    every writer that opens the name, not one that holds a descriptor already: its write during the look moves the file's
-    mtime or size, which are looked at again right before the delete, so the file is kept and nothing has to be written back
-    (a full disk is often why the create is taken back). A write between that last look and the delete is not seen."""
+def _delete_if_made(aside: Path, made: "_Made") -> bool | None:
+    """Delete `aside` when it is the file made for `made`, as it was written (that inode, those bytes), and nobody else
+    holds it open. True when deleted. False when it is another, a FIFO or a folder among them (opened without waiting), or
+    one another holds open: an editor that holds a descriptor writes through it whatever its name, so it goes back to its
+    name. None when it is the file made, as written, but the system cannot say that nobody else holds it: a late write
+    cannot be ruled out, so it is kept, never deleted (ticket 212 B).
+
+    The rename shut out every writer that opens the name, not one that holds a descriptor or a mapping already. A look at
+    the file's times or size, taken again before the delete, still let such a write in between, and on a filesystem with
+    coarse times one of the same size moved nothing: a write lease (Linux) is granted only while no other descriptor or
+    mapping holds the file, and while it is held nobody can open it without waiting for it. The bytes are read, and the file
+    deleted, under that lease."""
     want = made.text.encode("utf-8")
     try:
         fd = os.open(aside, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
         return False
-    with os.fdopen(fd, "rb") as f:
+    with os.fdopen(fd, "rb") as f:      # its close lets the lease go
         st = os.fstat(fd)
-        if (not stat_mod.S_ISREG(st.st_mode) or (st.st_dev, st.st_ino) != made.ident or st.st_size != len(want)
-                or f.read(len(want) + 1) != want):
+        if not stat_mod.S_ISREG(st.st_mode) or (st.st_dev, st.st_ino) != made.ident:
             return False
-        again = os.fstat(fd)
-        if (again.st_mtime_ns, again.st_size) != (st.st_mtime_ns, st.st_size):
+        alone = _held_by_none_else(fd)
+        if alone is False:
             return False
+        if os.fstat(fd).st_size != len(want) or f.read(len(want) + 1) != want:
+            return False
+        if alone is None:
+            return None
         try:
             os.unlink(aside)
         except OSError:
@@ -1660,23 +1681,71 @@ def _delete_if_made(aside: Path, made: "_Made") -> bool:
         return True
 
 
+_F_SETLEASE = getattr(fcntl, "F_SETLEASE", None) if fcntl is not None else None     # Linux only
+
+
+def _held_by_none_else(fd: int) -> bool | None:
+    """Take a write lease on `fd`: True when it is held, and no other descriptor or mapping holds the file; False when
+    another does; None when the system cannot say (no leases: macOS, a filesystem or a setting without them). The lease
+    goes with the descriptor's close."""
+    if _F_SETLEASE is None:
+        return None
+    try:
+        fcntl.fcntl(fd, _F_SETLEASE, fcntl.F_WRLCK)
+    except OSError as e:
+        return False if e.errno in (errno.EAGAIN, errno.EBUSY) else None
+    return True
+
+
 def _put_back(aside: Path, path: Path) -> str:
-    """Put `aside` back at `path`, never over a file that came there meanwhile; answers the name it is left under."""
+    """Put `aside` back at `path`, never over a file or a folder that came there meanwhile; answers the name it is left
+    under."""
     try:
         os.link(aside, path, follow_symlinks=False)
     except FileExistsError:
         return aside.name
     except (OSError, NotImplementedError):
-        # A folder has no hard link: renamed back, which can replace no file and no folder with anything in it. A file on a
-        # filesystem without hard links stays aside, as a rename could replace one that came to the name.
+        # A folder has no hard link: renamed back where nothing is (ticket 212 C), as a plain rename replaces an empty
+        # folder that came to the name. A file on a filesystem without hard links stays aside, as a rename could replace
+        # one that came to the name.
         if aside.is_dir() and not aside.is_symlink():
-            with contextlib.suppress(OSError):
-                os.rename(aside, path)
+            with contextlib.suppress(OSError, NotImplementedError):
+                _rename_noreplace(aside, path)
                 return path.name
         return aside.name
     with contextlib.suppress(OSError):
         os.unlink(aside)
     return path.name
+
+
+def _rename_noreplace(src: Path, dst: Path):
+    """Rename `src` to `dst` in one step that replaces nothing: FileExistsError when anything is at `dst`.
+    NotImplementedError where the system has no such step (then nothing was renamed)."""
+    libc = _libc()
+    if libc is None:
+        raise NotImplementedError("no rename that replaces nothing")
+    s, d = os.fsencode(src), os.fsencode(dst)
+    if sys.platform.startswith("linux") and hasattr(libc, "renameat2"):
+        got = libc.renameat2(_AT_FDCWD, s, _AT_FDCWD, d, _RENAME_NOREPLACE)
+    elif sys.platform == "darwin" and hasattr(libc, "renamex_np"):
+        got = libc.renamex_np(s, d, _RENAME_EXCL)
+    else:
+        raise NotImplementedError("no rename that replaces nothing")
+    if got != 0:
+        err = ctypes.get_errno()
+        if err in (errno.ENOSYS, errno.EINVAL, errno.ENOTSUP):     # this filesystem has none: nothing was renamed
+            raise NotImplementedError(os.strerror(err))
+        raise OSError(err, os.strerror(err), str(src), None, str(dst))
+
+
+_AT_FDCWD, _RENAME_NOREPLACE, _RENAME_EXCL = -100, 1, 0x4
+
+
+def _libc():
+    try:
+        return ctypes.CDLL(None, use_errno=True)
+    except OSError:
+        return None
 
 
 @dataclass

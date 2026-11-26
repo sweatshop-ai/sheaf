@@ -27,6 +27,9 @@ PREAMBLE = f"retry: {RETRY_MS}\n\n".encode("ascii")
 KEEPALIVE = b": keepalive\n\n"
 
 
+ENDS = ("hub-stopping", "signed-out", "gone")     # the last event of a tab's stream (8.8): nothing is queued after one
+
+
 class Renamed:
     """What `accept` returns to send another event in place of the one read: `gone` to a member who can no longer
     open the document (8.12)."""
@@ -45,14 +48,22 @@ class Subscription:
         self._q: queue.Queue = queue.Queue()
         self._accept = accept
         self.closed = False
+        self.ended = False       # it was handed one of `ENDS`, the last event of its stream (8.8): it takes nothing more
+        self._put_lock = threading.Lock()
         self.on_put = None       # called after every event queued: a `Shared` wakes its writer with it
 
     def put(self, name: str, data):
-        if not self.closed:
+        """Queue an event, unless the stream ended. The look and the queueing are one step under the stream's own lock: a
+        publisher that held the document's entry from before its last event (`_tell_grants`, a waiting Tell) and publishes
+        after it reaches the stream no more, whatever thread handed out which event first (ticket 212 A)."""
+        with self._put_lock:
+            if self.closed or self.ended:
+                return
+            self.ended = name in ENDS
             self._q.put((name, data))
-            on_put = self.on_put     # read once: a leave on another thread can clear it between a check and a call
-            if on_put is not None:
-                on_put()
+        on_put = self.on_put     # read once: a leave on another thread can clear it between a check and a call
+        if on_put is not None:
+            on_put()
 
     def get(self, timeout: float | None = 0):
         """The next (name, data) this stream is sent, or None when none arrived within `timeout`
@@ -135,7 +146,7 @@ class Shared:
     What it is sent goes out as the event `m`, `{"k": key, "e": name, "d": data}`: `open` when it
     is joined (or `refused` with the status a stream of its own was answered with), then its own
     events. Its last event (`ENDS`) drops it from here; the connection stays open, for the others."""
-    ENDS = ("hub-stopping", "signed-out", "gone")
+    ENDS = ENDS
 
     def __init__(self, owner=None):
         self.owner = owner               # the member id the stream was opened by: no other may join it

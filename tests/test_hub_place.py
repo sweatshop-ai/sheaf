@@ -9,6 +9,7 @@ import dataclasses
 import os
 import pwd
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -281,7 +282,8 @@ def test_a_door_create_taken_back_leaves_a_file_put_at_the_name_after_its_look(t
 
 def test_a_door_create_taken_back_keeps_what_an_open_descriptor_wrote_during_its_look(team, work, browser, tokens, monkeypatch):
     """Ticket 204 A: an editor that held the file open writes through its descriptor while the take-back looks at it. The
-    rename kept no such writer out: the file is looked at again before the delete, kept, and put back at its name."""
+    rename kept no such writer out: a file another holds open is never deleted (ticket 212 B), and goes back to its name
+    with what was written."""
     from sheafmd import mcp
     address = f"work/{SHARED}"
     browser.hub.docs.change(address, lambda e: {**e, "generated": {"by": "x", "id": None, "at": "t", "key": True}})
@@ -290,7 +292,7 @@ def test_a_door_create_taken_back_keeps_what_an_open_descriptor_wrote_during_its
     def written_during_the_look(fd, *args, **kwargs):
         if held and real_fstat(fd).st_ino == held[1]:
             looks.append(1)
-            if len(looks) == 2:         # after its first look and its read, before its last look
+            if len(looks) == 1:         # during its look
                 held[0].truncate(0)
                 held[0].write("# Written as it went\n")
                 held[0].flush()
@@ -307,7 +309,7 @@ def test_a_door_create_taken_back_keeps_what_an_open_descriptor_wrote_during_its
     monkeypatch.undo()
     held[0].close()
     assert is_error and "not made" in got, got
-    assert len(looks) == 2, "the write came between the take-back's read and its last look"
+    assert looks, "the write came during the take-back's look"
     assert (work / SHARED).read_text(encoding="utf-8") == "# Written as it went\n"
     assert not taken_aside(work / SHARED)
     assert any(r.get("kind") == "take-back-left-file" and r.get("file") == NAME for r in diagnostics.read())
@@ -349,6 +351,7 @@ def test_a_door_create_taken_back_keeps_aside_and_names_a_file_it_cannot_put_bac
     assert any(r.get("kind") == "take-back-left-file" and r.get("file") == kept for r in diagnostics.read())
 
 
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="a write lease is Linux's: elsewhere the file made is kept aside")
 def test_a_door_create_taken_back_deletes_the_file_it_made(team, work, browser, tokens, monkeypatch):
     """Ticket 195 E: the same take-back, with the file as the create made it, deletes it."""
     address = f"work/{SHARED}"
@@ -364,6 +367,109 @@ def test_a_door_create_taken_back_deletes_the_file_it_made(team, work, browser, 
     assert is_error and "not made" in got, got
     assert not (work / SHARED).exists()
     assert not taken_aside(work / SHARED)
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="a write lease is Linux's: elsewhere the file made is kept aside")
+def test_a_door_create_taken_back_never_deletes_a_file_an_editor_holds_open(team, work, browser, tokens, monkeypatch):
+    """Ticket 212 B (from #688): an editor that holds the file open can write through its descriptor after the take-back's
+    last look, right before its delete, and on a filesystem with coarse times a write of the same size moves nothing the
+    look sees. The take-back deletes the file only while nobody else holds it open; an editor's file stays at its name,
+    and what it writes through its descriptor is there."""
+    from sheafmd import mcp
+    address = f"work/{SHARED}"
+    browser.hub.docs.change(address, lambda e: {**e, "generated": {"by": "x", "id": None, "at": "t", "key": True}})
+    change, real_unlink, held = browser.hub.docs.change, os.unlink, []
+
+    def written_right_before(path, *args, **kwargs):
+        if held and ".sheaf-gone-" in str(path):
+            held[0].seek(0)
+            held[0].write(OPEN.replace("#", "%", 1))       # the same size: no time or size the look reads moves
+            held[0].flush()
+        return real_unlink(path, *args, **kwargs)
+
+    def no_clear_after_the_file(a, settle):
+        if (work / SHARED).exists():
+            held.append(open(work / SHARED, "r+", encoding="utf-8"))
+            monkeypatch.setattr(mcp.os, "unlink", written_right_before)
+            raise OSError(28, "No space left on device")
+        return change(a, settle)
+    monkeypatch.setattr(browser.hub.docs, "change", no_clear_after_the_file)
+    is_error, got = call(browser, "create", token=tokens["alice"], doc=address, text=OPEN)
+    monkeypatch.undo()
+    try:
+        held[0].seek(0)
+        held[0].write("# The editor's text\n")
+        held[0].truncate()
+        held[0].flush()
+    finally:
+        held[0].close()
+    assert is_error and "not made" in got, got
+    assert (work / SHARED).read_text(encoding="utf-8") == "# The editor's text\n"
+    assert not taken_aside(work / SHARED)
+
+
+def test_a_door_create_taken_back_keeps_aside_the_file_it_made_when_no_other_holder_can_be_ruled_out(
+        team, work, browser, tokens, monkeypatch):
+    """Ticket 212 B: where the system cannot say that nobody else holds the file (no lease: macOS, a filesystem without
+    them), a late write cannot be ruled out, and the file made is kept in its hidden sibling, never deleted. The create is
+    still not made: the name is free, and the diagnostics log names the sibling."""
+    from sheafmd import mcp
+    address = f"work/{SHARED}"
+    browser.hub.docs.change(address, lambda e: {**e, "generated": {"by": "x", "id": None, "at": "t", "key": True}})
+    change, real_create, written = browser.hub.docs.change, mcp.create_file, []
+    monkeypatch.setattr(mcp, "_held_by_none_else", lambda fd: None)
+
+    def create_noting_the_text(top, rel, text, judge=None):
+        written.append(text)
+        return real_create(top, rel, text, judge)
+    monkeypatch.setattr(mcp, "create_file", create_noting_the_text)
+
+    def no_clear_after_the_file(a, settle):
+        if (work / SHARED).exists():
+            raise OSError(28, "No space left on device")
+        return change(a, settle)
+    monkeypatch.setattr(browser.hub.docs, "change", no_clear_after_the_file)
+    is_error, got = call(browser, "create", token=tokens["alice"], doc=address, text=OPEN)
+    assert is_error and "not made" in got, got
+    assert not (work / SHARED).exists()
+    [kept] = taken_aside(work / SHARED)
+    assert (work / SHARED).with_name(kept).read_text(encoding="utf-8") == written[-1]
+    assert any(r.get("kind") == "take-back-left-file" and r.get("file") == kept for r in diagnostics.read())
+
+
+def test_a_folder_taken_back_is_never_renamed_over_an_empty_folder_that_came_to_its_name(tmp_path, monkeypatch):
+    """Ticket 212 C (from #688): a folder taken aside has no hard link to go back by, and a plain rename replaces an empty
+    folder that came to the name meanwhile. It goes back only where nothing is: else it stays aside, and the folder that
+    came stays."""
+    from sheafmd import mcp
+    path, aside = tmp_path / "a.md", tmp_path / ".a.md.sheaf-gone-0"
+    aside.mkdir()
+    (aside / "inside").write_text("kept\n", encoding="utf-8")
+    real_link = os.link
+
+    def an_empty_folder_comes(src, dst, *args, **kwargs):
+        try:
+            return real_link(src, dst, *args, **kwargs)
+        finally:
+            path.mkdir()
+    monkeypatch.setattr(mcp.os, "link", an_empty_folder_comes)
+    came = None
+    try:
+        assert mcp._put_back(aside, path) == aside.name
+    finally:
+        came = path.stat().st_ino if path.is_dir() else None
+    assert came is not None and list(path.iterdir()) == []
+    assert (aside / "inside").read_text(encoding="utf-8") == "kept\n"
+
+
+def test_a_folder_taken_back_goes_back_to_its_name_when_nothing_came(tmp_path):
+    """Ticket 212 C: with the name free, the folder goes back to it."""
+    from sheafmd import mcp
+    path, aside = tmp_path / "a.md", tmp_path / ".a.md.sheaf-gone-0"
+    aside.mkdir()
+    (aside / "inside").write_text("kept\n", encoding="utf-8")
+    assert mcp._put_back(aside, path) == path.name
+    assert (path / "inside").read_text(encoding="utf-8") == "kept\n" and not aside.exists()
 
 
 def test_a_door_create_at_home_whose_generated_mark_cannot_be_written_makes_no_folder_there(team, work, browser,

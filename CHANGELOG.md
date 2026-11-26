@@ -23,6 +23,7 @@ changes whenever an asset does. The entries name pull requests of sweatshop-ai/s
 - A pin in a root's own versions store keeps its age through a clone or checkout: its time is in `<hash>.at` beside it, kept out of git by `.sheaf/versions/.gitignore`, so a pin older than 7 days is not believed again. A pin written before has no such file: after the upgrade it counts only once pinned again, so a page that holds its reload across the hub's restart can get "version no longer known" (409) on its save until its next daily pin.
 - `sheaf connect` checks that `config.toml` can be written before it stores the token.
 - A page opened on its own address keeps the link of its byline's session name (the session kit moved to `session.js`, loaded by the page script and the mount bundle).
+- The list page (`/list`, and the list in Open WebUI's pane) asks git once per folder, not about 20 times per row: on a box with some 60 rows it made about 1,200 `git rev-parse` runs and took 5 s to answer, so the pane showed the chat page for 5 s before Sheaf. A rehearsal with 43 rows went from 862 runs to 2.
 
 ## 1.3.0 (2026-11-20)
 

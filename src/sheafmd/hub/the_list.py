@@ -914,6 +914,11 @@ class TheList:
         return r is not None and r.name == name and r.path == Path(config.realpath(self.cfg.root))
 
     def data(self, member, show: str) -> dict:
+        """The list as `member` reads it (see `_data`), with one answer of git per folder for the page, not ~20 runs per row (8.2)."""
+        with config.git_places_remembered():
+            return self._data(member, show)
+
+    def _data(self, member, show: str) -> dict:
         """The list as `member` reads it, as data: {show, filters, sections}, each section {key, title, count, groups},
         each group {name, rows}, each row {title, href, assistant, meta, actions}. The page of its own is drawn from
         this and the front mounts it (#116): both show the same rows, and the mount carries text, never markup."""

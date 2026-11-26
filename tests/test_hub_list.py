@@ -19,6 +19,7 @@ from bs4 import BeautifulSoup
 from helpers import FRONT, Front, call, hub_rows, page_meta
 
 from sheafmd import comments as rdc
+from sheafmd import config
 from sheafmd.blocks import split_md_blocks
 from sheafmd.hub import place, proxy, the_list
 from sheafmd.hub.state import Tokens
@@ -2500,3 +2501,28 @@ def test_a_generated_rectoverso_keeps_its_row_but_draws_no_action_button(box):
     assert [b.doc for b in buttons(box.get("/list", member=NELL))] == ["list/initech/website/2026-10-27-ga4-property.md"]
     titles = [r[0] for g in read(box.get("/list", member=NELL))["Waiting on you 2"].values() for r in g]
     assert "Reply to Joey about column L James" in titles
+
+
+def test_the_page_asks_git_per_folder_not_per_row(box, github, rectoversos, monkeypatch):
+    """The page of the list judges each row against the same few folders (SPEC 8.2): on the box, 60 rows made some 1,000
+    `git rev-parse` runs, 4 ms each, and `/list` took 5 s before Sheaf showed in Open WebUI's pane (ticket 52). It asks
+    git once per folder, so the runs do not grow with the rows."""
+    asked = []
+    real = config._rev_parse
+
+    def spy(folder, *a):
+        asked.append(folder)
+        return real(folder, *a)
+    monkeypatch.setattr(config, "_rev_parse", spy)
+    box.get("/list", member=NELL)
+    few = len(asked)
+    for n in range(100, 140):
+        github.issues[n] = {"status": "In progress at TT", "assignees": ["nell-l"], "updated": ago(3600)}
+        path = rectoversos / f"initech/website/2026-10-2{n % 10}-row-{n}.md"
+        path.write_text(f"---\nclient: initech\nproject: website\nissue: acme/record#{n}\nassistant: James\nkind: prep\n---\n# Row {n}\n",
+                        encoding="utf-8")
+    box.hub.the_list.poll()
+    del asked[:]
+    page = read(box.get("/list", member=NELL))
+    assert len(page["In progress 41"]["initech/website"]) == 41, "the 40 added rows and the one that was there"
+    assert len(asked) <= few + 4, f"{len(asked)} git runs for 43 rows, {few} for 3"

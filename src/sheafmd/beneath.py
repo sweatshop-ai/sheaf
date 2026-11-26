@@ -126,6 +126,7 @@ class Opened:
         """Replace the file with `text` whole, through the folder descriptor of the walk: a sibling made there and
         renamed over the name, only while the name still holds the file that was opened."""
         pfd, name = self._folder()
+        self._still_beneath(pfd)
         tmp = f".{name}.sheaf-tmp"
         try:
             os.unlink(tmp, dir_fd=pfd)
@@ -149,6 +150,7 @@ class Opened:
             st = os.stat(name, dir_fd=pfd, follow_symlinks=False)
             if (st.st_dev, st.st_ino) != self.file:
                 raise OSError(errno.ESTALE, "the file is no longer the one that was opened", name)
+            self._still_beneath(pfd)
             os.rename(tmp, name, src_dir_fd=pfd, dst_dir_fd=pfd)
         except BaseException:
             self.written = None
@@ -157,6 +159,28 @@ class Opened:
             except OSError:
                 pass
             raise
+
+    def _still_beneath(self, pfd: int):
+        """After `openat2` the folder descriptor is the one of the first walk, which follows a folder that was moved away: it is
+        resolved again beneath the root now (`RESOLVE_BENEATH`, no link, never blocking) and must be the same folder, else
+        the write is refused as the walk of our own refuses it (ESTALE)."""
+        if self.how != "openat2":
+            return
+        parts = self.rel.split("/")[:-1]
+        rootfd = os.open(self.top, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        try:
+            try:
+                here = _openat2(rootfd, "/".join(parts), os.O_RDONLY | os.O_DIRECTORY | os.O_NONBLOCK,
+                                _RESOLVE_BENEATH | _RESOLVE_NO_SYMLINKS) if parts else os.dup(rootfd)
+            except OSError as e:
+                raise OSError(errno.ESTALE, "the file's folder is no longer beneath its root", self.rel) from e
+            try:
+                if ident(here) != ident(pfd):
+                    raise OSError(errno.ESTALE, "the file's folder is no longer the one that was opened", self.rel)
+            finally:
+                os.close(here)
+        finally:
+            os.close(rootfd)
 
     def _folder(self):
         """(descriptor of the folder holding the file, its name). The walk of our own has it; after `openat2` the walk is

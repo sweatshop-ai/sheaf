@@ -7,6 +7,7 @@ the server (server.py) drives. A test builds one and calls `tick()` itself.
 A document is served from an Entry: its LiveDocument, its event bus, and the page's HTML in
 memory (no file in /tmp, SPEC 8.9).
 """
+import contextlib
 import errno
 import json
 import os
@@ -214,6 +215,7 @@ class Hub:
         self.index_bus = Bus()                   # the index streams (SPEC 8.8)
         self._index_opening = threading.Lock()   # one index stream opens at a time
         self._lock = threading.RLock()
+        self._only_root = threading.local()          # `within_root`
         self.pdf_lock = threading.Lock()         # one headless Chrome at a time
         # Stands in for the CSP nonce in the HTML kept in memory; the handler swaps in a fresh
         # nonce per response. Unguessable, so no document can hold it.
@@ -579,9 +581,11 @@ class Hub:
         The file is found before the hub's lock is taken, and its root looked at again under it: a
         `forget_root` that took the lock in between makes the address name nothing, as it does for
         a request that comes after it. All of it under the lock of a rectoverso's name (9.11), taken before
-        the hub's: the file is found and first read and rendered where no move takes it."""
+        the hub's: the file is found and first read and rendered where no move takes it. With `root_id`, only the root of
+        that id (`within_root`): the address names nothing when its name holds another root now, and then nothing is read or
+        rendered."""
         with place.held(self, address):
-            return self._entry(address)
+            return self._entry(address, getattr(self._only_root, "id", None))
 
     def _bound(self, address: str):
         """The entry the hub holds for `address`, None when there is none or when another root now holds its file,
@@ -597,7 +601,7 @@ class Hub:
                 return None
         return e
 
-    def _entry(self, address: str) -> Entry:
+    def _entry(self, address: str, root_id: str | None = None) -> Entry:
         """`entry` under the name's lock. The entry is looked up, and a new one made, under the hub's lock; its first render
         (pandoc, up to 120 s a run) runs outside it, so no request for another document waits for it (200). A second open
         of the same address meanwhile waits for that render (`_Making`) and is given the same entry. After the render the
@@ -605,9 +609,13 @@ class Hub:
         is kept."""
         name = roots_mod.Address.parse(address).root
         root = self.roots.get(name)
+        if root_id is not None and (root is None or root.id != root_id):
+            raise roots_mod.NotFound(address)
         path = self.roots.document(address)
         with self._lock:
             e = self.entries.get(address)
+            if e is not None and root_id is not None and e.root_id != root_id:
+                raise roots_mod.NotFound(address)
             if e is not None and self.private_roots and place.applies(self, name):
                 # The store and the file an entry uses cannot outlive the root they were chosen for: one bound to
                 # a private root is refused when its file is not there (`file_at`); one bound to a root other than the one that now holds the file is
@@ -633,7 +641,7 @@ class Hub:
                 mine = self._making[address] = _Making(e, root)
         if other is not None:                 # another thread makes it: its entry, once rendered, or a new try
             other.done.wait()
-            return self._entry(address)
+            return self._entry(address, root_id)
         kept = gone = False
         try:
             e.live.refresh(force=True)           # the first render: e.html, with no lock of the hub held
@@ -659,7 +667,7 @@ class Hub:
             return e
         if gone:
             raise roots_mod.NotFound(address)
-        return self._entry(address)          # deleted or moved meanwhile: made again from what the address names now
+        return self._entry(address, root_id)          # deleted or moved meanwhile: made again from what the address names now
 
     def _drop_making(self, address: str, forget: bool = False):
         """Under the hub's lock: an entry being made at `address` is not kept by its maker, which makes it again (200). With
@@ -1507,15 +1515,25 @@ class Hub:
         root nested inside one of theirs stays another root."""
         return bool(self.members_owning([member], address))
 
-    def member_owns_entry(self, member, e) -> bool:
-        """Whether the entry `e`, already resolved, is the member's and visible to them: judged against the root the entry
-        was made for (its id), never against the root its name holds by now, so a name given to another root between
-        the resolve and the check is no one's to read (a document of the replacement root is refused, ticket 30)."""
-        root = self.roots.get(roots_mod.Address.parse(e.address).root)
-        if root is None or root.id != e.root_id:
-            return False
-        return bool(self.members_owning([member], e.address, root)) and self.visible(member, e.address) \
-            and self.roots.get(root.name) is root
+    @contextlib.contextmanager
+    def within_root(self, root_id: str):
+        """For the calls of `entry` made by this thread inside the block: only the root of this id (ticket 30). A context, not a
+        parameter, so `entry` keeps the one argument its callers and their stand-ins give it."""
+        before = getattr(self._only_root, "id", None)
+        self._only_root.id = root_id
+        try:
+            yield
+        finally:
+            self._only_root.id = before
+
+    def owned_root(self, member, address: str):
+        """The root `address` names, once, when the document there is the member's and visible to them (`member_owns`, then
+        `visible`), else None. The caller resolves the entry within that root by its id (`entry(address, root_id=...)`),
+        so a name given to another root afterwards serves nothing and nothing of it is read (ticket 30)."""
+        root = self.roots.get(roots_mod.Address.parse(address).root)
+        if root is None or not self.members_owning([member], address, root) or not self.visible(member, address):
+            return None
+        return root
 
     def members_owning(self, members, address: str, root=None) -> list:
         """Those of `members` whose the document at `address` is, as `member_owns` judges, with one lookup of

@@ -65,3 +65,20 @@ def test_a_fifo_where_the_file_is_opened_is_refused_not_waited_on(tmp_path, monk
         t.join(5)
         pytest.fail("the open waits on the FIFO")
     assert out and isinstance(out[0], OSError)
+
+
+def test_a_folder_moved_outside_the_root_after_the_read_is_refused_and_the_file_outside_is_unchanged(tmp_path, monkeypatch):
+    monkeypatch.setattr(beneath, "FALLBACK", False)
+    root, outside = tmp_path / "root", tmp_path / "outside"
+    (root / "d").mkdir(parents=True)
+    outside.mkdir()
+    (root / "d" / "a.md").write_text("one\n", encoding="utf-8")
+    with beneath.open_beneath(root, "d/a.md") as op:
+        if op.how != "openat2":
+            pytest.skip("no openat2 here: the walk of our own is the one in use")
+        assert op.text() == "one\n"
+        os.rename(root / "d", outside / "d")          # the folder leaves the root after the read
+        with pytest.raises(OSError):
+            op.write("two\n")
+    assert (outside / "d" / "a.md").read_text(encoding="utf-8") == "one\n"
+    assert sorted(p.name for p in (outside / "d").iterdir()) == ["a.md"]

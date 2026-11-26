@@ -1934,6 +1934,24 @@ def test_a_list_of_the_changed_files_that_fails_holds_the_pull(box, rectoversos,
     assert [r for r in rows("push-failed") if "the list failed" in (r.get("error") or "")]
 
 
+def test_a_list_of_the_changed_files_that_fails_holds_a_branch_switch(box, rectoversos, monkeypatch):
+    """Ticket 209 B, review round 2: `moved`, the other path a clone's files move by, reads the same list; a non-zero exit
+    holds the switch, never moves it under no writer's lock."""
+    from sheafmd.hub import commits
+    real, ran = commits._git, []
+
+    def failing(folder, *args, **kwargs):
+        if "--name-only" in args and "--no-renames" in args:
+            return subprocess.CompletedProcess(["git", *args], 128, "", "fatal: the list failed")
+        return real(folder, *args, **kwargs)
+
+    monkeypatch.setattr(commits, "_git", failing)
+    root = box.hub.roots.get("rectoversos")
+    why = box.hub.commits.moved(root, "rectoversos", "HEAD", lambda: ran.append(1) or "")
+    assert ran == [] and "the list failed" in why
+    assert not box.hub.writes._pulling
+
+
 def test_a_pull_without_a_rename_writes_no_forward(box, rectoversos, remote, tmp_path):
     merged_on_github(tmp_path, remote, {"README.md": "# The rectoversos\n"}, "a README")
     poll_now(box, rectoversos)

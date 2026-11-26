@@ -683,7 +683,7 @@ class Commits:
         # pull went through. The look itself comes before anything opens or moves (ticket 209): a look that fails holds the whole
         # pull, never "no rename", since a page moved without its Forward is not repaired by a later poll, whose base is then theirs.
         try:
-            renames = self._renames(folder, base, theirs, top)
+            renames = self._renames(folder, base, theirs, top, self._children)
         except LookFailed as e:
             record("push-failed", address, error=f"the rename look: {e}")
             return False
@@ -706,13 +706,15 @@ class Commits:
         return go
 
     @staticmethod
-    def _renames(folder: Path, base: str, theirs: str, top: Path) -> list:
+    def _renames(folder: Path, base: str, theirs: str, top: Path, children=None) -> list:
         """The pages the remote renamed between `base` and `theirs`, `[(old, new)]` as absolute paths: git's own detection
         (`-M`), `.md` files only. A file copied or changed beyond what git calls a rename is no rename. `LookFailed` when git
         ran out of time, could not start or failed (ticket 209): that is not knowing, never "no rename". It is given a push's
-        time, not a commit's: rename detection over a large pull is slower than the other looks."""
+        time, not a commit's: rename detection over a large pull is slower than the other looks. `children`: as a fetch's, so
+        a stopping hub ends it; its `Stopped` is no `SubprocessError` and goes up as the stop it is."""
         try:
-            r = _git(folder, "diff", "--name-status", "-M", "--diff-filter=R", "-z", base, theirs, seconds=PUSH_SECONDS)
+            r = _git(folder, "diff", "--name-status", "-M", "--diff-filter=R", "-z", base, theirs, seconds=PUSH_SECONDS,
+                     children=children)
         except (subprocess.SubprocessError, OSError) as e:
             raise LookFailed(str(e)[:300] or type(e).__name__) from e
         if r.returncode != 0:
@@ -734,8 +736,10 @@ class Commits:
         path a clone's files move by besides `_pull`; a checker of the lock order (17) lists both."""
         folder = root.path
         top = Path(_git(folder, "rev-parse", "--show-toplevel").stdout.strip())
-        changed = [p for p in _git(folder, "diff", "--name-only", "--no-renames", "-z", "HEAD", target).stdout.split("\0")
-                   if p]
+        listed = _git(folder, "diff", "--name-only", "--no-renames", "-z", "HEAD", target)
+        if listed.returncode != 0:                     # no empty list: the files would move under no lock (ticket 209)
+            return _last_line(listed)
+        changed = [p for p in listed.stdout.split("\0") if p]
         pages = [top / p for p in changed if p.endswith(".md")]
         named = self._tell(self._pulling, address, folder, [(path, "?") for path in pages])
         why, left = "move failed", {}

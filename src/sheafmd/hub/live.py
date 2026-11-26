@@ -20,7 +20,8 @@ from .. import adapter as rda
 from .. import comments as rdc
 from .. import edit as rde
 from .. import source as rds
-from ..document import DocumentService
+from ..blocks import Unreadable
+from ..document import COMMENT_SESSION, DocumentService
 from .place import NotFound
 from .state import PINS_MAX_AGE
 
@@ -382,6 +383,61 @@ class LiveDocument:
                 self._take(self._save_rids, rid, sent, answer)
             return answer
 
+    def blocks(self):
+        """The blocks of the file as it is now, for the block editor: `{hash, blocks: [{id, type, content, gap}], lead}`, or
+        `blocks: None` when pandoc cannot read the text (the page then edits as before)."""
+        with self._hold(), self._held():
+            h, text = self._hash, self._text
+            try:
+                tree = self._service.tree(text)
+            except Unreadable:
+                return {"hash": h, "blocks": None, "lead": ""}
+            return {"hash": h, "lead": tree.lead,
+                    "blocks": [{"id": b.id, "type": b.type, "content": b.content, "gap": b.gap} for b in tree.blocks]}
+
+    def save_markdown(self, base_hash, markdown, ids, session, rid=None, guard=None, move=None):
+        """A page's whole Markdown and the id each block held at load (ADR 0007), made against the text `base_hash`
+        names, written by the Document service: a block that is the file's own keeps the file's bytes, and a page
+        never conflicts with its own earlier saves (`session`). The same request id is taken once, as in `save`.
+
+        Returns `{hash, changed, conflict}`: `conflict` is true, and nothing written, when the base is stale by
+        another's writing (`hash` is then the file's now). Raises what `guard` raises."""
+        sent = (base_hash, markdown, tuple(ids or ()), session)
+        with self._hold(), self._held():
+            if rid is not None and rid in self._save_rids and self._save_rids[rid][0] == sent:
+                return {**self._save_rids[rid][1], "again": True}
+            before = self._text
+            got = {"changed": True}
+
+            def change(text, opened=None):
+                token = rde.DOC.set(self._file())
+                try:
+                    try:
+                        new = self._service.settle(text, markdown, ids, base_hash, session)
+                    except rda.Refused as r:         # a save that breaks a Rich block or changes a locked one: a 409, the file unchanged
+                        raise rde.EditError(f"refused: {r.reason}") from None
+                    if new == text:
+                        got["changed"] = False
+                        return text
+                    return guard(text, new, []) if guard is not None else new
+                finally:
+                    rde.DOC.reset(token)
+            old, new_text = self._update(lambda t, op: change(t, op), move=move, remember=True)
+            if new_text is None:            # a base stale by someone else's writing: nothing was written
+                answer = {"hash": self._hash, "changed": False, "conflict": True}
+                return answer
+            if got["changed"]:
+                self._rerender()
+                raced = self._hash != rds.md_hash(new_text)
+                start = new_text if raced else before
+                self._announce(self._snapshot(self._text), start, **({"rid": rid} if rid is not None else {}))
+                self._service.record(old, new_text, session)
+            self._service.hold(session, markdown)
+            answer = {"hash": rds.md_hash(new_text), "changed": got["changed"], "conflict": False}
+            if rid is not None:
+                self._take(self._save_rids, rid, sent, answer)
+            return answer
+
     def comment(self, op, fields, base_hash, await_action=False, *, by=None, role=None,
                 announce=True, author=None, rid=None, guard=None, before_announce=None):
         """add / reply / status / edit / delete, written as this document's reader.
@@ -480,6 +536,8 @@ class LiveDocument:
 
             old, new = self._update(change)
             made["wrote"] = new != old
+            if new != old:
+                self._service.record(old, new, COMMENT_SESSION)
             self._after_write()
             self._rerender()
             if wait:

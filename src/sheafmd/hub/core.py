@@ -161,6 +161,8 @@ class Hub:
     def __init__(self, port: int, key: str, *, started_by: str = "cli", service: bool = False,
                  version: str = __version__, clock=time.time, proxy=None, person: str | None = None):
         self.port, self.version, self.service = port, version, service
+        self.block_editor = config.block_editor(lambda line: None)   # SPEC 4.3: the page edits in the block editor (off by default); the start has said what the file's unknown keys are
+        self.editor_asset = assets_mod.editor_bundle() if self.block_editor else None
         self.assets = assets_mod.load(version)   # /_/mount.js and .css as this hub serves them to its end (#179)
         self.proxy = proxy                       # the checked `[proxy]` table (9.9), None in loopback mode
         # the agency tiroir's client tiroirs, read through (9.9); None for a tiroir with none. The call is the channel's (`outgoing.call`).
@@ -731,6 +733,8 @@ class Hub:
         meta = {"doc": e.address, "root": e.root_id, "boot": self.boot, "version": self.version,
                 "service": self.service, "me": self.person,
                 "agent": None, "can": [], "lines": {}, "seen": {}}
+        if self.block_editor:
+            meta["blockEditor"] = self.editor_asset.tag
         if self.clone_of(e.address):
             # The branch this page is read on, the one `_rendered` read with the text its `hash` is of: its save carries it
             # back and a switch since is refused (SPEC 14). `_fresh_meta` keeps it, whatever HEAD is when the page is sent.

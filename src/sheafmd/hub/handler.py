@@ -380,6 +380,8 @@ class Handler:
             ("GET", "/_/index.json", "index", EITHER, self._index_json),
             ("GET", "/_/jobs", "jobs", KEY, self._jobs),
             ("POST", "/_/save", "save", COOKIE, self._save),
+            ("GET", "/_/blocks", "blocks", COOKIE, self._blocks),
+            ("GET", "/_/editor.js", "editor-js", OPEN, self._editor_asset),
             ("POST", "/_/pin", "pin", COOKIE, self._pin),
             ("POST", "/_/tick", "tick", COOKIE, self._tick),
             ("POST", "/_/share", "share", COOKIE, self._share),
@@ -1491,6 +1493,54 @@ class Handler:
             return guard(text, new, toggled)
         return on_branch
 
+    def _blocks(self, req: Req) -> Response:
+        """The blocks of the document for the block editor (`blockEditor` in the meta, SPEC 4.3): each block's id, type, text and the blank
+        lines after it, and the hash they are of."""
+        e = self._entry(req, req.query.get("doc"))
+        _shape(self.hub.block_editor, "the block editor is off")
+        self.hub.catch_up(e)
+        return _ok(**e.live.blocks())
+
+    def _editor_asset(self, req: Req) -> Response:
+        _shape(self.hub.block_editor, "the block editor is off")
+        asset = self.hub.editor_asset
+        named = req.query.get("v") == asset.tag
+        return Response(200, {"Content-Type": "text/javascript; charset=utf-8", "X-Content-Type-Options": "nosniff",
+                              "Cache-Control": "public, max-age=31536000, immutable" if named else "no-store"}, asset.body)
+
+    def _save_markdown(self, req: Req, e, b: dict) -> Response:
+        """A page's save as whole Markdown and the ids its blocks held at load (ADR 0007, SPEC 7.2): written by the Document
+        service. Answers `{hash, changed, conflict}`; a conflict writes nothing."""
+        _shape(self.hub.block_editor, "the block editor is off")
+        md, ids, session = b.get("markdown"), b.get("ids"), b.get("session", "")
+        _shape(isinstance(md, str), "markdown must be the whole text")
+        _shape(ids is None or (isinstance(ids, list) and all(x is None or isinstance(x, str) for x in ids)),
+               "ids must be a list of a block's id or null")
+        _shape(isinstance(session, str) and 0 < len(session) <= 64 and not session.startswith("\x00"),
+               "session must be the page's own id")      # \x00 is the service's own: a comment's
+        rid = b.get("rid")
+        _shape(rid is None or (isinstance(rid, str) and _RID_RE.fullmatch(rid)), "rid is not a request id")
+        read_on = self._read_on(e.address, b.get("branch"))
+        with place.held(self.hub, e.address):
+            guard, ticked = self._ticks(req, e, "/_/save")
+            guard = self._on_branch(e.address, read_on, guard)
+            move, moved = self._mover(e, ticked)
+            with self._moved_committed(e, req.member, "edit", moved):
+                try:
+                    got = e.live.save_markdown(b["hash"], md, ids, f"{len(req.member_id)}:{req.member_id}:{session}", rid=rid, guard=guard, move=move)
+                except (EditError, StaleError) as ex:
+                    raise Refuse(409, str(ex)) from None
+                except UnicodeEncodeError:
+                    raise Refuse(400, "the text holds a character that cannot be written to the .md "
+                                      "(half of a pair, such as half an emoji)") from None
+                self.hub.index.touch(e.address)
+                gone = moved[0] if moved else self._placed(e, ticked)
+                if got["changed"] and not got.get("again"):
+                    moved.clear()
+                    self.hub.committed(e.address, req.member, "edit", gone=gone, root_id=e.root_id)
+                    self._page_wrote(req, e, "save")
+        return _ok(**got)
+
     def _save(self, req: Req) -> Response:
         b = req.body
         e = self._entry_to_write(req, b.get("doc"))
@@ -1498,6 +1548,8 @@ class Handler:
         self._writable(e.address)
         h, edits = b.get("hash"), b.get("edits")
         _shape(isinstance(h, str) and h != "", "hash must be the hash of the version the edits were made against")
+        if "markdown" in b:
+            return self._save_markdown(req, e, b)
         _shape(isinstance(edits, list), "edits must be a list")
         for x in edits:
             _shape(isinstance(x, dict) and type(x.get("i")) is int and isinstance(x.get("html"), str)

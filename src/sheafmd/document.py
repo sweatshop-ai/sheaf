@@ -34,6 +34,7 @@ from .blocks import LOCKED, Clash, Unreadable, derive, read_tree, rebase, write_
 from .blocks import declarations as decl
 from .blocks.write import match
 
+COMMENT_SESSION = "\x00comment"   # the session a comment write is recorded under: the page's own saves, then comments, are not a write from outside (SPEC 7.3)
 RECORDS = 512       # the writes whose session is remembered: the page's chain is a few saves long
 TEXTS = 64          # the texts kept by hash, for a stale base to be rebased from
 TREES = 4           # the trees kept, by text hash: a save reads the file's and the page's, the next reads the one just written
@@ -45,6 +46,7 @@ class DocumentService:
         self._lock = threading.Lock()
         self._next = OrderedDict()       # hash of a text -> (hash of the text written over it, session)
         self._trees = OrderedDict()      # hash -> tree
+        self._sent = OrderedDict()       # session -> the Markdown its page sent last: the text the page holds
         self._texts = OrderedDict()      # hash -> text of a base the service has read or written
 
     # ── read ────────────────────────────────────────────────────────────────
@@ -105,8 +107,18 @@ class DocumentService:
             outcome["blocks"] = self._ids(new)
         return outcome
 
+    def hold(self, session: str, markdown: str) -> None:
+        """Note that the page of `session` now holds `markdown`: its save was written (or changed nothing), so a later save merges from it."""
+        if not session:
+            return
+        with self._lock:
+            self._sent[session] = markdown
+            self._sent.move_to_end(session)
+            while len(self._sent) > TEXTS:
+                self._sent.popitem(last=False)
+
     def settle(self, current: str, markdown: str, held_ids, base: str, session: str, base_text: str | None = None,
-               info: dict | None = None) -> str:
+                info: dict | None = None) -> str:
         """The text to write for a page's `markdown` over the `current` text of the file. Raises `Conflict`
         for a base that is stale by anyone else's writing and either unknown to the service or unreadable, or whose
         changes clash with the page's (ADR 0007), the latter with the rows of the clashing blocks. `info`, if given, receives the page's block changes as `changes`."""
@@ -121,6 +133,13 @@ class DocumentService:
             # the page's edit is checked against the text it was made from: the base when the service holds it
             self._refuse(page, self.tree(old if old is not None else current), held_ids)
             if base and base != here and not self._own(base, here, session):
+                # What the page itself saved on the way is not a change it must merge again: when only comments
+                # follow its own saves, the three-way merge starts from its last save.
+                if self._own_tail(base, here, session) != base:
+                    with self._lock:
+                        held = self._sent.get(session)
+                    if held is not None:
+                        old = held
                 if old is None:
                     raise rda.Conflict(here)
                 got = rebase(self.tree(old), self.tree(current), page, held_ids)
@@ -167,6 +186,10 @@ class DocumentService:
             return self._texts.get(h)
 
     # ── the page session record ─────────────────────────────────────────────
+    def record(self, old: str, new: str, session: str) -> None:
+        """Note that `session` wrote `new` over `old`, for a write the caller made itself (the page's save)."""
+        self._record(old, new, session)
+
     def _record(self, old: str, new: str, session: str) -> None:
         a, b = rds.md_hash(old), rds.md_hash(new)
         self._remember(old, a)
@@ -193,6 +216,24 @@ class DocumentService:
                 if h == here:
                     return True
         return False
+
+    def _own_tail(self, base: str, here: str, session: str) -> str:
+        """The hash `base` becomes by the writes of `session` alone, when nothing but comment writes (`COMMENT_SESSION`)
+        lies between it and `here`; `base` itself when anything else does."""
+        if not session:
+            return base
+        with self._lock:
+            h, mine = base, base
+            for _ in range(len(self._next) + 1):
+                step = self._next.get(h)
+                if step is None or step[1] not in (session, COMMENT_SESSION):
+                    return base
+                h = step[0]
+                if step[1] == session:
+                    mine = h
+                if h == here:
+                    return mine
+        return base
 
     def _ids(self, text: str) -> list:
         try:

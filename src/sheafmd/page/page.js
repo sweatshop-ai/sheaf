@@ -1128,8 +1128,115 @@ var create = function (ROOT, CFG, opts) {
     if (workOpen() && !workPop.contains(e.target) && e.target !== btn && !menu.contains(e.target)) closeWork();
   });
 
+  // ── The block editor (ADR 0003) ────────────────────────────────────────────────────────────────────────────────
+  // With CFG.blockEditor (SPEC 4.3) Edit opens TipTap on the document's blocks in place of the per-block fields: the
+  // page loads the bundle (/_/editor.js) and the blocks (/_/blocks), and saves the whole Markdown with the id each
+  // block held at load and one id for this page (a session). The base it names stays the text it loaded: the hub
+  // knows this page's own writes by the session, so two saves in a row never conflict with each other (SPEC 7.3).
+  var beMine = {}, bke = null, beHost = null, beTimer = null, beBusy = null, beReq = null, beBase = null, beLast = null, beOn = false;
+  var BE_SESSION = 'p' + Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
+  var BE_PAUSE = 2500;
+  function beOwed() { return !!bke && bke.markdown() !== beLast; }
+  function beScript() {
+    if (window.sheafBlockEditor) return Promise.resolve();
+    return new Promise(function (ok, no) {
+      var s = document.createElement('script');
+      s.src = '/_/editor.js?v=' + encodeURIComponent(CFG.blockEditor);
+      var own = document.querySelector('script[nonce]');       // the page's CSP allows the scripts that carry its nonce
+      if (own && own.nonce) s.nonce = own.nonce;
+      s.onload = function () { ok(); };
+      s.onerror = function () { no(new Error('the editor did not load')); };
+      document.head.appendChild(s);
+    });
+  }
+  function beChanged() {
+    if (beTimer) window.clearTimeout(beTimer);
+    beTimer = window.setTimeout(function () { beTimer = null; if (bke && !stale && !docGone && bke.markdown() !== beRefused) beSave(true); }, BE_PAUSE);
+    var st = q('#rd-state'); if (st) st.textContent = beOwed() ? 'Unsaved changes' : 'Saved';
+  }
+  async function beOpen() {
+    if (bke || beOn) return;
+    beOn = true;
+    try {
+      await beScript();
+      var r = await fetch('/_/blocks?doc=' + encodeURIComponent(CFG.doc), { credentials: 'same-origin' });
+      var j = await r.json();
+      if (!r.ok || !j.blocks) throw new Error(j.error || 'this document is not edited in blocks');
+      beBase = j.hash;
+      beHost = document.createElement('div');
+      beHost.id = 'rd-be';
+      beHost.setAttribute('data-rd-ui', '');
+      main.parentNode.insertBefore(beHost, main);
+      main.style.display = 'none';
+      bke = window.sheafBlockEditor.mount(beHost, { lead: j.lead, blocks: j.blocks, onChange: beChanged });
+      beLast = bke.markdown();
+    } catch (e) {
+      beOn = false;
+      say('The editor could not open: ' + e.message, true);
+      setEditing(false);
+    }
+  }
+  function beClose() {
+    if (beTimer) { window.clearTimeout(beTimer); beTimer = null; }
+    if (bke) { bke.destroy(); bke = null; }
+    if (beHost) { beHost.remove(); beHost = null; }
+    main.style.display = '';
+    beOn = false;
+  }
+  // One save at a time; the one in flight is waited for, and what was typed meanwhile goes in the next.
+  async function beSave(quiet, res) {
+    if (!bke) return true;
+    if (beTimer) { window.clearTimeout(beTimer); beTimer = null; }
+    if (beBusy) { await beBusy; return beSave(quiet, res); }
+    var md = bke.markdown();
+    if (md === beLast && !beReq) { if (!quiet) say('Nothing changed'); return true; }
+    var done; beBusy = new Promise(function (r) { done = r; });
+    var st = q('#rd-state'); if (st) st.textContent = 'Saving…';
+    try {
+      var req = beReq && beReq.md === md ? beReq : (beReq = { rid: newRid(), md: md });
+      var j = await post('/_/save', { hash: beBase, markdown: md, ids: bke.ids(), session: BE_SESSION, rid: req.rid, branch: CFG.branch });
+      beReq = null;
+      if (j.conflict) {
+        say('The document changed elsewhere and this text could not be placed. Copy what you need, then reload.', true);
+        stale = true;
+        return false;
+      }
+      hash = j.hash; beMine[j.hash] = true;
+      beLast = md;
+      if (!quiet) say(j.changed ? 'Saved → ' + CFG.name : 'Nothing changed');
+      refresh();
+      return true;
+    } catch (e) {
+      if (e.status >= 400 && e.status < 500) { beReq = null; beRefused = md; }      // the same refused text is not sent again by itself
+      if (res) res.owed = true;
+      say(e.unreachable ? e.message : 'save failed: ' + e.message, true);
+      return false;
+    } finally {
+      beBusy = null; done();
+      if (bke && md !== bke.markdown() && !stale) beChanged();
+    }
+  }
+  var beDiscard = 0, beRefused = null;
+  async function blockEditing(on) {
+    editing = on;
+    BODY.classList.toggle('rd-editing', on);
+    var tg = modes.querySelector('button'); if (tg) tg.setAttribute('data-m', on ? 'save' : 'edit');
+    if (on) { beDiscard = 0; await beOpen(); } else if (bke) {
+      if (stale && (!beDiscard || Date.now() - beDiscard < 800)) {      // a held key repeats: the second press must be a new one          // the text typed since the conflict is not on disk: leaving throws it away, so ask once
+        if (!beDiscard) beDiscard = Date.now(); editing = true; BODY.classList.add('rd-editing'); if (tg) tg.setAttribute('data-m', 'save');
+        say('The document changed, so your last edits are not saved. Press Done again to discard them and reload.', true);
+        return;
+      }
+      if (!stale && !(await beSave(true))) { editing = true; BODY.classList.add('rd-editing'); if (tg) tg.setAttribute('data-m', 'save'); return; }
+      beClose();
+      reloadWhenFree(popId);          // the page shows the text the editor wrote
+    }
+    refresh();
+  }
+
   function setEditing(on) {
     if (!canEdit) return;
+    if (CFG.blockEditor) { blockEditing(on); return; }
     editing = on;
     BODY.classList.toggle('rd-editing', on);
     var tg = modes.querySelector('button'); if (tg) tg.setAttribute('data-m', on ? 'save' : 'edit');
@@ -1384,6 +1491,7 @@ var create = function (ROOT, CFG, opts) {
   }
   // `res`, when given, is told whether a failure left the save owed (res.owed): the caller's own save, not an earlier one.
   async function save(quiet, res) {
+    if (bke) return beSave(quiet, res);
     if (!canEdit) { say('This page has nothing to save to. Open the document with sheaf to edit it.', true); return false; }
     if (stale) { say('The document changed. Reload the page before saving again.', true); return false; }
     if (saving) { await saving; return save(quiet, res); }
@@ -1659,6 +1767,7 @@ var create = function (ROOT, CFG, opts) {
   //   text  only text typed counts; else an open form does, empty or not
   //   sent  a send out counts too: 'new' the send of a new comment from this popover, 'any' every form's
   function writingNow(o) {
+    if (bke && o.sent === 'any' && (beOwed() || beBusy)) return true;       // the editor holds text the file does not
     if (o.sent === 'any' && out.length > 0) return true;
     if (o.sent === 'new' && newSentHere()) return true;
     if (o.page) return formsWithText(true).length > 0;
@@ -3831,6 +3940,7 @@ var create = function (ROOT, CFG, opts) {
     var typing = e.target.isContentEditable ||
                  /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName || '');
     if (e.key === 'Escape') {
+      if (e.repeat) { e.preventDefault(); return; }      // a held key is not a second press
       // One thing per press, the first that applies.
       if (workOpen()) { e.preventDefault(); closeWork(); return; }
       if (pop && !standing()) { e.preventDefault(); leavePopover(); return; }
@@ -4504,7 +4614,7 @@ var create = function (ROOT, CFG, opts) {
   // or edit being typed is asked about too: until it is sent, nothing but the form holds it. A form
   // that holds what the store keeps for it is not: the next page draws that text again (unkept).
   // Mounted, the front's loader asks the page's dirty() before it moves, and holds the tab's own beforeunload with it.
-  function unsavedNow() { return !!(dirty().length || unkept() || (docGone && storedTexts().length)); }
+  function unsavedNow() { return !!((bke && (beOwed() || beBusy)) || dirty().length || unkept() || (docGone && storedTexts().length)); }
   if (!MOUNTED) listen(window, 'beforeunload', function (e) {
     if (unsavedNow()) { e.preventDefault(); e.returnValue = ''; }
   });
@@ -4539,7 +4649,7 @@ var create = function (ROOT, CFG, opts) {
   // and is ignored, another writer's is told as ever.
   function heard(d) {
     if (ownWrites) { held.push(d); return; }
-    if (d.hash === hash) return;
+    if (d.hash === hash || (typeof beMine !== 'undefined' && beMine[d.hash])) return;   // beMine: an earlier save of this editor, whose event came after a later one
     // Only comments moved: take them in place, even with unsaved edits on
     // screen, since the saved blocks keep their comments on the server side. Only
     // when this page holds the version the hub compared with (d.base): a page that
@@ -4825,9 +4935,9 @@ var create = function (ROOT, CFG, opts) {
       // A press's tick counts in `writes`: its reload waits for the press instead (reloadKeep), so that a refusal
       // is said again on the page it brings. Any other write out is waited for, as ever.
       if (writes + parked > (ticking ? 1 : 0)) { afterWrites.push(function () { meetVersion(v); }); return; }
-      if (dirty().length || writingNow({ page: true })) {
+      if (dirty().length || (bke && (beOwed() || beBusy)) || writingNow({ page: true })) {
         showNoticeOverOffer('The sheaf hub was upgraded. ' +
-                            (dirty().length ? 'Save your edits' : 'Send or cancel your comment') +
+                            (dirty().length || bke ? 'Save your edits' : 'Send or cancel your comment') +
                             ', then reload this page to use the new version.');
         return;
       }

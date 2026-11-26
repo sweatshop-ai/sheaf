@@ -43,7 +43,7 @@ def agent_env_prefixes() -> tuple:
 
 _AGENT_ENV_PREFIXES = agent_env_prefixes()
 PACKAGED = [
-    "sheafmd/page/page.js", "sheafmd/page/page.css", "sheafmd/page/index.js", "sheafmd/page/index.css",
+    "sheafmd/page/page.js", "sheafmd/page/editor.bundle.js", "sheafmd/page/page.css", "sheafmd/page/index.js", "sheafmd/page/index.css",
     "sheafmd/themes/plain/theme.css", "sheafmd/themes/plain/theme.toml",
     "sheafmd/agent_files/claude-skill.md", "sheafmd/agent_files/agents-snippet.md",
 ]

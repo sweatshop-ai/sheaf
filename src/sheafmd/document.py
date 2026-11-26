@@ -43,7 +43,8 @@ class DocumentService:
     def __init__(self, adapter):
         self.adapter = adapter
         self._lock = threading.Lock()
-        self._next = OrderedDict()       # hash of a text -> (hash of the text written over it, session)
+        self._next = OrderedDict()       # hash of a text -> (hash of the text written over it, session, ids it changed)
+        self._tip = None                 # hash of the text the service wrote last
         self._trees = OrderedDict()      # hash -> tree
         self._texts = OrderedDict()      # hash -> text of a base the service has read or written
 
@@ -76,7 +77,7 @@ class DocumentService:
         """`base_text`: the text `base` names, for a base the service has not read or written itself."""
         info = {}
         out = self.write(lambda text, opened: self.settle(text, markdown, held_ids, base, session, base_text, info),
-                         session, author=author, note=note, move=move)
+                         session, author=author, note=note, move=move, info=info)
         if out["outcome"] == "written":
             out["changes"] = info.get("changes", [])
         return out
@@ -90,19 +91,38 @@ class DocumentService:
         tree, _ = self.read()
         return derive(self.tree(old), tree)
 
-    def write(self, change, session: str = "", *, author: str = "", note: str = "", move=None, **hooks) -> dict:
+    def write(self, change, session: str = "", *, author: str = "", note: str = "", move=None, info: dict | None = None,
+              **hooks) -> dict:
         """The write `change(text, opened)` makes through the adapter, under its lock, recorded as this session's.
-        A `Conflict` the change raises is the outcome `conflict`. Returns the outcome; `hooks` are the adapter's own."""
+        The record is made under the file lock, before it is released, so a save of the same session that follows at
+        once finds it; a write that then fails takes its record back. A `Conflict` the change raises is the outcome
+        `conflict`. Returns the outcome; `hooks` are the adapter's own. `info` is the dict `settle` filled, whose
+        `changes` give the ids the write changed."""
         here, name = self.adapter.pinned()
         if not self.adapter.accepts(name):
             return rda.refused(f"{name} is not a .md file")
+        made = []
+
+        def recording(text, opened):
+            new = change(text, opened)
+            if new != text:
+                made.append(self._record(text, new, session, (info or {}).get("changes")))
+            return new
+
         try:
-            outcome, old, new = here.apply(change, author=author, note=note, move=move, **hooks)
+            outcome, old, new = here.apply(recording, author=author, note=note, move=move, **hooks)
         except rda.Refused as r:
+            self._unrecord(made)
             return rda.refused(r.reason, r.block)
+        except BaseException:
+            self._unrecord(made)
+            raise
         if outcome["outcome"] == "written":
-            self._record(old, new, session)
+            self._remember(old)
+            self._remember(new)
             outcome["blocks"] = self._ids(new)
+        else:
+            self._unrecord(made)
         return outcome
 
     def settle(self, current: str, markdown: str, held_ids, base: str, session: str, base_text: str | None = None,
@@ -111,29 +131,93 @@ class DocumentService:
         for a base that is stale by anyone else's writing and either unknown to the service or unreadable, or whose
         changes clash with the page's (ADR 0007), the latter with the rows of the clashing blocks. `info`, if given, receives the page's block changes as `changes`."""
         here = rds.md_hash(current)
-        if base_text is not None:
+        if base_text is not None and rds.md_hash(base_text) == base:     # a text is believed only for the hash it has
             self._remember(base_text, base)
+        stale = bool(base) and base != here
         try:
             page = self.tree(markdown)
-            old = self._text_of(base) if base and base != here else current
+            old = self._text_of(base) if stale else current
             if info is not None and old is not None:
                 info["changes"] = derive(self.tree(old), page, held_ids)
             # the page's edit is checked against the text it was made from: the base when the service holds it
             self._refuse(page, self.tree(old if old is not None else current), held_ids)
-            if base and base != here and not self._own(base, here, session):
+            steps = self._steps(base, here) if stale else []
+            if stale and not self._own(steps, session):
                 if old is None:
                     raise rda.Conflict(here)
-                got = rebase(self.tree(old), self.tree(current), page, held_ids)
+                got = self._rebase(base, old, current, page, held_ids, steps, session)
                 if isinstance(got, Clash):
                     raise rda.Conflict(here, got.rows)
+                if info is not None and "changes" in info:
+                    info["changes"] = self._remap(info["changes"], page, self.tree(got))
                 return got
             if markdown == current:
                 return current
             return write_back(page, self.tree(current), held_ids)
         except Unreadable:
-            if base and base != here and not self._own(base, here, session):
+            if stale and not self._own(self._steps(base, here), session):
                 raise rda.Conflict(here) from None
             return markdown
+
+    def _rebase(self, base, old, current, page, held_ids, steps, session):
+        """The text of `page` rebased onto `current`, or a `Clash`. Where the history from `base` is known and starts
+        with writes of this very session, they are the page's own: the rebase starts from the text they made, so that
+        only the writes of others are merged, and not the page's own earlier edit as if it were another's."""
+        start, held, rest = old, held_ids, steps
+        if steps and session:
+            k = 0
+            while k < len(steps) and steps[k][2] == session:
+                k += 1
+            text = self._text_of(steps[k - 1][1]) if k else None
+            if text is not None:
+                start, rest = text, steps[k:]
+                held = self._forward(held_ids, steps[:k])
+        file_held = None
+        if rest is not None:
+            now = self.tree(current)
+            origin = self._origin(rest)
+            file_held = [origin.get(b.id) for b in now.blocks]
+        return rebase(self.tree(start), self.tree(current), page, held, file_held)
+
+    @staticmethod
+    def _forward(held_ids, steps):
+        if held_ids is None:
+            return None
+        out = []
+        for h in held_ids:
+            for _, _, _, m in steps:
+                h = m.get(h, h)
+            out.append(h)
+        return out
+
+    @staticmethod
+    def _origin(steps) -> dict:
+        """For each id a block has after `steps`, the id it had before them (only ids that changed)."""
+        origin = {}
+        for _, _, _, m in steps:
+            nxt = {n: origin.get(o, o) for o, n in m.items()}
+            for k, v in origin.items():
+                if k not in m:
+                    nxt.setdefault(k, v)
+            origin = nxt
+        return origin
+
+    @staticmethod
+    def _remap(changes, page, merged):
+        """The changes with the ids of the blocks as the merged text has them: the text written holds the other
+        writer's blocks too, and an equal block of theirs would give the page's the id of a copy."""
+        names = {}
+
+        def walk(a, b):
+            for x, y in zip(a, b):
+                names.setdefault(x.id, y.id)
+                if len(x.children) == len(y.children):
+                    walk(x.children, y.children)
+
+        got = match(page, merged, None)
+        walk([b for b, i in zip(page.blocks, got) if i is not None], [merged.blocks[i] for i in got if i is not None])
+        return [{**c, "new_id": names.get(c["new_id"], c["new_id"]), "parent": names.get(c["parent"], c["parent"])}
+                for c in changes]
 
     @staticmethod
     def _refuse(new, cur, held_ids) -> None:
@@ -167,32 +251,59 @@ class DocumentService:
             return self._texts.get(h)
 
     # ── the page session record ─────────────────────────────────────────────
-    def _record(self, old: str, new: str, session: str) -> None:
+    def _record(self, old: str, new: str, session: str, changes=None):
+        """The record of the write of `new` over `old`: the hash it makes, the session, and the ids it changed.
+        Returns what `_unrecord` needs to take it back."""
         a, b = rds.md_hash(old), rds.md_hash(new)
         self._remember(old, a)
         self._remember(new, b)
         if a == b:
-            return
+            return None
+        ids = {c["id"]: c["new_id"] for c in changes or () if c["kind"] in ("edit", "move") and c["id"] and c["new_id"]}
         with self._lock:
-            self._next[a] = (b, session)
+            before = (self._next.get(a), self._tip)
+            self._next[a] = (b, session, ids)
             self._next.move_to_end(a)
+            self._tip = b
             while len(self._next) > RECORDS:
                 self._next.popitem(last=False)
+        return a, b, before
 
-    def _own(self, base: str, here: str, session: str) -> bool:
-        """Whether every write from `base` to `here` is a record of `session`."""
-        if not session:
-            return False
+    def _unrecord(self, made) -> None:
+        for rec in made:
+            if rec is None:
+                continue
+            a, b, (prev, tip) = rec
+            with self._lock:
+                if self._next.get(a, (None,))[0] == b:
+                    if prev is None:
+                        self._next.pop(a, None)
+                    else:
+                        self._next[a] = prev
+                    self._tip = tip
+
+    def _steps(self, base: str, here: str):
+        """The writes the service recorded from `base` to `here`, each `(from, to, session, ids)`, or None where
+        there is no such chain: a write it did not see (any other writer, or a restore of an older text) came in,
+        for the text now is not the last one it wrote."""
         with self._lock:
-            h = base
+            if self._tip != here:
+                return None
+            h, out = base, []
             for _ in range(len(self._next) + 1):
                 step = self._next.get(h)
-                if step is None or step[1] != session:
-                    return False
+                if step is None:
+                    return None
+                out.append((h, *step))
                 h = step[0]
                 if h == here:
-                    return True
-        return False
+                    return out
+        return None
+
+    @staticmethod
+    def _own(steps, session: str) -> bool:
+        """Whether every write of `steps` is a record of `session`."""
+        return bool(session) and bool(steps) and all(s[2] == session for s in steps)
 
     def _ids(self, text: str) -> list:
         try:

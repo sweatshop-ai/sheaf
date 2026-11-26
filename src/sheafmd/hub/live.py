@@ -353,7 +353,10 @@ class LiveDocument:
                     return text
                 # The text the edits made over `text`, written as the Document service writes it: a block that is
                 # the file's own block (an equal AST) keeps the file's bytes. `new` was made on `text`, so its base is `text`'s.
-                new = self._service.settle(text, new, None, rds.md_hash(text), rid or "")
+                try:
+                    new = self._service.settle(text, new, None, rds.md_hash(text), rid or "")
+                except rda.Refused as r:         # a save that makes an invalid Rich block: the page's refusal, not a failure
+                    raise rde.EditError(f"refused: {r.reason}") from None
                 if new == text:             # every block came back as the file's own: nothing was written
                     got["report"]["changed"] = False
                     return text

@@ -19,6 +19,7 @@ import json
 from dataclasses import dataclass
 
 from .. import _pandoc
+from . import declarations as decl
 from .flat import LOCKED_KINDS, SENTINEL_RE, instrument
 
 FORMAT = "gfm+fenced_divs+bracketed_spans"
@@ -95,6 +96,10 @@ def _type_and_attrs(blocks: list, kind: str):
         return t, {"ordered": True, "start": b["c"][0][0]}
     if b["t"] == "BulletList":
         return t, {"ordered": False}
+    if b["t"] == "Div":
+        classes = b["c"][0][1]
+        if classes and classes[0] in decl.DECLARED:
+            return classes[0], {k: v for k, v in b["c"][0][2]}
     return t, {}
 
 
@@ -107,6 +112,8 @@ def _children(blocks: list) -> list:
         kids = []
         if b["t"] == "BlockQuote":
             kids = _children(b["c"])
+        elif b["t"] == "Div":
+            kids = _children(b["c"][1])
         elif b["t"] in ("BulletList", "OrderedList"):
             items = b["c"] if b["t"] == "BulletList" else b["c"][1]
             kids = [("item", {}, [{"t": "Item", "c": item}], _children(item)) for item in items]
@@ -119,6 +126,14 @@ class _Ids:
 
     def __init__(self):
         self.seen = {}
+        self.stored = set()
+
+    def take(self, stored: str, type_: str, ast: str) -> str:
+        """A Rich block keeps the id written in the file; a missing or repeated one falls back to a derived id."""
+        if stored and stored not in self.stored:
+            self.stored.add(stored)
+            return stored
+        return self(type_, ast)
 
     def __call__(self, type_: str, ast: str) -> str:
         h = hashlib.sha1(f"{type_}\0{ast}".encode("utf-8")).hexdigest()[:8]
@@ -149,13 +164,58 @@ def _segments(doc: dict) -> dict:
     return seg
 
 
+def _rich_found(blocks: list):
+    """The first declared-type Div held by a plain container (a quote or a list item) in `blocks`, or None."""
+    for b in blocks:
+        t = b["t"]
+        if t == "Div":
+            classes = b["c"][0][1]
+            if classes and classes[0] in decl.DECLARED:
+                return classes[0]
+            inner = _rich_found(b["c"][1])
+        elif t == "BlockQuote":
+            inner = _rich_found(b["c"])
+        elif t in ("BulletList", "OrderedList"):
+            items = b["c"] if t == "BulletList" else b["c"][1]
+            inner = next((r for r in map(_rich_found, items) if r), None)
+        else:
+            continue
+        if inner:
+            return inner
+    return None
+
+
+def _div_fault(b: dict):
+    """(type, reason) for a top-level Div: the reason is None when it is a valid declared Rich block."""
+    (_, classes, kvs), content = b["c"][0], b["c"][1]
+    t = classes[0] if classes else ""
+    if t not in decl.DECLARED:
+        return t, "unknown type"
+    for extra in classes[1:]:
+        return t, f"{t} has class {extra!r}, which is not declared"
+    kid_types = [_type_and_attrs([k], "")[0] for k in content]
+    return t, (decl.check_attrs(t, {k: v for k, v in kvs}) or decl.check_children(t, kid_types)
+               or _nested_fault(content))
+
+
+def _nested_fault(content: list):
+    """A Rich block inside a quote or a list inside the content is as forbidden as one in a quote at top level."""
+    for k in content:
+        found = _rich_found([k]) if k["t"] in ("BlockQuote", "BulletList", "OrderedList") else None
+        if found:
+            return f"a {found} may not sit inside a {_type_and_attrs([k], '')[0]}"
+    return None
+
+
 def read_tree(text: str) -> Tree:
     """The block tree of `text`. Raises `Unreadable` for a text pandoc does not read."""
-    inst, tiles = instrument(text)
+    inst, tiles = instrument(text, divs=True)
     live = [i for i, t in enumerate(tiles) if t.kind not in ("blank", "frontmatter") and t.content.strip()]
     seg = {}
     if live:
-        got = _pandoc.run(["-f", FORMAT, "-t", "json"], inst)
+        # Bytes that are not UTF-8 reach us as lone surrogates: pandoc reads a `?` there, the
+        # tiles keep the bytes, so the file still writes back byte for byte.
+        got = _pandoc.run(["-f", FORMAT, "-t", "json"], inst.encode("utf-8", "replace").decode("utf-8"))
         if got.returncode != 0:
             raise Unreadable(got.stderr.strip() or "pandoc did not read the text")
         try:
@@ -176,11 +236,32 @@ def read_tree(text: str) -> Tree:
         else:
             ast_blocks = seg.get(i, [])
             t, attrs = _type_and_attrs(ast_blocks, tile.kind)
+            stub = None            # (declared or unknown type, why it is a Stub), for a block that is no valid Rich block
+            first = ast_blocks[0] if ast_blocks else None
+            if first and first["t"] == "Div":
+                rtype, why = _div_fault(first)
+                if why:
+                    stub = (rtype, why)
+                else:
+                    attrs = {k: v for k, v in first["c"][0][2]}
+            elif first and first["t"] in ("BlockQuote", "BulletList", "OrderedList"):
+                found = _rich_found(ast_blocks[:1])
+                if found:
+                    stub = (found, f"a {found} may not sit inside a {t}")
+            if stub:
+                sid = first["c"][0][0] if first["t"] == "Div" else ""
+                bid = ids.take(sid, "stub", tile.content)
+                blocks.append(Block(id=bid, type="stub", attrs={"type": stub[0], "reason": stub[1]}, caps=LOCKED,
+                                    content=tile.content, gap=tile.gap, ast=tile.content))
+                continue
             # Reference and footnote definitions are no block of the AST: they are equal when their bytes are.
             ast = _canon(ast_blocks) if ast_blocks else tile.content
             kids = _children(ast_blocks[:1])[0][3] if ast_blocks else []
         locked = tile.kind in LOCKED_KINDS
-        bid = ids(t, ast)
+        if t in decl.DECLARED:
+            bid = ids.take(ast_blocks[0]["c"][0][0], t, ast)
+        else:
+            bid = ids(t, ast)
         blocks.append(Block(id=bid, type=t, attrs=attrs, caps=LOCKED if locked else ALL, content=tile.content,
                             gap=tile.gap, children=_build(kids, ids), ast=ast))
     return Tree(text=text, blocks=tuple(blocks), lead=lead)

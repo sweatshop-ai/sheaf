@@ -18,6 +18,11 @@ a base older than the file's is the page's own when every write since it is a re
 save then stands; a write from anywhere else (another session, the MCP door, the CLI) breaks the chain and the
 stale base is a `conflict`. Matching of moved or reworded blocks, rebase and the clash rules are the next ticket's.
 
+A save is refused whole, and nothing is written, when it makes a Rich block that breaks its declaration (an
+attribute or value it does not declare, a forbidden nesting: `blocks.declarations`), or when it changes a locked
+block that the page held under its id. A block already invalid in the file stays as it is: a save that leaves it alone
+is not refused for it. An unknown type is a Stub, kept byte for byte, never refused.
+
 A text pandoc cannot read is written as the page sent it: the service never refuses what the page saved before.
 """
 import threading
@@ -25,7 +30,9 @@ from collections import OrderedDict
 
 from . import adapter as rda
 from . import source as rds
-from .blocks import Clash, Unreadable, derive, read_tree, rebase, write_back
+from .blocks import LOCKED, Clash, Unreadable, derive, read_tree, rebase, write_back
+from .blocks import declarations as decl
+from .blocks.write import match
 
 RECORDS = 512       # the writes whose session is remembered: the page's chain is a few saves long
 TEXTS = 64          # the texts kept by hash, for a stale base to be rebased from
@@ -89,7 +96,10 @@ class DocumentService:
         here, name = self.adapter.pinned()
         if not self.adapter.accepts(name):
             return rda.refused(f"{name} is not a .md file")
-        outcome, old, new = here.apply(change, author=author, note=note, move=move, **hooks)
+        try:
+            outcome, old, new = here.apply(change, author=author, note=note, move=move, **hooks)
+        except rda.Refused as r:
+            return rda.refused(r.reason, r.block)
         if outcome["outcome"] == "written":
             self._record(old, new, session)
             outcome["blocks"] = self._ids(new)
@@ -108,6 +118,8 @@ class DocumentService:
             old = self._text_of(base) if base and base != here else current
             if info is not None and old is not None:
                 info["changes"] = derive(self.tree(old), page, held_ids)
+            # the page's edit is checked against the text it was made from: the base when the service holds it
+            self._refuse(page, self.tree(old if old is not None else current), held_ids)
             if base and base != here and not self._own(base, here, session):
                 if old is None:
                     raise rda.Conflict(here)
@@ -122,6 +134,21 @@ class DocumentService:
             if base and base != here and not self._own(base, here, session):
                 raise rda.Conflict(here) from None
             return markdown
+
+    @staticmethod
+    def _refuse(new, cur, held_ids) -> None:
+        """Raises `Refused` for a save that makes an invalid Rich block or changes a locked block the page held."""
+        got = match(new, cur, held_ids)
+        for b, i in zip(new.blocks, got):
+            if i is None and b.type == "stub" and b.attrs.get("type") in decl.DECLARED:
+                raise rda.Refused(b.attrs["reason"], b.id)
+        if held_ids is not None:
+            by_id = {b.id: b for b in cur.blocks}
+            for j, b in enumerate(new.blocks):
+                h = held_ids[j] if j < len(held_ids) else None
+                old = by_id.get(h) if h else None
+                if old is not None and old.caps == LOCKED and old.key != b.key:
+                    raise rda.Refused(f"the {old.type} block is locked and cannot be changed", old.id)
 
     def _remember(self, text: str, h: str | None = None) -> None:
         h = h or rds.md_hash(text)

@@ -47,6 +47,8 @@ import re
 from bs4 import BeautifulSoup, Comment
 from bs4.element import PreformattedString, Tag
 
+from .blocks import declarations
+
 REMOVE = frozenset({
     "script", "style", "iframe", "frame", "frameset", "object", "embed", "applet", "base",
     "meta", "link", "form", "button", "textarea", "select", "template", "noscript",
@@ -73,6 +75,7 @@ _STRIP_CONTROL = re.compile(r"[\x00-\x20\x7f]+")
 MAX_PASSES = 3
 
 # Mount mode.
+_BLOCKS = declarations.allow_list()          # {type: {"tag", "attrs": {"data-<name>": [values]}}}: one list for both layers
 MOUNT_REMOVED = frozenset({
     "video", "audio", "source", "track", "canvas", "portal", "use", "image", "foreignobject", "animate", "set",
     "animatetransform", "animatemotion", "math", "maction", "annotation-xml", "mglyph", "semantics",
@@ -331,6 +334,25 @@ def _mount_attrs(tag, name: str, log: list[str]) -> None:
         tag["rel"] = "noopener noreferrer"
 
 
+def _block_attrs(tag, log: list[str]) -> None:
+    """A declared Rich block (`div.<type>`, `blocks.declarations`) keeps its id, its type as the only class and exactly its
+    declared `data-<attr>` with an allowed value. No style, free class, title or handler, whatever the mode."""
+    bt = next((c for c in (tag.get("class") or []) if c in _BLOCKS), None)
+    if tag.name != "div" or bt is None:
+        return
+    allowed = _BLOCKS[bt]["attrs"]
+    for attr in list(tag.attrs):
+        a = attr.lower()
+        value = tag[attr]
+        value = " ".join(value) if isinstance(value, list) else str(value)
+        if a == "id" or (a in allowed and value in allowed[a]):
+            continue
+        if a != "class":
+            log.append(f"  - {attr} removed from <div class={bt}>: not declared")
+        del tag[attr]
+    tag["class"] = [bt]
+
+
 def _comment_ok(text: str) -> bool:
     """A comment that every parser reads as ending at the same place as this one."""
     return not (text.startswith((">", "->")) or "--!>" in text or "<!--" in text)
@@ -410,6 +432,7 @@ def _pass(fragment: str, comments: bool, log: list[str], mount: bool = False) ->
                     del tag[attr]
         if mount:
             _mount_attrs(tag, name, log)
+        _block_attrs(tag, log)
     return str(soup)
 
 

@@ -46,6 +46,7 @@ class DocumentService:
         self._lock = threading.Lock()
         self._next = OrderedDict()       # hash of a text -> (hash of the text written over it, session)
         self._trees = OrderedDict()      # hash -> tree
+        self._sent = OrderedDict()       # session -> the Markdown its page sent last: the text the page holds
         self._texts = OrderedDict()      # hash -> text of a base the service has read or written
 
     # ── read ────────────────────────────────────────────────────────────────
@@ -108,6 +109,17 @@ class DocumentService:
 
     def settle(self, current: str, markdown: str, held_ids, base: str, session: str, base_text: str | None = None,
                info: dict | None = None) -> str:
+        out = self._settle(current, markdown, held_ids, base, session, base_text, info)
+        if session:
+            with self._lock:
+                self._sent[session] = markdown
+                self._sent.move_to_end(session)
+                while len(self._sent) > TEXTS:
+                    self._sent.popitem(last=False)
+        return out
+
+    def _settle(self, current: str, markdown: str, held_ids, base: str, session: str, base_text: str | None = None,
+                info: dict | None = None) -> str:
         """The text to write for a page's `markdown` over the `current` text of the file. Raises `Conflict`
         for a base that is stale by anyone else's writing and either unknown to the service or unreadable, or whose
         changes clash with the page's (ADR 0007), the latter with the rows of the clashing blocks. `info`, if given, receives the page's block changes as `changes`."""
@@ -124,9 +136,11 @@ class DocumentService:
             if base and base != here and not self._own(base, here, session):
                 # What the page itself saved on the way is not a change it must merge again: when only comments
                 # follow its own saves, the three-way merge starts from its last save.
-                mine = self._own_tail(base, here, session)
-                if mine != base:
-                    old = self._text_of(mine)
+                if self._own_tail(base, here, session) != base:
+                    with self._lock:
+                        held = self._sent.get(session)
+                    if held is not None:
+                        old = held
                 if old is None:
                     raise rda.Conflict(here)
                 got = rebase(self.tree(old), self.tree(current), page, held_ids)

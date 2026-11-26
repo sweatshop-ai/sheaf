@@ -116,6 +116,7 @@ src/sheafmd/
   paths.py                     state, config and cache folders; SHEAF_HOME, SHEAF_PORT
   config.py                    user config, .sheaf.toml, theme.toml readers
   source.py                    the Source file: lock, hash, atomic write
+  adapter.py                   the Markdown-file adapter: the one door to the file (read, write, apply, creating)
   blocks.py                    split_md_blocks, instrument, sentinels
   comments.py                  comment grammar, parse, format, anchor, add/reply/status/edit/delete
   edit.py                      html → md for edited blocks, task boxes, merge_edits, map_block

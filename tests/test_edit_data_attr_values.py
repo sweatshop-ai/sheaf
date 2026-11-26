@@ -36,7 +36,7 @@ def test_a_quoted_value_that_holds_data_is_kept_whole(tag):
     # A name straight after a quote or a `/` is one to the page's parser.
     ('<a b="x"data-y="z">x</a>', '<a b="x">x</a>'),
     ("<a b='x'data-y='z' c=\"d\">x</a>", "<a b='x' c=\"d\">x</a>"),
-    ('<a/data-x="1">x</a>', '<a/>x</a>'),
+    ('<a/data-x="1">x</a>', '<a>x</a>'),  # not `<a/>`, which closes itself (ticket 205)
 ])
 def test_data_attributes_go_whatever_their_name_or_place(html, want):
     assert rde.strip_data_attrs(html) == want

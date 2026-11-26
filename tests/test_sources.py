@@ -424,3 +424,101 @@ def test_many_callers_never_make_two_probes_at_once_and_a_served_source_stays_se
     assert box["most"] == 1                                 # never more than one probe at a time
     assert served_seen and not lost and srcs.get("shop").served
     assert box["calls"] == 3                                # down, down, ok: a served source is never asked again
+
+
+# ── round 8: what a member is told, what a refusal covers, the wire ────────────
+
+LEAK = "Bearer SECRETBEARERVALUE123456 echoed by the service"
+
+
+def test_a_members_page_never_holds_the_upstream_error_text_but_the_status(tmp_path, request):
+    def answer(verb, body, h):
+        if verb == "info":
+            return 200, {"interface": rda.INTERFACE_VERSION, "name": "x", "publish": False}
+        return 503, {"error": {"code": "unavailable", "message": LEAK}}
+    stand = Stand(answer)
+    request.addfinalizer(stand.stop)
+    site = hub_with(tmp_path, request, [source_text("shop", stand.url, secret(tmp_path))])
+    page = get(site, "/shop/")
+    assert page.status == 503 and b"SECRETBEARERVALUE" not in page.body and b"echoed" not in page.body
+    assert b"HTTP 503" in page.body
+
+
+def test_the_log_text_of_an_upstream_error_has_the_bearer_and_authorization_taken_out():
+    from sheafmd import remote
+    out = remote.redact("echo: Authorization: Bearer abcdefghijklmnop1234 and abcdefghijklmnop1234 again", "abcdefghijklmnop1234")
+    assert "abcdefghijklmnop1234" not in out and "echo:" in out
+
+
+def test_a_source_page_is_never_rendered_as_a_share_copy(tmp_path, request, service, monkeypatch):
+    from sheafmd.hub import handler
+    seen = []
+    real = handler.render_file
+    monkeypatch.setattr(handler, "render_file", lambda *a, **k: (seen.append(k), real(*a, **k))[1])
+    site = hub_with(tmp_path, request, [source_text("shop", service.url, secret(tmp_path, text=service.bearer + "\n", name="hubbearer"))])
+    assert get(site, "/shop/home.md").status == 200
+    assert seen and seen[0]["share"] is False
+
+
+def test_a_secrets_path_of_an_account_that_does_not_exist_refuses_that_source_only(tmp_path):
+    f = secret(tmp_path)
+    write_config(source_text("bad", "unix:///run/a.sock", "~no-such-account-zz/bearer") + "\n"
+                 + source_text("good", "unix:///run/b.sock", f))
+    declared, problems = config.load_sources()
+    assert [d.name for d in declared] == ["good"] and "bad" in problems
+
+
+def test_a_secrets_file_that_is_a_fifo_is_refused_at_once(tmp_path):
+    fifo = tmp_path / "fifo"
+    os.mkfifo(fifo, 0o600)
+    with pytest.raises(config.ConfigError) as e:
+        config.read_bearer(decl(fifo))
+    assert "regular" in str(e.value)
+
+
+def test_a_service_that_trickles_its_headers_is_cut_at_the_one_deadline(request):
+    import socket as sk
+    import threading
+    import time
+    from sheafmd import remote
+    run = __import__("source_fakes").short_dir()
+    path = str(run / "t.sock")
+    srv = sk.socket(sk.AF_UNIX)
+    srv.bind(path)
+    srv.listen(1)
+    stop = threading.Event()
+
+    def trickle():
+        c, _ = srv.accept()
+        c.recv(65536)
+        c.sendall(b"HTTP/1.1 200 OK\r\n")
+        while not stop.is_set():
+            try:
+                c.sendall(b"X-A: b\r\n")
+            except OSError:
+                return
+            time.sleep(0.1)
+    t = threading.Thread(target=trickle, daemon=True)
+    t.start()
+    request.addfinalizer(lambda: (stop.set(), srv.close()))
+    src = remote.RemoteSource("shop", f"unix://{path}", "b" * 20, timeout=1.0)
+    started = time.monotonic()
+    with pytest.raises(remote.Unreachable):
+        src.ask("info", {})
+    assert time.monotonic() - started < 3
+
+
+def test_an_empty_cursor_is_sent_and_a_version_that_is_not_an_int_is_a_mismatch(request):
+    from sheafmd import remote
+    pages = {None: {"documents": [{"name": "a.md"}], "next": ""}, "": {"documents": [{"name": "b.md"}], "next": None}}
+
+    def answer(verb, body, h):
+        if verb == "documents":
+            return 200, pages[body.get("cursor")]
+        return 200, {"interface": 1.0, "name": "x", "publish": False}
+    stand = Stand(answer)
+    request.addfinalizer(stand.stop)
+    src = remote.RemoteSource("shop", stand.url, "b" * 20)
+    assert list(src.documents()) == ["a.md", "b.md"]
+    with pytest.raises(remote.VersionMismatch):
+        src.info()

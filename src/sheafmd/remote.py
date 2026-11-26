@@ -21,6 +21,7 @@ import http.client
 import json
 import re
 import socket
+import threading
 import ssl
 import time
 from collections.abc import Iterator
@@ -42,14 +43,14 @@ class SourceError(Exception):
     """An answer of the service that is an error, or a service the hub cannot use. `code` is one of `CODES`, or
     `unreachable` for a service that did not answer and `protocol` for one that answered what is not the protocol."""
 
-    def __init__(self, code: str, message: str):
+    def __init__(self, code: str, message: str, status: int | None = None):
         super().__init__(message)
-        self.code, self.message = code, message
+        self.code, self.message, self.status = code, message, status      # `status`: the HTTP status of the answer, when there was one
 
 
 class Unreachable(SourceError):
-    def __init__(self, message: str):
-        super().__init__("unreachable", message)
+    def __init__(self, message: str, status: int | None = None):
+        super().__init__("unreachable", message, status)
 
 
 class VersionMismatch(SourceError):
@@ -137,10 +138,14 @@ class RemoteSource:
         raw = json.dumps(body or {}).encode("utf-8")
         base = self._parts.path.rstrip("/") if self._parts.scheme != "unix" else ""
         conn = self._connection()
+        expired, late = threading.Event(), None
         try:
             try:
                 conn.connect()
                 sock = conn.sock                  # `getresponse` lets go of `conn.sock` on a `Connection: close` answer
+                late = threading.Timer(max(0.05, deadline - time.monotonic()), _cut, (sock, expired))   # the one deadline of the whole call
+                late.daemon = True
+                late.start()
                 sock.settimeout(max(0.05, deadline - time.monotonic()))
                 conn.request("POST", f"{base}/{verb}", raw, {"Authorization": f"Bearer {self._bearer}",
                                                               "Content-Type": "application/json",
@@ -158,11 +163,17 @@ class RemoteSource:
                     size += len(piece)
                     if size > BODY_MAX or time.monotonic() > deadline:
                         raise Unreachable(f"source {self.name!r} answered too much or too slowly")
+                if expired.is_set():              # the deadline shut the socket: what was read is not the whole answer
+                    raise Unreachable(f"source {self.name!r} answered too much or too slowly")
             except Unreachable:
                 raise
-            except (OSError, http.client.HTTPException) as e:        # TimeoutError, ConnectionError, ssl.SSLError, a torn answer
+            except (OSError, http.client.HTTPException) as e:
+                if expired.is_set():
+                    raise Unreachable(f"source {self.name!r} answered too much or too slowly") from None        # TimeoutError, ConnectionError, ssl.SSLError, a torn answer
                 raise Unreachable(f"source {self.name!r} cannot be reached ({type(e).__name__})") from None
         finally:
+            if late is not None:
+                late.cancel()
             conn.close()
         try:
             data = json.loads(b"".join(chunks).decode("utf-8"))
@@ -181,25 +192,25 @@ class RemoteSource:
         err = data.get("error")
         if err is None:
             if status >= 500:
-                raise Unreachable(f"source {self.name!r} answered HTTP {status}")
+                raise Unreachable(f"source {self.name!r} answered HTTP {status}", status)
             if status >= 400:
-                raise SourceError("protocol", f"source {self.name!r} answered HTTP {status} with no error")
+                raise SourceError("protocol", f"source {self.name!r} answered HTTP {status} with no error", status)
             return data
         code = err.get("code") if isinstance(err, dict) else None
         message = err.get("message") if isinstance(err, dict) else None
         code = code if code in CODES else "protocol"
         message = message if isinstance(message, str) and message else code
         if code == "unavailable" or status >= 500:
-            raise Unreachable(f"source {self.name!r} is unavailable: {message}")
-        raise SourceError(code, f"source {self.name!r}: {message}")
+            raise Unreachable(f"source {self.name!r} is unavailable: {message}", status)
+        raise SourceError(code, f"source {self.name!r}: {message}", status)
 
     # ── the protocol ────────────────────────────────────────────────────────
     def info(self) -> dict:
         """The service's `info`, with its interface version checked: `VersionMismatch` names both versions."""
         got = self.ask("info", {"interface": rda.INTERFACE_VERSION})
         theirs = got.get("interface")
-        if isinstance(theirs, bool) or theirs != rda.INTERFACE_VERSION:
-            raise VersionMismatch(self.name, theirs if isinstance(theirs, int) and not isinstance(theirs, bool) else "unknown",
+        if type(theirs) is not int or theirs != rda.INTERFACE_VERSION:       # JSON 1.0 and true equal 1: the type is the rule
+            raise VersionMismatch(self.name, theirs if type(theirs) is int else "unknown",
                                   rda.INTERFACE_VERSION)
         name = got.get("name")
         self.display = name if isinstance(name, str) else ""
@@ -210,7 +221,7 @@ class RemoteSource:
         """The names of every document the service lists, page after page."""
         cursor, seen = None, set()
         while True:
-            got = self.ask("documents", {"cursor": cursor} if cursor else {})
+            got = self.ask("documents", {} if cursor is None else {"cursor": cursor})
             rows = got.get("documents")
             if not isinstance(rows, list) or len(rows) > PAGE_MAX:
                 raise SourceError("protocol", f"source {self.name!r} listed documents in a shape or a page size it must not")
@@ -228,6 +239,23 @@ class RemoteSource:
 
     def adapter(self, document: str) -> "RemoteAdapter":
         return RemoteAdapter(self, document)
+
+
+def _cut(sock, expired) -> None:
+    """The deadline of a call has passed: its socket is shut, so a read that was waiting on a slow service fails at once."""
+    expired.set()
+    try:
+        sock.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass
+
+
+def redact(text: str, bearer: str = "") -> str:
+    """`text` with the bearer, and any `Bearer ...` or `Authorization: ...` it holds, taken out: for the hub's log, never for a member."""
+    if bearer:
+        text = text.replace(bearer, "[bearer]")
+    text = re.sub(r"(?i)bearer\s+\S+", "Bearer [redacted]", text)
+    return re.sub(r"(?i)(authorization\s*[:=]\s*)\S+(\s+\S+)?", r"\1[redacted]", text)
 
 
 class RemoteAdapter:

@@ -4,6 +4,7 @@ adapter and against the remote adapter talking to the reference Source service, 
 The tests under "the contract" take the `kind` fixture and know nothing of which adapter they have. What only a service can do
 (its authors, its bearer, its pages, its errors) is below them."""
 import json
+import os
 import subprocess
 
 import pytest
@@ -492,3 +493,40 @@ def test_via_is_one_line_and_absent_when_no_token_wrote():
     assert remote.with_via("Edit", "") == "Edit"
     assert remote.with_via("", "tok") == "via tok"
     assert remote.with_via("Edit\n", "a\nb  c") == "Edit via a b c"
+
+
+# ── the reference service's git commits ───────────────────────────────────────
+
+def _git_service(tmp_path):
+    import subprocess
+    from sheafmd import sourceservice
+    folder = tmp_path / "repo"
+    folder.mkdir()
+    env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.org", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.org"}
+
+    def git(*a):
+        return subprocess.run(["git", "-C", str(folder), *a], capture_output=True, text=True, check=True, env={**os.environ, **env}).stdout
+    git("init", "-q")
+    (folder / "*.md").write_text("star\n")
+    (folder / "b.md").write_text("bee\n")
+    git("add", "."), git("commit", "-q", "-m", "start")
+    return sourceservice.Service(folder, "b" * 20, {"Ada": ("Ada Writer", "ada@example.org")}), folder, git
+
+
+def test_a_document_named_like_a_glob_commits_that_file_only(tmp_path):
+    svc, folder, git = _git_service(tmp_path)
+    (folder / "b.md").write_text("bee, edited by someone else\n")
+    base = svc.read("*.md")["base"]
+    out = svc.write({"document": "*.md", "author": "Ada", "note": "n", "base": base, "tree": {"text": "star two\n"}})
+    assert out["outcome"] == "written"
+    assert git("show", "--name-only", "--format=", "HEAD").split() == ["*.md"]
+    assert "b.md" in git("status", "--porcelain")                   # the other file is still the other person's change
+
+
+def test_a_write_that_changes_nothing_commits_nothing(tmp_path):
+    svc, folder, git = _git_service(tmp_path)
+    (folder / "b.md").write_text("bee, uncommitted\n")
+    before = git("rev-list", "--count", "HEAD")
+    base = svc.read("b.md")["base"]
+    out = svc.write({"document": "b.md", "author": "Ada", "note": "n", "base": base, "tree": {"text": "bee, uncommitted\n"}})
+    assert out["outcome"] == "written" and git("rev-list", "--count", "HEAD") == before

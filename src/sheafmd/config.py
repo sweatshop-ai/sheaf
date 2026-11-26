@@ -227,7 +227,11 @@ def load_sources(warn=None) -> tuple[list[SourceDecl], dict[str, str]]:
         except BadUrl as e:
             problems[name] = f"[sources.{name}] in {path}: 'url' {e}"
             continue
-        secrets_file = Path(table["secrets"]).expanduser()
+        try:
+            secrets_file = Path(table["secrets"]).expanduser()
+        except RuntimeError:             # `~name` of an account this machine does not have
+            problems[name] = f"[sources.{name}] in {path}: 'secrets' starts with ~ and an account this machine does not have"
+            continue
         if not secrets_file.is_absolute():
             problems[name] = f"[sources.{name}] in {path}: 'secrets' must be an absolute path"
             continue
@@ -241,7 +245,7 @@ def read_bearer(decl: SourceDecl) -> str:
     its message names the file and never holds what the file holds."""
     path = decl.secrets
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)   # a FIFO opens at once and is refused below
     except OSError as e:
         raise ConfigError(f"source {decl.name!r}: the secrets file {path} cannot be opened ({e.strerror or e})") from None
     try:

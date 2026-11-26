@@ -1026,14 +1026,16 @@ class Handler:
         except remote.SourceError as e:
             if e.code in ("not_found", "bad_request"):
                 raise Refuse(404, "no such page") from None
-            res = _html(503, _sign_in_page(f"The source {escape(at.root)} is not reachable", escape(e.message)))
-            res.error = "source unreachable"
+            said = f" (HTTP {e.status})" if e.status else ""
+            res = _html(503, _sign_in_page(f"The source {escape(at.root)} is not reachable",
+                                           f"The source did not answer as the hub needs{said}. Ask the owner of this hub."))   # its own words stay in the log
+            res.error = "source unreachable: " + remote.redact(e.message, getattr(client, "_bearer", ""))
             return res
         top = paths.state_dir() / "sources" / at.root
         top.mkdir(parents=True, exist_ok=True)
         page = render_file(top / at.rel, theme=source.theme, src=tree.text, root=top, script_nonce=nonce,
                            image_ok=lambda _p: False,      # a source has no folder: no local image is embedded
-                            mount=req.mount)
+                            share=False, mount=req.mount)
         return _html(200, page, nonce)
 
     def _asleep(self, req: Req, address: str) -> Response | None:

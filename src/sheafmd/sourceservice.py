@@ -30,6 +30,7 @@ import socketserver
 import stat
 import subprocess
 import sys
+import threading
 import tomllib
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -96,6 +97,7 @@ class Service:
         self._bearer = bearer.encode("utf-8")
         self.authors = authors
         self.git = self._inside_git()
+        self._writing = threading.Lock()      # one write at a time, from the file's check to the end of its commit
 
     def authorised(self, header: str | None) -> bool:
         if not header or not header.startswith("Bearer "):
@@ -158,18 +160,19 @@ class Service:
             raise Fault("bad_request", "write needs tree.text, base and a note, all text")
         if not text.strip():
             return rda.refused("a document is not written empty")      # the one rule of this service: a source's own are its owner's
-        try:
-            out = self.adapter(rel).write(rda.Tree(text), base, author=author, note=note)
-        except (OSError, UnicodeDecodeError):
-            raise Fault("not_found", f"no document {rel}") from None
-        if out["outcome"] == "written":
-            self.commit(rel, who, note)
+        with self._writing:       # the file and the commit are one step: a second write cannot come between them
+            try:
+                out = self.adapter(rel).write(rda.Tree(text), base, author=author, note=note)
+            except (OSError, UnicodeDecodeError):
+                raise Fault("not_found", f"no document {rel}") from None
+            if out["outcome"] == "written" and out["base"] != base:      # the text the member was shown is the text now: nothing to commit
+                self.commit(rel, who, note)
         return out
 
     # ── git ─────────────────────────────────────────────────────────────────
     def _git(self, *args, env=None):
         return subprocess.run(["git", "-C", str(self.top), *args], capture_output=True, text=True, timeout=30,
-                              env={**os.environ, **(env or {})})
+                              env={**os.environ, **(env or {}), "GIT_LITERAL_PATHSPECS": "1"})   # a name is a file, never a glob or a magic pathspec
 
     def _inside_git(self) -> bool:
         try:

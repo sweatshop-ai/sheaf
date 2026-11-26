@@ -184,6 +184,24 @@ class _Claims:
     by_hash: dict = field(default_factory=dict)     # hash -> {writer, ...}; None is a writer that is no document
 
 
+_PIN_KEY = "pin-key"             # in the state folder: the key of the marks of this hub's pin times (`Versions._mark`)
+_pin_keys: dict = {}             # the key file -> its key, read once
+
+
+def _pin_key() -> bytes:
+    """The key this hub marks its pin times with, made once and kept in its state folder, never in a root."""
+    path = paths.state_dir() / _PIN_KEY
+    if (key := _pin_keys.get(path)) is not None:
+        return key
+    with file_locked(f"{_PIN_KEY}.lock"):
+        text = (read_small(path, 128) or "").strip()
+        if not re.fullmatch(r"[0-9a-f]{64}", text):
+            text = secrets.token_hex(32)
+            write_text_private(path, text)
+    _pin_keys[path] = key = text.encode()
+    return key
+
+
 def is_pin_time(rel: str) -> bool:
     """Whether `rel`, a path relative to a root as git names it, is a pin time of the root's own store: `<hash>.at` in a
     document folder's `pins/` or a member's folder in it (7.4). No other file is one, whatever its name ends in (ticket 203)."""
@@ -204,6 +222,7 @@ class Versions:
         documents, inside it at `.sheaf/versions/` (7.4, `versions = "root"`), keyed by the path in the
         root, not the address: another hub, a clone's, names the root otherwise. `name` is the root's."""
         self._root, self._prefix = root, f"{name}/"
+        self._marked: str | None = None
 
     # Between a document's `watch` (its root was forgotten, and the name may be another folder's at once) and its
     # `forget_texts`, who put each hash in that document's folder, by the folder's path: one file holds a text whatever
@@ -255,7 +274,7 @@ class Versions:
         timed = pinned and self._root is not None
         if timed:                                   # first: a pin with no time is never believed
             self._times_out_of_git(folder)
-            write_text_private(folder / f"{h}{_PINNED_AT}", str(int(time.time() * 1e9)), True)
+            write_text_private(folder / f"{h}{_PINNED_AT}", f"{int(time.time() * 1e9)} {self._mark()}", True)
         f = folder / f"{h}.md"
         if f.is_file():
             os.utime(f, follow_symlinks=False)
@@ -296,15 +315,28 @@ class Versions:
         store (`_pinned_at`)."""
         return self._pinned_at(pin) if self._root is not None else pin.stat().st_mtime_ns
 
-    @staticmethod
-    def _pinned_at(pin: Path) -> int:
+    def _mark(self) -> str:
+        """What a pin time of this hub in this store carries after its number (ticket 213 B): a keyed hash, by a key of this
+        hub's state folder, of the store's real path. A time another clone wrote (committed by an older hub, then pulled, or
+        a folder copied from another root) carries another mark, or none, and is not this hub's."""
+        if self._marked is None:
+            self._marked = hmac.new(_pin_key(), os.path.realpath(self.dir).encode("utf-8", "surrogateescape"),
+                                    hashlib.sha256).hexdigest()[:32]
+        return self._marked
+
+    def _pinned_at(self, pin: Path) -> int:
         """When the pin `pin` of a root's own store was last pinned, in ns: the file beside it says, since the store goes to git
         (8.11) and a clone or checkout writes every file with its own time (ticket 192). That file is this hub's alone: the
-        store's `.gitignore` keeps it out of git, so two clones pinning one version never conflict, and a pin another clone
-        made is not believed here. None there, or no number: 0, a pin never believed; nor a time more than a minute to come."""
+        store's `.gitignore` keeps it out of git, so two clones pinning one version never conflict, and one that came from
+        another clone all the same (an older hub committed it, a pull wrote it) bears another mark and is not believed or
+        counted here (ticket 213 B). None there, no number, not this hub's mark: 0, a pin never believed; nor a time more than
+        a minute to come."""
+        at, _, mark = (read_small(pin.with_suffix(_PINNED_AT), 96) or "").strip().partition(" ")  # never a link or a FIFO (7.4)
         try:
-            at = int((read_small(pin.with_suffix(_PINNED_AT), 32) or "").strip())   # never a link or a FIFO (7.4)
+            at = int(at)
         except ValueError:
+            return 0
+        if not hmac.compare_digest(mark, self._mark()):
             return 0
         return at if at <= (time.time() + _PIN_CLOCK_AHEAD) * 1e9 else 0          # a time to come is no age either
 

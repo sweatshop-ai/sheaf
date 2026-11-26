@@ -8,7 +8,8 @@ acquisition against this list, in the move, Tell, save, door create, queue_agent
               a render or the hub's lock
     name      `place.held`: a rectoverso's name (`place._name_lock`); two names only under the moves' lock (`moves.exclusive()`, the one place two are held; their order is then free), or a link's name before its target's
     hub       `Hub._lock`; never held over a first render (200): a second open of an entry being made waits for it
-              (`Hub._making`) with nothing after the name's lock held, and the maker takes the hub's lock only to insert it
+              (`Hub._making`) with nothing after the name's lock held, and the maker takes the hub's lock only to insert it;
+              a mark's own `_Making.lock` is a leaf, held for its flags and a `detach` (213 E)
     doc       `LiveDocument._lock`
     file      `source.file_lock`: the flock of one .md (`update_file`, `update_beneath`, a move's link)
     folders   `place.folders_lock`: a project's private folders; after a file's lock (`place` takes the file's, then this)

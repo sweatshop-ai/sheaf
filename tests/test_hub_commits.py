@@ -2584,3 +2584,50 @@ def test_the_cleanup_of_pin_times_removes_no_file_of_the_store(tmp_path, via):
     assert at.is_file()
     assert not [p for p in git(repo, "ls-files").split() if p.endswith(state.PINNED_AT)]
     assert not [p for p in git(repo, "ls-tree", "-r", "--name-only", "HEAD").split() if p.endswith(state.PINNED_AT)]
+
+
+@pytest.mark.parametrize("via", ["write", "sweep"])
+def test_pin_times_leave_git_however_many_there_are(tmp_path, monkeypatch, via):
+    """Ticket 213 A (Codex round 16 on #687): every pin time git held went on one `update-index` and one `ls-tree` command
+    line. A large store passed the system's limit on a command line, the cleanup failed, and with it every commit of the
+    store. No path list of the cleanup rides on a command line: here a limit of 8 KiB stands for the system's."""
+    import errno
+    from sheafmd.hub import commits, state
+    from sheafmd.hub.roots import Root
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    (repo / ".sheaf.toml").write_text('commit = true\nversions = "root"\n', encoding="utf-8")
+    (repo / "plan.md").write_text("# plan\n", encoding="utf-8")
+    v = state.Versions(repo, "r")
+    pins = next(repo.rglob(f"pins/{v.pin('r/plan.md', '# plan' + chr(10))}.md")).parent
+    (repo / state.INSIDE / ".gitignore").unlink()                         # a fresh clone: git never carried it
+    times = []
+    for n in range(400):                                     # about 22 KiB of paths; no store `.gitignore`: a fresh clone
+        times.append(pins / f"{n:016x}{state.PINNED_AT}")
+        times[-1].write_text(f"{n}\n", encoding="utf-8")
+    git(repo, "add", "-A", "-f")                                         # what the old bug let in
+    git(repo, "-c", "user.name=a", "-c", "user.email=a@example.com", "commit", "-q", "-m", "first")
+    real = subprocess.run
+
+    def limited(argv, *a, **k):
+        if sum(len(str(x)) + 1 for x in argv) > 8192:
+            raise OSError(errno.E2BIG, "Argument list too long")
+        return real(argv, *a, **k)
+
+    made = []
+    hub = commits.Commits(lambda kind, doc, **detail: made.append((kind, doc, detail)), roots=lambda: [])
+    root = Root("r", repo, True)
+    monkeypatch.setattr(subprocess, "run", limited)
+    if via == "write":
+        (repo / "plan.md").write_text("# plan, edited\n", encoding="utf-8")
+        hub.saved(root, "plan.md", commits.Author("Bea", "bea@example.com"), "edit")
+    else:
+        hub._sweep(root, commits._repo(repo))
+    monkeypatch.setattr(subprocess, "run", real)
+    assert not [r for r in made if "failed" in r[0]], made
+    assert not [p for p in git(repo, "ls-files").split() if p.endswith(state.PINNED_AT)]
+    assert not [p for p in git(repo, "ls-tree", "-r", "--name-only", "HEAD").split() if p.endswith(state.PINNED_AT)]
+    assert all(t.is_file() for t in times)
+    if via == "write":
+        assert "plan.md" in git(repo, "show", "--name-only", "--format=", "HEAD")

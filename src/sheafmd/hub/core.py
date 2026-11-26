@@ -81,13 +81,18 @@ class _Making:
     under the hub's lock meanwhile: `dropped` by a delete or move of its address (`Hub._drop_making`), and the maker makes
     it again from the file the address names then; `detached` by a move of its address or a forget of its root
     (`_let_go_root`), as the entries the hub holds are detached: the maker that gives it up forgets it, which takes out
-    only the texts it stored itself."""
+    only the texts it stored itself. `root`: the root it is made for; an open through another root of that name never
+    waits for it (213 D). `lock`, a leaf taken with nothing after it but `detach`: a detach without the hub's lock
+    (`moved_remote`) and the maker's choice to forget, once `settled`, never cross (213 E)."""
 
-    def __init__(self, entry: "Entry"):
+    def __init__(self, entry: "Entry", root=None):
         self.entry = entry
+        self.root = root
         self.done = threading.Event()
         self.dropped = False
         self.detached = False
+        self.settled = False
+        self.lock = threading.Lock()
 
 
 @dataclass
@@ -106,7 +111,7 @@ class Entry:
     log: list = field(default_factory=list)        # the render log of the last build
     warnings: list = field(default_factory=list)   # link-rule warnings not yet handed to a command
     first: bool = True                             # no build has run yet
-    rebuild_due: bool = False                      # a render's rebuild for new settings failed: the next render rebuilds (199)
+    settings_built: int = 0      # the settings change (`Hub._settings_seq`) its last build read: older, a render rebuilds (199, 213 C)
     images_scope: tuple | None = None              # the image rule its last build read: `Hub._image_scope` (9.9)
 
     where: Callable[[], tuple] | None = None     # (the root's folder, the path in it) of its file now: what is opened beneath
@@ -200,6 +205,10 @@ class Hub:
         # The entries being made (200): address -> `_Making`, under the hub's lock. A first render runs outside that lock, and
         # a second open of the same address waits for the first one's instead of rendering again.
         self._making: dict[str, _Making] = {}
+        # Each change of a document's render settings, numbered (213 C): address -> the number of its last change, under the
+        # hub's lock. A render answers only once the page was built from its own settings or newer ones (`Entry.settings_built`).
+        self._settings_seq: dict[str, int] = {}
+        self._settings_tick = 0
         self.index_bus = Bus()                   # the index streams (SPEC 8.8)
         self._index_opening = threading.Lock()   # one index stream opens at a time
         self._lock = threading.RLock()
@@ -613,10 +622,13 @@ class Hub:
             if self.roots.get(name) != root:
                 raise roots_mod.NotFound(address)
             other = self._making.get(address)
+            if other is not None and other.root != root:
+                other = None                    # the mark of a root forgotten since: its maker finds it gone (213 D)
             if other is None:
                 # Made before it is marked: a new entry that raises (a private root not seen) leaves no mark to wait on.
                 e = self._new_entry(address, name, root, path)
-                mine = self._making[address] = _Making(e)
+                e.settings_built = self._settings_seq.get(address, 0)      # its first render reads the settings recorded by now
+                mine = self._making[address] = _Making(e, root)
         if other is not None:                 # another thread makes it: its entry, once rendered, or a new try
             other.done.wait()
             return self._entry(address)
@@ -632,6 +644,8 @@ class Hub:
             with self._lock:
                 if self._making.get(address) is mine:
                     del self._making[address]
+            with mine.lock:                  # after it, a detach of `moved_remote` finds it settled and leaves it (213 E)
+                mine.settled = True
                 forget = not kept and mine.detached
             if forget:                       # what its first render stored goes, as for an entry the hub dropped
                 try:
@@ -651,11 +665,14 @@ class Hub:
         store, and its forget takes out only the texts it put there itself, never a version the page brings back to the
         address before that render ends."""
         m = self._making.get(address)
+        if address not in self.entries:     # no page held there any more: its next one is built from the settings it reads
+            self._settings_seq.pop(address, None)
         if m is not None:
             m.dropped = True
-            if forget and not m.detached:
-                m.entry.live.detach()
-                m.detached = True
+            with m.lock:                     # a detach of `moved_remote` may run at once, without the hub's lock
+                if forget and not m.detached:
+                    m.entry.live.detach()
+                    m.detached = True
 
     def _new_entry(self, address: str, name: str, root, path: Path) -> Entry:
         """A new entry for `address`, not rendered yet: under the hub's lock, with no pandoc run."""
@@ -1124,9 +1141,13 @@ class Hub:
                     # A render of the page (pandoc, up to 120 s) waits for the document's lock, and every request that needs
                     # the hub would wait with it were the hub's lock still held. The settings are recorded already: one that
                     # fails leaves the next render to rebuild, or a later `sheaf open` with them would serve the old page (199).
-                    e.rebuild_due = True
+                    # A rebuild reads the settings when it has the document's lock, so it builds from those recorded by
+                    # now or newer ones: once it is done, `built` says so (213 C).
+                    with self._lock:
+                        asked = self._settings_seq.get(address, 0)
                     e.live.rebuild()
-                    e.rebuild_due = False
+                    with self._lock:
+                        e.settings_built = max(e.settings_built, asked)
             except FileNotFoundError:          # deleted after the look above
                 raise gone from None
             with self._lock:
@@ -1168,10 +1189,15 @@ class Hub:
             return new
         with self._lock:
             old, new = self.docs.change(address, settle)
+            if any(old.get(k) != new[k] for k in SETTING_KEYS) or old.get("target") != new.get("target"):
+                self._settings_tick += 1
+                self._settings_seq[address] = self._settings_tick
             existed = address in self.entries or address in self._making
         e = self.entry(address)
-        rebuild = existed and (e.rebuild_due or any(old.get(k) != new[k] for k in SETTING_KEYS)
-                               or old.get("target") != new.get("target"))
+        # Rebuilt unless the page was built from these settings or newer ones: settings another render recorded just before
+        # (the same as these: old == new) may not be built yet, nor ones whose rebuild failed (213 C, 199).
+        with self._lock:
+            rebuild = existed and e.settings_built < self._settings_seq.get(address, 0)
         return e, rebuild, existed
 
     @contextmanager
@@ -1273,6 +1299,8 @@ class Hub:
             except Exception:
                 self.record_exception("tell-end-failed")
             popped = [(a, self.entries.pop(a)) for a in held]      # all of them: no entry is made while the hub's lock is held
+            for a in [a for a in self._settings_seq if a.startswith(prefix)]:
+                del self._settings_seq[a]
             # A Tell still running on a document that is gone: its dot, its
             # answer and its wait have nowhere to go, and the name may be taken at once. Also
             # when the registry no longer holds the root (another process forgot it, and this hub
@@ -1372,7 +1400,10 @@ class Hub:
         # none and does it once, and `finish` marks the entry dropped under the hub's lock (200).
         making = self._making.get(old)
         if making is not None:
-            making.entry.live.detach()
+            with making.lock:                # marked, so a maker whose first render fails forgets it (213 E)
+                if not making.settled:
+                    making.entry.live.detach()
+                    making.detached = True
         for step in steps:
             try:
                 step()

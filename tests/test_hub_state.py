@@ -4,6 +4,7 @@ import json
 import os
 import stat
 import subprocess
+import shutil
 import sys
 import time
 
@@ -641,3 +642,35 @@ def test_a_pin_two_clones_share_keeps_its_text_when_this_clones_trim_drops_it(tm
 def test_only_a_hash_named_time_in_a_pins_folder_is_a_pin_time(rel, clock):
     """Ticket 203, Codex round 13 on #687: the cleanup of pin times treated any tracked `*.at` as one."""
     assert state.is_pin_time(rel) is clock
+
+
+def test_pin_times_another_clone_wrote_are_never_believed_or_counted_here(tmp_path):
+    """Ticket 213 B (Codex round 16 on #687): an older hub committed its pin times; a pull wrote them into this clone, and
+    the cleanup takes them out of git but leaves the files. Read as this hub's, they counted in its trim, which took away
+    this hub's own times (a 409 on the page that pinned), and they made another clone's pins believed here."""
+    mine, theirs = tmp_path / "mine", tmp_path / "theirs"
+    mine.mkdir(), theirs.mkdir()
+    here, there = state.Versions(mine, "r"), state.Versions(theirs, "r")
+    for n in range(state.PINS_KEPT):
+        here.pin("r/plan.md", f"mine {n}\n")
+        there.pin("r/plan.md", f"theirs {n}\n")
+    pins_here, pins_there = next(here.dir.rglob("pins")), next(there.dir.rglob("pins"))
+    for f in pins_there.iterdir():                          # what a pull of the other clone's committed files writes
+        shutil.copyfile(f, pins_here / f.name)
+    here.pin("r/plan.md", "mine 0\n")                       # this hub pins again: its trim runs
+    assert all(here.get("r/plan.md", md_hash(f"mine {n}\n")) for n in range(state.PINS_KEPT))
+    assert not any(here.get("r/plan.md", md_hash(f"theirs {n}\n")) for n in range(state.PINS_KEPT))
+    assert all((pins_here / f"{md_hash(t)}.md").is_file() for t in (f"theirs {n}\n" for n in range(state.PINS_KEPT)))
+
+
+def test_a_pin_time_is_this_stores_alone_even_on_the_same_hub(tmp_path):
+    """Ticket 213 B: a folder copied from another root of the same hub brings that root's times; they are not this root's."""
+    (tmp_path / "a").mkdir(), (tmp_path / "b").mkdir()
+    a, b = state.Versions(tmp_path / "a", "r"), state.Versions(tmp_path / "b", "r")
+    h = a.pin("r/plan.md", "kept\n")
+    b.pin("r/plan.md", "other\n")
+    pins_a, pins_b = next(a.dir.rglob("pins")), next(b.dir.rglob("pins"))
+    for suffix in (".md", state.PINNED_AT):
+        shutil.copyfile(pins_a / f"{h}{suffix}", pins_b / f"{h}{suffix}")
+    assert a.get("r/plan.md", h) == "kept\n"
+    assert b.get("r/plan.md", h) is None

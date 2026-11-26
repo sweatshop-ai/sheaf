@@ -429,6 +429,7 @@ class LiveDocument:
                 start = new_text if raced else before
                 self._announce(self._snapshot(self._text), start, **({"rid": rid} if rid is not None else {}))
                 self._service.record(old, new_text, session)
+            self._service.hold(session, markdown)
             answer = {"hash": rds.md_hash(new_text), "changed": got["changed"], "conflict": False}
             if rid is not None:
                 self._take(self._save_rids, rid, sent, answer)

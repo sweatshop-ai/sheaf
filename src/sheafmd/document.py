@@ -107,18 +107,17 @@ class DocumentService:
             outcome["blocks"] = self._ids(new)
         return outcome
 
-    def settle(self, current: str, markdown: str, held_ids, base: str, session: str, base_text: str | None = None,
-               info: dict | None = None) -> str:
-        out = self._settle(current, markdown, held_ids, base, session, base_text, info)
-        if session:
-            with self._lock:
-                self._sent[session] = markdown
-                self._sent.move_to_end(session)
-                while len(self._sent) > TEXTS:
-                    self._sent.popitem(last=False)
-        return out
+    def hold(self, session: str, markdown: str) -> None:
+        """Note that the page of `session` now holds `markdown`: its save was written (or changed nothing), so a later save merges from it."""
+        if not session:
+            return
+        with self._lock:
+            self._sent[session] = markdown
+            self._sent.move_to_end(session)
+            while len(self._sent) > TEXTS:
+                self._sent.popitem(last=False)
 
-    def _settle(self, current: str, markdown: str, held_ids, base: str, session: str, base_text: str | None = None,
+    def settle(self, current: str, markdown: str, held_ids, base: str, session: str, base_text: str | None = None,
                 info: dict | None = None) -> str:
         """The text to write for a page's `markdown` over the `current` text of the file. Raises `Conflict`
         for a base that is stale by anyone else's writing and either unknown to the service or unreadable, or whose

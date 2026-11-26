@@ -196,39 +196,51 @@ def _source_break_runs(source) -> list:
     return runs
 
 
+def _line_kept(line: str, was: str) -> float:
+    """How much of a line beside a run of the source is still there: 1 when it is the same, else the share of its
+    words and the edited line's words that both have (0 when they have none)."""
+    if line == was:
+        return 1.0
+    words, had = set(line.lower().split()), set(was.lower().split())
+    return len(words & had) / len(words | had) if words and had else 0.0
+
+
 def _source_runs_kept(soup, source) -> set:
-    """The ids of the <br> in `soup` that make up a run of the source's own (`_source_break_runs`). The runs of the
-    edit and those of the source are paired in order, as many as can be, each pair of the same length; among the
-    pairings with the most pairs, the one whose runs keep the most lines beside them (`_run_key`). A run of the
-    source stays the source's when both lines beside it were edited, and a new run with one of its lines takes no
-    pair from the run that kept both."""
-    edits = []
+    """The ids of the <br> in `soup` that make up a run of the source's own (`_source_break_runs`). The page's runs
+    and the source's are paired in order, each pair of the same length and with some words of a line beside it still
+    there (`_line_kept`); the pairing keeps the most of those lines. A run of the source stays the source's when both
+    lines beside it were edited, a new run takes no pair from a run that kept more of its lines, before it or after
+    it, and a new run with none of the source's words beside it is no run of the source's."""
+    page_runs = []
     for p in soup.find_all("p"):
         if _page_own(p):
             continue
         kids = list(p.children)
-        edits += [(_run_key(kids, a, b), [id(c) for c in kids[a:b + 1] if getattr(c, "name", None) == "br"])
-                  for a, b in _break_runs(kids, lambda c: True)]
+        page_runs += [(_run_key(kids, a, b), [id(c) for c in kids[a:b + 1] if getattr(c, "name", None) == "br"])
+                      for a, b in _break_runs(kids, lambda c: True)]
     had = _source_break_runs(source)
-    if not edits or not had:
+    if not page_runs or not had:
         return set()
-    # best[i][j]: (pairs, lines kept) of the best pairing of edits[i:] with had[j:], and the step it takes there
-    best = [[(0, 0, None)] * (len(had) + 1) for _ in range(len(edits) + 1)]
-    for i in range(len(edits) - 1, -1, -1):
+    # best[i][j]: the most lines kept by a pairing of page_runs[i:] with had[j:], and whether it pairs i with j
+    best = [[0.0] * (len(had) + 1) for _ in range(len(page_runs) + 1)]
+    paired = [[False] * len(had) for _ in range(len(page_runs))]
+    for i in range(len(page_runs) - 1, -1, -1):
         for j in range(len(had) - 1, -1, -1):
-            options = [best[i + 1][j][:2] + ("edit",), best[i][j + 1][:2] + ("source",)]
-            (n, before, after), (m, was_before, was_after) = edits[i][0], had[j]
-            if n == m:
-                pairs, lines = best[i + 1][j + 1][:2]
-                options.append((pairs + 1, lines + (before == was_before) + (after == was_after), "pair"))
-            best[i][j] = max(options, key=lambda o: o[:2])
+            best[i][j] = max(best[i + 1][j], best[i][j + 1])
+            (n, before, after), (m, was_before, was_after) = page_runs[i][0], had[j]
+            lines = _line_kept(before, was_before) + _line_kept(after, was_after)
+            if n == m and lines > 0 and best[i + 1][j + 1] + lines > best[i][j]:
+                best[i][j] = best[i + 1][j + 1] + lines
+                paired[i][j] = True
     kept, i, j = set(), 0, 0
-    while i < len(edits) and j < len(had):
-        step = best[i][j][2]
-        if step == "pair":
-            kept.update(edits[i][1])
-        i += step != "source"
-        j += step != "edit"
+    while i < len(page_runs) and j < len(had):
+        if paired[i][j]:
+            kept.update(page_runs[i][1])
+            i, j = i + 1, j + 1
+        elif best[i][j] == best[i + 1][j]:
+            i += 1
+        else:
+            j += 1
     return kept
 
 
@@ -245,7 +257,7 @@ def _split_at_double_breaks(soup, new_br, source=None) -> None:
 
     kept = None     # the <br> of the source's runs, read once a run with words on both sides is found
 
-    def old(kids, first, last):
+    def in_source_run(kids, first, last):
         nonlocal kept
         if kept is None:
             kept = _source_runs_kept(soup, source)
@@ -260,7 +272,7 @@ def _split_at_double_breaks(soup, new_br, source=None) -> None:
             # and the scan goes on past it.
             cut = next(((a, b) for a, b in _break_runs(kids, lambda c: id(c) in new_br)
                         if any(words(c) for c in kids[:a]) and not all(blank(c) for c in kids[b + 1:])
-                        and not old(kids, a, b)), None)
+                        and not in_source_run(kids, a, b)), None)
             if cut is None:
                 break
             first, last = cut
@@ -806,13 +818,13 @@ def _lines_as_paragraphs(soup, comments=frozenset()):
             # typed above the heading, and stay above it.
             half = next((c for c in kids if is_line(c) and c.has_attr(_SPLIT) and said(c)), None)
             if half is not None:
-                for c in kids:
-                    if not is_line(c) and not blank(c):
-                        keep = targets(c)
-                        for t in reversed(keep):
-                            half.insert(0, t.extract())
-                        if c not in keep:
-                            c.decompose()
+                gone = [c for c in kids if not is_line(c) and not blank(c)]
+                keep = [t for c in gone for t in targets(c)]
+                for t in reversed(keep):
+                    half.insert(0, t.extract())
+                for c in gone:
+                    if not any(t is c for t in keep):
+                        c.decompose()
                 trim(half, end=False)
                 half.unwrap()
                 kids = list(host.children)

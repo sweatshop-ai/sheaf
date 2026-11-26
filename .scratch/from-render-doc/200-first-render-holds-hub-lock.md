@@ -1,8 +1,8 @@
 # 200: a first render runs pandoc under the hub's lock and stops every document's requests
 
-**Claimed by:** Mei
+**Claimed by:** Mei; implemented by Thea
 
-**Status:** open (claimed, ticket written, no code yet)
+**Status:** done: PR #679, merged as 426d9ddf (2026-11-26), CI green on 677e1666.
 
 **Blocked by:** none
 
@@ -35,8 +35,8 @@ Do the first render outside `self._lock`, under the document's own lock (`place.
 
 ## Boxes
 
-- [ ] **A** Failing test first, in `tests/test_hub_index.py`: a first render of document A whose fake pandoc is held by an `Event` runs on a thread. A request for document B, already opened (`hub.entry(B)`, and a render of B with unchanged settings), answers within 1 s while A's pandoc is held. On main, it waits until the `Event` is set.
-- [ ] **B** Same test shape for a document B that was not opened before: its own first render runs while A's pandoc is held (two first renders in parallel).
-- [ ] **C** Tests that keep the guarantees: (1) `forget_root` during A's held first render makes A's address NotFound and inserts no entry; (2) two threads opening the same new document while its pandoc is held produce one entry and one render (pandoc call count).
-- [ ] **D** Fix in `Hub._entry` (see Direction). `place.held` stays thread-bound, as in 199.
-- [ ] SPEC: if a section states that the hub's lock covers the first render, say what it covers now; otherwise nothing.
+- [x] **A** Failing test first, in `tests/test_hub_index.py`: a first render of document A whose fake pandoc is held by an `Event` runs on a thread. A request for document B, already opened (`hub.entry(B)`, and a render of B with unchanged settings), answers within 1 s while A's pandoc is held. On main, it waits until the `Event` is set.
+- [x] **B** Same test shape for a document B that was not opened before: its own first render runs while A's pandoc is held (two first renders in parallel).
+- [x] **C** Tests that keep the guarantees: (1) `forget_root` during A's held first render makes A's address NotFound and inserts no entry; (2) two threads opening the same new document while its pandoc is held produce one entry and one render (pandoc call count).
+- [x] **D** Fix in `Hub._entry` (see Direction). `place.held` stays thread-bound, as in 199.
+- [x] SPEC: if a section states that the hub's lock covers the first render, say what it covers now; otherwise nothing.

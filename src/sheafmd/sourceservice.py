@@ -40,6 +40,7 @@ import stat
 import subprocess
 import sys
 import threading
+import time
 import tomllib
 from http.server import BaseHTTPRequestHandler
 from pathlib import Path
@@ -108,8 +109,10 @@ class Service:
         self.authors = authors
         self.git = self._inside_git()
         self._writing = threading.Lock()      # one write at a time, from the file's check to the end of its commit
+        self._broken = False                  # set when a failed write could not be cleaned up: the service takes no write until restarted
         busy = self._busy() if self.git else None
         if busy:
+            self.close()
             raise SystemExit(f"{self.top}: {busy}; the service does not start until the repository is quiet")
 
     def authorised(self, header: str | None) -> bool:
@@ -192,8 +195,20 @@ class Service:
         except UnicodeDecodeError:
             raise Fault("not_found", f"no document {rel}") from None
 
+    def close(self) -> None:
+        fd, self._root = getattr(self, "_root", -1), -1
+        if fd >= 0:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+    def __del__(self):
+        self.close()
+
     def read(self, rel: str) -> dict:
-        text, _ = self._text_of(rel)
+        with self._writing:            # a write in progress is not shown: its text is tentative until git has taken it
+            text, _ = self._text_of(rel)
         return {"tree": {"text": text}, "base": rds.md_hash(text)}
 
     def write(self, body: dict) -> dict:
@@ -208,6 +223,8 @@ class Service:
         if not text.strip():
             return rda.refused("a document is not written empty")      # the one rule of this service: a source's own are its owner's
         with self._writing:       # the file and the commit are one step: a second write cannot come between them
+            if self._broken:
+                raise Fault("unavailable", "an earlier write could not be cleaned up: the service takes no write until it is restarted")
             busy = self._busy() if self.git else None
             if busy:
                 raise Fault("unavailable", f"{busy}: the folder takes no write until it is over")
@@ -220,7 +237,7 @@ class Service:
                 return rda.conflict(rds.md_hash(old))
             if text == old:
                 return rda.written(base)               # the text the member was shown is the text now: nothing to commit
-            done = False
+            done, clean = False, True
             try:
                 try:
                     self._put(rel, text.encode("utf-8"), mode)
@@ -229,7 +246,9 @@ class Service:
                 done = self.commit(rel, who, note)
             finally:
                 if not done:
-                    self._undo(rel, before, mode)
+                    clean = self._undo(rel, before, mode)
+            if not clean:
+                raise Fault("unavailable", "the write failed and could not be cleaned up: the service takes no write until it is restarted")
             if not done:
                 return rda.refused("the change could not be recorded in the folder's history: the document is as it was")
         return rda.written(rds.md_hash(text))
@@ -240,9 +259,18 @@ class Service:
         the file is replaced."""
         fd, parent, name = self._open(rel, os.O_RDONLY)
         os.close(fd)
-        tmp = f".{name}.{secrets.token_hex(6)}.sheaf-tmp"
+        tmp = None
         try:
-            out = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=parent)
+            for _ in range(8):             # a short name of its own, whatever the document's: a long one must still be writable
+                name_tmp = f".sheaf-{secrets.token_hex(4)}"
+                try:
+                    out = os.open(name_tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=parent)
+                except FileExistsError:
+                    continue
+                tmp = name_tmp
+                break
+            else:
+                raise OSError("no free temporary name")
             with os.fdopen(out, "wb") as f:
                 f.write(data)
                 f.flush()
@@ -263,19 +291,27 @@ class Service:
             finally:
                 os.close(parent)
 
-    def _undo(self, rel: str, before: bytes, mode: int) -> None:
+    def _undo(self, rel: str, before: bytes, mode: int) -> bool:
         """What a failed write leaves put back: nothing staged for `rel`, and its previous bytes, each step on its own so that one
-        failing does not skip the other."""
+        failing does not skip the other. False when a step failed: the service is then unavailable until it is restarted."""
+        clean = True
         try:
             if self.git:
-                self._git("reset", "-q", "--", rel)
-        except (OSError, subprocess.SubprocessError):
-            print(f"source service: the index entry of {rel} could not be reset", file=sys.stderr, flush=True)
+                got = self._git("reset", "-q", "--", rel)
+                if got.returncode != 0:
+                    raise OSError(f"reset exited {got.returncode}")
+        except (OSError, subprocess.SubprocessError) as e:
+            clean = False
+            print(f"source service: the index entry of {rel} could not be reset ({type(e).__name__})", file=sys.stderr, flush=True)
         finally:
             try:
                 self._put(rel, before, mode)
             except (OSError, Fault):
+                clean = False
                 print(f"source service: {rel} could not be put back after a failed commit", file=sys.stderr, flush=True)
+        if not clean:
+            self._broken = True
+        return clean
 
     # ── git ─────────────────────────────────────────────────────────────────
     def _git(self, *args, env=None):
@@ -295,10 +331,11 @@ class Service:
             gdir = self._git("rev-parse", "--absolute-git-dir")
             if gdir.returncode != 0:
                 return "the repository cannot be read"
-            for marker in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"):
+            for marker in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "sequencer"):
                 if os.path.lexists(os.path.join(gdir.stdout.strip(), marker)):
                     return "a merge, rebase, cherry-pick or revert is in progress"
-            if self._git("diff", "--cached", "--quiet").returncode != 0:
+            # the whole repository, whatever `diff.relative` says
+            if self._git("-c", "diff.relative=false", "diff", "--cached", "--quiet", "--no-relative").returncode != 0:
                 return "the index holds staged changes"
         except (OSError, subprocess.SubprocessError):
             return "the repository cannot be read"
@@ -312,6 +349,7 @@ class Service:
             return True
         name, email = who
         env = {"GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email, "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email}
+        head = self._git("rev-parse", "-q", "--verify", "HEAD").stdout.strip()
         try:
             added = self._git("add", "--", rel)
             if added.returncode != 0:
@@ -324,9 +362,25 @@ class Service:
             if got.returncode == 1 and self._git("diff", "--cached", "--quiet", "--", rel).returncode == 0:
                 return True                     # 1 with nothing staged: the text was the same
             print(f"source service: git commit of {rel} failed ({got.returncode})", file=sys.stderr, flush=True)
+        except subprocess.TimeoutExpired:
+            if self._landed(rel, head):
+                return True                      # the commit went in before the time ran out
+            print(f"source service: git commit of {rel} timed out", file=sys.stderr, flush=True)
         except (OSError, subprocess.SubprocessError) as e:
             print(f"source service: git commit of {rel} failed ({type(e).__name__})", file=sys.stderr, flush=True)
         return False
+
+    def _landed(self, rel: str, head: str) -> bool:
+        """After a git timeout: HEAD moved, and what it holds for `rel` is the file as written."""
+        try:
+            now = self._git("rev-parse", "-q", "--verify", "HEAD").stdout.strip()
+            if not now or now == head:
+                return False
+            listed = self._git("ls-tree", "HEAD", "--", rel).stdout.split()
+            mine = self._git("hash-object", "--", rel).stdout.strip()
+            return len(listed) >= 3 and listed[2] == mine
+        except (OSError, subprocess.SubprocessError):
+            return False
 
 
 def make_handler(service: Service):
@@ -362,9 +416,11 @@ def make_handler(service: Service):
                 self._error("unauthorized", "a request carries the hub's bearer", close=True)
                 try:
                     self.connection.shutdown(socket.SHUT_WR)
-                    self.connection.settimeout(0.5)
-                    left = 65536
-                    while left > 0 and (chunk := self.connection.recv(min(left, 8192))):
+                    until, left = time.monotonic() + 2.0, 65536       # one overall deadline, then it is closed
+                    while left > 0 and (room := until - time.monotonic()) > 0:
+                        self.connection.settimeout(room)
+                        if not (chunk := self.connection.recv(min(left, 8192))):
+                            break
                         left -= len(chunk)
                 except OSError:
                     pass

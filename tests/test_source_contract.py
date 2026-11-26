@@ -635,7 +635,7 @@ def _write_body(svc, rel, text, note="n"):
 
 
 def _no_leftovers(folder):
-    assert [p.name for p in folder.iterdir() if "sheaf-tmp" in p.name] == []
+    assert [p.name for p in folder.iterdir() if p.name.startswith(".sheaf-")] == []
 
 
 def test_a_git_step_that_times_out_leaves_disk_index_and_head_as_they_were(tmp_path, monkeypatch):
@@ -664,11 +664,11 @@ def test_a_write_is_unavailable_while_the_index_holds_staged_changes_and_nothing
     assert e.value.code == "unavailable" and (folder / "b.md").read_text() == "bee\n" and git("diff", "--cached", "--name-only").strip() == "other.md"
 
 
-@pytest.mark.parametrize("marker", ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge"])
+@pytest.mark.parametrize("marker", ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "sequencer"])
 def test_a_write_is_unavailable_while_a_merge_rebase_or_cherry_pick_is_in_progress(tmp_path, marker):
     svc, folder, git = _git_service(tmp_path)
     gd = Path(git("rev-parse", "--absolute-git-dir").strip())
-    (gd / marker).mkdir() if marker == "rebase-merge" else (gd / marker).write_text(git("rev-parse", "HEAD").strip() + "\n")
+    (gd / marker).mkdir() if marker in ("rebase-merge", "sequencer") else (gd / marker).write_text(git("rev-parse", "HEAD").strip() + "\n")
     with pytest.raises(sourceservice_fault()) as e:
         svc.write(_write_body(svc, "b.md", "bee two\n"))
     assert e.value.code == "unavailable" and (folder / "b.md").read_text() == "bee\n"
@@ -693,8 +693,9 @@ def test_a_failed_commit_puts_the_bytes_back_even_when_the_cleanup_step_raises(t
             raise OSError("reset failed")
         return real(*args, **kw)
     monkeypatch.setattr(svc, "_git", broken_reset)
-    assert svc.write(_write_body(svc, "b.md", "bee two\n"))["outcome"] == "refused"
-    assert (folder / "b.md").read_text() == "bee\n"
+    with pytest.raises(sourceservice_fault()) as e:
+        svc.write(_write_body(svc, "b.md", "bee two\n"))
+    assert e.value.code == "unavailable" and (folder / "b.md").read_text() == "bee\n"
 
 
 def test_a_failed_sync_of_the_folder_after_a_commit_still_counts_as_written(tmp_path, monkeypatch):
@@ -785,3 +786,129 @@ def test_the_root_is_held_by_descriptor_from_the_start_so_a_link_put_in_its_plac
     folder.rename(moved)
     folder.symlink_to(elsewhere)
     assert svc.read("real.md")["tree"]["text"] == "real\n"
+
+
+# ── round 12: the edges ───────────────────────────────────────────────────────
+
+def test_a_document_with_a_very_long_name_is_written(tmp_path):
+    svc, folder, git = _git_service(tmp_path)
+    name = "n" * 237 + ".md"
+    (folder / name).write_text("long\n")
+    git("add", name), git("commit", "-q", "-m", "long")
+    out = svc.write(_write_body(svc, name, "longer\n"))
+    assert out["outcome"] == "written" and (folder / name).read_text() == "longer\n"
+    _no_leftovers(folder)
+
+
+def test_a_read_during_a_write_waits_and_never_sees_a_text_that_git_then_refuses(tmp_path, monkeypatch):
+    import threading
+    svc, folder, git = _git_service(tmp_path)
+    _signing_fails(git)
+    real, seen = svc._git, {}
+
+    def reading_meanwhile(*args, **kw):
+        if "commit" in args and "t" not in seen:
+            seen["t"] = t = threading.Thread(target=lambda: seen.update(got=svc.read("b.md")["tree"]["text"]))
+            t.start()
+            t.join(0.4)
+            seen["blocked"] = t.is_alive()
+        return real(*args, **kw)
+    monkeypatch.setattr(svc, "_git", reading_meanwhile)
+    assert svc.write(_write_body(svc, "b.md", "bee two\n"))["outcome"] == "refused"
+    seen["t"].join(5)
+    assert seen["blocked"] and seen["got"] == "bee\n"
+
+
+def test_a_git_timeout_after_the_commit_moved_head_counts_as_written(tmp_path, monkeypatch):
+    svc, folder, git = _git_service(tmp_path)
+    real = svc._git
+
+    def late(*args, **kw):
+        got = real(*args, **kw)
+        if "commit" in args:
+            raise subprocess.TimeoutExpired("git", 30)
+        return got
+    monkeypatch.setattr(svc, "_git", late)
+    assert svc.write(_write_body(svc, "b.md", "bee two\n"))["outcome"] == "written"
+    assert (folder / "b.md").read_text() == "bee two\n" and git("show", "HEAD:b.md") == "bee two\n"
+
+
+def test_a_failed_reset_after_a_failed_commit_makes_the_service_unavailable_and_is_never_a_clean_refusal(tmp_path, monkeypatch):
+    svc, folder, git = _git_service(tmp_path)
+    _signing_fails(git)
+    real = svc._git
+
+    def reset_fails(*args, **kw):
+        if args[:1] == ("reset",):
+            return subprocess.CompletedProcess(args, 1, "", "no")
+        return real(*args, **kw)
+    monkeypatch.setattr(svc, "_git", reset_fails)
+    with pytest.raises(sourceservice_fault()) as e:
+        svc.write(_write_body(svc, "b.md", "bee two\n"))
+    assert e.value.code == "unavailable" and (folder / "b.md").read_text() == "bee\n"
+    git("config", "commit.gpgsign", "false")
+    monkeypatch.setattr(svc, "_git", real)
+    with pytest.raises(sourceservice_fault()) as again:
+        svc.write(_write_body(svc, "b.md", "bee three\n"))
+    assert again.value.code == "unavailable"
+
+
+def test_staged_changes_outside_the_folder_are_seen_whatever_diff_relative_says(tmp_path):
+    import subprocess as sp
+    from sheafmd import sourceservice
+    top = tmp_path / "top"
+    (top / "docs").mkdir(parents=True)
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.org", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.org"}
+
+    def g(*a):
+        return sp.run(["git", "-C", str(top), *a], capture_output=True, text=True, check=True, env=env).stdout
+    g("init", "-q")
+    (top / "docs" / "a.md").write_text("a\n")
+    (top / "x.txt").write_text("x\n")
+    g("add", "."), g("commit", "-q", "-m", "s")
+    g("config", "diff.relative", "true")
+    (top / "x.txt").write_text("changed\n")
+    g("add", "x.txt")
+    with pytest.raises(SystemExit):
+        sourceservice.Service(top / "docs", "b" * 20, {})
+
+
+def test_an_unauthorized_caller_that_trickles_its_body_is_cut_within_a_couple_of_seconds(tmp_path):
+    import socket
+    import time
+    folder = tmp_path / "f"
+    folder.mkdir()
+    (folder / "d.md").write_text("d\n")
+    (tmp_path / "secrets").mkdir()
+    svc = ReferenceService(folder, tmp_path / "secrets")
+    try:
+        c = socket.socket(socket.AF_UNIX)
+        c.connect(svc.sock)
+        c.sendall(b"POST /read HTTP/1.1\r\nHost: x\r\nContent-Length: 60000\r\n\r\n")
+        started, gone = time.monotonic(), False
+        c.settimeout(0.2)
+        while time.monotonic() - started < 6:
+            try:
+                c.sendall(b"x")
+            except OSError:
+                gone = True
+                break
+            time.sleep(0.2)
+        assert gone and time.monotonic() - started < 4
+    finally:
+        svc.stop()
+
+
+def test_a_refused_start_and_close_release_the_root_descriptor(tmp_path):
+    from sheafmd import sourceservice
+    svc, folder, git = _git_service(tmp_path)
+    (folder / "o.md").write_text("o\n")
+    git("add", "o.md")
+    before = len(os.listdir("/proc/self/fd"))
+    for _ in range(5):
+        with pytest.raises(SystemExit):
+            sourceservice.Service(folder, "b" * 20, {})
+    assert len(os.listdir("/proc/self/fd")) == before
+    svc.close()
+    with pytest.raises(OSError):
+        os.fstat(svc._root)

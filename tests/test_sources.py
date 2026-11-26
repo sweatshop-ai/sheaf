@@ -675,3 +675,27 @@ def test_names_cursors_and_the_text_of_a_document_pass_unchanged_and_only_words_
     src = remote.RemoteSource("shop", stand.url, bearer)
     assert src.adapter("d.md").read()[0].text == doc
     assert src.ask("documents", {}) == {"documents": [{"name": name}], "next": "Bearer cursor"}
+
+
+@pytest.mark.parametrize("answer", [
+    {"outcome": "refused", "reason": "no", "block": 5},
+    {"outcome": "refused", "reason": "no", "block": ["x"]},
+    {"outcome": "conflict", "base": "b", "blocks": "x"},
+    {"outcome": "conflict", "base": "b", "blocks": ["x"]},
+    {"outcome": "conflict", "base": "b", "blocks": [{"id": 5}]},
+])
+def test_a_conflict_or_refusal_of_the_wrong_shape_is_a_bad_request_of_the_adapter(request, answer):
+    from sheafmd import remote
+    stand = Stand(lambda verb, body, headers: (200, answer))
+    request.addfinalizer(stand.stop)
+    with pytest.raises(remote.SourceError) as e:
+        remote.RemoteSource("shop", stand.url, "b" * 20).adapter("d.md").write(rda.Tree("x\n"), "b", author="Ada", note="")
+    assert e.value.code == "bad_request"
+
+
+def test_a_conflict_with_well_formed_blocks_passes(request):
+    from sheafmd import remote
+    stand = Stand(lambda verb, body, headers: (200, {"outcome": "conflict", "base": "b", "blocks": [{"id": "x1", "text": "t"}]}))
+    request.addfinalizer(stand.stop)
+    out = remote.RemoteSource("shop", stand.url, "b" * 20).adapter("d.md").write(rda.Tree("x\n"), "b", author="Ada", note="")
+    assert out["outcome"] == "conflict" and out["blocks"] == [{"id": "x1", "text": "t"}]

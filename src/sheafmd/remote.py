@@ -384,15 +384,26 @@ class RemoteAdapter:
         if kind == "written" and isinstance(got.get("base"), str):
             return rda.written(got["base"])
         if kind == "conflict" and isinstance(got.get("base"), str):
-            return rda.conflict(got["base"], got.get("blocks") or [])
+            blocks = got.get("blocks") or []
+            if not isinstance(blocks, list) or not all(_block_shape(b) for b in blocks):
+                raise SourceError("bad_request", f"source {self.source.name!r} answered a conflict with blocks of the wrong shape")
+            return rda.conflict(got["base"], blocks)
         if kind == "refused" and isinstance(got.get("reason"), str):
-            return rda.refused(got["reason"], got.get("block") or "")
+            block = got.get("block") or ""
+            if not isinstance(block, str):
+                raise SourceError("bad_request", f"source {self.source.name!r} answered a refusal with a block of the wrong shape")
+            return rda.refused(got["reason"], block)
         raise SourceError("protocol", f"source {self.source.name!r} answered a write with no outcome")
 
     def publish(self, note: str = "") -> dict:
         if not self.source.publishes:
             raise SourceError("bad_request", f"source {self.source.name!r} does not publish")
         return self.source.ask("publish", {"document": self.document, "note": note})
+
+
+def _block_shape(b) -> bool:
+    """A block of a conflict as a service reports it: a mapping with a text `id` and only text values besides."""
+    return isinstance(b, dict) and isinstance(b.get("id"), str) and all(isinstance(k, str) and isinstance(v, str) for k, v in b.items())
 
 
 def with_via(note: str, via: str = "") -> str:

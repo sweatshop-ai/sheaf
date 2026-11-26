@@ -1314,3 +1314,24 @@ def test_a_git_dir_with_a_control_character_in_it_refuses_the_start(tmp_path):
     subprocess.run(["git", "init", "-q", f"--separate-git-dir={gdir}", str(folder)], check=True, env=env)
     with pytest.raises(SystemExit):
         sourceservice.Service(folder, "b" * 20, {})
+
+
+def test_the_listing_leaves_out_a_backslash_name_and_a_file_with_two_names(tmp_path):
+    svc, folder, git = _git_service(tmp_path)
+    (folder / "back\\slash.md").write_text("x\n")
+    (folder / "two.md").write_text("t\n")
+    os.link(folder / "two.md", folder / "alias.md")
+    assert not svc.acceptable("back\\slash.md")
+    assert sorted(svc.names()) == ["*.md", "b.md"]
+
+
+def test_a_cursor_that_names_a_disallowed_path_is_bad_request(tmp_path):
+    import base64
+    svc, folder, git = _git_service(tmp_path)
+    for bad in ("a\rb.md", "x\\y.md", "../b.md", "a.txt"):
+        cursor = base64.urlsafe_b64encode(bad.encode()).decode().rstrip("=")
+        with pytest.raises(sourceservice_fault()) as e:
+            svc.documents(cursor)
+        assert e.value.code == "bad_request"
+    good = base64.urlsafe_b64encode(b"a.md").decode().rstrip("=")
+    assert [d["name"] for d in svc.documents(good)["documents"]] == ["b.md"]

@@ -156,7 +156,7 @@ class Service:
             rel.encode("utf-8")
         except UnicodeEncodeError:
             return False
-        if any(ord(c) < 32 or ord(c) == 127 for c in rel) or not self.served(rel):
+        if any(ord(c) < 32 or ord(c) == 127 or c == "\\" for c in rel) or not self.served(rel):
             return False
         parts = rel.split("/")
         if any(p in (".", "..") for p in parts):
@@ -172,8 +172,10 @@ class Service:
                 continue
             for f in files:
                 full = os.path.join(dirpath, f)
-                if self.acceptable((here / f).as_posix()) and not os.path.islink(full) and stat.S_ISREG(os.lstat(full).st_mode):
-                    yield (here / f).as_posix()
+                if self.acceptable((here / f).as_posix()) and not os.path.islink(full):
+                    st = os.lstat(full)
+                    if stat.S_ISREG(st.st_mode) and st.st_nlink == 1:       # the same file `_bytes_of` serves
+                        yield (here / f).as_posix()
 
     def documents(self, cursor) -> dict:
         after = ""
@@ -182,6 +184,8 @@ class Service:
                 after = base64.b64decode(cursor.encode("ascii") + b"=" * (-len(cursor) % 4), altchars=b"-_", validate=True).decode("utf-8")
             except (AttributeError, UnicodeError, binascii.Error):
                 raise Fault("bad_request", "cursor is not one this service gave") from None
+            if after and not self.acceptable(after):
+                raise Fault("bad_request", "cursor is not one this service gave")
         names = sorted(n for n in self.names() if n > after)
         page, more = names[:PAGE_MAX], len(names) > PAGE_MAX
         nxt = base64.urlsafe_b64encode(page[-1].encode("utf-8")).decode("ascii").rstrip("=") if more else None

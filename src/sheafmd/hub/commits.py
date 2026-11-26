@@ -157,16 +157,17 @@ class Children:
         return bool(running)
 
 
-def _git(root: Path, *args, author=None, seconds=GIT_SECONDS, given=None, children=None):
+def _git(root: Path, *args, author=None, seconds=GIT_SECONDS, given=None, children=None, index=None):
     """`children`: given for a fetch or a push, which a stopping hub ends (#95). Every git runs in a session of
-    its own: a signal to the hub's group never reaches it."""
+    its own: a signal to the hub's group never reaches it. `index`: an index file of the hub's own, not the repo's."""
     # No hook of the repo runs for the hub: hooks are code of whoever wrote `.git/hooks`.
     argv = ["git", "-C", str(root), "-c", "core.hooksPath=/dev/null", "--literal-pathspecs", *args]
     folder = root
     if children is not None:
         return children.run(argv, seconds, _env(author, folder))
+    env = _env(author, folder) | ({"GIT_INDEX_FILE": str(index)} if index else {})
     return subprocess.run(argv, capture_output=True, text=True, encoding="utf-8", errors="surrogateescape",
-                          timeout=seconds, env=_env(author, folder), input=given, start_new_session=True)
+                          timeout=seconds, env=env, input=given, start_new_session=True)
 
 
 def blame(file: Path, text: str, lines, seconds: float = BLAME_SECONDS) -> dict:
@@ -322,6 +323,37 @@ def _again(folder: Path, commit: str, onto: str):
     if made.returncode != 0:
         return None, [made.stderr.decode("utf-8", "replace").strip()[-300:] or f"git exited {made.returncode}"]
     return made.stdout.decode().strip(), []
+
+
+def _untrack_pin_times(folder: Path, paths: list) -> bool:
+    """A pin time is each hub's own (7.4): one git took in before the store's `.gitignore` kept it out (an older hub,
+    a `.gitignore` that let it in) leaves git in a commit of its own, `versions: pin times out of git`, and the index;
+    the file stays on disk. `commit -- paths` would take it back from the work tree, so the commit is made on an index
+    of the hub's own, from HEAD less those files (ticket 203 C). False when git refused a step; HEAD is then as it was."""
+    inside = [p for p in paths if Path(p).parts[:len(state.INSIDE.parts)] == state.INSIDE.parts]
+    held = [p for p in _git(folder, "ls-files", "-z", "--", *inside).stdout.split("\0")
+            if p.endswith(state.PINNED_AT)] if inside else []
+    if not held:
+        return True
+    head = _git(folder, "rev-parse", "-q", "--verify", "HEAD").stdout.strip()
+    if head and _git(folder, "ls-tree", "--name-only", "-z", head, "--", *held).stdout.strip("\0"):
+        index = _git(folder, "rev-parse", "--path-format=absolute", "--git-path", "sheaf-untrack.index").stdout.strip()
+        try:
+            steps = [("read-tree", head), ("update-index", "--force-remove", "--", *held)]
+            if any(_git(folder, *step, index=index).returncode for step in steps):
+                return False
+            tree = _git(folder, "write-tree", index=index).stdout.strip()
+            made = _git(folder, "-c", f"user.name={COMMITTER[0]}", "-c", f"user.email={COMMITTER[1]}", "commit-tree",
+                        tree, "-p", head, "-m", "versions: pin times out of git", author=Author(*COMMITTER))
+            new = made.stdout.strip()
+            if made.returncode or not new or _git(folder, "update-ref", "HEAD", new, head).returncode:
+                return False
+        finally:
+            try:
+                os.unlink(index)
+            except OSError:
+                pass
+    return _locking(folder, "update-index", "--force-remove", "--", *held).returncode == 0
 
 
 def root_config(root) -> "config.RootConfig":
@@ -482,6 +514,9 @@ class Commits:
 
     def _add_and_commit(self, folder: Path, paths: list, before: dict, author: Author, subject: str, address: str,
                         record) -> bool:
+        if not _untrack_pin_times(folder, paths):
+            record("commit-failed", address, error="a pin time git holds could not be taken out of it")
+            return False
         r = _locking(folder, "add", "-A", "--", *paths)   # a file an ignore rule names, in the folder, stays out
         if r.returncode != 0:
             kept = _restage(folder, before, paths)

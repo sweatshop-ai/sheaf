@@ -603,5 +603,5 @@ def test_the_trim_of_a_roots_own_store_leaves_the_pins_another_clone_made(tmp_pa
     for n in range(state.PINS_KEPT + 3):
         v.pin("r/plan.md", f"mine {n}\n")
     assert all((pins / f"{md_hash(t)}.md").is_file() for t in theirs)
-    mine = [p for p in pins.glob("*.md") if p.with_suffix(".at").is_file()]
+    mine = [p for p in pins.glob("*.md") if p.with_suffix(state.PINNED_AT).is_file()]
     assert len(mine) == state.PINS_KEPT                                   # this hub's own pins are still trimmed

@@ -8,7 +8,7 @@ changes whenever an asset does. The entries name pull requests of sweatshop-ai/s
 
 ### Fixed
 
-- A pin's time in a root's own versions store stays out of git when the store's `.gitignore` was changed, made a link, or overruled by a `.gitignore` lower in the store; and a pin another clone made is no longer trimmed here, so its merge base stays for the page that holds it (from the review of #659).
+- A pin's time in a root's own versions store stays out of git when the store's `.gitignore` was changed, made a link, or overruled by a `.gitignore` lower in the store; and a pin another clone made is no longer trimmed here, so its merge base stays for the page that holds it; a pin time a repo already tracks is taken out of git in a commit of its own (#687, from the review of #659).
 - `sheaf open` gets its answer on a slow page: a render the hub has not finished within 120 seconds goes on and publishes its page, and the command says that the next `sheaf open` serves it, instead of failing. Each pandoc run keeps its own 120 seconds, and a wait for the document's lock no longer counts against them.
 - `sheaf FILE.md` calls a tiroir's tools under the names the server lists in `tools/list` (`sheaf_create` on a door that prefixes them, `create` on a laptop hub), instead of always sending the bare name, which a door refused with 403. A 403 now shows the door's own words instead of the sentence about a revoked token (a revoked token still answers 401).
 - A conflict copy (`FILE.tiroir.md`) is never overwritten: a second conflict leaves the next free name, `FILE.tiroir-2.md`, `-3`, and the same text reuses the copy already there; `pull` does the same.

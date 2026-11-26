@@ -40,7 +40,7 @@ _ADDRESS_FILE = "address"       # in each versions folder: the address it is the
 _PINS_DIR = "pins"              # in each versions folder: the versions pages keep
 _MEMBER_PINS = "m-"             # in `pins/`: the prefix of a member's own folder (`member_key`)
 _PIN_CLOCK_AHEAD = 60           # seconds a pin time may lie ahead of this clock (another clone's)
-_PINNED_AT = ".at"              # in a root's own store, beside a pin `<hash>.md`: when it was last pinned, ns since the epoch
+PINNED_AT = _PINNED_AT = ".at"              # in a root's own store, beside a pin `<hash>.md`: when it was last pinned, ns since the epoch
 _LOCAL_ONLY = f"*{_PINNED_AT}\n.gitignore\n"   # `.gitignore` of a root's own store: each hub's pin times stay out of git
 INSIDE = Path(".sheaf") / "versions"    # a root's own versions store, inside it (7.4)
 

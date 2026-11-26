@@ -76,6 +76,14 @@ _NAMES = {"Para": "paragraph", "Plain": "paragraph", "Header": "heading", "Bulle
           "LineBlock": "lines", "Div": "div", "Figure": "figure"}
 
 
+def _attrs(kvs) -> dict:
+    """Attributes as pandoc renders them: of a repeated key the first value counts (the HTML writer drops the rest)."""
+    out = {}
+    for k, v in kvs:
+        out.setdefault(k, v)
+    return out
+
+
 def _canon(x) -> str:
     return json.dumps(x, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
@@ -99,26 +107,47 @@ def _type_and_attrs(blocks: list, kind: str):
     if b["t"] == "Div":
         classes = b["c"][0][1]
         if classes and classes[0] in decl.DECLARED:
-            return classes[0], {k: v for k, v in b["c"][0][2]}
+            return classes[0], _attrs(b["c"][0][2])
     return t, {}
 
 
-def _children(blocks: list) -> list:
-    """(type, attrs, ast, its own children, stored id) for the blocks held by a quote, a list or a div, from the AST."""
+_LOCKED_AST = frozenset({"CodeBlock", "RawBlock"})      # locked at the top level (fence, raw HTML, indented code): locked at every depth
+
+
+def _source(div: dict, api) -> str:
+    """The Markdown of a div held inside a quote or a list, written back by pandoc: children hold no bytes of their own."""
+    doc = {"pandoc-api-version": api, "meta": {}, "blocks": [div]}
+    got = _pandoc.run(["-f", "json", "-t", FORMAT, "--wrap=preserve"], json.dumps(doc))
+    if got.returncode != 0:
+        raise Unreadable(got.stderr.strip() or "pandoc did not write a div back")
+    return got.stdout.rstrip("\n")
+
+
+def _children(blocks: list, api) -> list:
+    """(type, attrs, ast, its own children, stored id, caps, content) for the blocks held by a quote, a list or a div,
+    from the AST. A div that is no declared type is a locked Stub with its type name and its source."""
     out = []
     for b in blocks:
         t, attrs = _type_and_attrs([b], "")
         ast = [b]
-        kids, stored = [], ""
+        kids, stored, caps, content = [], "", ALL, ""
         if b["t"] == "BlockQuote":
-            kids = _children(b["c"])
+            kids = _children(b["c"], api)
         elif b["t"] == "Div":
-            kids = _children(b["c"][1])
-            stored = b["c"][0][0] if t in decl.DECLARED else ""
+            if t in decl.DECLARED:
+                kids = _children(b["c"][1], api)
+                stored = b["c"][0][0]
+            else:
+                classes = b["c"][0][1]
+                content = _source(b, api)
+                t, attrs, caps, ast = "stub", {"type": classes[0] if classes else "", "reason": "unknown type"}, LOCKED, content
+                stored = b["c"][0][0]
         elif b["t"] in ("BulletList", "OrderedList"):
             items = b["c"] if b["t"] == "BulletList" else b["c"][1]
-            kids = [("item", {}, [{"t": "Item", "c": item}], _children(item), "") for item in items]
-        out.append((t, attrs, ast, kids, stored))
+            kids = [("item", {}, [{"t": "Item", "c": item}], _children(item, api), "", ALL, "") for item in items]
+        elif b["t"] in _LOCKED_AST:
+            caps = LOCKED
+        out.append((t, attrs, ast, kids, stored, caps, content))
     return out
 
 
@@ -127,27 +156,52 @@ class _Ids:
 
     def __init__(self):
         self.seen = {}
-        self.stored = set()
+        self.used = set()           # every id handed out, stored or generated: no two blocks share one
+        self.reserved = set()       # every id written in the file: a generated id never takes one, wherever the block stands
 
     def take(self, stored: str, type_: str, ast: str) -> str:
         """A Rich block keeps the id written in the file; a missing or repeated one falls back to a derived id."""
-        if stored and stored not in self.stored:
-            self.stored.add(stored)
+        if stored and stored not in self.used:
+            self.used.add(stored)
             return stored
         return self(type_, ast)
 
     def __call__(self, type_: str, ast: str) -> str:
         h = hashlib.sha1(f"{type_}\0{ast}".encode("utf-8")).hexdigest()[:8]
-        n = self.seen[h] = self.seen.get(h, 0) + 1
-        return h if n == 1 else f"{h}-{n}"
+        while True:
+            n = self.seen[h] = self.seen.get(h, 0) + 1
+            id_ = h if n == 1 else f"{h}-{n}"
+            if id_ not in self.used and id_ not in self.reserved:
+                self.used.add(id_)
+                return id_
 
 
 def _build(kids, ids: _Ids) -> tuple:
     out = []
-    for t, attrs, ast, sub, stored in kids:
-        a = _canon(ast)
-        out.append(Block(id=ids.take(stored, t, a), type=t, attrs=attrs, caps=ALL, ast=a, children=_build(sub, ids)))
+    for t, attrs, ast, sub, stored, caps, content in kids:
+        a = ast if isinstance(ast, str) else _canon(ast)
+        out.append(Block(id=ids.take(stored, t, a), type=t, attrs=attrs, caps=caps, content=content, ast=a,
+                         children=_build(sub, ids)))
     return tuple(out)
+
+
+def _div_ids(blocks: list, out: set) -> set:
+    """The id of every div that is a block of the tree, among `blocks` and the blocks they hold: through quotes, lists
+    and declared divs only, never into what an unknown div (a Stub) holds nor into a footnote inline."""
+    for b in blocks:
+        t = b["t"]
+        if t == "Div":
+            if b["c"][0][0]:
+                out.add(b["c"][0][0])
+            classes = b["c"][0][1]
+            if classes and classes[0] in decl.DECLARED:
+                _div_ids(b["c"][1], out)
+        elif t == "BlockQuote":
+            _div_ids(b["c"], out)
+        elif t in ("BulletList", "OrderedList"):
+            for item in (b["c"] if t == "BulletList" else b["c"][1]):
+                _div_ids(item, out)
+    return out
 
 
 def _segments(doc: dict) -> dict:
@@ -173,7 +227,7 @@ def _rich_found(blocks: list):
             classes = b["c"][0][1]
             if classes and classes[0] in decl.DECLARED:
                 return classes[0]
-            inner = _rich_found(b["c"][1])
+            continue            # an unknown div is a locked Stub of its own: what it holds is no reason to lock its container
         elif t == "BlockQuote":
             inner = _rich_found(b["c"])
         elif t in ("BulletList", "OrderedList"):
@@ -196,7 +250,7 @@ def _div_fault(b: dict, top: bool = True):
     for extra in classes[1:]:
         return t, f"{t} has class {extra!r}, which is not declared"
     kid_types = [_type_and_attrs([k], "")[0] for k in content]
-    why = (decl.top_fault(t) if top else None) or decl.check_attrs(t, {k: v for k, v in kvs}) \
+    why = (decl.top_fault(t) if top else None) or decl.check_attrs(t, _attrs(kvs)) \
         or decl.check_children(t, kid_types) or _nested_fault(content)
     why = why or (t == "image" and _image_fault(content))
     why = why or next((f for k in content if k["t"] == "Div" and (f := _div_fault(k, top=False)[1])), None)
@@ -219,11 +273,40 @@ def _nested_fault(content: list):
     return None
 
 
+def _stub_of(ast_blocks: list, t: str):
+    """(declared or unknown type, why it is a Stub) for a tile that is no valid Rich block, else None."""
+    first = ast_blocks[0] if ast_blocks else None
+    if first and first["t"] == "Div":
+        rtype, why = _div_fault(first)
+        return (rtype, why) if why else None
+    if first and first["t"] in ("BlockQuote", "BulletList", "OrderedList"):
+        found = _rich_found(ast_blocks[:1])
+        if found:
+            return found, f"a {found} may not sit inside a {t}"
+    return None
+
+
+def _reserved(tiles: list, seg: dict) -> set:
+    """The ids written in the file on divs that are blocks of the tree: a Stub's own, never what it holds."""
+    out = set()
+    for i, tile in enumerate(tiles):
+        if tile.kind in ("blank", "frontmatter"):
+            continue
+        ast_blocks = seg.get(i, [])
+        first = ast_blocks[0] if ast_blocks else None
+        if _stub_of(ast_blocks, _type_and_attrs(ast_blocks, tile.kind)[0]):
+            if first["t"] == "Div" and first["c"][0][0]:
+                out.add(first["c"][0][0])
+        else:
+            _div_ids(ast_blocks, out)
+    return out
+
+
 def read_tree(text: str) -> Tree:
     """The block tree of `text`. Raises `Unreadable` for a text pandoc does not read."""
     inst, tiles = instrument(text, divs=True)
     live = [i for i, t in enumerate(tiles) if t.kind not in ("blank", "frontmatter") and t.content.strip()]
-    seg = {}
+    seg, api = {}, None
     if live:
         # Bytes that are not UTF-8 reach us as lone surrogates: pandoc reads a `?` there, the
         # tiles keep the bytes, so the file still writes back byte for byte.
@@ -231,12 +314,14 @@ def read_tree(text: str) -> Tree:
         if got.returncode != 0:
             raise Unreadable(got.stderr.strip() or "pandoc did not read the text")
         try:
-            seg = _segments(json.loads(got.stdout))
+            parsed = json.loads(got.stdout)
+            api, seg = parsed["pandoc-api-version"], _segments(parsed)
         except (ValueError, KeyError, TypeError) as e:
             raise Unreadable(f"the AST is not in the shape expected: {e}") from None
         if set(seg) != set(live):
             raise Unreadable("a block of the text is not a top-level block for pandoc")
     ids, blocks, lead = _Ids(), [], ""
+    ids.reserved = _reserved(tiles, seg)
     for i, tile in enumerate(tiles):
         if tile.kind == "blank":
             lead = tile.gap
@@ -248,18 +333,10 @@ def read_tree(text: str) -> Tree:
         else:
             ast_blocks = seg.get(i, [])
             t, attrs = _type_and_attrs(ast_blocks, tile.kind)
-            stub = None            # (declared or unknown type, why it is a Stub), for a block that is no valid Rich block
+            stub = _stub_of(ast_blocks, t)
             first = ast_blocks[0] if ast_blocks else None
-            if first and first["t"] == "Div":
-                rtype, why = _div_fault(first)
-                if why:
-                    stub = (rtype, why)
-                else:
-                    attrs = {k: v for k, v in first["c"][0][2]}
-            elif first and first["t"] in ("BlockQuote", "BulletList", "OrderedList"):
-                found = _rich_found(ast_blocks[:1])
-                if found:
-                    stub = (found, f"a {found} may not sit inside a {t}")
+            if not stub and first and first["t"] == "Div":
+                attrs = _attrs(first["c"][0][2])
             if stub:
                 sid = first["c"][0][0] if first["t"] == "Div" else ""
                 bid = ids.take(sid, "stub", tile.content)
@@ -268,7 +345,7 @@ def read_tree(text: str) -> Tree:
                 continue
             # Reference and footnote definitions are no block of the AST: they are equal when their bytes are.
             ast = _canon(ast_blocks) if ast_blocks else tile.content
-            kids = _children(ast_blocks[:1])[0][3] if ast_blocks else []
+            kids = _children(ast_blocks[:1], api)[0][3] if ast_blocks else []
         locked = tile.kind in LOCKED_KINDS
         if t in decl.DECLARED:
             bid = ids.take(ast_blocks[0]["c"][0][0], t, ast)

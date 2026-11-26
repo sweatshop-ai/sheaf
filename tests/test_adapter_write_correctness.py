@@ -390,3 +390,32 @@ def test_a_forget_that_fails_during_a_first_render_leaves_no_unrendered_entry(wo
     monkeypatch.setattr(hub, "_new_entry", real)
     e = hub.entry("work/start.md")
     assert e.html and "First paragraph" in e.html
+
+
+@pytest.mark.parametrize("replacement", REPLACEMENTS)
+def test_a_root_let_go_after_the_page_swap_does_not_fail_the_save_through_its_read_back(world, work, tmp_path, replacement):
+    """26 D: the save read back the file after its page was installed, by resolving the name again. A root let go in that
+    window, with another folder holding the name (a missing file, invalid UTF-8, a malformed config), made the save fail
+    after its edit had landed. The save is `written` and let go: it answers, the tabs hear `gone`, nothing of the new root
+    is read into the document."""
+    hub = world.hub
+    e = hub.entry("work/start.md")
+    f = work / "start.md"
+    text = f.read_text(encoding="utf-8")
+    i = next(n for n, b in enumerate(split_md_blocks(text)) if b.content.startswith("First paragraph"))
+    sub = e.bus.subscribe()
+    sub.drain()
+    finishes = []
+    real = e.live.install
+
+    def install_then_let_go(t, g):
+        out = real(t, g)
+        finishes.append(retake_the_name(hub, tmp_path, REPLACEMENTS[replacement])[0])
+        return out
+    e.live.install = install_then_let_go
+    out = e.live.save(rds.md_hash(text), [{"i": i, "html": "<p>Edited words.</p>"}])
+    assert out["changed"] and "Edited words." in f.read_text(encoding="utf-8")
+    finishes[0]()
+    events = sub.drain()
+    assert "Replacement" not in repr(events) and "Replacement" not in e.live._text
+    assert [n for n, _ in events][-1:] == ["gone"], events

@@ -2,7 +2,7 @@
 
 **Claimed by:** Kenji
 
-**Status:** done (2026-11-26, PR #694)
+**Status:** done (2026-11-26, PR #694, merged as 9810f310)
 
 **Blocked by:** none
 

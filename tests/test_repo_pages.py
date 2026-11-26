@@ -890,7 +890,7 @@ def test_a_door_that_does_not_answer_a_report_renders_the_page_on_the_laptop(
 
 def test_a_door_whose_list_has_no_render_report_is_not_called_and_is_not_a_refusal(
         tiroir, hub_repos, laptop, local, monkeypatch, capsys):
-    """Ticket 53: tiroir-tt's library door lists nine `sheaf_*` tools and no `sheaf_render_report`. The CLI read that
+    """Ticket 53: a door lists nine `sheaf_*` tools and no `sheaf_render_report`. The CLI read that
     list and still called the tool, got `Unknown tool`, and printed "refused"."""
     called = []
 

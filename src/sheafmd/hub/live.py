@@ -354,6 +354,9 @@ class LiveDocument:
                 # The text the edits made over `text`, written as the Document service writes it: a block that is
                 # the file's own block (an equal AST) keeps the file's bytes. `new` was made on `text`, so its base is `text`'s.
                 new = self._service.settle(text, new, None, rds.md_hash(text), rid or "")
+                if new == text:             # every block came back as the file's own: nothing was written
+                    got["report"]["changed"] = False
+                    return text
                 return guard(text, new, got["report"]["toggled"]) if guard is not None else new
             # The version check happens inside change(), under the file lock: the CLI and an
             # Tell job write this file from other processes.

@@ -176,7 +176,8 @@ def read_tree(text: str) -> Tree:
         else:
             ast_blocks = seg.get(i, [])
             t, attrs = _type_and_attrs(ast_blocks, tile.kind)
-            ast = _canon(ast_blocks)
+            # Reference and footnote definitions are no block of the AST: they are equal when their bytes are.
+            ast = _canon(ast_blocks) if ast_blocks else tile.content
             kids = _children(ast_blocks[:1])[0][3] if ast_blocks else []
         locked = tile.kind in LOCKED_KINDS
         bid = ids(t, ast)

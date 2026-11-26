@@ -55,6 +55,8 @@ class DocumentService:
         return t
 
     def read(self):
+        """The tree and the base. Raises `blocks.Unreadable` for a file pandoc cannot read: it has no tree, where
+        `save` writes the page's text as sent."""
         tree, base = self.adapter.read()
         return self.tree(tree.text), base
 

@@ -259,6 +259,38 @@ def test_a_document_pandoc_cannot_read_is_still_saved_as_the_page_sent_it(tmp_pa
     assert out["outcome"] == "written" and disk(p) == "Two.\n"
 
 
+def test_an_edited_link_or_footnote_definition_is_written_and_not_put_back_as_the_file_had_it(tmp_path):
+    p, svc = make(tmp_path, "See [a] and [b].[^1]\n\n[a]: https://one.example\n\n[b]: https://two.example\n\n[^1]: Old note.\n")
+    _, base = svc.read()
+    new = "See [a] and [b].[^1]\n\n[a]: https://changed.example\n\n[b]: https://two.example\n\n[^1]: New note.\n"
+    assert save(svc, new, base)["outcome"] == "written"
+    assert disk(p) == new
+
+
+def test_two_definitions_that_swap_places_are_written_in_the_order_the_page_sent(tmp_path):
+    p, svc = make(tmp_path, "See [a] and [b].\n\n[a]: https://one.example\n\n[b]: https://two.example\n")
+    _, base = svc.read()
+    new = "See [a] and [b].\n\n[b]: https://two.example\n\n[a]: https://one.example\n"
+    save(svc, new, base)
+    assert disk(p) == new
+
+
+def test_a_last_block_without_a_final_newline_is_not_run_into_a_block_that_touches_it_in_the_page(tmp_path):
+    p, svc = make(tmp_path, "One.\n\nTwo.")
+    _, base = svc.read()
+    save(svc, "One.\n\nTwo.\n- item\n", base)
+    assert disk(p) == "One.\n\nTwo.\n- item\n"
+
+
+def test_reading_a_file_pandoc_cannot_read_says_so(tmp_path, monkeypatch):
+    from sheafmd import _pandoc
+    from sheafmd.blocks import Unreadable
+    p, svc = make(tmp_path, "One.\n")
+    monkeypatch.setattr(_pandoc, "run", lambda args, text: subprocess.CompletedProcess(args, 1, "", "no"))
+    with pytest.raises(Unreadable):
+        svc.read()
+
+
 # ── the tree reader on its own ───────────────────────────────────────────────
 
 def test_the_tiles_of_a_tree_join_back_to_the_text():

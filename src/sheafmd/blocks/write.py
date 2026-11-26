@@ -59,7 +59,11 @@ def write_back(new: Tree, current: Tree, held_ids=None) -> str:
             # Blocks that touch in the file (a list that interrupts a paragraph) may touch where they did, or where
             # the page's own text has them touch (and the last block of a file has no gap at all): any other
             # neighbour is set apart by a blank line.
+            if j == n - 1 and i != len(current.blocks) - 1:
+                gap = b.gap                  # the end of the document is the page's, not that of the block's old place
+            if j < n - 1 and not content.endswith("\n"):
+                content += "\n"
             if j < n - 1 and not gap and got[j + 1] != i + 1 and b.gap:
-                content, gap = (content if content.endswith("\n") else content + "\n"), "\n"
+                gap = "\n"
         parts.append(content + gap)
     return "".join(parts)

@@ -910,6 +910,19 @@ def test_a_render_with_the_settings_another_render_just_set_waits_for_a_page_of_
             second.join(10)
 
 
+def test_the_settings_count_of_a_page_goes_with_its_page(world, work):
+    """213 C: the count of settings a render recorded is kept while the hub holds the page, and goes with it (a delete,
+    a forgotten root), so it never grows for the life of the hub."""
+    world.hub.render(work / "start.md", {"title": "Apricot"}, None)
+    world.hub.render(work / "start.md", {"title": "Bramble"}, None)
+    assert "work/start.md" in world.hub._settings_seq
+    world.hub.forget_document("work/start.md")
+    assert "work/start.md" not in world.hub._settings_seq
+    world.hub.render(work / "start.md", {"title": "Cedar"}, None)
+    assert "Cedar" in world.hub.entries["work/start.md"].html
+    world.hub.forget_root("work")
+    assert not world.hub._settings_seq
+
 def test_an_open_after_its_root_was_forgotten_and_its_name_taken_never_waits_for_the_old_roots_render(world, work, put,
                                                                                                     held_pandoc, tmp_path):
     """213 D (Codex round 9 of #679): the mark of an entry being made was the address alone. A root forgotten during a

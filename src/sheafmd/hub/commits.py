@@ -349,7 +349,7 @@ def _untrack_pin_times(folder: Path) -> tuple[bool, str | None]:
     if not held:
         return False, None
     try:
-        if _unstage(folder, held, _locking):
+        if not _unstage(folder, held, _locking):
             return False, "a pin time git holds could not be taken out of the index"
     except subprocess.SubprocessError as e:
         return False, str(e)[:300] or type(e).__name__
@@ -360,7 +360,7 @@ def _untrack_pin_times(folder: Path) -> tuple[bool, str | None]:
         index = Path(own) / "index"
         try:
             if _git(folder, "read-tree", head, index=index).returncode \
-                    or _unstage(folder, in_head, lambda *a, **k: _git(*a, **k, index=index)):
+                    or not _unstage(folder, in_head, lambda *a, **k: _git(*a, **k, index=index)):
                 return False, refused
             tree = _git(folder, "write-tree", index=index).stdout.strip()
             made = _git(folder, "-c", f"user.name={COMMITTER[0]}", "-c", f"user.email={COMMITTER[1]}", "commit-tree",
@@ -378,13 +378,13 @@ def _pin_times_out_of_index(folder: Path, paths: list) -> bool:
     """Whatever `add` staged of `paths`, no pin time (`state.is_pin_time`) stays staged: a `.gitignore` may be missing, a
     link, or undone by a `!*.at` lower down, and a pin time is each hub's own (7.4, ticket 203). False: git refused."""
     staged = [p for p in _git(folder, "ls-files", "-z", "--", *paths).stdout.split("\0") if state.is_pin_time(p)]
-    return not staged or not _unstage(folder, staged, _locking)
+    return not staged or _unstage(folder, staged, _locking)
 
 
-def _unstage(folder: Path, paths: list, run) -> int:
-    """`paths` out of an index, by `run` (`_locking` for the repo's, `_git` on an index of the hub's own): git's exit code.
+def _unstage(folder: Path, paths: list, run) -> bool:
+    """`paths` out of an index, by `run` (`_locking` for the repo's, `_git` on an index of the hub's own): whether git took them.
     On stdin, never the command line: a store holds any number of pin times, and a command line has a bound (ticket 213 A)."""
-    return run(folder, "update-index", "-z", "--force-remove", "--stdin", given="".join(p + "\0" for p in paths)).returncode
+    return run(folder, "update-index", "-z", "--force-remove", "--stdin", given="".join(p + "\0" for p in paths)).returncode == 0
 
 
 def root_config(root) -> "config.RootConfig":

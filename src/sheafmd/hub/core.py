@@ -111,7 +111,7 @@ class Entry:
     log: list = field(default_factory=list)        # the render log of the last build
     warnings: list = field(default_factory=list)   # link-rule warnings not yet handed to a command
     first: bool = True                             # no build has run yet
-    built: int = 0               # the settings change (`Hub._settings_asked`) its last build read: older, a render rebuilds (199, 213 C)
+    settings_built: int = 0      # the settings change (`Hub._settings_seq`) its last build read: older, a render rebuilds (199, 213 C)
     images_scope: tuple | None = None              # the image rule its last build read: `Hub._image_scope` (9.9)
 
     where: Callable[[], tuple] | None = None     # (the root's folder, the path in it) of its file now: what is opened beneath
@@ -206,8 +206,8 @@ class Hub:
         # a second open of the same address waits for the first one's instead of rendering again.
         self._making: dict[str, _Making] = {}
         # Each change of a document's render settings, numbered (213 C): address -> the number of its last change, under the
-        # hub's lock. A render answers only once the page was built from its own settings or newer ones (`Entry.built`).
-        self._settings_asked: dict[str, int] = {}
+        # hub's lock. A render answers only once the page was built from its own settings or newer ones (`Entry.settings_built`).
+        self._settings_seq: dict[str, int] = {}
         self._settings_tick = 0
         self.index_bus = Bus()                   # the index streams (SPEC 8.8)
         self._index_opening = threading.Lock()   # one index stream opens at a time
@@ -627,7 +627,7 @@ class Hub:
             if other is None:
                 # Made before it is marked: a new entry that raises (a private root not seen) leaves no mark to wait on.
                 e = self._new_entry(address, name, root, path)
-                e.built = self._settings_asked.get(address, 0)      # its first render reads the settings recorded by now
+                e.settings_built = self._settings_seq.get(address, 0)      # its first render reads the settings recorded by now
                 mine = self._making[address] = _Making(e, root)
         if other is not None:                 # another thread makes it: its entry, once rendered, or a new try
             other.done.wait()
@@ -665,6 +665,8 @@ class Hub:
         store, and its forget takes out only the texts it put there itself, never a version the page brings back to the
         address before that render ends."""
         m = self._making.get(address)
+        if address not in self.entries:     # no page held there any more: its next one is built from the settings it reads
+            self._settings_seq.pop(address, None)
         if m is not None:
             m.dropped = True
             with m.lock:                     # a detach of `moved_remote` may run at once, without the hub's lock
@@ -1142,10 +1144,10 @@ class Hub:
                     # A rebuild reads the settings when it has the document's lock, so it builds from those recorded by
                     # now or newer ones: once it is done, `built` says so (213 C).
                     with self._lock:
-                        asked = self._settings_asked.get(address, 0)
+                        asked = self._settings_seq.get(address, 0)
                     e.live.rebuild()
                     with self._lock:
-                        e.built = max(e.built, asked)
+                        e.settings_built = max(e.settings_built, asked)
             except FileNotFoundError:          # deleted after the look above
                 raise gone from None
             with self._lock:
@@ -1189,13 +1191,13 @@ class Hub:
             old, new = self.docs.change(address, settle)
             if any(old.get(k) != new[k] for k in SETTING_KEYS) or old.get("target") != new.get("target"):
                 self._settings_tick += 1
-                self._settings_asked[address] = self._settings_tick
+                self._settings_seq[address] = self._settings_tick
             existed = address in self.entries or address in self._making
         e = self.entry(address)
         # Rebuilt unless the page was built from these settings or newer ones: settings another render recorded just before
         # (the same as these: old == new) may not be built yet, nor ones whose rebuild failed (213 C, 199).
         with self._lock:
-            rebuild = existed and e.built < self._settings_asked.get(address, 0)
+            rebuild = existed and e.settings_built < self._settings_seq.get(address, 0)
         return e, rebuild, existed
 
     @contextmanager
@@ -1297,6 +1299,8 @@ class Hub:
             except Exception:
                 self.record_exception("tell-end-failed")
             popped = [(a, self.entries.pop(a)) for a in held]      # all of them: no entry is made while the hub's lock is held
+            for a in [a for a in self._settings_seq if a.startswith(prefix)]:
+                del self._settings_seq[a]
             # A Tell still running on a document that is gone: its dot, its
             # answer and its wait have nowhere to go, and the name may be taken at once. Also
             # when the registry no longer holds the root (another process forgot it, and this hub

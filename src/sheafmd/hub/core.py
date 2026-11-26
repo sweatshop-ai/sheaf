@@ -700,6 +700,8 @@ class Hub:
         e.live.agent_tells = lambda: self.waiting_tells.waits(address, None, sweep=False)   # the hub person's (9.8)
         e.live.tells_lock = self.waiting_tells._lock
         e.live.keep_page = lambda: self._keep_page(e)
+        e.live.same_root = lambda: ((r := self.roots.get(roots_mod.Address.parse(address).root)) is not None
+                                    and r.id == e.root_id)
         return e
 
     @staticmethod

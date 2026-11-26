@@ -94,9 +94,18 @@ class DocumentService:
         """The write `change(text, opened)` makes through the adapter, under its lock, recorded as this session's.
         A `Conflict` the change raises is the outcome `conflict`. Returns the outcome; `hooks` are the adapter's own."""
         name = "the file"
-        landed = []                 # set once the file is written: a policy error of a hook after that is not a refusal
-        after = hooks.pop("between", None)
-        hooks["between"] = lambda: (landed.append(1), after() if after is not None else None)
+        late = []               # a policy error of a hook, which runs after the file is written: no refusal, and the record is made first
+
+        def guarded(hook):
+            def run(*args):
+                try:
+                    return hook(*args)
+                except rda.POLICY as e:
+                    late.append(e)
+            return run
+        for k in ("between", "kept"):
+            if k in hooks:
+                hooks[k] = guarded(hooks[k])
         try:
             here, name = self.adapter.pinned()
             if not self.adapter.accepts(name):
@@ -105,12 +114,12 @@ class DocumentService:
         except rda.Refused as r:
             return rda.refused(r.reason, r.block)
         except rda.POLICY as e:
-            if landed:
-                raise
             return rda.policy_refusal(name, e)
         if outcome["outcome"] == "written":
             self._record(old, new, session)
             outcome["blocks"] = self._ids(new)
+        if late:
+            raise late[0]
         return outcome
 
     def settle(self, current: str, markdown: str, held_ids, base: str, session: str, base_text: str | None = None,

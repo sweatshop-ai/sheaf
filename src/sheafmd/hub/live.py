@@ -104,6 +104,9 @@ class LiveDocument:
         self.tells_lock = contextlib.nullcontext()      # the lock of the Tells' file: held while `telling` is read and published (`_publish_telling`)
         # Keeps the page served now and answers a callable that puts it back: a torn read's render replaced it (ticket 204 C).
         self.keep_page = lambda: (lambda: None)
+        # Whether the root this document was made for is still the one its name holds: a root forgotten and its name taken
+        # by another folder is not (the hub sets it). A render after a write is kept only while it is.
+        self.same_root = lambda: True
         # The question the told session put to its person in its own chat, while it waits for
         # them there ("" when it is not waiting).
         self._question = ""
@@ -119,14 +122,18 @@ class LiveDocument:
             return self._entry.read()
         return self._file().read_text(encoding="utf-8")
 
-    def _update(self, change, move=None, remember=False):
+    def _update(self, change, move=None, remember=False, pin=None):
         """The write of this document's file, through its Markdown-file adapter; `change(text, opened)`. With an entry
         the file is opened once beneath its root, judged, read from that descriptor and written through it;
-        `opened` is that open, None where the document has no entry. With `remember`, the adapter calls `_after_write` and
+        `opened` is that open, None where the document has no entry, and `pin`, if given, receives the file the write acts
+        on (asked once). With `remember`, the adapter calls `_after_write` and
         then `_remember` (the Versions store) on the text written, as a save and a rewrite do. Returns (old text, new text)."""
         hooks = {"between": self._after_write, "kept": self._remember} if remember else {}
         if self._entry is None:
-            _, old, new = self._adapter.apply(change, move=move, **hooks)
+            here, _ = self._adapter.pinned()
+            if pin is not None:
+                pin.append(here._file())
+            _, old, new = here.apply(change, move=move, **hooks)
             return old, new
 
         def judged(t, op):
@@ -238,17 +245,21 @@ class LiveDocument:
             return None
         return st.st_mtime_ns, st.st_size
 
-    def _rerender(self, remember: bool = True):
-        # One read for both. Reading the file once for the page and again for the state lets a
-        # write land in between (a session's reply right after its own edit, while pandoc
-        # runs). The page would then carry a hash the hub does not know, the watcher would see
-        # its own hash and never rebuild, and every new comment would fail with "select the text again".
+    def _rerender(self, remember: bool = True, same=None):
+        """Render the page from the file and keep what was read. With `same` (a save's), a root that was let go, or whose
+        name another folder took, while it read and rendered is not the document's any more: the page served is put back,
+        nothing is kept, and False says so (its tabs hear `gone` of the forget, never the text of the folder that took the name)."""
+        put_back = self.keep_page() if same is not None else None
         text = self._read()
         branch = self._render(text)
+        if same is not None and (self._detached or not same()):
+            put_back()
+            return False
         self._text, self._hash = text, rds.md_hash(text)
         self._branch = branch if isinstance(branch, str) else None
         if remember:
             self._remember(text)
+        return True
 
     def _telling_view(self):
         """`[{id, to, state}]` (SPEC 8.5): the threads told to the session, `working`, or `waiting` while it
@@ -334,12 +345,12 @@ class LiveDocument:
             before = self._text
             got = {}
 
-            here = self._file() if self._entry is None else None     # asked before the lock, for the diagnostics label only
+            pinned = []                 # the file a document with no entry writes, asked once
 
             def change(text, op):
                 # The file as this save opened it, never found again: a root forgotten while the save waited for the lock
                 # leaves nothing to look up (ticket 26 D). For the edit alone: the seam and the Versions record run after it.
-                token = rde.DOC.set(Path(op.top) / op.rel if op is not None else here)
+                token = rde.DOC.set(Path(op.top) / op.rel if op is not None else pinned[0])
                 try:
                     return decide(text)
                 finally:
@@ -368,20 +379,20 @@ class LiveDocument:
                 return guard(text, new, got["report"]["toggled"]) if guard is not None else new
             # The version check happens inside change(), under the file lock: the CLI and an
             # Tell job write this file from other processes.
-            _, new_text = self._update(change, move=move, remember=True)
+            _, new_text = self._update(change, move=move, remember=True, pin=pinned)
             report = got["report"]
             # A root forgotten while the save waited has no page to render for, and its file is not found again: the
             # edit is written and answered (its tabs heard `gone`), never failed by a look-up after it (ticket 26 D).
             if report["changed"] and not self._detached:
                 try:
-                    self._rerender()
-                    # One event for the whole write: the watcher compares the hash just taken and
-                    # will say nothing more of it. Measured from the text the tabs hold, or, when
-                    # someone wrote between our write and the render (the watcher will not see
-                    # that either), from the text we wrote: the tab that saved holds that one.
-                    raced = self._hash != rds.md_hash(new_text)
-                    start = new_text if raced else before
-                    self._announce(self._snapshot(self._text), start, **({"rid": rid} if rid is not None else {}))
+                    if self._rerender(same=self.same_root):
+                        # One event for the whole write: the watcher compares the hash just taken and
+                        # will say nothing more of it. Measured from the text the tabs hold, or, when
+                        # someone wrote between our write and the render (the watcher will not see
+                        # that either), from the text we wrote: the tab that saved holds that one.
+                        raced = self._hash != rds.md_hash(new_text)
+                        start = new_text if raced else before
+                        self._announce(self._snapshot(self._text), start, **({"rid": rid} if rid is not None else {}))
                 except NotFound:
                     if not self._detached:      # a root forgotten after the check above: its detach came first
                         raise

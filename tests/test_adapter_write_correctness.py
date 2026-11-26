@@ -188,15 +188,85 @@ def test_a_resolver_that_raises_a_policy_refusal_is_refused_by_the_adapter_and_t
     assert DocumentService(a).write(lambda t, op: "x\n")["outcome"] == "refused"
 
 
-def test_a_policy_error_of_a_hook_after_the_write_is_not_a_refusal_and_the_write_is_still_recorded(tmp_path):
+def test_a_policy_error_of_a_hook_after_the_write_is_not_a_refusal_and_the_session_record_is_made(tmp_path):
+    """1: the file is written when the hook raises, so the error reaches the caller, and the page session's record of the
+    write is made first: its next save from that base is its own, never a conflict."""
     from sheafmd.document import DocumentService
     md = tmp_path / "a.md"
     md.write_text(DOC, encoding="utf-8")
     svc = DocumentService(rda.MarkdownFileAdapter(md))
     svc.read()
+    kept = []
 
     def late():
         raise beneath.Escapes("a.md")
     with pytest.raises(beneath.Escapes):
-        svc.write(lambda t, op: "Changed.\n", kept=lambda new: None, between=late)
+        svc.write(lambda t, op: "Changed.\n", "s1", kept=kept.append, between=late)
     assert md.read_text(encoding="utf-8") == "Changed.\n"
+    assert kept == ["Changed.\n"]                   # the hook after the failing one still ran
+    assert svc._own(rds.md_hash(DOC), rds.md_hash("Changed.\n"), "s1")
+    assert not svc._own(rds.md_hash(DOC), rds.md_hash("Changed.\n"), "s2")
+
+
+def test_a_save_without_an_entry_names_in_its_diagnostics_the_file_it_wrote(tmp_path):
+    """3: the path was asked for the label and again for the write; two answers named two files."""
+    from sheafmd.edit import DOC as DIAG
+    from sheafmd.hub.live import LiveDocument
+    a, b = tmp_path / "a.md", tmp_path / "b.md"
+    a.write_text(PLAN, encoding="utf-8")
+    b.write_text(PLAN, encoding="utf-8")
+    state = {"n": 0}
+
+    def find():
+        state["n"] += 1
+        return a if state["n"] == 1 else b
+    live = LiveDocument(find, render=lambda text: None, publish=lambda *x, **k: None)
+    state["n"] = 0
+    seen = []
+    import sheafmd.edit as rde
+    real = rde.apply_edits
+
+    def spy(text, edits):
+        seen.append(DIAG.get())
+        return real(text, edits)
+    rde.apply_edits = spy
+    try:
+        text = a.read_text(encoding="utf-8")
+        i = next(n for n, x in enumerate(split_md_blocks(text)) if x.content.startswith("First paragraph"))
+        live.save(rds.md_hash(text), [{"i": i, "html": "<p>Edited words.</p>"}])
+    finally:
+        rde.apply_edits = real
+    assert seen == [a]
+    assert "Edited words." in a.read_text(encoding="utf-8") and "Edited words." not in b.read_text(encoding="utf-8")
+
+
+def test_a_root_forgotten_and_its_name_taken_between_the_write_and_the_render_tells_the_tabs_nothing_of_the_new_root(
+        world, work, tmp_path):
+    """2: the render after the write read the file by the name, so a root forgotten and its name taken by another folder
+    in between gave the old tabs the new root's text. The save is written and answered; the tabs hear `gone` only."""
+    hub = world.hub
+    e = hub.entry("work/start.md")
+    f = work / "start.md"
+    text = f.read_text(encoding="utf-8")
+    i = next(n for n, b in enumerate(split_md_blocks(text)) if b.content.startswith("First paragraph"))
+    sub = e.bus.subscribe()
+    sub.drain()
+    finishes = []
+    real = e.live._read
+
+    def read():
+        # between the write and the re-render's read: the root is let go and the name is taken by another folder
+        finishes.append(hub.let_go_root("work")[1])
+        other = tmp_path / "again" / "work"
+        other.mkdir(parents=True)
+        (other / "start.md").write_text("# Other\n\nReplacement words.\n", encoding="utf-8")
+        assert hub.roots.for_document(other / "start.md").name == "work"
+        return real()
+    e.live._read = read
+    out = e.live.save(rds.md_hash(text), [{"i": i, "html": "<p>Edited words.</p>"}])
+    assert out["changed"] and "Edited words." in f.read_text(encoding="utf-8")
+    finishes[0]()
+    events = sub.drain()
+    assert "Replacement" not in repr(events)
+    assert "Replacement" not in e.live._text
+    assert [n for n, _ in events][-1:] == ["gone"], events

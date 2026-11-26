@@ -215,7 +215,8 @@ TOOLS = {
     "block_types": {
         "description": "Every Block type that may be inserted in a page, each with its `attributes` (allowed `values` "
                        "and `default`), a one-line `description` and an `example` in Markdown; and `containers`, the "
-                       "types each container (the document, a callout, a quote, a list item) may hold. `child_types` describes a "
+                       "types each container (the document, a callout, a quote, a list item) may hold. An attribute whose `default` is empty is left out of "
+                       "the block to get its default (equal shares, for a `size`); never write it as empty. `child_types` describes a "
                        "type that may only stand inside another (a `column`, in `columns`), never on its own.",
         "annotations": {"readOnlyHint": True},
         "properties": {"doc": _DOC},

@@ -27,6 +27,8 @@ class WriteFailed(RuntimeError):
 @functools.lru_cache(maxsize=1)
 def _api_version() -> list:
     got = _pandoc.run(["-f", "markdown", "-t", "json"], "")
+    if got.returncode != 0:
+        raise WriteFailed(got.stderr.strip()[:200] or "pandoc exited with an error")
     try:
         return json.loads(got.stdout)["pandoc-api-version"]
     except (ValueError, KeyError):

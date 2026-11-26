@@ -353,3 +353,34 @@ def test_block_types_describes_a_column_as_a_child_only_type(browser, page):
     col = got["child_types"][0]
     assert [a["name"] for a in col["attributes"]] == [a.name for a in decl.DECLARED["column"].attrs]
     assert "column" not in {t["type"] for t in got["types"]}
+
+
+def test_an_attribute_with_an_empty_default_is_not_written_in_the_example_and_the_tool_says_to_leave_it_out(browser, page):
+    got = ok(browser, "block_types", doc=DOC)
+    for t in got["types"] + got["child_types"]:
+        for a in t["attributes"]:
+            if a["default"] == "":
+                assert f'{a["name"]}=""' not in t["example"], (t["type"], a["name"])
+    tool = next(t for t in mcp.TOOLS.values() if t is mcp.TOOLS["block_types"])
+    assert "left out" in tool["description"] and "never write it as empty" in tool["description"]
+    col = got["child_types"][0]
+    assert "leave it out" in col["description"] and 'size=""' not in col["example"]
+
+
+def test_a_pandoc_probe_that_fails_but_prints_a_version_is_refused_and_not_cached(browser, plan, monkeypatch):
+    from sheafmd import _pandoc
+    from sheafmd.blocks import describe
+    plan.write_text("> A nested paragraph.\n", encoding="utf-8")
+    describe._api_version.cache_clear()
+    describe._written.cache_clear()
+    real = _pandoc.run
+
+    def failing(args, text, *a, **kw):
+        got = real(args, text, *a, **kw)
+        if args == ["-f", "markdown", "-t", "json"]:
+            got.returncode = 1                                      # a version on stdout, but pandoc said it failed
+        return got
+    monkeypatch.setattr(_pandoc, "run", failing)
+    assert "could not be written" in refused(browser, "blocks", doc=DOC)
+    monkeypatch.setattr(_pandoc, "run", real)
+    assert ok(browser, "blocks", doc=DOC)["blocks"][0]["children"][0]["markdown"] == "A nested paragraph."

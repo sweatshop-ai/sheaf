@@ -139,11 +139,11 @@ DESCRIPTIONS = {
                 '::: {.callout tone="info"}\nA note for the reader.\n:::'),
     "columns": ("A row of columns side by side; it holds `column` blocks only, each with a `size` (its share of the row, in %).",
                 '::: {.columns}\n::: {.column size="50"}\nLeft.\n:::\n::: {.column size="50"}\nRight.\n:::\n:::'),
-    "column": ("One column of a `columns` row: it only ever stands inside one, never on its own; `size` is its share of the row, in %.",
+    "column": ("One column of a `columns` row: it only ever stands inside one, never on its own; `size` is its share of the row, in %; leave it out for an equal share.",
                '::: {.column size="50"}\nText in a column.\n:::'),
     "box": ("A box around plain blocks that carries only layout: `align` its text and `pad` its padding.",
             '::: {.box align="center" pad="m"}\nText in a box.\n:::'),
-    "image": ("An image on a line of its own; `size` is its share of its container in %, `align` its place in it.",
+    "image": ("An image on a line of its own; `size` is its share of its container in %, `align` its place in it; leave out what you do not set.",
               '::: {.image size="50" align="center"}\n![A description](https://example.org/a.png)\n:::'),
 }
 # As `blocks` reports them (tree.py): a heading's level is a number, a list's `ordered` a boolean; `lang` is free text.

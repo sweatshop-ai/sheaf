@@ -923,6 +923,7 @@ def test_the_settings_count_of_a_page_goes_with_its_page(world, work):
     world.hub.forget_root("work")
     assert not world.hub._settings_seq
 
+
 def test_an_open_after_its_root_was_forgotten_and_its_name_taken_never_waits_for_the_old_roots_render(world, work, put,
                                                                                                     held_pandoc, tmp_path):
     """213 D (Codex round 9 of #679): the mark of an entry being made was the address alone. A root forgotten during a

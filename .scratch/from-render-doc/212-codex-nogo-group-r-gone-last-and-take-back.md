@@ -28,3 +28,12 @@
 - A hard link made after the link-count check, or an open already past its permission check as the mode changed, is not kept out.
 - Any other holder, the hub's own reader included, refuses the lease: the file then goes back to its name, without its mark.
 - A hub that dies between the mode change and the delete leaves the hidden file at mode none.
+
+## Known limits (Codex recheck pass 8)
+
+Recorded, no new PR: the stop criterion of 2026-11-26 fixes only defects reachable in normal use, or that lose data without a constructed race.
+
+- #700 round 04:
+  > FINDING: [SERIOUS] `src/sheafmd/mcp.py:1689` — `_lease_held()` is only a snapshot. An `open()` already past the new mode check can begin breaking the lease immediately afterward; rollback then unlinks and closes the file, allowing the blocked opener to resume with an unlinked descriptor whose writes are lost. Linux performs the lease break late in the [open path](https://github.com/torvalds/linux/blob/master/fs/open.c).
+- #700 round 04:
+  > FINDING: [SERIOUS] `src/sheafmd/mcp.py:1684` — The lease does not protect namespace operations. Between the link-count check and pathname unlink, another process can hard-link the inode, leaving that link mode `000`, or rename the sibling and replace it, causing rollback to unlink the replacement. Leases mediate only `open` and `truncate`, per [Linux lease semantics](https://www.man7.org/linux/man-pages/man2/F_SETLEASE.2const.html).

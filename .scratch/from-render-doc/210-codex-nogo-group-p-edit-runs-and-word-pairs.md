@@ -27,3 +27,10 @@
 ## Notes
 
 - Review of #695: Matt's code review (standards: no hard violations, naming minors applied; spec: one SERIOUS regression in the first version of B, a deleted escape handed to a typed `:smile:`, fixed test first), Codex b on the branch and on each fix commit (P2 only, see B3 and B4), and the gate's rounds 01 (Opus fallback GO), 02 (NO-GO: the same regression in a cut diff, fixed test first) and 03 (fix pass, GO).
+
+## Known limits (Codex recheck pass 8)
+
+Recorded, no new PR: the stop criterion of 2026-11-26 fixes only defects reachable in normal use, or that lose data without a constructed race.
+
+- #695 round 04:
+  > FINDING: [SERIOUS] src/sheafmd/edit.py:1688 — An unmatched adjacent token does not prove the escaped shortcode moved: `SequenceMatcher` can leave one of many identical tokens unmatched. For source `a \:smile: ` followed by 800 `a` words, edited to 801 `a` words followed by `:smile: :smile:`, this fallback incorrectly transfers the deleted escape to the first newly typed shortcode, saving it as literal text instead of an emoji.

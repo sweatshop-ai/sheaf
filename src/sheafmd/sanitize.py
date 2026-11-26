@@ -286,11 +286,7 @@ def _mount_img_ok(value: str) -> bool:
 
 
 def _mount_link_ok(value: str) -> bool:
-    v = _STRIP_CONTROL.sub("", value)
-    if "\\" in v:
-        return False
-    m = _SCHEME.match(v)
-    return not m or m.group(1).lower() in _MOUNT_LINK_SCHEMES
+    return declarations.link_ok(value)          # one link rule for a mounted link and for a button's
 
 
 def _mount_attrs(tag, name: str, log: list[str]) -> None:

@@ -412,7 +412,10 @@ class LiveDocument:
             def change(text, opened=None):
                 token = rde.DOC.set(self._file())
                 try:
-                    new = self._service.settle(text, markdown, ids, base_hash, session)
+                    try:
+                        new = self._service.settle(text, markdown, ids, base_hash, session)
+                    except rda.Refused as r:         # a save that breaks a Rich block or changes a locked one: a 409, the file unchanged
+                        raise rde.EditError(f"refused: {r.reason}") from None
                     if new == text:
                         got["changed"] = False
                         return text

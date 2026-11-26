@@ -182,3 +182,13 @@ def test_a_comment_survives_every_save_of_a_page_that_never_heard_of_it(on, brow
         assert r["conflict"] is False
         now = doc.read_text(encoding="utf-8")
         assert f"One, {word}." in now and "Why?" in now
+
+
+def test_a_markdown_save_that_breaks_a_callout_is_a_409_and_the_file_is_unchanged(on, browser, plan):
+    text = 'Intro.\n\n::: {#c1 .callout tone="warning"}\nBe careful.\n:::\n'
+    plan.write_text(text, encoding="utf-8")
+    j = browser.get(f"/_/blocks?doc={DOC}").json()
+    ids = [b["id"] for b in j["blocks"]]
+    r = save(browser, text.replace('tone="warning"', 'tone="warning" onclick="x"'), j["hash"], ids)
+    assert r.status == 409 and "refused" in r.text
+    assert plan.read_text(encoding="utf-8") == text

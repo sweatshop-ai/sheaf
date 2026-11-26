@@ -11,8 +11,8 @@
 
 ## Evidence
 
-- Page tests ran on t-compute over ssh (not in CI: the Tests step failed on `test_land_root` first, so the page steps were skipped in run 45718830657). `test_page_svg_zoom.py`: 8 passed. Whole `tests/page`, Chromium: 1158 passed, 0 failed.
-- Firefox and WebKit cannot be installed on t-compute (Playwright does not support ubuntu26.04); those variants were not run for the other page tests.
+- Page tests ran on a self-hosted runner over ssh (not in CI: the Tests step failed on `test_land_root` first, so the page steps were skipped in run 45718830657). `test_page_svg_zoom.py`: 8 passed. Whole `tests/page`, Chromium: 1158 passed, 0 failed.
+- Firefox and WebKit cannot be installed on that runner (Playwright does not support ubuntu26.04); those variants were not run for the other page tests.
 - `test_enter_at_the_end_of_a_task_item_then_a_comment_on_the_new_words_deleted_keeps_the_comment_and_throws_nothing` is flaky: 1 failure in 15 runs on the merge-base and 1 in 15 on this branch.
 - Review: Matt's code-review once; boss_review round 1 was the Opus fallback only (Codex gave no answer): provisional GO.
 

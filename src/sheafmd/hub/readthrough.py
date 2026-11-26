@@ -76,17 +76,19 @@ def read_only_doc(got: dict) -> dict:
             "target": None, "targets": [], "capabilities": [], "lines": {}, "telling": []}
 
 
-def agency_config(config: dict, doc: str) -> dict:
+def agency_config(config: dict, doc: str, member: str) -> dict:
     """The meta block of a page read through, or the config of its mount, with what the page script acts on set by this hub:
     the address it reads and writes is `doc`, the one this hub asked for, and it has no actions, no editor and no agent. The
     script runs on this origin with the member's cookie, so a client tiroir that named another address or an action would
     have this hub's page act on them (SPEC 9.9, ticket 190). A session's `work` and `way_back` are dropped, as `read_only_doc` drops
-    them from the doc state; the client's own keys the script reads only for drawing are kept."""
+    them from the doc state; the client's own keys the script reads only for drawing are kept. Whose page it is, `proxy` and
+    `member`, is this hub's to say too: the script keeps unsent drafts in this origin's storage under them, so a client that
+    named one member for all, or no proxy, would have the agency's members share each other's drafts (ticket 202 A)."""
     return {**{k: v for k, v in config.items() if k not in ("way_back", "work")}, "doc": doc, "actions": [], "edit": False,
-            "editable": [], "agent": None, "can": [], "targets": [], "lines": {}}
+            "editable": [], "agent": None, "can": [], "targets": [], "lines": {}, "proxy": True, "member": member}
 
 
-def agency_meta(html: str, doc: str | None) -> str:
+def agency_meta(html: str, doc: str | None, member: str) -> str:
     """A client's HTML answer, of any status, with its meta block set by this hub (`agency_config`): every script `adopt` keeps
     as the data block, by the same matcher, whatever spelling of the tag the client hub chose. The first is the one the page
     script reads, and it becomes the agency's block in the form the hub writes; the others go. A first block that is no JSON
@@ -107,7 +109,7 @@ def agency_meta(html: str, doc: str | None) -> str:
             meta = {}
         if not isinstance(meta, dict):
             meta = {}
-        return f'<script {_META_ATTRS}>' + json.dumps(agency_config(meta, doc)).replace("<", "\\u003c") + "</script>"
+        return f'<script {_META_ATTRS}>' + json.dumps(agency_config(meta, doc, member)).replace("<", "\\u003c") + "</script>"
     return _SCRIPT_RE.sub(one, html)
 
 

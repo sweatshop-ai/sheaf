@@ -13,6 +13,7 @@ Nothing is written unless the door accepted the token, and the token is never pr
 the home folder at the time of the call, so a test that sets HOME is honoured. The keyring is `system_store()`, which a
 test replaces.
 """
+import hashlib
 import json
 import os
 import re
@@ -79,15 +80,27 @@ def system_store():
 _WARNED: set[str] = set()      # the credential files already warned about, by name
 
 
+_TEMP = ".new"                # the file store writes NAME.new, then moves it to NAME
+_NAME_MAX = 255 - len(_TEMP)  # a file name has 255 bytes on Linux and macOS, the temp name among them
+
+
 def peer_credential_name(url: str) -> str:
     """The name of the file that holds the token for the peer tiroir at `url`, in a service's credentials folder (systemd
     `LoadCredential=NAME:PATH` makes it `$CREDENTIALS_DIRECTORY/NAME`): one safe word per origin and port, `sheaf-peer-<host>`
     then `_p<port>` when the origin names one. No two origins share it, or the token kept for one peer would be sent to the
-    other (ticket 190): a character of the host outside `[a-z0-9.-]` is written `_` and two hex digits for each of its bytes."""
-    parts = urllib.parse.urlsplit(origin_of(url))
+    other (ticket 190): a character of the host outside `[a-z0-9.-]` is written `_` and two hex digits for each of its bytes.
+    A name that would leave no room in the 255 bytes of a file name for the store's `.new` (a long host, above all a non-ASCII
+    one, three characters a byte) is cut and ends in `_h` and the SHA-256 of the origin: `_h` is no escape and no port, so no
+    shorter name ends so (ticket 202 B)."""
+    origin = origin_of(url)
+    parts = urllib.parse.urlsplit(origin)
     host = parts.netloc[:-len(f":{parts.port}")] if parts.port else parts.netloc
     word = "".join(c if re.fullmatch(r"[a-z0-9.-]", c) else "".join(f"_{b:02x}" for b in c.encode()) for c in host)
-    return "sheaf-peer-" + word + (f"_p{parts.port}" if parts.port else "")
+    name = "sheaf-peer-" + word + (f"_p{parts.port}" if parts.port else "")
+    if len(name) <= _NAME_MAX:
+        return name
+    digest = "_h" + hashlib.sha256(origin.encode()).hexdigest()
+    return name[:_NAME_MAX - len(digest)] + digest
 
 
 def _credential_file(url: str) -> str | None:
@@ -145,7 +158,7 @@ def use_peer_file(url: str, token: str, folder: Path) -> Path:
     _check_peer_token(token)
     folder = Path(folder)
     target = folder / peer_credential_name(origin)
-    tmp = folder / (target.name + ".new")
+    tmp = folder / (target.name + _TEMP)
     made = False                     # the temp is ours to remove only once we made it: a leftover link is left as it was
     try:
         folder.mkdir(mode=0o700, parents=True, exist_ok=True)

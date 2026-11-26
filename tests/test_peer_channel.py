@@ -362,6 +362,28 @@ def test_no_two_peer_origins_share_a_credential_name():
     assert all(re.fullmatch(r"[A-Za-z0-9._-]+", n) for n in names)
 
 
+NO_KEYRING = type("NoKeyring", (), {"get": lambda self, service, user: None})()
+LONG_HOSTS = ["https://" + "é" * 50 + ".example", "https://" + "é" * 50 + ".example:8443", "https://" + "é" * 49 + "e.example",
+              "https://" + ".".join(["a" * 63, "b" * 63, "c" * 63, "d" * 61]) + ":65535",
+              "https://" + ".".join(["a" * 63, "b" * 63, "c" * 63, "d" * 60]) + "e:65535"]
+
+
+def test_a_credential_name_fits_a_file_name_for_a_long_or_non_ascii_host_and_stays_one_per_origin():
+    # Ticket 202 B (Codex on #655): three characters per byte of a non-ASCII host passed the 255-byte limit of a file name.
+    names = [connect.peer_credential_name(o) for o in LONG_HOSTS]
+    assert all(len(n.encode()) <= 255 and re.fullmatch(r"[A-Za-z0-9._-]+", n) for n in names)
+    assert len(set(names)) == len(LONG_HOSTS) and all(n.startswith("sheaf-peer-") for n in names)
+    assert connect.peer_credential_name("https://" + "É" * 50 + ".EXAMPLE") == names[0]
+    assert connect.peer_credential_name(PEER) == "sheaf-peer-other.example.com"          # a short name is the one it was
+
+
+def test_a_peer_with_a_long_host_is_kept_in_the_file_store_and_read_back(sheaf, stdin, monkeypatch, tmp_path):
+    stdin(FAKE + "\n")
+    assert sheaf("peer", "use", LONG_HOSTS[0], "--store", "file", "--dir", tmp_path).code == 0
+    monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))
+    assert connect.peer_token_for(LONG_HOSTS[0], store=NO_KEYRING) == FAKE
+
+
 def test_a_credential_file_of_the_old_port_name_is_not_read_for_the_other_peer(monkeypatch, tmp_path):
     (tmp_path / "sheaf-peer-a.example-8443").write_text(FAKE)
     monkeypatch.setenv("CREDENTIALS_DIRECTORY", str(tmp_path))

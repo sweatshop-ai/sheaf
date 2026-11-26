@@ -209,9 +209,10 @@ def _line_kept(line: str, was: str) -> float:
 def _source_runs_kept(soup, source) -> set:
     """The ids of the <br> in `soup` that make up a run of the source's own (`_source_break_runs`). The page's runs
     and the source's are paired in order, each pair of the same length and with some words of a line beside it still
-    there (`_line_kept`); the pairing keeps the most of those lines. A run of the source stays the source's when both
-    lines beside it were edited, a new run takes no pair from a run that kept more of its lines, before it or after
-    it, and a new run with none of the source's words beside it is no run of the source's."""
+    there (`_line_kept`); the pairing has the most pairs, and among those keeps the most of those lines. A run of
+    the source stays the source's when both lines beside it were edited, a new run takes no pair from a run that kept
+    more of its lines, before it or after it, one run close to another's lines takes no pair from two that keep fewer,
+    and a new run with none of the source's words beside it is no run of the source's."""
     page_runs = []
     for p in soup.find_all("p"):
         if _page_own(p):
@@ -222,16 +223,17 @@ def _source_runs_kept(soup, source) -> set:
     had = _source_break_runs(source)
     if not page_runs or not had:
         return set()
-    # best[i][j]: the most lines kept by a pairing of page_runs[i:] with had[j:], and whether it pairs i with j
-    best = [[0.0] * (len(had) + 1) for _ in range(len(page_runs) + 1)]
+    # best[i][j]: (pairs, lines kept) of the best pairing of page_runs[i:] with had[j:]; paired: whether it pairs i, j
+    best = [[(0, 0.0)] * (len(had) + 1) for _ in range(len(page_runs) + 1)]
     paired = [[False] * len(had) for _ in range(len(page_runs))]
     for i in range(len(page_runs) - 1, -1, -1):
         for j in range(len(had) - 1, -1, -1):
             best[i][j] = max(best[i + 1][j], best[i][j + 1])
             (n, before, after), (m, was_before, was_after) = page_runs[i][0], had[j]
             lines = _line_kept(before, was_before) + _line_kept(after, was_after)
-            if n == m and lines > 0 and best[i + 1][j + 1] + lines > best[i][j]:
-                best[i][j] = best[i + 1][j + 1] + lines
+            pairs, kept_lines = best[i + 1][j + 1]
+            if n == m and lines > 0 and (pairs + 1, kept_lines + lines) > best[i][j]:
+                best[i][j] = (pairs + 1, kept_lines + lines)
                 paired[i][j] = True
     kept, i, j = set(), 0, 0
     while i < len(page_runs) and j < len(had):

@@ -38,6 +38,15 @@ def test_a_new_run_with_none_of_the_source_runs_words_beside_it_still_splits(pag
     assert got == md, got
 
 
+def test_two_runs_that_each_keep_a_word_are_both_the_sources_over_one_that_keeps_more():
+    # Codex round 4: the pairing kept the most words, so one run close to the source's second run took it and left
+    # the source's two runs with one pair; it keeps the most pairs first now
+    src = "Alpha one two\\\n\\\nBeta three four\\\n\\\nGamma five six\n"
+    page = "<p>Beta three four alpha<br>\n<br>\nGamma five six<br>\n<br>\nGamma end</p>"
+    got = rde.html_block_to_md(page, source=src, strays=[])
+    assert got == "Beta three four alpha\\\n\\\nGamma five six\\\n\\\nGamma end", got
+
+
 # ── B: an empty element that is a link target is no remnant ──
 # `remnant` took every empty inline element but an image or a box for what an emptied half leaves, and the
 # promotion of the split-off half deleted it: an `<a id>` (a link target) was lost. Pandoc writes an empty target

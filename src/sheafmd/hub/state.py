@@ -43,7 +43,7 @@ _PIN_CLOCK_AHEAD = 60           # seconds a pin time may lie ahead of this clock
 PINNED_AT = _PINNED_AT = ".at"              # in a root's own store, beside a pin `<hash>.md`: when it was last pinned, ns since the epoch
 _LOCAL_ONLY = f"*{_PINNED_AT}\n.gitignore\n"   # `.gitignore` of a root's own store: each hub's pin times stay out of git
 INSIDE = Path(".sheaf") / "versions"    # a root's own versions store, inside it (7.4)
-_PIN_CLOCK_RE = re.compile(rf"{re.escape(INSIDE.as_posix())}/[0-9a-f]{{16}}/{_PINS_DIR}/({_MEMBER_PINS}[0-9a-f]{{16}}/)?"
+_PIN_TIME_RE = re.compile(rf"{re.escape(INSIDE.as_posix())}/[0-9a-f]{{16}}/{_PINS_DIR}/({_MEMBER_PINS}[0-9a-f]{{16}}/)?"
                            rf"[0-9a-f]{{16}}{re.escape(_PINNED_AT)}")
 
 
@@ -105,9 +105,9 @@ def file_locked(name: str):
         f.close()
 
 
-def _drop(version: Path):
-    """The version file `version` gone, with the pin time beside it if it has one."""
-    for f in (version, version.with_suffix(_PINNED_AT)):
+def _drop(version: Path, text: bool = True):
+    """The version file `version` gone, with the pin time beside it if it has one; `text` False: the pin time alone."""
+    for f in ((version,) if text else ()) + (version.with_suffix(_PINNED_AT),):
         try:
             f.unlink()
         except OSError:
@@ -184,10 +184,10 @@ class _Claims:
     by_hash: dict = field(default_factory=dict)     # hash -> {writer, ...}; None is a writer that is no document
 
 
-def is_pin_clock(rel: str) -> bool:
+def is_pin_time(rel: str) -> bool:
     """Whether `rel`, a path relative to a root as git names it, is a pin time of the root's own store: `<hash>.at` in a
     document folder's `pins/` or a member's folder in it (7.4). No other file is one, whatever its name ends in (ticket 203)."""
-    return _PIN_CLOCK_RE.fullmatch(rel) is not None
+    return _PIN_TIME_RE.fullmatch(rel) is not None
 
 
 class Versions:
@@ -272,13 +272,7 @@ class Versions:
                     continue        # another clone's pin, pulled with no time here: theirs to trim, never this hub's (203 B)
                 files.append((at, p.name, p))
         for _, _, p in sorted(files)[:-newest]:
-            if timed:       # this hub's time only: git carries the text, which another clone may pin too (203, round 13)
-                try:
-                    p.with_suffix(_PINNED_AT).unlink()
-                except OSError:
-                    pass
-            else:
-                _drop(p)
+            _drop(p, text=not timed)    # timed: this hub's time only; git carries the text, another clone may pin it (203)
         return h
 
     def _times_out_of_git(self, folder: Path):

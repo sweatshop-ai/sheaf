@@ -27,7 +27,7 @@ Thirteen rounds patched C one failure at a time. This note fixes the rules first
 
 ### Definitions
 
-- **Pin clock**: a path, relative to the root, that matches `.sheaf/versions/<16 hex>/pins/<16 hex>.at` or `.sheaf/versions/<16 hex>/pins/m-<16 hex>/<16 hex>.at`. Nothing else is one: `notes.at`, `pins/x.at` or `.sheaf/versions/a.at` are files of the root like any other. One test, `state.is_pin_clock(rel)`, used by every caller.
+- **Pin time**: a path, relative to the root, that matches `.sheaf/versions/<16 hex>/pins/<16 hex>.at` or `.sheaf/versions/<16 hex>/pins/m-<16 hex>/<16 hex>.at`. Nothing else is one: `notes.at`, `pins/x.at` or `.sheaf/versions/a.at` are files of the root like any other. One test, `state.is_pin_time(rel)`, used by every caller.
 - **Pin text**: `<16 hex>.md` in a `pins` folder.
 
 ### Rules

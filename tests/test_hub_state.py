@@ -622,7 +622,8 @@ def test_a_pin_two_clones_share_keeps_its_text_when_this_clones_trim_drops_it(tm
     assert (pins / f"{md_hash(shared)}.md").read_text() == shared
     assert not (pins / f"{md_hash(shared)}{state.PINNED_AT}").exists()     # no longer this hub's pin
     assert v.get("r/plan.md", md_hash(shared)) is None
-    assert (pins / f"{md_hash('mine\n')}.md").is_file()                     # this hub's own old pins keep their text too
+    first = md_hash("mine\n")
+    assert (pins / f"{first}.md").is_file()                     # this hub's own old pins keep their text too
     mine = [p for p in pins.glob("*.md") if p.with_suffix(state.PINNED_AT).is_file()]
     assert len(mine) == state.PINS_KEPT
 
@@ -637,6 +638,6 @@ def test_a_pin_two_clones_share_keeps_its_text_when_this_clones_trim_drops_it(tm
     ("docs/.sheaf/versions/0123456789abcdef/pins/0123456789abcdef.at", False),
     (".sheaf/versions/a.at", False),
 ])
-def test_only_a_hash_named_time_in_a_pins_folder_is_a_pin_clock(rel, clock):
+def test_only_a_hash_named_time_in_a_pins_folder_is_a_pin_time(rel, clock):
     """Ticket 203, Codex round 13 on #687: the cleanup of pin times treated any tracked `*.at` as one."""
-    assert state.is_pin_clock(rel) is clock
+    assert state.is_pin_time(rel) is clock

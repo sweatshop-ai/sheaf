@@ -79,15 +79,14 @@ class MemberTarget:
 class _Making:
     """An entry being made outside the hub's lock (200). `done` is set when its maker has inserted it or given it up. Set
     under the hub's lock meanwhile: `dropped` by a delete or move of its address (`Hub._drop_making`), and the maker makes
-    it again from the file the address names then; `forget` where the entry it gives up must take out what its first
-    render stored, as a moved page's entry does; `detached` by a forget of its root (`_let_go_root`), as the entries the
-    hub holds are detached, so that forget takes out only its own texts."""
+    it again from the file the address names then; `detached` by a move of its address or a forget of its root
+    (`_let_go_root`), as the entries the hub holds are detached: the maker that gives it up forgets it, which takes out
+    only the texts it stored itself."""
 
     def __init__(self, entry: "Entry"):
         self.entry = entry
         self.done = threading.Event()
         self.dropped = False
-        self.forget = False
         self.detached = False
 
 
@@ -633,7 +632,7 @@ class Hub:
             with self._lock:
                 if self._making.get(address) is mine:
                     del self._making[address]
-                forget = not kept and (mine.forget or mine.detached)
+                forget = not kept and mine.detached
             if forget:                       # what its first render stored goes, as for an entry the hub dropped
                 try:
                     e.live.forget()
@@ -647,12 +646,16 @@ class Hub:
         return self._entry(address)          # deleted or moved meanwhile: made again from what the address names now
 
     def _drop_making(self, address: str, forget: bool = False):
-        """Under the hub's lock: an entry being made at `address` is not kept by its maker, which makes it again (200); with
-        `forget`, it takes out what its first render stored. Called where the hub drops an entry for a delete or a move."""
+        """Under the hub's lock: an entry being made at `address` is not kept by its maker, which makes it again (200). With
+        `forget` (a move), it is detached first, as a forgotten root's are: from then on nothing it renders reaches the
+        store, and its forget takes out only the texts it put there itself, never a version the page brings back to the
+        address before that render ends."""
         m = self._making.get(address)
         if m is not None:
             m.dropped = True
-            m.forget = m.forget or forget
+            if forget and not m.detached:
+                m.entry.live.detach()
+                m.detached = True
 
     def _new_entry(self, address: str, name: str, root, path: Path) -> Entry:
         """A new entry for `address`, not rendered yet: under the hub's lock, with no pandoc run."""
@@ -1054,20 +1057,26 @@ class Hub:
             raise RenderError(f"{md} is not in a root the hub serves.") from None
         done, gate, out = threading.Event(), threading.Lock(), {}
 
+        def hand(answer: dict) -> bool:
+            """The answer to the request, when it still waits: False once it was answered `pending`. Called by
+            `_render_held` under the name's lock and the hub's, so warnings nobody took are back on the entry before an
+            open that waits for those locks reads them."""
+            with gate:
+                if out.get("late"):
+                    return False
+                out["answer"] = answer
+                done.set()
+                return True
+
         def work():
             try:
-                got = ("answer", self._render_held(address, md, settings, target))
+                got = ("answer", self._render_held(address, md, settings, target, hand))
             except BaseException as ex:            # the request's, while it waits; else written down
                 got, trace = ("error", ex), traceback.format_exc()[-1900:]
             with gate:
-                out[got[0]] = got[1]
+                out.setdefault(got[0], got[1])
                 late = out.get("late", False)
                 done.set()
-            if late and got[0] == "answer" and got[1].get("warnings"):
-                with self._lock:                   # nobody took this answer: the next open is handed its warnings
-                    e = self.entries.get(address)
-                    if e is not None:
-                        e.warnings = [*got[1]["warnings"], *e.warnings]
             if late and got[0] == "error":
                 known = isinstance(got[1], (RenderError, config.ConfigError))    # a bug keeps its traceback (`record_exception`)
                 self.record("render-failed", address, error=f"{type(got[1]).__name__}: {got[1]}"[:500],
@@ -1083,9 +1092,11 @@ class Hub:
             raise out["error"]
         return out["answer"]
 
-    def _render_held(self, address: str, md: Path, settings: dict, target: dict | None) -> dict:
+    def _render_held(self, address: str, md: Path, settings: dict, target: dict | None, hand=None) -> dict:
         """The render of `render`, on its own thread: every lock it needs it takes on this thread, the name's here, the
-        hub's in `_render_entry` and below, never over a pandoc run (200)."""
+        hub's in `_render_entry` and below, never over a pandoc run (200). `hand(answer)` gives the answer to the request
+        that waits for it, and says False when none does: the warnings then stay on the entry for the next open, put
+        back before the locks are let go."""
         with place.held(self, address):  # the name's lock first (9.11), as `entry` takes it
             e, rebuild, existed = self._render_entry(address, md, settings, target)
             # A delete, move or forget since `_render_entry` found the entry has taken it: its page is not read
@@ -1113,8 +1124,11 @@ class Hub:
                     e.opened, e.rendered = False, True
                     warnings, e.warnings = e.warnings, []
                     self.index.touch(address)
-                return {"doc": address, "url": self.url(address), "tabs": e.bus.count(),
-                        "log": list(e.log), "warnings": warnings}
+                answer = {"doc": address, "url": self.url(address), "tabs": e.bus.count(),
+                          "log": list(e.log), "warnings": warnings}
+                if hand is not None and not hand(answer) and warnings and self.entries.get(address) is e:
+                    e.warnings = [*warnings, *e.warnings]       # nobody took this answer: the next open is handed them
+                return answer
 
     def _render_entry(self, address: str, md: Path, settings: dict, target: dict | None):
         """The first part of `render`: the settings are recorded under the hub's lock, then the entry is found or made, its

@@ -385,22 +385,49 @@ def test_a_render_the_hub_answers_in_time_raises_its_error_in_the_request(world,
         world.hub.render(work / "start.md", {}, None)
 
 
+def _late_warnings(world, monkeypatch, go):
+    """The render's entry is found, given a link-rule warning, and held until `go`: past the hub's answer limit."""
+    entered = world.hub._render_entry
+
+    def warned(*a, **kw):
+        got = entered(*a, **kw)
+        got[0].warnings = ["a link that no longer leads anywhere"]
+        go.wait(10)
+        return got
+    monkeypatch.setattr(world.hub, "_render_entry", warned)
+    monkeypatch.setattr(core, "RENDER_ANSWER_WITHIN", 0.2)
+    return entered
+
+
 def test_the_warnings_of_a_render_that_answered_pending_go_to_the_next_open(world, work, monkeypatch):
     """199 (review round 1): a render answered `pending` hands its link-rule warnings to nobody; they stay with the
     document, and the next `sheaf open` gets them."""
-    go, held = threading.Event(), world.hub._render_held
-
-    def late(*a, **kw):
-        go.wait(10)
-        got = held(*a, **kw)
-        return {**got, "warnings": ["a link that no longer leads anywhere"]}
-    monkeypatch.setattr(world.hub, "_render_held", late)
-    monkeypatch.setattr(core, "RENDER_ANSWER_WITHIN", 0.2)
+    go = threading.Event()
+    entered = _late_warnings(world, monkeypatch, go)
     assert world.hub.render(work / "start.md", {}, None).get("pending") is True
     go.set()
     _join_renders()
-    monkeypatch.setattr(world.hub, "_render_held", held)
+    monkeypatch.setattr(world.hub, "_render_entry", entered)
     assert world.hub.render(work / "start.md", {}, None)["warnings"] == ["a link that no longer leads anywhere"]
+
+
+def test_the_warnings_of_a_late_render_are_with_the_document_before_its_locks_are_let_go(world, work, monkeypatch):
+    """200 (Codex, round 3 of #673): the warnings of a render answered `pending` are back on the entry before the render
+    lets go of the name's lock and the hub's, so an open that comes in right then is handed them, never an empty list."""
+    go, seen = threading.Event(), []
+    entered = _late_warnings(world, monkeypatch, go)
+    held = world.hub._render_held
+
+    def then_the_next_open(*a, **kw):          # the next open, at once after the late render let go of its locks
+        got = held(*a, **kw)
+        monkeypatch.setattr(world.hub, "_render_entry", entered)
+        seen.append(held(a[0], a[1], {}, None)["warnings"])
+        return got
+    monkeypatch.setattr(world.hub, "_render_held", then_the_next_open)
+    assert world.hub.render(work / "start.md", {}, None).get("pending") is True
+    go.set()
+    _join_renders()
+    assert seen == [["a link that no longer leads anywhere"]], seen
 
 
 def test_a_render_whose_rebuild_for_new_settings_failed_is_rebuilt_by_the_next_render_with_the_same_settings(world, work,
@@ -773,3 +800,19 @@ def test_a_new_entry_that_cannot_be_made_leaves_no_mark_for_the_next_open(world,
     with pytest.raises(RuntimeError):
         world.hub.entry("work/start.md")
     assert _timed(world.hub.entry, "work/start.md", within=10).address == "work/start.md"
+
+
+def test_a_page_moved_away_and_back_during_its_held_first_render_keeps_its_versions(world, work, put, held_pandoc):
+    """200 (Codex, round 2 of #679): a move of the address while its first render is held drops that entry, and the entry
+    given up takes out only what it stored itself: the versions the page brought back to the address stay."""
+    go, begun, _ = held_pandoc
+    put("held.md", PLAN + f"\n{HELD_MARK}\n")
+    world.hub.roots.for_document(work / "held.md")
+    store = world.hub._versions_of(world.hub.roots.get("work"))
+    a, out = _in_thread(world.hub.entry, "work/held.md")
+    assert begun.wait(10)
+    world.hub.moved_page("work/held.md", "work/away.md", "test")
+    store.put("work/held.md", "# Back\n\nThe page came back with this version.\n")    # as a move back carries it
+    go.set()
+    a.join(10)
+    assert any("came back" in t for t in store.texts("work/held.md")), store.texts("work/held.md")

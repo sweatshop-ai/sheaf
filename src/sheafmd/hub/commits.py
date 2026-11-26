@@ -267,14 +267,14 @@ def _restage(folder: Path, before: dict, paths: list) -> bool:
                 given="".join(e + "\0" for e in gone + back)).returncode == 0
 
 
-def _locking(folder: Path, *args, author=None):
+def _locking(folder: Path, *args, author=None, given=None):
     """`_git` for a command that takes the index lock (`add`, `commit`). Killed on its bound, it leaves the lock: that
     goes (#38), unless it was there before, another git's (the command then fails on it, no timeout). One a person's
     git took while the hub's hung before taking it goes too, a window the repo's lock cannot close."""
     lock = _git(folder, "rev-parse", "--path-format=absolute", "--git-path", "index.lock").stdout.strip()
     held = bool(lock) and os.path.lexists(lock)
     try:
-        return _git(folder, *args, author=author)
+        return _git(folder, *args, author=author, given=given)
     except subprocess.TimeoutExpired:
         if lock and not held:
             try:
@@ -342,27 +342,25 @@ def _untrack_pin_times(folder: Path) -> tuple[bool, str | None]:
     was made, owed a push whatever comes after; `error`, what git refused: the store's versions are then not committed,
     since its index may still hold a pin time."""
     head = _git(folder, "rev-parse", "-q", "--verify", "HEAD").stdout.strip()
-    listed = _git(folder, "ls-files", "-z", "--", str(state.INSIDE)).stdout.split("\0")
-    if head:
-        listed += _git(folder, "ls-tree", "-r", "--name-only", "-z", head, "--", str(state.INSIDE)).stdout.split("\0")
-    held = sorted({p for p in listed if state.is_pin_time(p)})
+    staged = {p for p in _git(folder, "ls-files", "-z", "--", str(state.INSIDE)).stdout.split("\0") if state.is_pin_time(p)}
+    in_head = sorted(p for p in _git(folder, "ls-tree", "-r", "--name-only", "-z", head, "--", str(state.INSIDE))
+                     .stdout.split("\0") if state.is_pin_time(p)) if head else []
+    held = sorted(staged.union(in_head))
     if not held:
         return False, None
     try:
-        if _locking(folder, "update-index", "--force-remove", "--", *held).returncode:
+        if _unstage(folder, held, _locking):
             return False, "a pin time git holds could not be taken out of the index"
     except subprocess.SubprocessError as e:
         return False, str(e)[:300] or type(e).__name__
-    in_head = [p for p in _git(folder, "ls-tree", "--name-only", "-z", head, "--", *held).stdout.split("\0") if p] \
-        if head else []
     if not in_head:
         return False, None
     new, refused = "", "a pin time git holds could not be taken out of it"
     with tempfile.TemporaryDirectory(prefix="sheaf-untrack-", ignore_cleanup_errors=True) as own:
         index = Path(own) / "index"
         try:
-            steps = [("read-tree", head), ("update-index", "--force-remove", "--", *in_head)]
-            if any(_git(folder, *step, index=index).returncode for step in steps):
+            if _git(folder, "read-tree", head, index=index).returncode \
+                    or _unstage(folder, in_head, lambda *a, **k: _git(*a, **k, index=index)):
                 return False, refused
             tree = _git(folder, "write-tree", index=index).stdout.strip()
             made = _git(folder, "-c", f"user.name={COMMITTER[0]}", "-c", f"user.email={COMMITTER[1]}", "commit-tree",
@@ -380,7 +378,13 @@ def _pin_times_out_of_index(folder: Path, paths: list) -> bool:
     """Whatever `add` staged of `paths`, no pin time (`state.is_pin_time`) stays staged: a `.gitignore` may be missing, a
     link, or undone by a `!*.at` lower down, and a pin time is each hub's own (7.4, ticket 203). False: git refused."""
     staged = [p for p in _git(folder, "ls-files", "-z", "--", *paths).stdout.split("\0") if state.is_pin_time(p)]
-    return not staged or _locking(folder, "update-index", "--force-remove", "--", *staged).returncode == 0
+    return not staged or not _unstage(folder, staged, _locking)
+
+
+def _unstage(folder: Path, paths: list, run) -> int:
+    """`paths` out of an index, by `run` (`_locking` for the repo's, `_git` on an index of the hub's own): git's exit code.
+    On stdin, never the command line: a store holds any number of pin times, and a command line has a bound (ticket 213 A)."""
+    return run(folder, "update-index", "-z", "--force-remove", "--stdin", given="".join(p + "\0" for p in paths)).returncode
 
 
 def root_config(root) -> "config.RootConfig":

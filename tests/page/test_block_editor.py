@@ -160,3 +160,17 @@ def test_a_block_the_editor_does_not_read_is_shown_as_it_is_and_never_rewritten(
     until(lambda: text(site) != SAMPLE, timeout=10, what="the autosave")
     assert '::: {#note .callout tone="info"}\nA block the editor does not read stays as it is.\n:::\n' in text(site)
     assert text(site).startswith("---\ntitle: Sample\n---\n")
+
+
+def test_enter_in_a_table_cell_is_a_line_break_and_the_text_after_it_is_saved(doc, site):
+    p = open_editor(doc, site)
+    p.click(f"{DOC} td >> text=a")
+    p.keyboard.press(key("End"))
+    p.keyboard.press("Enter")
+    p.keyboard.type("more")
+    until(lambda: "more" in text(site), timeout=10, what="the autosave")
+    assert text(site) == SAMPLE.replace("| a | 1 |", "| a<br>more | 1 |")
+    p.reload()
+    p.click(TOGGLE)
+    p.wait_for_selector(DOC)
+    assert p.evaluate("window.sheafBlockEditor.last.freshMarkdown()") == text(site)      # `<br>` reads back as the line break

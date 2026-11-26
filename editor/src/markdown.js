@@ -52,6 +52,9 @@ export function inline(s, marks = [], out = []) {
       if (s[i + 1] === '\n') { flush(); push(out, { type: 'hardBreak' }); i++; continue; }
       if (ESCAPABLE.test(s[i + 1])) { buf += s[i + 1]; i++; continue; }
     }
+    if (c === '<' && /^<br\s*\/?>/i.test(s.slice(i, i + 8))) {      // a line break inside a table cell
+      flush(); push(out, { type: 'hardBreak' }); i += s.slice(i).match(/^<br\s*\/?>/i)[0].length - 1; continue;
+    }
     if (c === ' ' && s.startsWith('  \n', i)) {
       flush(); push(out, { type: 'hardBreak' }); i += 2; while (s[i + 1] === ' ') i++; continue;
     }
@@ -335,8 +338,10 @@ export function blockMarkdown(node) {
     }
     case 'bulletList': case 'orderedList': return listMarkdown(node);
     case 'table': {
+      // A cell holds one line of Markdown: its paragraphs and its hard breaks are written as <br>.
       const rows = (node.content || []).map((r) => (r.content || []).map((c) =>
-        inlineMarkdown(((c.content || [])[0] || {}).content || []).replace(/(?<!\\)\|/g, '\\|').replace(/\n/g, ' ')));
+        (c.content || []).map((p) => inlineMarkdown(p.content || []).replace(/\\\n/g, '<br>')).join('<br>')
+          .replace(/(?<!\\)\|/g, '\\|').replace(/\n/g, ' ')));
       const line = (r) => '| ' + r.join(' | ') + ' |';
       return [line(rows[0]), line(rows[0].map(() => '---')), ...rows.slice(1).map(line)].join('\n');
     }

@@ -14,7 +14,7 @@ import { Editor, Extension, Node } from '@tiptap/core';
 import StarterKit from '@tiptap/starter-kit';
 import { BulletList, OrderedList } from '@tiptap/extension-list';
 import CodeBlock from '@tiptap/extension-code-block';
-import { Table, TableRow, TableCell, TableHeader } from '@tiptap/extension-table';
+import { Table, TableRow, TableCell as BaseCell, TableHeader as BaseHeader } from '@tiptap/extension-table';
 import { parseBlock, blockMarkdown } from './markdown.js';
 
 const TOP = ['paragraph', 'heading', 'bulletList', 'orderedList', 'blockquote', 'table', 'codeBlock', 'horizontalRule', 'raw'];
@@ -61,6 +61,11 @@ function hash(s) {
   for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
   return String(h >>> 0) + ':' + s.length;
 }
+
+// Enter in a table cell is a line break: a Markdown cell is one line, and a second paragraph would be lost.
+const enterBreaks = { addKeyboardShortcuts() { return { Enter: () => this.editor.commands.setHardBreak() }; } };
+const TableCell = BaseCell.extend(enterBreaks);
+const TableHeader = BaseHeader.extend(enterBreaks);
 
 export function mount(host, { lead = '', blocks = [], onChange = () => {} } = {}) {
   const kit = StarterKit.configure({

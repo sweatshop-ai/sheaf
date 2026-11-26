@@ -2259,6 +2259,34 @@ def test_pin_times_taken_out_of_git_stay_out_when_this_hub_never_wrote_the_store
     assert all(t.is_file() for t in times)
 
 
+@pytest.mark.parametrize("target", ["outside", "inside"])
+def test_a_sheaf_folder_that_is_a_link_has_no_gitignore_written_or_removed_through_it(tmp_path, target):
+    """Ticket 203 C (fallback review of #687, round 9), SPEC 7.4: `.sheaf` is never a link. A pulled repo whose `.sheaf`
+    links out of the root, or to a folder of the root, has no `.gitignore` written or removed through it by a write's
+    commit or a sweep."""
+    from sheafmd.hub import commits, state
+    from sheafmd.hub.roots import Root
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    (repo / ".sheaf.toml").write_text('commit = true\nversions = "root"\n', encoding="utf-8")
+    (repo / "plan.md").write_text("# plan\n", encoding="utf-8")
+    there = tmp_path / "elsewhere" if target == "outside" else repo / "docs"
+    (there / "versions" / "deep").mkdir(parents=True)
+    (there / "versions" / ".gitignore").write_text("build/\n", encoding="utf-8")
+    (there / "versions" / "deep" / ".gitignore").write_text("*.log\n", encoding="utf-8")
+    (repo / ".sheaf").symlink_to(there if target == "outside" else "docs")
+    git(repo, "add", "-A")
+    git(repo, "-c", "user.name=a", "-c", "user.email=a@example.com", "commit", "-q", "-m", "first")
+    hub = commits.Commits(lambda kind, doc, **detail: None, roots=lambda: [])
+    root = Root("r", repo, True)
+    (repo / "plan.md").write_text("# plan, edited\n", encoding="utf-8")
+    hub.saved(root, "plan.md", commits.Author("Bea", "bea@example.com"), "edit")
+    hub._sweep(root, commits._repo(repo))
+    assert (there / "versions" / ".gitignore").read_text(encoding="utf-8") == "build/\n"
+    assert (there / "versions" / "deep" / ".gitignore").read_text(encoding="utf-8") == "*.log\n"
+
+
 @pytest.mark.parametrize("step", ["commit-tree", "update-index"])
 def test_a_pin_time_that_cannot_leave_git_keeps_the_versions_out_of_the_writes_commit(tmp_path, monkeypatch, step):
     """Ticket 203 C (Codex on #687, rounds 3 and 4): git refuses a step of taking a tracked pin time out. The write's

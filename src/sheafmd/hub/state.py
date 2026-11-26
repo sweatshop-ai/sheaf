@@ -186,9 +186,16 @@ def times_out_of_git(store: Path):
     """Keep every pin time of a root's own store at `store` out of git, whether or not this hub has pinned there: the
     store's `.gitignore` is written unless it is a file of its own holding the hub's lines, and any other `.gitignore`
     in the store, which could say `!*.at`, goes (ticket 203 C, round 8). A clone gets no store `.gitignore` from git:
-    the file ignores itself. Nothing is made when there is no store. OSError: the caller must not stage the store."""
-    if not store.is_dir():
-        return
+    the file ignores itself. Nothing is made when there is no store, and nothing is touched through `.sheaf` or a store
+    that is a link or a folder of another account (7.4, round 9): that store is not the hub's. OSError: the caller must
+    not stage the store."""
+    for d in (store.parent, store):
+        try:
+            st = os.lstat(d)
+        except FileNotFoundError:
+            return
+        if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
+            return
     if read_small(store / ".gitignore") != _LOCAL_ONLY:
         write_text_private(store / ".gitignore", _LOCAL_ONLY, True)
     for d, dirs, names in os.walk(store):

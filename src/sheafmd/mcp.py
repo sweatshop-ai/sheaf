@@ -20,6 +20,7 @@ import json
 import os
 import re
 import secrets
+import stat as stat_mod
 import sys
 import time
 from collections import Counter
@@ -1372,16 +1373,8 @@ class Door:
         """Undo a create refused once `_make` is under way: the file where it was written, the folders `_make` made at its
         home, the mark it set. The list's row that `assignees` dropped stays dropped: it was of a file no longer there,
         which is what the address holds again."""
-        if written:
-            # The file it made, known by its inode (ticket 195 E): one that replaced it at the name since (an editor's save,
-            # a sync) stays. What comes between this look and the unlink is not covered; the name's lock keeps the hub's
-            # own writers out of it.
-            with contextlib.suppress(OSError):
-                st = os.lstat(made.top / made.rel)
-                if made.ident is not None and (st.st_dev, st.st_ino) == made.ident:
-                    os.unlink(made.top / made.rel)
-                else:       # replaced, or a filesystem whose inode numbers do not hold (some FUSE mounts): left, and said
-                    diagnostics.record("mcp", "take-back-left-file", address)
+        if written and (left := _take_back_file(made)) is not None:
+            diagnostics.record("mcp", "take-back-left-file", address, file=left)
         self.hub.writes.told(address)
         if made.folders:
             with place.folders_lock(made.top, made.name):
@@ -1612,6 +1605,75 @@ def _missing_folders(top: Path, rel: str) -> list:
         if not os.path.lexists(at):
             out.append(at)
     return out
+
+
+def _take_back_file(made: "_Made") -> str | None:
+    """Delete the file `create_file` made for `made`, and no other (tickets 195 E, 204 A). Whatever is at the name is first
+    taken from it in one step, a rename to a hidden sibling, so a file put there between a look and a delete is never the one
+    deleted. Only the file made, with the text written, is deleted: its inode (a file that replaced it is another) and its
+    bytes (an editor that saves in place keeps the inode). Anything else goes back to its name, never over a file that came
+    there meanwhile; then it stays in the hidden sibling. None when the file made is gone, or nothing was at the name; else
+    the name of the file left, for the caller to say: the page's own, or the hidden sibling's."""
+    path = made.top / made.rel
+    aside = _hidden_sibling(path)
+    try:
+        os.rename(path, aside)
+    except FileNotFoundError:
+        return None
+    except OSError:
+        return path.name
+    if made.ident is not None and _delete_if_made(aside, made):
+        return None
+    return _put_back(aside, path)
+
+
+def _hidden_sibling(path: Path) -> Path:
+    return path.with_name(f".{path.name}.sheaf-gone-{secrets.token_hex(6)}")
+
+
+def _delete_if_made(aside: Path, made: "_Made") -> bool:
+    """Delete `aside` when it is the file made for `made`, as it was written: that inode, those bytes. True when deleted;
+    False when it is another (left where it is), a FIFO or a folder among them, opened without waiting. The rename shut out
+    every writer that opens the name, not one that holds a descriptor already: its write during the look moves the file's
+    mtime or size, which are looked at again right before the delete, so the file is kept and nothing has to be written back
+    (a full disk is often why the create is taken back). A write between that last look and the delete is not seen."""
+    want = made.text.encode("utf-8")
+    try:
+        fd = os.open(aside, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError:
+        return False
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(fd)
+        if (not stat_mod.S_ISREG(st.st_mode) or (st.st_dev, st.st_ino) != made.ident or st.st_size != len(want)
+                or f.read(len(want) + 1) != want):
+            return False
+        again = os.fstat(fd)
+        if (again.st_mtime_ns, again.st_size) != (st.st_mtime_ns, st.st_size):
+            return False
+        try:
+            os.unlink(aside)
+        except OSError:
+            return False
+        return True
+
+
+def _put_back(aside: Path, path: Path) -> str:
+    """Put `aside` back at `path`, never over a file that came there meanwhile; answers the name it is left under."""
+    try:
+        os.link(aside, path, follow_symlinks=False)
+    except FileExistsError:
+        return aside.name
+    except (OSError, NotImplementedError):
+        # A folder has no hard link: renamed back, which can replace no file and no folder with anything in it. A file on a
+        # filesystem without hard links stays aside, as a rename could replace one that came to the name.
+        if aside.is_dir() and not aside.is_symlink():
+            with contextlib.suppress(OSError):
+                os.rename(aside, path)
+                return path.name
+        return aside.name
+    with contextlib.suppress(OSError):
+        os.unlink(aside)
+    return path.name
 
 
 @dataclass

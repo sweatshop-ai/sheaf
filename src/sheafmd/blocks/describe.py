@@ -27,7 +27,10 @@ class WriteFailed(RuntimeError):
 @functools.lru_cache(maxsize=1)
 def _api_version() -> list:
     got = _pandoc.run(["-f", "markdown", "-t", "json"], "")
-    return json.loads(got.stdout)["pandoc-api-version"]
+    try:
+        return json.loads(got.stdout)["pandoc-api-version"]
+    except (ValueError, KeyError):
+        raise WriteFailed("pandoc gave no api version") from None
 
 
 @functools.lru_cache(maxsize=2048)
@@ -49,7 +52,7 @@ def one(b: Block, depth: int | None, top: bool, text: bool = True, alias: dict |
     """`b` as a row. `depth` is the levels of children still to show (None: all); a block cut by it says
     in `more` how many children it left out. Without `text` the row has no `markdown` and only the structural
     attributes: nothing a person wrote (SPEC 9.7)."""
-    out = {"id": alias[b.id] if alias else b.id, "type": b.type,
+    out = {"id": alias[id(b)] if alias else b.id, "type": b.type,
            "attrs": dict(b.attrs) if text else decl.structural(b.type, b.attrs),
            "capabilities": [c for c in ORDER if c in b.caps], "children": []}
     if text:
@@ -61,36 +64,37 @@ def one(b: Block, depth: int | None, top: bool, text: bool = True, alias: dict |
     return out
 
 
-def _opaque(tree: Tree) -> dict:
-    """`{real id: p1, p2, ...}` in document order (a block before its children), for a caller who may not read the
-    page's text: its ids say where a block sits and nothing of what it holds, and hold only for the page as it is."""
-    out = {}
+def _opaque(tree: Tree) -> tuple:
+    """`({id(block): p1, p2, ...}, {p1: block, ...})` in document order (a block before its children), for a caller
+    who may not read the page's text: its ids say where a block sits and nothing of what it holds, and hold only
+    for the page as it is. Keyed by the block itself, never by its id: two blocks that share an id still get two
+    aliases, and the alias numbering never shows that they share one."""
+    alias, by_alias = {}, {}
 
     def walk(b):
-        out[b.id] = f"p{len(out) + 1}"
+        name = f"p{len(alias) + 1}"
+        alias[id(b)], by_alias[name] = name, b
         for c in b.children:
             walk(c)
     for b in tree.blocks:
         walk(b)
-    return out
+    return alias, by_alias
 
 
 def rows(tree: Tree, depth: int | None = None, ids=None, text: bool = True) -> list:
     """The tree's top-level rows; or, for `ids`, the rows of those blocks wherever they sit, in the order asked,
     each with its own children cut by `depth`. Without `text` every id is an opaque positional one (`p1`, `p2`...,
     in document order) and `ids` are read as such. Raises `NotFound` for an id the tree does not hold."""
-    alias = None if text else _opaque(tree)
-    back = {v: k for k, v in alias.items()} if alias else {}
+    alias, by_alias = (None, {}) if text else _opaque(tree)
     if ids is None:
         return [one(b, depth, True, text, alias) for b in tree.blocks]
-    top_ids = {b.id for b in tree.blocks}
+    tops = {id(b) for b in tree.blocks}
     out = []
     for i in ids:
-        real = back.get(i) if alias else i
-        b = tree.get(real) if real is not None else None
+        b = by_alias.get(i) if alias else tree.get(i)
         if b is None:
             raise NotFound(i)
-        out.append(one(b, depth, real in top_ids, text, alias))
+        out.append(one(b, depth, id(b) in tops, text, alias))
     return out
 
 

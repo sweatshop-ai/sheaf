@@ -295,3 +295,61 @@ def test_a_failed_pandoc_write_is_refused_and_never_cached(browser, plan, monkey
     assert "could not be written" in refused(browser, "blocks", doc=DOC)
     monkeypatch.setattr(_pandoc, "run", real)                       # pandoc recovers
     assert ok(browser, "blocks", doc=DOC)["blocks"][0]["children"][0]["markdown"] == "A nested paragraph."
+
+
+def _tree_with_a_shared_id():
+    tree = read_tree("First.\n\n::: {.columns}\n::: {.column size=\"50\"}\nLeft.\n:::\n:::\n\nLast.\n")
+    columns = tree.blocks[1]
+    object.__setattr__(columns.children[0], "id", tree.blocks[0].id)     # a column and a paragraph, one id
+    return tree
+
+
+def test_aliases_follow_the_block_not_its_id():
+    from sheafmd.blocks import describe
+    tree = _tree_with_a_shared_id()
+    rows = describe.rows(tree, text=False)
+    flat = []
+
+    def walk(rs):
+        for r in rs:
+            flat.append((r["id"], r["type"]))
+            walk(r["children"])
+    walk(rows)
+    assert [i for i, _ in flat] == [f"p{n}" for n in range(1, len(flat) + 1)]      # distinct, none skipped
+    assert describe.rows(tree, ids=["p3"], text=False)[0]["type"] == "column"        # the column, not the paragraph
+    assert describe.rows(tree, ids=["p1"], text=False)[0]["type"] == "paragraph"
+
+
+def test_a_read_only_response_does_not_show_that_two_blocks_share_an_id():
+    from sheafmd.blocks import describe
+    shared = json.dumps(describe.rows(_tree_with_a_shared_id(), text=False), sort_keys=True)
+    plain = json.dumps(describe.rows(read_tree("First.\n\n::: {.columns}\n::: {.column size=\"50\"}\nLeft.\n:::\n:::\n\nLast.\n"),
+                                     text=False), sort_keys=True)
+    assert shared == plain                                                           # the same response, id clash or none
+
+
+def test_a_pandoc_that_gives_no_api_version_is_refused_not_cached(browser, plan, monkeypatch):
+    from sheafmd import _pandoc
+    from sheafmd.blocks import describe
+    plan.write_text("> A nested paragraph.\n", encoding="utf-8")
+    describe._api_version.cache_clear()
+    describe._written.cache_clear()
+    real = _pandoc.run
+
+    def silent(args, text, *a, **kw):
+        got = real(args, text, *a, **kw)
+        if args == ["-f", "markdown", "-t", "json"]:
+            got.returncode, got.stdout = 1, ""
+        return got
+    monkeypatch.setattr(_pandoc, "run", silent)
+    assert "could not be written" in refused(browser, "blocks", doc=DOC)
+    monkeypatch.setattr(_pandoc, "run", real)
+    assert ok(browser, "blocks", doc=DOC)["blocks"][0]["children"][0]["markdown"] == "A nested paragraph."
+
+
+def test_block_types_describes_a_column_as_a_child_only_type(browser, page):
+    got = ok(browser, "block_types", doc=DOC)
+    assert [t["type"] for t in got["child_types"]] == ["column"]
+    col = got["child_types"][0]
+    assert [a["name"] for a in col["attributes"]] == [a.name for a in decl.DECLARED["column"].attrs]
+    assert "column" not in {t["type"] for t in got["types"]}

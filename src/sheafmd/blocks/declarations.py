@@ -139,6 +139,8 @@ DESCRIPTIONS = {
                 '::: {.callout tone="info"}\nA note for the reader.\n:::'),
     "columns": ("A row of columns side by side; it holds `column` blocks only, each with a `size` (its share of the row, in %).",
                 '::: {.columns}\n::: {.column size="50"}\nLeft.\n:::\n::: {.column size="50"}\nRight.\n:::\n:::'),
+    "column": ("One column of a `columns` row: it only ever stands inside one, never on its own; `size` is its share of the row, in %.",
+               '::: {.column size="50"}\nText in a column.\n:::'),
     "box": ("A box around plain blocks that carries only layout: `align` its text and `pad` its padding.",
             '::: {.box align="center" pad="m"}\nText in a box.\n:::'),
     "image": ("An image on a line of its own; `size` is its share of its container in %, `align` its place in it.",
@@ -180,6 +182,11 @@ def describe(name: str) -> dict:
         attrs = [{"name": n, "values": list(v), "default": d} for n, v, d in PLAIN_ATTRS.get(name, ())]
     line, example = DESCRIPTIONS[name]
     return {"type": name, "attributes": attrs, "description": line, "example": example}
+
+
+def child_only() -> list:
+    """The names of the declared types that may only be a child of another (a column)."""
+    return [n for n, t in DECLARED.items() if not t.top]
 
 
 def containers() -> dict:

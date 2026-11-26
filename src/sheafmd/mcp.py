@@ -215,7 +215,8 @@ TOOLS = {
     "block_types": {
         "description": "Every Block type that may be inserted in a page, each with its `attributes` (allowed `values` "
                        "and `default`), a one-line `description` and an `example` in Markdown; and `containers`, the "
-                       "types each container (the document, a callout, a quote, a list item) may hold.",
+                       "types each container (the document, a callout, a quote, a list item) may hold. `child_types` describes a "
+                       "type that may only stand inside another (a `column`, in `columns`), never on its own.",
         "annotations": {"readOnlyHint": True},
         "properties": {"doc": _DOC},
         "required": ["doc"]},
@@ -1044,7 +1045,8 @@ class Door:
     def _block_types(self, args: dict, caller: Caller):
         address, _ = self._page_text(args, caller)
         return {"doc": address, "url": self.hub.url(address),
-                "types": [decl.describe(n) for n in decl.insertable()], "containers": decl.containers()}
+                "types": [decl.describe(n) for n in decl.insertable()],
+                "child_types": [decl.describe(n) for n in decl.child_only()], "containers": decl.containers()}
 
     def _generated(self, address: str) -> dict | None:
         """The page's mark as `read` shows it, `{by, at}`, or None for a page that is not generated (SPEC 8.3, 12)."""

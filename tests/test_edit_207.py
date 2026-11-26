@@ -40,13 +40,30 @@ def test_by_words_diffs_each_stretch_between_unchanged_words_on_its_own():
 def test_many_long_stretches_stop_at_the_total_and_do_not_grow_with_their_square(no_gc):
     # Forty stretches at the bound, of a few words repeated (the diff's dearest case), with an unchanged word after
     # each: the diff stops once the stretches add up past `_DIFF_TOTAL`, and the literals go to their neighbours.
-    random.seed(207)
+    rng = random.Random(207)
     vocab = [f"w{i}" for i in range(30)]
 
     def text():
-        return " ".join(" ".join(random.choice(vocab) for _ in range(1400)) + f" keep{s}" for s in range(40))
+        return " ".join(" ".join(rng.choice(vocab) for _ in range(1400)) + f" keep{s}" for s in range(40))
 
     old, new = text(), text()
     t = time.process_time()
     assert rde._by_words(old, new) is None
     assert time.process_time() - t < 1.0
+
+
+def test_a_chain_of_cuts_that_each_find_one_word_stops_at_the_total(no_gc):
+    # Each cut finds one word once on each side, near the end of its stretch: the cuts' own counting stops at the
+    # total too (`_CUT_WEIGHT`).
+    rng = random.Random(207)
+    vocab = [f"w{i}" for i in range(30)]
+    head_a = [rng.choice(vocab) for _ in range(1600)]
+    head_b = [rng.choice(vocab) for _ in range(1600)]
+    ta, tb = ["x1"], ["x1", "j"]
+    for k in range(2, 3001):
+        ta += [f"x{k}", f"x{k - 1}"]
+        tb += [f"x{k}", "j", f"x{k - 1}", "j"]
+    old, new = " ".join(head_a + ta), " ".join(head_b + tb)
+    t = time.process_time()
+    rde._by_words(old, new)
+    assert time.process_time() - t < 0.3

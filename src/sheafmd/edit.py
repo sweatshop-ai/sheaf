@@ -1530,9 +1530,13 @@ _NEIGHBOURS = 12
 _DIFF_WORD = re.compile(r":[a-z0-9_+-]+:|\w+|[^\w\s]")
 
 
-# The most words squared that `_by_words` diffs in all, over the stretches it cuts a long text into: about 100 ms of
-# CPU at worst, measured (stretches at the bound, of a few words repeated). Each stretch is within `_DIFF_BOUND`.
+# The most words squared that `_by_words` diffs in all, over the stretches it cuts a long text into, each within
+# `_DIFF_BOUND`: about 100 ms of CPU at worst, measured (stretches at the bound, of a few words repeated, or a chain
+# of cuts that each find one word once on each side).
 _DIFF_TOTAL = 4 * _DIFF_BOUND
+# What a cut costs against `_DIFF_TOTAL`, per word of its stretch: counting a word costs about as much as this many
+# cells of a diff.
+_CUT_WEIGHT = 32
 
 
 def _once_on_both_sides(wa: list, alo: int, ahi: int, wb: list, blo: int, bhi: int) -> list:
@@ -1580,7 +1584,7 @@ def _word_pairs(wa: list, wb: list):
                 pairs.append((ahi, bhi))
             todo.append((alo, ahi, blo, bhi, True))
             continue
-        spent += (ahi - alo) + (bhi - blo)
+        spent += _CUT_WEIGHT * ((ahi - alo) + (bhi - blo))
         anchors = _once_on_both_sides(wa, alo, ahi, wb, blo, bhi)
         if not anchors or spent > _DIFF_TOTAL:
             return None
@@ -1595,7 +1599,7 @@ def _by_words(old: str, new: str):
     matches. A word is a shortcode, a run of letters and digits, or one other character that is not white space
     (`_DIFF_WORD`): a `(` glued to a literal, or a letter typed beside it, leaves the literal a word of its own that
     still matches. Lists too long for one diff (`_DIFF_BOUND`) are cut at their common start and end and at the words
-    found once on each side, and each stretch between those is diffed on its own (#207): two long changed stretches
+    found once on each side, and each stretch between those is diffed on its own (ticket 207): two long changed stretches
     with unchanged words between them are each placed. None where a stretch is still too long and holds no such
     word, or where the stretches add up past `_DIFF_TOTAL`."""
     a, b = list(_DIFF_WORD.finditer(old)), list(_DIFF_WORD.finditer(new))

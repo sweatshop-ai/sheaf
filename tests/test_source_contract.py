@@ -994,6 +994,8 @@ def test_a_refused_start_and_close_release_the_root_descriptor(tmp_path):
     svc, folder, git = _git_service(tmp_path)
     (folder / "o.md").write_text("o\n")
     git("add", "o.md")
+    import gc
+    gc.collect()                                                        # what earlier tests left to collect must not be freed inside the count
     before = len(os.listdir("/proc/self/fd"))
     for _ in range(5):
         with pytest.raises(SystemExit):

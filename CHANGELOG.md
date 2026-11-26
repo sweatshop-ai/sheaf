@@ -31,6 +31,7 @@ Everything merged since 1.2.1 (#472), up to #534. Version 1.2.1 was never tagged
 
 ### Added
 
+- A poll of a laptop session writes a `tells-poll` row to the hub's diagnostics (session id, no token secret), at most one a minute per session, so whether a session listens can be checked from the box.
 - A Tell that waits for a laptop session says, on the page, what the Sheaf plugin does and how to install it (the README link and the two commands), so a Tell that waits because the plugin was never installed says why.
 - A diagram (mermaid or chart) or an SVG image opens in a full-window viewer on a click or tap: wheel and pinch zoom about the pointer, drag to pan, double click or Fit to reset, Esc, the close button or a click outside to close. It works in Comment and Edit mode, on a phone, and in both themes (SPEC 6.9).
 - A page a job generates can be marked as generated, read-only for text edits: the mark is set, shown and guarded by the door (#486, #503, #534, ticket 156). The hub refuses a save, a tick or a share on such a page with a sentence that names who generated it; comments, replies and resolve stay open.

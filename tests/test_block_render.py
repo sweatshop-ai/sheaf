@@ -75,3 +75,11 @@ def test_an_older_theme_with_none_of_the_block_properties_still_lays_callouts_ou
     (folder / "theme.css").write_text("body{margin:0}\n", encoding="utf-8")
     css = re.search(r"<style[^>]*>(.*?)</style>", render(tmp_path, theme=str(folder)), re.S).group(1)
     assert "div.callout{" in css and "--sheaf-callout-info-bg:" in css and "--sheaf-pad-m:" in css
+
+
+def test_the_base_block_css_is_light_only_and_the_plain_theme_carries_its_own_dark_tones():
+    from sheafmd.blocks import declarations
+    from sheafmd.theme import load_theme
+    assert "prefers-color-scheme" not in declarations.css()       # a Theme with a light page must not get dark boxes
+    plain = load_theme("plain").css
+    assert "--sheaf-callout-info-bg" in plain and "prefers-color-scheme:dark" in plain

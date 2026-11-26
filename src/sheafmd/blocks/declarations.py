@@ -49,10 +49,10 @@ CALLOUT = BlockType(
 DECLARED = {t.name: t for t in (CALLOUT,)}
 
 # The Theme properties: documented, stable through 1.x (ADR 0008). A Theme's `theme.css` may override any.
-TONES = {"info": ("#1f5fd6", "#eef3fd", "#8ab4f8", "#17243a"),
-         "success": ("#1e7e46", "#edf8f1", "#6fcf97", "#14291d"),
-         "warning": ("#b07a00", "#fff8e6", "#e0a800", "#2e2712"),
-         "danger": ("#b3261e", "#fdeeed", "#f2766e", "#33181a")}
+TONES = {"info": ("#1f5fd6", "#eef3fd"),
+         "success": ("#1e7e46", "#edf8f1"),
+         "warning": ("#b07a00", "#fff8e6"),
+         "danger": ("#b3261e", "#fdeeed")}       # (accent, background), light: a Theme with a dark page overrides them
 PADS = {"none": "0", "s": ".5rem", "m": "1rem", "l": "1.5rem"}
 RADIUS = ".4rem"
 
@@ -94,14 +94,11 @@ def allow_list() -> dict:
 
 
 def _properties() -> str:
-    light, dark = [], []
-    for tone, (accent, bg, daccent, dbg) in TONES.items():
-        light += [f"--sheaf-callout-{tone}-accent:{accent}", f"--sheaf-callout-{tone}-bg:{bg}"]
-        dark += [f"--sheaf-callout-{tone}-accent:{daccent}", f"--sheaf-callout-{tone}-bg:{dbg}"]
+    tones = []
+    for tone, (accent, bg) in TONES.items():
+        tones += [f"--sheaf-callout-{tone}-accent:{accent}", f"--sheaf-callout-{tone}-bg:{bg}"]
     pads = [f"--sheaf-pad-{k}:{v}" for k, v in PADS.items()]
-    base = ";".join(light + pads + [f"--sheaf-callout-radius:{RADIUS}"])
-    return (f":root{{{base}}}\n"
-            f"@media(prefers-color-scheme:dark){{:root{{{';'.join(dark)}}}}}\n")
+    return f":root{{{';'.join(tones + pads + [f'--sheaf-callout-radius:{RADIUS}'])}}}\n"
 
 
 def css() -> str:

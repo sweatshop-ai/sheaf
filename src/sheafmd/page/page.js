@@ -401,7 +401,7 @@ var create = function (ROOT, CFG, opts) {
     // Only where the viewer's handlers are installed: a page that stops short of them (below) is a plain copy of the file.
     if (!((!CFG.readonly && (location.protocol === 'http:' || location.protocol === 'https:')) || COMMENTS.length || (CFG.malformed || []).length)) return;
     Array.prototype.forEach.call(main.querySelectorAll('.mermaid-svg svg, .chart svg, img'), function (n) {
-      if (!zoomTarget(n) || inLink(n)) return;
+      if (!zoomTarget(n) || inLink(n) || n.querySelector('a[href], a[*|href]')) return;   // a diagram with links in it has them to tab to
       n.setAttribute('tabindex', '0');
       n.setAttribute('role', 'button');
       if (!n.hasAttribute('aria-label')) {          // a name the diagram already has stays

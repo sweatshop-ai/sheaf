@@ -196,8 +196,10 @@ TOOLS = {
     "blocks": {
         "description": "The block tree of a page: per block its `id` (stable: name it in an edit), `type`, `attrs`, "
                        "`capabilities` (edit, move, remove: a locked block, such as a code fence, and a Stub have only "
-                       "move and remove), `markdown` and `children`, and the page's `base`. A token made without "
-                       "`--write` may not read page text: its rows have no `markdown` and only layout attributes. A Stub is a block of a type "
+                       "move and remove), `markdown` and `children`, and the page's `base`. A nested block's `markdown` "
+                       "describes it and is not round-trip source. A token made without `--write` may not read page "
+                       "text: it gets no `base`, no `markdown`, only layout attributes, and opaque positional ids "
+                       "(`p1`, `p2`, ... in document order, good for that page as it is). A Stub is a block of a type "
                        "this sheaf does not know or a Rich block that breaks its declaration: `type` is `stub`, "
                        "`attrs.type` its type name and `markdown` its raw source. `depth` limits the levels shown "
                        "(1: the top level; a block cut by it has `more`, the number of children left out); `ids` "
@@ -1031,7 +1033,13 @@ class Door:
             rows = describe.rows(tree, args.get("depth"), args.get("ids"), text=caller.may_write)
         except describe.NotFound as e:
             raise ToolError(f"{address} has no block with the id {e.args[0]}; `blocks` lists the ids.", "no block") from None
-        return {"doc": address, "url": self.hub.url(address), "base": md_hash(text), "blocks": rows}
+        except describe.WriteFailed:
+            raise ToolError(f"The Markdown of a nested block of {address} could not be written just now; ask again.",
+                            "unavailable") from None
+        out = {"doc": address, "url": self.hub.url(address), "blocks": rows}
+        if caller.may_write:
+            out["base"] = md_hash(text)               # a token that may not read page text gets no hash either (9.7)
+        return out
 
     def _block_types(self, args: dict, caller: Caller):
         address, _ = self._page_text(args, caller)

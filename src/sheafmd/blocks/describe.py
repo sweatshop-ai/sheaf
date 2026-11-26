@@ -20,6 +20,10 @@ class NotFound(KeyError):
     """An id the tree does not hold."""
 
 
+class WriteFailed(RuntimeError):
+    """Pandoc could not write a nested block as Markdown. Never cached: the next call asks pandoc again."""
+
+
 @functools.lru_cache(maxsize=1)
 def _api_version() -> list:
     got = _pandoc.run(["-f", "markdown", "-t", "json"], "")
@@ -28,44 +32,66 @@ def _api_version() -> list:
 
 @functools.lru_cache(maxsize=2048)
 def _written(ast: str) -> str:
-    """The Markdown of a nested block, from its AST (a list item is written as its content)."""
+    """The Markdown of a nested block, from its AST (a list item is written as its content). It describes the block
+    and is not round-trip source: typography stays as it is (no `smart`), raw inline HTML stays HTML, a column and a
+    button keep their fenced-div and bracketed-span forms."""
     blocks = json.loads(ast)
     if blocks and blocks[0].get("t") == "Item":
         blocks = blocks[0]["c"]
     doc = {"pandoc-api-version": _api_version(), "meta": {}, "blocks": blocks}
-    got = _pandoc.run(["-f", "json", "-t", "commonmark_x", "--wrap=none"], json.dumps(doc))
-    return got.stdout.strip("\n") if got.returncode == 0 else ""
+    got = _pandoc.run(["-f", "json", "-t", "commonmark_x-smart+raw_html-raw_attribute", "--wrap=none"], json.dumps(doc))
+    if got.returncode != 0:
+        raise WriteFailed(got.stderr.strip()[:200] or "pandoc exited with an error")
+    return got.stdout.strip("\n")
 
 
-def one(b: Block, depth: int | None, top: bool, text: bool = True) -> dict:
+def one(b: Block, depth: int | None, top: bool, text: bool = True, alias: dict | None = None) -> dict:
     """`b` as a row. `depth` is the levels of children still to show (None: all); a block cut by it says
     in `more` how many children it left out. Without `text` the row has no `markdown` and only the structural
     attributes: nothing a person wrote (SPEC 9.7)."""
-    out = {"id": b.id, "type": b.type,
+    out = {"id": alias[b.id] if alias else b.id, "type": b.type,
            "attrs": dict(b.attrs) if text else decl.structural(b.type, b.attrs),
            "capabilities": [c for c in ORDER if c in b.caps], "children": []}
     if text:
         out["markdown"] = b.content.rstrip("\n") if top else _written(b.ast)
     if depth is None or depth > 1:
-        out["children"] = [one(c, None if depth is None else depth - 1, False, text) for c in b.children]
+        out["children"] = [one(c, None if depth is None else depth - 1, False, text, alias) for c in b.children]
     elif b.children:
         out["more"] = len(b.children)
     return out
 
 
-def rows(tree: Tree, depth: int | None = None, ids=None, text: bool = True) -> list:
-    """The tree's top-level rows; or, for `ids`, the rows of those blocks wherever they sit, in the order asked,
-    each with its own children cut by `depth`. Raises `NotFound` for an id the tree does not hold."""
-    if ids is None:
-        return [one(b, depth, True, text) for b in tree.blocks]
-    top_ids = {b.id for b in tree.blocks}
-    out = []
-    for i in ids:
-        b = tree.get(i)
-        if b is None:
-            raise NotFound(i)
-        out.append(one(b, depth, i in top_ids, text))
+def _opaque(tree: Tree) -> dict:
+    """`{real id: p1, p2, ...}` in document order (a block before its children), for a caller who may not read the
+    page's text: its ids say where a block sits and nothing of what it holds, and hold only for the page as it is."""
+    out = {}
+
+    def walk(b):
+        out[b.id] = f"p{len(out) + 1}"
+        for c in b.children:
+            walk(c)
+    for b in tree.blocks:
+        walk(b)
     return out
 
 
-__all__ = ["NotFound", "one", "rows"]
+def rows(tree: Tree, depth: int | None = None, ids=None, text: bool = True) -> list:
+    """The tree's top-level rows; or, for `ids`, the rows of those blocks wherever they sit, in the order asked,
+    each with its own children cut by `depth`. Without `text` every id is an opaque positional one (`p1`, `p2`...,
+    in document order) and `ids` are read as such. Raises `NotFound` for an id the tree does not hold."""
+    alias = None if text else _opaque(tree)
+    back = {v: k for k, v in alias.items()} if alias else {}
+    if ids is None:
+        return [one(b, depth, True, text, alias) for b in tree.blocks]
+    top_ids = {b.id for b in tree.blocks}
+    out = []
+    for i in ids:
+        real = back.get(i) if alias else i
+        b = tree.get(real) if real is not None else None
+        if b is None:
+            raise NotFound(i)
+        out.append(one(b, depth, real in top_ids, text, alias))
+    return out
+
+
+__all__ = ["NotFound", "WriteFailed", "one", "rows"]

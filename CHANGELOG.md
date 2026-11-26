@@ -8,7 +8,7 @@ changes whenever an asset does. The entries name pull requests of sweatshop-ai/s
 
 ### Added
 
-- The MCP door's `blocks` and `block_types` tools: the block tree of a page with each block's id, type, attributes, capabilities and Markdown (a Stub with its type name and raw source, and only move and remove), cut by `depth` or `ids`; and every insertable Block type with its attributes, allowed values and an example. Both read-only, open to any member's token; for a token without `--write` `blocks` shows structure only (no Markdown, layout attributes only), as 9.7 keeps page text from it (block editor v1, ticket 14).
+- The MCP door's `blocks` and `block_types` tools: the block tree of a page with each block's id, type, attributes, capabilities and Markdown (a Stub with its type name and raw source, and only move and remove), cut by `depth` or `ids`; and every insertable Block type with its attributes, allowed values and an example. Both read-only, open to any member's token; for a token without `--write` `blocks` shows structure only (no Markdown, layout attributes only, no `base`, opaque positional ids `p1`, `p2`...), as 9.7 keeps page text from it (block editor v1, ticket 14).
 - The block tree of plain Markdown (`sheafmd.blocks`, which replaces the flat `blocks.py`: `blocks.flat` keeps the old names) and the Document service (`sheafmd.document`): `read()` gives the tree and the base, `save()` writes a whole Markdown text so that every block with an equal pandoc AST keeps the file's bytes, and a page's earlier saves on an old base are not a conflict for the page itself. A page save now writes through it, with no change for a save that rewrote nothing but its own blocks (block editor v1, ticket 02).
 
 ### Fixed

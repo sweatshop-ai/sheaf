@@ -109,7 +109,7 @@ def test_a_document_that_is_not_there_is_refused(browser, page):
 
 def test_both_tools_are_read_only_and_open_to_a_token_that_cannot_write(browser, page):
     token = Tokens().add("codex")
-    assert ok(browser, "blocks", doc=DOC, token=token)["base"] == md_hash(TEXT)
+    assert ok(browser, "blocks", doc=DOC, token=token)["blocks"]
     assert ok(browser, "block_types", doc=DOC, token=token)["types"]
     for n in ("blocks", "block_types"):
         assert mcp.TOOLS[n]["annotations"] == {"readOnlyHint": True}
@@ -178,10 +178,10 @@ def test_a_token_without_write_gets_the_structure_and_no_text_of_the_page(browse
     reader = Tokens().add("reader")
     got = ok(browser, "blocks", doc=DOC, token=reader)
     assert SECRET not in json.dumps(got)                            # nowhere: markdown, attrs, ids, children
-    assert got["base"] == full["base"]
+    assert "base" not in got and md_hash(SECRET_TEXT) not in json.dumps(got)
 
     def shape(rows):
-        return [(r["id"], r["type"], r["capabilities"], shape(r["children"])) for r in rows]
+        return [(r["type"], r["capabilities"], shape(r["children"])) for r in rows]
     assert shape(got["blocks"]) == shape(full["blocks"])            # the same tree
     seen = set()
 
@@ -199,11 +199,38 @@ def test_a_token_without_write_gets_the_structure_and_no_text_of_the_page(browse
     assert top["code"]["attrs"] == {} and top["stub"]["attrs"] == {}
     for n in ids_only(top):                                         # asking by id gives the same, still no text
         got = ok(browser, "blocks", doc=DOC, ids=[n], token=reader)
-        assert SECRET not in json.dumps(got)
+        assert SECRET not in json.dumps(got) and got["blocks"][0]["id"] == n
+    refused(browser, "blocks", doc=DOC, ids=[full["blocks"][0]["id"]], token=reader)     # a real id is not an opaque one
 
 
 def ids_only(top):
     return [b["id"] for b in top.values()]
+
+
+def test_a_read_only_tokens_ids_are_positional_and_say_nothing_of_the_content(browser, plan):
+    plan.write_text(f'::: {{#{SECRET}id .callout}}\nInside.\n:::\n\nyes\n\n::: {{#{SECRET}w .widget}}\nraw\n:::\n',
+                    encoding="utf-8")
+    reader = Tokens().add("reader")
+    got = ok(browser, "blocks", doc=DOC, token=reader)
+    flat = []
+
+    def walk(rows):
+        for r in rows:
+            flat.append(r["id"])
+            walk(r["children"])
+    walk(got["blocks"])
+    assert flat == [f"p{n}" for n in range(1, len(flat) + 1)]       # document order, a block before its children
+    assert SECRET not in json.dumps(got) and "base" not in got
+    full = ok(browser, "blocks", doc=DOC)
+    assert full["blocks"][0]["id"] == f"{SECRET}id" and full["base"]   # the key and a write token keep the stable ids
+    assert ok(browser, "blocks", doc=DOC, ids=["p2"], token=reader)["blocks"][0]["type"] == "paragraph"
+    # a short paragraph whose hash could be guessed: its id carries no hash of it
+    again = ok(browser, "blocks", doc=DOC, token=reader)
+    assert [b["id"] for b in again["blocks"]] == [b["id"] for b in got["blocks"]]
+    plan.write_text("yes\n", encoding="utf-8")
+    assert [b["id"] for b in ok(browser, "blocks", doc=DOC, token=reader)["blocks"]] == ["p1"]
+    assert read_tree("yes\n").ids[0] not in json.dumps(ok(browser, "blocks", doc=DOC, token=reader))
+    assert md_hash("yes\n") not in json.dumps(ok(browser, "blocks", doc=DOC, token=reader))
 
 
 def test_the_structural_attributes_are_chosen_per_type_in_one_place():
@@ -242,3 +269,29 @@ def test_a_nested_blocks_markdown_keeps_a_column_and_a_button(browser, plan):
     col = ok(browser, "blocks", doc=DOC)["blocks"][0]["children"][0]
     assert col["type"] == "column" and col["markdown"].startswith('::: {.column size="50"}') and "<div" not in col["markdown"]
     assert '{.button size="m"}' in col["children"][0]["markdown"] and "<span" not in col["children"][0]["markdown"]
+
+
+def test_nested_markdown_keeps_typography_and_raw_inline_html(browser, plan):
+    plan.write_text('> A \u201cquoted\u201d word \u2014 and\u2026 <kbd>Ctrl</kbd> done.\n', encoding="utf-8")
+    quote = ok(browser, "blocks", doc=DOC)["blocks"][0]
+    md = quote["children"][0]["markdown"]
+    assert md == 'A \u201cquoted\u201d word \u2014 and\u2026 <kbd>Ctrl</kbd> done.', md
+    assert "{=html}" not in md
+
+
+def test_a_failed_pandoc_write_is_refused_and_never_cached(browser, plan, monkeypatch):
+    from sheafmd import _pandoc
+    from sheafmd.blocks import describe
+    plan.write_text("> A nested paragraph.\n", encoding="utf-8")
+    describe._written.cache_clear()
+    real = _pandoc.run
+
+    def failing(args, text, *a, **kw):
+        got = real(args, text, *a, **kw)
+        if args[:2] == ["-f", "json"]:
+            got.returncode, got.stdout, got.stderr = 1, "", "boom"
+        return got
+    monkeypatch.setattr(_pandoc, "run", failing)
+    assert "could not be written" in refused(browser, "blocks", doc=DOC)
+    monkeypatch.setattr(_pandoc, "run", real)                       # pandoc recovers
+    assert ok(browser, "blocks", doc=DOC)["blocks"][0]["children"][0]["markdown"] == "A nested paragraph."

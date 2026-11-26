@@ -8,12 +8,13 @@ changes whenever an asset does. The entries name pull requests of sweatshop-ai/s
 
 ### Fixed
 
-- A pin's time in a root's own versions store stays out of git when the store's `.gitignore` was changed, made a link, or overruled by a `.gitignore` lower in the store; and a pin another clone made is no longer trimmed here, so its merge base stays for the page that holds it; a pin time a repo already tracks is taken out of git in a commit of its own (#687, from the review of #659).
+- Two shortcodes written as text (`\:smile:`), each in its own long changed stretch of about 1 000 words with unchanged words between the stretches, keep both escapes, instead of showing as their emoji: each stretch is now compared on its own (#691).
 - A tab that joins its browser's shared stream while that stream is opened again keeps its place on the fresh stream: the join begun on the old one no longer takes the tab off the fresh one, which left the tab counted nowhere and getting no events (#690).
 - Raw HTML with a `data-` attribute right after a `/` (`<div/data-x>`) is compared as the open tag it is, instead of as one that closes itself (`<div/>`), so a block nobody touched is not rewritten (#689).
 - Two shortcodes written as text (`\:smile: \:smile:`) in a long changed stretch keep both escapes, instead of one of them showing as its emoji (#689).
 - A paragraph with hard breaks of its own (`Alpha\` `\` `Beta`) stays one paragraph when both lines beside the breaks are edited in one save, as long as a word of them is left; two new breaks typed before or after them still make two paragraphs, as do two new breaks with none of those words beside them (#685).
 - An empty link target (`<a id="x"></a>`) left at the start of a heading split with Enter goes on with the heading, in its order, instead of being deleted with the empty marks the browser leaves (#685).
+- `sheaf FILE.md` on a page in a git repo no longer calls `render_report` on a door whose `tools/list` does not name it: it prints one line, `does not take render reports yet`, and renders on the laptop hub, instead of printing `the render report ... was refused: Unknown tool`. A list that cannot be read, or not to its end, changes nothing.
 - `sheaf open` gets its answer on a slow page: a render the hub has not finished within 120 seconds goes on and publishes its page, and the command says that the next `sheaf open` serves it, instead of failing. Each pandoc run keeps its own 120 seconds, and a wait for the document's lock no longer counts against them.
 - `sheaf FILE.md` calls a tiroir's tools under the names the server lists in `tools/list` (`sheaf_create` on a door that prefixes them, `create` on a laptop hub), instead of always sending the bare name, which a door refused with 403. A 403 now shows the door's own words instead of the sentence about a revoked token (a revoked token still answers 401).
 - A conflict copy (`FILE.tiroir.md`) is never overwritten: a second conflict leaves the next free name, `FILE.tiroir-2.md`, `-3`, and the same text reuses the copy already there; `pull` does the same.
@@ -22,6 +23,7 @@ changes whenever an asset does. The entries name pull requests of sweatshop-ai/s
 - A pin in a root's own versions store keeps its age through a clone or checkout: its time is in `<hash>.at` beside it, kept out of git by `.sheaf/versions/.gitignore`, so a pin older than 7 days is not believed again. A pin written before has no such file: after the upgrade it counts only once pinned again, so a page that holds its reload across the hub's restart can get "version no longer known" (409) on its save until its next daily pin.
 - `sheaf connect` checks that `config.toml` can be written before it stores the token.
 - A page opened on its own address keeps the link of its byline's session name (the session kit moved to `session.js`, loaded by the page script and the mount bundle).
+- A pin's time in a root's own versions store stays out of git when the store's `.gitignore` was changed, made a link, or overruled by a `.gitignore` lower in the store; and a pin another clone made is no longer trimmed here, so its merge base stays for the page that holds it; a pin time a repo already tracks is taken out of git in a commit of its own (#687, from the review of #659).
 
 ## 1.3.0 (2026-11-20)
 

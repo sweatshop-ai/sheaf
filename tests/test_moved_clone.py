@@ -136,6 +136,9 @@ def test_the_moved_line_names_the_new_tiroir_and_the_toml_line(monkeypatch, tmp_
         def __init__(self, *a):
             pass
 
+        def lacks(self, name):
+            return False
+
         def tool(self, name, args):
             return False, {"clone": "moved", "moved_to": THERE}
 

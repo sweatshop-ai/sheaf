@@ -365,7 +365,7 @@ def test_a_join_that_found_the_old_stream_listed_before_a_reopen_leaves_the_tab_
     other = shared(world, sid="n" * 24)
     assert join(world, "t1:1", docs[0], sid="n" * 24).status == 200
     stale = shared(world)
-    closing, release, fresh, threads = threading.Event(), threading.Event(), [], []
+    closing, release, fresh, threads, in_window = threading.Event(), threading.Event(), [], [], []
     real_close = stale.close
 
     def held_close():                                          # the reopen's close of the old stream waits for the join
@@ -377,7 +377,7 @@ def test_a_join_that_found_the_old_stream_listed_before_a_reopen_leaves_the_tab_
         t = threading.Thread(target=lambda: fresh.append(shared(world)))
         threads.append(t)
         t.start()
-        closing.wait(0.5)                                      # a limit: with no `_join_lock` the reopen gets this far at once
+        in_window.append(closing.wait(30))                     # a limit: the reopen lists the fresh stream and reaches the close
         return False
 
     monkeypatch.setattr(stale, "close", held_close)
@@ -388,6 +388,7 @@ def test_a_join_that_found_the_old_stream_listed_before_a_reopen_leaves_the_tab_
         release.set()
         for t in threads:
             t.join(30)
+    assert in_window == [True]                                 # the reopen ran in the join's window: the race was forced
     assert stale.closed and fresh
     assert join(world, "t1:1", docs[0]).status == 200          # the leader's join again on the fresh connection
     assert fresh[0].keys() == ["t1:1"] and other.keys() == [] and world.hub.tabs(docs[0]) == 1

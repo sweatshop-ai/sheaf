@@ -33,7 +33,7 @@ from . import _pandoc, charts, config, copyblock, images, links, orderedtask
 from . import comments as rdc
 from . import sanitize as sanitizer
 from . import source as src_mod
-from .blocks import SENTINEL_RE, declarations, instrument, split_md_blocks
+from .blocks import FORMAT, SENTINEL_RE, declarations, instrument, split_md_blocks
 from .hub import visibility
 from .theme import Theme, css_string, font_css, load_theme
 
@@ -805,7 +805,7 @@ def _shown_head_line(src: str) -> int:
 
 def pandoc_html(text: str) -> str:
     """The bundled pandoc, never whatever is on PATH (SPEC 3.2)."""
-    r = _pandoc.run(["-f", "gfm+fenced_divs+bracketed_spans", "-t", "html5", "--no-highlight"], orderedtask.hide(copyblock.hide(text)))
+    r = _pandoc.run(["-f", FORMAT, "-t", "html5", "--no-highlight"], orderedtask.hide(copyblock.hide(text)))
     if r.returncode != 0:
         raise RenderError(f"pandoc could not read this document: {r.stderr.strip()[:200]}")
     return orderedtask.show(r.stdout)

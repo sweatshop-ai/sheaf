@@ -213,7 +213,7 @@ def read_tree(text: str) -> Tree:
     live = [i for i, t in enumerate(tiles) if t.kind not in ("blank", "frontmatter") and t.content.strip()]
     seg = {}
     if live:
-        # Bytes that are not UTF-8 reach us as lone surrogates: pandoc reads a replacement character there, the
+        # Bytes that are not UTF-8 reach us as lone surrogates: pandoc reads a `?` there, the
         # tiles keep the bytes, so the file still writes back byte for byte.
         got = _pandoc.run(["-f", FORMAT, "-t", "json"], inst.encode("utf-8", "replace").decode("utf-8"))
         if got.returncode != 0:

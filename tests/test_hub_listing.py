@@ -646,7 +646,7 @@ def test_a_torn_read_whose_second_render_fails_leaves_the_hub_serving_the_page_i
     file = md(tmp_path / "x" / "notes" / "a.md", PLAN)
     hub.render(file, {}, None)
     e = hub.entries["notes/a.md"]
-    before = e.html
+    before = (e.html, list(e.log), e.first, e.images_scope)
     file.write_text("# Plan\n\nHalf a", encoding="utf-8")
     real, calls = hub._build, []
 
@@ -661,7 +661,7 @@ def test_a_torn_read_whose_second_render_fails_leaves_the_hub_serving_the_page_i
     with pytest.raises(RuntimeError):
         e.live.refresh()
     assert calls == ["# Plan\n\nHalf a", PLAN]
-    assert e.html == before and e.live.current() == (md_hash(PLAN), PLAN)
+    assert (e.html, e.log, e.first, e.images_scope) == before and e.live.current() == (md_hash(PLAN), PLAN)
 
 
 def test_a_document_stream_that_opens_as_its_root_is_forgotten_is_told_the_document_is_gone(

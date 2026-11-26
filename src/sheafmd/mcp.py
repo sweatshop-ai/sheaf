@@ -20,6 +20,7 @@ import json
 import os
 import re
 import secrets
+import stat as stat_mod
 import sys
 import time
 from collections import Counter
@@ -1372,8 +1373,8 @@ class Door:
         """Undo a create refused once `_make` is under way: the file where it was written, the folders `_make` made at its
         home, the mark it set. The list's row that `assignees` dropped stays dropped: it was of a file no longer there,
         which is what the address holds again."""
-        if written and not _take_back_file(made):
-            diagnostics.record("mcp", "take-back-left-file", address)
+        if written and (left := _take_back_file(made)) is not None:
+            diagnostics.record("mcp", "take-back-left-file", address, file=left)
         self.hub.writes.told(address)
         if made.folders:
             with place.folders_lock(made.top, made.name):
@@ -1606,54 +1607,95 @@ def _missing_folders(top: Path, rel: str) -> list:
     return out
 
 
-def _take_back_file(made: "_Made") -> bool:
+def _take_back_file(made: "_Made") -> str | None:
     """Delete the file `create_file` made for `made`, and no other (tickets 195 E, 204 A). Whatever is at the name is first
     taken from it in one step, a rename to a hidden sibling, so a file put there between a look and a delete is never the one
     deleted. Only the file made, with the text written, is deleted: its inode (a file that replaced it is another) and its
     bytes (an editor that saves in place keeps the inode). Anything else goes back to its name, never over a file that came
-    there meanwhile, which leaves it in the hidden sibling. True when the file made is gone, or was never there; False when
-    a file was left (at its name or beside it), and the caller says so."""
+    there meanwhile; then it stays in the hidden sibling. None when the file made is gone, or nothing was at the name; else
+    the name of the file left, for the caller to say: the page's own, or the hidden sibling's."""
     path = made.top / made.rel
-    aside = path.with_name(f".{path.name}.sheaf-gone-{secrets.token_hex(6)}")
+    aside = _hidden_sibling(path)
     try:
         os.rename(path, aside)
     except FileNotFoundError:
-        return True
+        return None
     except OSError:
-        return False
-    if made.ident is not None and _is_made(aside, made):
-        with contextlib.suppress(OSError):
-            os.unlink(aside)
-            return True
-        return False
-    try:
-        os.link(aside, path, follow_symlinks=False)     # never over a file that came to the name meanwhile
-    except FileExistsError:
-        return False
-    except OSError:
-        # A folder, or a filesystem without hard links: renamed back when the name is still free; a file that comes in that
-        # moment is replaced by it, which the hard link above keeps from every ordinary file.
-        with contextlib.suppress(OSError):
-            if not os.path.lexists(path):
-                os.rename(aside, path)
-        return False
-    with contextlib.suppress(OSError):
-        os.unlink(aside)
-    return False
+        return path.name
+    got = _delete_if_made(aside, made) if made.ident is not None else False
+    if got is True:
+        return None
+    if got is False:
+        return _put_back(aside, path)
+    return _write_back(got, path)     # written through a descriptor while it was deleted: its bytes go back
 
 
-def _is_made(path: Path, made: "_Made") -> bool:
-    """Whether `path` is the file `create_file` made for `made`, as it wrote it: that inode, those bytes."""
+def _hidden_sibling(path: Path) -> Path:
+    return path.with_name(f".{path.name}.sheaf-gone-{secrets.token_hex(6)}")
+
+
+def _delete_if_made(aside: Path, made: "_Made") -> bool | bytes:
+    """Delete `aside` when it is the file made for `made`, as it was written: that inode, those bytes. True when deleted;
+    False when it is another (left where it is), a FIFO or a folder among them, opened without waiting. The rename shut out
+    every writer that opens the name, not one that holds a descriptor already: a write of such a one between the look and
+    the delete is seen after it, on the descriptor kept open (its mtime or size moved), and the bytes the file holds then are
+    answered for the caller to put back. A write in the same tick of the clock, at the same size, is not seen."""
     want = made.text.encode("utf-8")
     try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = os.open(aside, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     except OSError:
         return False
     with os.fdopen(fd, "rb") as f:
-        st = os.fstat(f.fileno())
-        if (st.st_dev, st.st_ino) != made.ident or st.st_size != len(want):
+        st = os.fstat(fd)
+        if (not stat_mod.S_ISREG(st.st_mode) or (st.st_dev, st.st_ino) != made.ident or st.st_size != len(want)
+                or f.read(len(want) + 1) != want):
             return False
-        return f.read(len(want) + 1) == want
+        try:
+            os.unlink(aside)
+        except OSError:
+            return False
+        after = os.fstat(fd)
+        if (after.st_mtime_ns, after.st_size) == (st.st_mtime_ns, st.st_size):      # not its ctime: the delete moves that
+            return True
+        f.seek(0)
+        return f.read()
+
+
+def _put_back(aside: Path, path: Path) -> str:
+    """Put `aside` back at `path`, never over a file that came there meanwhile; answers the name it is left under."""
+    try:
+        os.link(aside, path, follow_symlinks=False)
+    except FileExistsError:
+        return aside.name
+    except (OSError, NotImplementedError):
+        # A folder has no hard link: renamed back, which can replace no file and no folder with anything in it. A file on a
+        # filesystem without hard links stays aside, as a rename could replace one that came to the name.
+        if aside.is_dir() and not aside.is_symlink():
+            with contextlib.suppress(OSError):
+                os.rename(aside, path)
+                return path.name
+        return aside.name
+    with contextlib.suppress(OSError):
+        os.unlink(aside)
+    return path.name
+
+
+def _write_back(data: bytes, path: Path) -> str:
+    """Write `data` at `path` as a new file, never over one; answers the name it is left under."""
+    tmp = _hidden_sibling(path)
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666)
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+    except OSError:
+        return f"{path.name} (its bytes could not be written back)"
+    try:
+        os.link(tmp, path)
+    except (OSError, NotImplementedError):
+        return tmp.name
+    with contextlib.suppress(OSError):
+        os.unlink(tmp)
+    return path.name
 
 
 @dataclass

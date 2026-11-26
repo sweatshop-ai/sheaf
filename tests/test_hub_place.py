@@ -279,6 +279,74 @@ def test_a_door_create_taken_back_leaves_a_file_put_at_the_name_after_its_look(t
     assert not taken_aside(work / SHARED)
 
 
+def test_a_door_create_taken_back_puts_back_what_an_open_descriptor_wrote_as_it_was_deleted(
+        team, work, browser, tokens, monkeypatch):
+    """Ticket 204 A: an editor that held the file open writes through its descriptor between the take-back's look and its
+    delete. The rename kept no such writer out: the bytes it wrote are put back at the name, and said."""
+    from sheafmd import mcp
+    address = f"work/{SHARED}"
+    browser.hub.docs.change(address, lambda e: {**e, "generated": {"by": "x", "id": None, "at": "t", "key": True}})
+    change, real_unlink, held = browser.hub.docs.change, os.unlink, []
+
+    def written_through_a_descriptor(path, *args, **kwargs):
+        if ".sheaf-gone-" in str(path) and not held:
+            held.append(open(path, "r+", encoding="utf-8"))     # opened before the take-back, in the editor's hands
+            held[0].truncate(0)
+            held[0].write("# Written as it went\n")
+            held[0].flush()
+        return real_unlink(path, *args, **kwargs)
+
+    def no_clear_after_the_file(a, settle):
+        if (work / SHARED).exists():
+            monkeypatch.setattr(mcp.os, "unlink", written_through_a_descriptor)
+            raise OSError(28, "No space left on device")
+        return change(a, settle)
+    monkeypatch.setattr(browser.hub.docs, "change", no_clear_after_the_file)
+    is_error, got = call(browser, "create", token=tokens["alice"], doc=address, text=OPEN)
+    monkeypatch.undo()
+    held[0].close()
+    assert is_error and "not made" in got, got
+    assert (work / SHARED).read_text(encoding="utf-8") == "# Written as it went\n"
+    assert not taken_aside(work / SHARED)
+    assert any(r.get("kind") == "take-back-left-file" and r.get("file") == NAME for r in diagnostics.read())
+
+
+def test_a_door_create_taken_back_keeps_aside_and_names_a_file_it_cannot_put_back(team, work, browser, tokens, monkeypatch):
+    """Ticket 204 A: a file that is not the one made goes back to its name, never over one that came there meanwhile:
+    then it stays in its hidden sibling, which the diagnostics log names."""
+    from sheafmd import mcp
+    address = f"work/{SHARED}"
+    browser.hub.docs.change(address, lambda e: {**e, "generated": {"by": "x", "id": None, "at": "t", "key": True}})
+    real_create, change, real_rename, made = mcp.create_file, browser.hub.docs.change, os.rename, []
+
+    def create_then_saved_in_place(top, rel, text, judge=None):
+        ident = real_create(top, rel, text, judge)
+        (work / rel).write_text("# The editor's text\n", encoding="utf-8")
+        made.append(rel)
+        return ident
+
+    def then_another_comes(src, dst, *args, **kwargs):
+        got = real_rename(src, dst, *args, **kwargs)
+        if str(src) == str(work / SHARED):
+            (work / SHARED).write_text("# Another's\n", encoding="utf-8")
+        return got
+
+    def no_clear_after_the_file(a, settle):
+        if made:
+            monkeypatch.setattr(mcp.os, "rename", then_another_comes)
+            raise OSError(28, "No space left on device")
+        return change(a, settle)
+    monkeypatch.setattr(mcp, "create_file", create_then_saved_in_place)
+    monkeypatch.setattr(browser.hub.docs, "change", no_clear_after_the_file)
+    is_error, got = call(browser, "create", token=tokens["alice"], doc=address, text=OPEN)
+    monkeypatch.undo()
+    assert is_error and "not made" in got, got
+    assert (work / SHARED).read_text(encoding="utf-8") == "# Another's\n"
+    [kept] = taken_aside(work / SHARED)
+    assert (work / SHARED).with_name(kept).read_text(encoding="utf-8") == "# The editor's text\n"
+    assert any(r.get("kind") == "take-back-left-file" and r.get("file") == kept for r in diagnostics.read())
+
+
 def test_a_door_create_taken_back_deletes_the_file_it_made(team, work, browser, tokens, monkeypatch):
     """Ticket 195 E: the same take-back, with the file as the create made it, deletes it."""
     address = f"work/{SHARED}"

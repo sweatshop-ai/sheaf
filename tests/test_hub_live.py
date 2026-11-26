@@ -465,6 +465,19 @@ def test_a_wait_nobody_answers_expires_and_says_so(made):
                        "or it answered in its own chat. Tell again, or reply here."})]
 
 
+def test_a_closed_document_tells_its_tabs_nothing_after_gone(made):
+    """Ticket 204 B: once a page is deleted (`close`, then `gone`), no event of its document goes out: a wait that expires,
+    the session's state, a save."""
+    doc, md, rendered, events, clock = made(WITH_C1)
+    doc.await_reply("c1")
+    doc.close()
+    clock.t += 601
+    doc.expire(600)
+    doc.observe("waiting")
+    doc.save(rds.md_hash(WITH_C1), edit_other(WITH_C1), rid=SAVE_RID)
+    assert events == []
+
+
 def test_stopping_a_wait_says_whether_there_was_one(made):
     doc, *_ = made(WITH_C1)
     doc.await_reply("c1")
@@ -1184,7 +1197,7 @@ def test_a_torn_read_whose_second_render_fails_serves_the_page_the_tabs_hold(mad
     the text the tabs hold fails, the page served before the torn one is put back: it is of the text the document holds."""
     doc, md, rendered, events, _ = made()
     page = {"html": f"page of {DOC}"}
-    doc.served = lambda: (lambda kept=page["html"]: page.update(html=kept))
+    doc.keep_page = lambda: (lambda kept=page["html"]: page.update(html=kept))
     torn, whole = "# Title\n\nFirst par", DOC.replace("First paragraph.", "First, reworded.")
     md.write_text(torn, encoding="utf-8")
     calls = []

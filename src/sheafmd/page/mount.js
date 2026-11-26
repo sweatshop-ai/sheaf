@@ -128,6 +128,9 @@
   const SCHEME = /^([^/?#]*):/;
   const LINK_SCHEMES = new Set(['http', 'https', 'mailto']);
   const IMAGE_DATA = /^data:image\/(?:png|jpeg|gif|webp)[;,]/i;
+  // The one SVG form sheaf writes itself (a local .svg file's image: base64, nothing after it): an image loader runs no script
+  // in it and loads nothing from it, and the diagram viewer opens it. Any other SVG data address goes (sanitize.py, the same).
+  const SVG_DATA = /^data:image\/svg\+xml;base64,[A-Za-z0-9+/]*={0,2}$/i;
 
   function linkOk(value) {
     const v = value.replace(CONTROL, '');
@@ -139,7 +142,7 @@
   function imageOk(value) {
     const v = value.replace(CONTROL, '');
     if (v.includes('\\') || v.startsWith('//')) return false;
-    return !SCHEME.test(v) || IMAGE_DATA.test(v);
+    return !SCHEME.test(v) || IMAGE_DATA.test(v) || SVG_DATA.test(v);
   }
 
   const UINT = /^\d{1,6}$/;

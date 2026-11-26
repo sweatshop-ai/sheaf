@@ -113,6 +113,8 @@ class Entry:
     first: bool = True                             # no build has run yet
     settings_built: int = 0      # the settings change (`Hub._settings_seq`) its last build read: older, a render rebuilds (199, 213 C)
     images_scope: tuple | None = None              # the image rule its last build read: `Hub._image_scope` (9.9)
+    generation: int = 0          # raised, under `swap`, when its root is let go: a page is installed only while it holds (26 D)
+    swap: threading.Lock = field(default_factory=threading.Lock)   # a leaf, outside `lockorder.ORDER`: the generation and the page swap
 
     where: Callable[[], tuple] | None = None     # (the root's folder, the path in it) of its file now: what is opened beneath
     last_where: tuple | None = None              # what `where` last found: kept for a root forgotten under a write
@@ -700,8 +702,8 @@ class Hub:
         e.live.agent_tells = lambda: self.waiting_tells.waits(address, None, sweep=False)   # the hub person's (9.8)
         e.live.tells_lock = self.waiting_tells._lock
         e.live.keep_page = lambda: self._keep_page(e)
-        e.live.same_root = lambda: ((r := self.roots.get(roots_mod.Address.parse(address).root)) is not None
-                                    and r.id == e.root_id)
+        e.live.generation = lambda: e.generation
+        e.live.install = lambda text, gen: self._install(e, gen, text)
         return e
 
     @staticmethod
@@ -723,11 +725,39 @@ class Hub:
         e.rebuild_failure = None         # every rebuild that works passes here: the next failure is news
         return branch
 
+    @staticmethod
+    def _regenerate(e: Entry, by: int):
+        with e.swap:
+            e.generation += by
+
+    def _install(self, e: Entry, gen: int, text: str):
+        """(True, the branch) when `text` was rendered for `e` and is now the page the hub serves, (False, None) when `e` was
+        let go since `gen` was read: the render is dropped, whatever folder holds the name now (ticket 26 D). The page is
+        swapped under the entry's `swap` lock, which the let-go raises the generation under (a leaf: the hub's lock comes before the document's, which the save holds), so no page of a replacement root is served."""
+        repo = self.clone_of(e.address)
+        branch = self._repos.head_of(repo) if repo else None
+        html, log, scope = self._compose(e, text, branch=branch)
+        with e.swap:
+            if e.generation != gen or e.live._detached:
+                return False, None
+            e.html = html
+            e.rebuild_failure = None
+            e.log, e.first, e.images_scope = log, False, scope
+        return True, branch
+
     def _settings(self, address: str) -> dict:
         s = self.docs.get(address)
         return {k: s.get(k) for k in SETTING_KEYS}
 
     def _build(self, e: Entry, text: str, *, mount: bool = False, count: bool = True, branch: str | None = None) -> str:
+        html, log, scope = self._compose(e, text, mount=mount, count=count, branch=branch)
+        if count:
+            e.log, e.first = log, False
+            e.images_scope = scope          # once the build worked
+        return html
+
+    def _compose(self, e: Entry, text: str, *, mount: bool = False, count: bool = True, branch: str | None = None):
+        """(the page, its render log, its image rule) of `text` for `e`; keeps nothing on `e`."""
         s = self._settings(e.address)
         root = self._file_root(e)
         meta = {"doc": e.address, "root": e.root_id, "boot": self.boot, "version": self.version,
@@ -748,10 +778,7 @@ class Hub:
                            script_nonce=self.placeholder, image_ok=self._image_rule(root, e.path, e.address, scope),
                            image_read=self._image_read(root) if self.proxy is not None else None,
                            warn=e.warnings.append if e.first and count else None, mount=mount)
-        if count:
-            e.log, e.first = log, False
-            e.images_scope = scope          # once the build worked
-        return html
+        return html, log, scope
 
     def share_copy(self, e: Entry) -> str:
         """The share copy of the document as the file is now, with the settings it is shown with."""
@@ -1268,10 +1295,12 @@ class Hub:
             # then for the late forget to leave them (`LiveDocument.detach`).
             for a in held:
                 self.entries[a].live.detach()   # no wait for its lock here: a render holds it for up to 120 s
+                self._regenerate(self.entries[a], 1)    # a save's page is installed only while it holds (26 D)
             # An entry still in its first render is detached too: its maker finds the root gone and forgets it (200).
             making = [m for a, m in self._making.items() if a.startswith(prefix)]
             for m in making:
                 m.entry.live.detach()
+                self._regenerate(m.entry, 1)
                 m.detached = True
             known = self.roots.held(name)     # a private root too, which `get` hides
             try:
@@ -1281,8 +1310,10 @@ class Hub:
                 if self.roots.held(name) is not None:
                     for a in held:      # the registry still holds the root: it stays, and so do its documents' versions
                         self.entries[a].live.reattach()
+                        self._regenerate(self.entries[a], -1)
                     for m in making:
                         m.entry.live.reattach()
+                        self._regenerate(m.entry, -1)
                         m.detached = False
                     raise
                 # The registry let the name go, and another folder may take it now: the forget goes on, its documents

@@ -166,10 +166,10 @@ def test_a_root_forgotten_between_the_write_and_the_render_does_not_fail_the_sav
     i = next(n for n, b in enumerate(split_md_blocks(text)) if b.content.startswith("First paragraph"))
     finishes = []
 
-    def render(_text):
+    def render(_text, _gen):
         finishes.append(hub.let_go_root(root.name)[1])       # the root goes while the render starts, then its file is not found
         raise NotFound("gone")
-    e.live._render = render
+    e.live.install = render
     out = e.live.save(rds.md_hash(text), [{"i": i, "html": "<p>Edited words.</p>"}])
     assert out["changed"] and "Edited words." in f.read_text(encoding="utf-8")
     finishes[0]()
@@ -240,33 +240,61 @@ def test_a_save_without_an_entry_names_in_its_diagnostics_the_file_it_wrote(tmp_
     assert "Edited words." in a.read_text(encoding="utf-8") and "Edited words." not in b.read_text(encoding="utf-8")
 
 
-def test_a_root_forgotten_and_its_name_taken_between_the_write_and_the_render_tells_the_tabs_nothing_of_the_new_root(
-        world, work, tmp_path):
-    """2: the render after the write read the file by the name, so a root forgotten and its name taken by another folder
-    in between gave the old tabs the new root's text. The save is written and answered; the tabs hear `gone` only."""
+@pytest.mark.parametrize("replacement", [b"# Other\n\nReplacement words.\n", b"\xff\xfe not utf-8 Replacement", None],
+                         ids=["a document", "invalid utf-8", "no document"])
+@pytest.mark.parametrize("window", ["before the render", "between the render and the swap"])
+def test_a_root_forgotten_and_its_name_taken_between_the_write_and_the_page_swap_tells_the_tabs_nothing_of_the_new_root(
+        world, work, tmp_path, replacement, window):
+    """2: the page a save installs is the text it wrote, rendered against the entry it pinned, and swapped in only while that
+    entry's root was not let go. Forget the root and let another folder take the name in the window: the save is `written`
+    and answered, the tabs hear `gone`, and nothing of the new root is installed or served meanwhile."""
     hub = world.hub
     e = hub.entry("work/start.md")
     f = work / "start.md"
     text = f.read_text(encoding="utf-8")
+    old_page = e.html
     i = next(n for n, b in enumerate(split_md_blocks(text)) if b.content.startswith("First paragraph"))
     sub = e.bus.subscribe()
     sub.drain()
-    finishes = []
-    real = e.live._read
+    finishes, served = [], []
 
-    def read():
-        # between the write and the re-render's read: the root is let go and the name is taken by another folder
+    def take_the_name():
         finishes.append(hub.let_go_root("work")[1])
         other = tmp_path / "again" / "work"
         other.mkdir(parents=True)
-        (other / "start.md").write_text("# Other\n\nReplacement words.\n", encoding="utf-8")
-        assert hub.roots.for_document(other / "start.md").name == "work"
-        return real()
-    e.live._read = read
+        if replacement is not None:
+            (other / "start.md").write_bytes(replacement)
+        if replacement is not None:
+            assert hub.roots.for_document(other / "start.md").name == "work"
+    if window == "before the render":
+        real = e.live.install
+        e.live.install = lambda t, g: (take_the_name(), real(t, g))[1]
+    else:
+        real = hub._compose
+
+        def compose(*a, **k):
+            out = real(*a, **k)
+            take_the_name()
+            served.append(e.html)               # a GET in the window reads this
+            return out
+        hub._compose = compose
     out = e.live.save(rds.md_hash(text), [{"i": i, "html": "<p>Edited words.</p>"}])
     assert out["changed"] and "Edited words." in f.read_text(encoding="utf-8")
+    assert e.html == old_page and "Replacement" not in e.html and all(h == old_page for h in served)
     finishes[0]()
     events = sub.drain()
-    assert "Replacement" not in repr(events)
-    assert "Replacement" not in e.live._text
+    assert "Replacement" not in repr(events) and "Replacement" not in e.live._text
     assert [n for n, _ in events][-1:] == ["gone"], events
+
+
+@pytest.mark.parametrize("hook", ["between", "kept"])
+def test_a_hook_passed_as_none_is_not_called_and_the_write_is_recorded(tmp_path, hook):
+    """1: a disabled hook (None) is no hook: the write lands and the session's record is made."""
+    from sheafmd.document import DocumentService
+    md = tmp_path / "a.md"
+    md.write_text(DOC, encoding="utf-8")
+    svc = DocumentService(rda.MarkdownFileAdapter(md))
+    svc.read()
+    out = svc.write(lambda t, op: "Changed.\n", "s1", **{hook: None})
+    assert out["outcome"] == "written" and md.read_text(encoding="utf-8") == "Changed.\n"
+    assert svc._own(rds.md_hash(DOC), rds.md_hash("Changed.\n"), "s1")

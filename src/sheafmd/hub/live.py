@@ -104,9 +104,11 @@ class LiveDocument:
         self.tells_lock = contextlib.nullcontext()      # the lock of the Tells' file: held while `telling` is read and published (`_publish_telling`)
         # Keeps the page served now and answers a callable that puts it back: a torn read's render replaced it (ticket 204 C).
         self.keep_page = lambda: (lambda: None)
-        # Whether the root this document was made for is still the one its name holds: a root forgotten and its name taken
-        # by another folder is not (the hub sets it). A render after a write is kept only while it is.
-        self.same_root = lambda: True
+        # A save's page is installed under a check of the root the document was made for (ticket 26 D): `generation()` is the
+        # root entry's number now, and `install(text, generation)` renders `text` and makes the page the hub serves only while
+        # that number still holds, answering (True, the branch) or (False, None). Without them, `_render` does it.
+        self.generation = lambda: 0
+        self.install = None
         # The question the told session put to its person in its own chat, while it waits for
         # them there ("" when it is not waiting).
         self._question = ""
@@ -245,20 +247,35 @@ class LiveDocument:
             return None
         return st.st_mtime_ns, st.st_size
 
-    def _rerender(self, remember: bool = True, same=None):
-        """Render the page from the file and keep what was read. With `same` (a save's), a root that was let go, or whose
-        name another folder took, while it read and rendered is not the document's any more: the page served is put back,
-        nothing is kept, and False says so (its tabs hear `gone` of the forget, never the text of the folder that took the name)."""
-        put_back = self.keep_page() if same is not None else None
+    def _rerender(self, remember: bool = True):
         text = self._read()
         branch = self._render(text)
-        if same is not None and (self._detached or not same()):
-            put_back()
-            return False
         self._text, self._hash = text, rds.md_hash(text)
         self._branch = branch if isinstance(branch, str) else None
         if remember:
             self._remember(text)
+
+    def _install_page(self, text: str, gen, before: str, rid=None) -> bool:
+        """The page of a save that wrote `text`, and the one `changed` event for it. A document of a root renders the text the
+        save wrote, never one read back, against the entry the save pinned (`gen`), and keeps it only while that entry was not
+        let go: False says it was, nothing is installed and its tabs hear `gone` (ticket 26 D). A document with no entry has no
+        root to lose, and reads the file back, as before."""
+        if self.install is None:
+            self._rerender()
+            # Measured from the text the tabs hold, or, when someone wrote between our write and the render (the watcher will
+            # not see that either), from the text we wrote: the tab that saved holds that one.
+            raced = self._hash != rds.md_hash(text)
+            start = text if raced else before
+        else:
+            kept, branch = self.install(text, gen)
+            if not kept:
+                return False
+            self._text, self._hash = text, rds.md_hash(text)
+            self._branch = branch if isinstance(branch, str) else None
+            self._remember(text)
+            start = before
+        # One event for the whole write: the watcher compares the hash just taken and will say nothing more of it.
+        self._announce(self._snapshot(self._text), start, **({"rid": rid} if rid is not None else {}))
         return True
 
     def _telling_view(self):
@@ -343,6 +360,7 @@ class LiveDocument:
             if rid is not None and rid in self._save_rids and self._save_rids[rid][0] == sent:
                 return {**self._save_rids[rid][1], "again": True}
             before = self._text
+            gen = self.generation()         # the root entry this save is of, pinned before it writes
             got = {}
 
             pinned = []                 # the file a document with no entry writes, asked once
@@ -385,14 +403,7 @@ class LiveDocument:
             # edit is written and answered (its tabs heard `gone`), never failed by a look-up after it (ticket 26 D).
             if report["changed"] and not self._detached:
                 try:
-                    if self._rerender(same=self.same_root):
-                        # One event for the whole write: the watcher compares the hash just taken and
-                        # will say nothing more of it. Measured from the text the tabs hold, or, when
-                        # someone wrote between our write and the render (the watcher will not see
-                        # that either), from the text we wrote: the tab that saved holds that one.
-                        raced = self._hash != rds.md_hash(new_text)
-                        start = new_text if raced else before
-                        self._announce(self._snapshot(self._text), start, **({"rid": rid} if rid is not None else {}))
+                    self._install_page(new_text, gen, before, rid)
                 except NotFound:
                     if not self._detached:      # a root forgotten after the check above: its detach came first
                         raise

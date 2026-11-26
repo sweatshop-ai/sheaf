@@ -104,7 +104,7 @@ class DocumentService:
                     late.append(e)
             return run
         for k in ("between", "kept"):
-            if k in hooks:
+            if hooks.get(k) is not None:
                 hooks[k] = guarded(hooks[k])
         try:
             here, name = self.adapter.pinned()

@@ -82,6 +82,14 @@ def _openat2(dirfd: int, rel: str, flags: int, resolve: int = _RESOLVE_BENEATH) 
     return fd
 
 
+def stat_key(st, ctime: bool = True) -> tuple:
+    """What the watcher compares to see that a file was written to: its identity, size and both times. A write or a rename
+    moves the change time even where the modification time is put back, and a replacement is another inode. Without `ctime`
+    (a key taken before a rename, which moves it) the change time is None, a key no later status equals: the first pass that
+    meets it looks at the file's text once, and stores the real key."""
+    return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns if ctime else None
+
+
 def ident(fd: int) -> tuple:
     st = os.fstat(fd)
     return (st.st_dev, st.st_ino)
@@ -94,6 +102,7 @@ class Opened:
     def __init__(self, fd, file, dirs, parent, name, how, top, rel, st=None):
         self.fd, self.file, self.dirs, self._parent, self.name, self.how = fd, file, dirs, parent, name, how
         self.top, self.rel, self._st = top, rel, st
+        self.written = None         # `stat_key` of the file `write` made, taken from its descriptor once it was in place
 
     def idents(self) -> list:
         return [*self.dirs, self.file]
@@ -117,6 +126,7 @@ class Opened:
         """Replace the file with `text` whole, through the folder descriptor of the walk: a sibling made there and
         renamed over the name, only while the name still holds the file that was opened."""
         pfd, name = self._folder()
+        self._still_beneath(pfd)
         tmp = f".{name}.sheaf-tmp"
         try:
             os.unlink(tmp, dir_fd=pfd)
@@ -131,19 +141,46 @@ class Opened:
                 os.fchmod(f.fileno(), mode)
                 os.fsync(f.fileno())
                 made = ident(f.fileno())
+                # The status the watcher is handed, taken from the new file's descriptor before the rename: whatever an
+                # editor does in place after it is then no part of the key (it moves the size or the times it holds).
+                self.written = stat_key(os.fstat(f.fileno()), ctime=False)
             sib = os.stat(tmp, dir_fd=pfd, follow_symlinks=False)       # a folder writer may swap the sibling while it is written
             if (sib.st_dev, sib.st_ino) != made:
                 raise OSError(errno.ESTALE, "the new text was swapped out of its place", tmp)
             st = os.stat(name, dir_fd=pfd, follow_symlinks=False)
             if (st.st_dev, st.st_ino) != self.file:
                 raise OSError(errno.ESTALE, "the file is no longer the one that was opened", name)
+            self._still_beneath(pfd)
             os.rename(tmp, name, src_dir_fd=pfd, dst_dir_fd=pfd)
         except BaseException:
+            self.written = None
             try:
                 os.unlink(tmp, dir_fd=pfd)
             except OSError:
                 pass
             raise
+
+    def _still_beneath(self, pfd: int):
+        """After `openat2` the folder descriptor is the one of the first walk, which follows a folder that was moved away: it is
+        resolved again beneath the root now (`RESOLVE_BENEATH`, no link, never blocking) and must be the same folder, else
+        the write is refused as the walk of our own refuses it (ESTALE)."""
+        if self.how != "openat2":
+            return
+        parts = self.rel.split("/")[:-1]
+        rootfd = os.open(self.top, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        try:
+            try:
+                here = _openat2(rootfd, "/".join(parts), os.O_RDONLY | os.O_DIRECTORY | os.O_NONBLOCK,
+                                _RESOLVE_BENEATH | _RESOLVE_NO_SYMLINKS) if parts else os.dup(rootfd)
+            except OSError as e:
+                raise OSError(errno.ESTALE, "the file's folder is no longer beneath its root", self.rel) from e
+            try:
+                if ident(here) != ident(pfd):
+                    raise OSError(errno.ESTALE, "the file's folder is no longer the one that was opened", self.rel)
+            finally:
+                os.close(here)
+        finally:
+            os.close(rootfd)
 
     def _folder(self):
         """(descriptor of the folder holding the file, its name). The walk of our own has it; after `openat2` the walk is
@@ -190,8 +227,9 @@ def _root_dirs(rootfd: int) -> list:
         os.close(fd)
 
 
-def _folders_of(rootfd: int, rel: str, file: tuple) -> list:
-    """The identities of the folders that hold the file `openat2` opened: the root's, its parents' and every folder
+def _folders_of(rootfd: int, rel: str, file: tuple) -> tuple:
+    """(the identities of the folders, a descriptor of the file's own folder, which the caller closes). The folders that hold
+    the file `openat2` opened: the root's, its parents' and every folder
     between the root and the file. The file's folder is opened beneath the root the same way (no link), the name in it
     must be the file opened (else ESTALE: something moved meanwhile), and the folders above it are read by `..` up to
     the root, so what is judged is what the file lies in, not a path read again."""
@@ -200,22 +238,27 @@ def _folders_of(rootfd: int, rel: str, file: tuple) -> list:
         raise OSError(errno.ESTALE, "a path with dots is walked, not opened by the kernel", rel)
     out = _root_dirs(rootfd)
     if len(parts) == 1:
-        return out
+        return out, os.dup(rootfd)
     here = _openat2(rootfd, "/".join(parts[:-1]), os.O_RDONLY | os.O_DIRECTORY, _RESOLVE_BENEATH | _RESOLVE_NO_SYMLINKS)
     try:
         st = os.stat(parts[-1], dir_fd=here, follow_symlinks=False)
         if (st.st_dev, st.st_ino) != file:
             raise OSError(errno.ESTALE, "the file is no longer the one that was opened", rel)
-        root, mid = ident(rootfd), []
-        for _ in range(len(parts)):
-            now = ident(here)
-            if now == root:
-                return [*mid, *out]
-            mid.append(now)
-            up = os.open("..", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=here)
-            os.close(here)
-            here = up
-        raise OSError(errno.ESTALE, "the file's folders do not lead up to its root", rel)
+        own = os.dup(here)
+        try:
+            root, mid = ident(rootfd), []
+            for _ in range(len(parts)):
+                now = ident(here)
+                if now == root:
+                    return [*mid, *out], own
+                mid.append(now)
+                up = os.open("..", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=here)
+                os.close(here)
+                here = up
+            raise OSError(errno.ESTALE, "the file's folders do not lead up to its root", rel)
+        except BaseException:
+            os.close(own)
+            raise
     finally:
         os.close(here)
 
@@ -248,7 +291,7 @@ def _walk(top, rel: str, meta: bool = False):
             while True:
                 try:
                     try:
-                        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | (0 if last else os.O_DIRECTORY),
+                        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | (os.O_NONBLOCK if last else os.O_DIRECTORY),
                                      dir_fd=stack[-1])
                     except PermissionError:
                         if not (meta and last):
@@ -313,7 +356,7 @@ def open_beneath(top, rel: str, meta: bool = False) -> Opened:
             try:
                 # No link at all, first: the kernel alone then decides, and every name of the path is the one checked above.
                 try:
-                    fd = _openat2(rootfd, rel, os.O_RDONLY, _RESOLVE_BENEATH | _RESOLVE_NO_SYMLINKS)
+                    fd = _openat2(rootfd, rel, os.O_RDONLY | os.O_NONBLOCK, _RESOLVE_BENEATH | _RESOLVE_NO_SYMLINKS)
                 except PermissionError:
                     if not meta:
                         raise
@@ -332,11 +375,13 @@ def open_beneath(top, rel: str, meta: bool = False) -> Opened:
                     os.close(fd)
                     raise Linked(rel)
                 try:
-                    dirs = _folders_of(rootfd, rel, (st.st_dev, st.st_ino))
+                    dirs, parent = _folders_of(rootfd, rel, (st.st_dev, st.st_ino))
                 except BaseException:
                     os.close(fd)
                     raise
-                return Opened(fd, (st.st_dev, st.st_ino), dirs, None, None, "openat2", top, rel)
+                # The file's folder is kept from this first walk: a write goes through it and is refused when the name no
+                # longer holds this file, and the path is never walked again (a name turned into a FIFO would be waited on).
+                return Opened(fd, (st.st_dev, st.st_ino), dirs, parent, rel.split("/")[-1], "openat2", top, rel)
         finally:
             os.close(rootfd)
     fd, file, dirs, parent, name, st = _walk(top, rel, meta)

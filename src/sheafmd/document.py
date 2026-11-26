@@ -93,16 +93,33 @@ class DocumentService:
     def write(self, change, session: str = "", *, author: str = "", note: str = "", move=None, **hooks) -> dict:
         """The write `change(text, opened)` makes through the adapter, under its lock, recorded as this session's.
         A `Conflict` the change raises is the outcome `conflict`. Returns the outcome; `hooks` are the adapter's own."""
-        here, name = self.adapter.pinned()
-        if not self.adapter.accepts(name):
-            return rda.refused(f"{name} is not a .md file")
+        name = "the file"
+        late = []               # a policy error of a hook, which runs after the file is written: no refusal, and the record is made first
+
+        def guarded(hook):
+            def run(*args):
+                try:
+                    return hook(*args)
+                except rda.POLICY as e:
+                    late.append(e)
+            return run
+        for k in ("between", "kept"):
+            if hooks.get(k) is not None:
+                hooks[k] = guarded(hooks[k])
         try:
+            here, name = self.adapter.pinned()
+            if not self.adapter.accepts(name):
+                return rda.refused(f"{name} is not a .md file")
             outcome, old, new = here.apply(change, author=author, note=note, move=move, **hooks)
         except rda.Refused as r:
             return rda.refused(r.reason, r.block)
+        except rda.POLICY as e:
+            return rda.policy_refusal(name, e)
         if outcome["outcome"] == "written":
             self._record(old, new, session)
             outcome["blocks"] = self._ids(new)
+        if late:
+            raise late[0]
         return outcome
 
     def settle(self, current: str, markdown: str, held_ids, base: str, session: str, base_text: str | None = None,

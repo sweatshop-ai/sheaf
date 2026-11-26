@@ -27,9 +27,25 @@ from pathlib import Path
 from typing import NamedTuple
 
 from . import source as rds
+from .beneath import Escapes, Linked
 
 INTERFACE_VERSION = 1
 SUFFIX = ".md"
+
+
+def _as_read(text: str) -> str:
+    """The text as a read of a path gives it back: `read_text` turns a CRLF or a lone CR into LF, so the base of what was
+    written is the hash of that, the one the next read and the stale check compute. A file opened beneath its root is read
+    byte for byte and needs none of this."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
+
+
+POLICY = (Escapes, Linked)      # the source's own policy: a file it does not serve (read elsewhere as one that is not there)
+
+
+def policy_refusal(name: str, error: Exception) -> dict:
+    """The outcome `refused` for a write the source's policy turned away, for every door that returns outcomes."""
+    return {"outcome": "refused", "block": "", "reason": f"{name} is not a file this source serves ({type(error).__name__.lower()})"}
 
 
 class Refused(Exception):
@@ -98,13 +114,18 @@ class MarkdownFileAdapter:
         if self._beneath is not None:
             where = self._beneath()
             return MarkdownFileAdapter(beneath=lambda: where), where[1]
-        return self, self._file().name
+        here = self._file()
+        return MarkdownFileAdapter(here), here.name
 
     def write(self, tree, base, author: str = "", note: str = "", move=None) -> dict:
-        here, name = self.pinned()
-        if not self.accepts(name):
-            return refused(f"{name} is not a .md file")
-        out, _, _ = here.apply(lambda t, opened: tree.text, expected=base, move=move, author=author, note=note)
+        name = "the file"
+        try:
+            here, name = self.pinned()
+            if not self.accepts(name):
+                return refused(f"{name} is not a .md file")
+            out, _, _ = here.apply(lambda t, opened: tree.text, expected=base, move=move, author=author, note=note)
+        except POLICY as e:
+            return policy_refusal(name, e)
         return out
 
     def apply(self, change: Callable, *, expected: str | None = None, move=None, author: str = "", note: str = "",
@@ -126,6 +147,8 @@ class MarkdownFileAdapter:
                 old, new = (by or rds.update_file)(self._file(), lambda t: judged(t, None), move=move)
         except Conflict as c:
             return conflict(c.base, c.blocks), None, None
+        if self._beneath is None:
+            new = _as_read(new)         # what the next read gives back: the base, the record and the caller's text are all of that
         if between is not None:
             between()
         if kept is not None:

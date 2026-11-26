@@ -7,6 +7,7 @@ the server (server.py) drives. A test builds one and calls `tick()` itself.
 A document is served from an Entry: its LiveDocument, its event bus, and the page's HTML in
 memory (no file in /tmp, SPEC 8.9).
 """
+import contextlib
 import errno
 import json
 import os
@@ -56,7 +57,7 @@ from .events import Bus
 from .index import Index
 from .jobs import Jobs
 from .writelog import WriteLog
-from .live import RETRY, LiveDocument
+from .live import RETRY, LetGo, LiveDocument
 
 # What a render may set (SPEC 8.3). Every other key of docs.json is the hub's own.
 SETTING_KEYS = ("title", "toc", "max_image_width", "by", "for", "theme", "credit")
@@ -113,6 +114,8 @@ class Entry:
     first: bool = True                             # no build has run yet
     settings_built: int = 0      # the settings change (`Hub._settings_seq`) its last build read: older, a render rebuilds (199, 213 C)
     images_scope: tuple | None = None              # the image rule its last build read: `Hub._image_scope` (9.9)
+    generation: int = 0          # raised, under `swap`, when its root is let go: a page is installed only while it holds (26 D)
+    swap: threading.Lock = field(default_factory=threading.Lock)   # a leaf, outside `lockorder.ORDER`: the generation and the page swap
 
     where: Callable[[], tuple] | None = None     # (the root's folder, the path in it) of its file now: what is opened beneath
     last_where: tuple | None = None              # what `where` last found: kept for a root forgotten under a write
@@ -212,6 +215,7 @@ class Hub:
         self.index_bus = Bus()                   # the index streams (SPEC 8.8)
         self._index_opening = threading.Lock()   # one index stream opens at a time
         self._lock = threading.RLock()
+        self._only_root = threading.local()          # `within_root`
         self.pdf_lock = threading.Lock()         # one headless Chrome at a time
         # Stands in for the CSP nonce in the HTML kept in memory; the handler swaps in a fresh
         # nonce per response. Unguessable, so no document can hold it.
@@ -577,9 +581,11 @@ class Hub:
         The file is found before the hub's lock is taken, and its root looked at again under it: a
         `forget_root` that took the lock in between makes the address name nothing, as it does for
         a request that comes after it. All of it under the lock of a rectoverso's name (9.11), taken before
-        the hub's: the file is found and first read and rendered where no move takes it."""
+        the hub's: the file is found and first read and rendered where no move takes it. With `root_id`, only the root of
+        that id (`within_root`): the address names nothing when its name holds another root now, and then nothing is read or
+        rendered."""
         with place.held(self, address):
-            return self._entry(address)
+            return self._entry(address, getattr(self._only_root, "id", None))
 
     def _bound(self, address: str):
         """The entry the hub holds for `address`, None when there is none or when another root now holds its file,
@@ -595,7 +601,7 @@ class Hub:
                 return None
         return e
 
-    def _entry(self, address: str) -> Entry:
+    def _entry(self, address: str, root_id: str | None = None) -> Entry:
         """`entry` under the name's lock. The entry is looked up, and a new one made, under the hub's lock; its first render
         (pandoc, up to 120 s a run) runs outside it, so no request for another document waits for it (200). A second open
         of the same address meanwhile waits for that render (`_Making`) and is given the same entry. After the render the
@@ -603,9 +609,13 @@ class Hub:
         is kept."""
         name = roots_mod.Address.parse(address).root
         root = self.roots.get(name)
+        if root_id is not None and (root is None or root.id != root_id):
+            raise roots_mod.NotFound(address)
         path = self.roots.document(address)
         with self._lock:
             e = self.entries.get(address)
+            if e is not None and root_id is not None and e.root_id != root_id:
+                raise roots_mod.NotFound(address)
             if e is not None and self.private_roots and place.applies(self, name):
                 # The store and the file an entry uses cannot outlive the root they were chosen for: one bound to
                 # a private root is refused when its file is not there (`file_at`); one bound to a root other than the one that now holds the file is
@@ -631,7 +641,7 @@ class Hub:
                 mine = self._making[address] = _Making(e, root)
         if other is not None:                 # another thread makes it: its entry, once rendered, or a new try
             other.done.wait()
-            return self._entry(address)
+            return self._entry(address, root_id)
         kept = gone = False
         try:
             e.live.refresh(force=True)           # the first render: e.html, with no lock of the hub held
@@ -657,7 +667,7 @@ class Hub:
             return e
         if gone:
             raise roots_mod.NotFound(address)
-        return self._entry(address)          # deleted or moved meanwhile: made again from what the address names now
+        return self._entry(address, root_id)          # deleted or moved meanwhile: made again from what the address names now
 
     def _drop_making(self, address: str, forget: bool = False):
         """Under the hub's lock: an entry being made at `address` is not kept by its maker, which makes it again (200). With
@@ -700,6 +710,9 @@ class Hub:
         e.live.agent_tells = lambda: self.waiting_tells.waits(address, None, sweep=False)   # the hub person's (9.8)
         e.live.tells_lock = self.waiting_tells._lock
         e.live.keep_page = lambda: self._keep_page(e)
+        e.live.generation = lambda: e.generation
+        e.live.install = lambda text, gen: self._install(e, gen, text)    # raises LetGo
+        e.live.watch_key = lambda key, gen: self._watch_key(e, gen, key)
         return e
 
     @staticmethod
@@ -712,20 +725,71 @@ class Hub:
             e.html, e.log, e.first, e.images_scope = kept
         return put_back
 
+    def _watch_key(self, e, gen, key):
+        """What the watcher compares the file's status with: the one the save's own write took, so a later change of it (an
+        outside write that restored the time too) is seen. Of an entry let go, nothing."""
+        with e.swap:
+            if e.generation == gen and not e.live._detached:
+                e.last_stat = key
+
     def _rendered(self, e: Entry, text: str) -> str | None:
         """Render `text` for `e`; answers the branch the page was rendered on (a clone's page), which the live document keeps
-        with the hash. The render runs under the pages' lock, which a switch of the clone takes, so HEAD is the text's."""
-        repo = self.clone_of(e.address)
-        branch = self._repos.head_of(repo) if repo else None
-        e.html = self._build(e, text, branch=branch)
-        e.rebuild_failure = None         # every rebuild that works passes here: the next failure is news
+        with the hash. The render runs under the pages' lock, which a switch of the clone takes, so HEAD is the text's.
+        Pinned to the entry as it stands now: see `_install`."""
+        return self._install(e, e.generation, text)
+
+    @staticmethod
+    def _regenerate(e: Entry, by: int):
+        with e.swap:
+            e.generation += by
+
+    def _install(self, e: Entry, gen: int, text: str) -> str | None:
+        """The one place a page is installed on an entry (the save's render, a refresh, a rebuild, a GET's catch-up, the
+        watcher's): `text` is rendered for the pinned entry `e` and becomes the page the hub serves only while `e` was not
+        let go since `gen` was read, compared under its `swap` lock, which the let-go raises the generation under (a leaf: the
+        hub's lock comes before the document's). Answers the branch the page was rendered on. An entry let go raises `LetGo`
+        and nothing is installed, whatever folder holds the name now; so does any error of the render once the entry is let
+        go, since the root it resolves is then another's (ticket 26 D)."""
+        def moved() -> bool:
+            with e.swap:
+                return e.generation != gen or e.live._detached
+        if moved():
+            raise LetGo(e.address)
+        try:
+            repo = self.clone_of(e.address)
+            branch = self._repos.head_of(repo) if repo else None
+            kept = {}
+            html = self._build(e, text, branch=branch, keep=kept)
+        except Exception:
+            if moved():
+                raise LetGo(e.address) from None
+            raise
+        with e.swap:
+            if e.generation != gen or e.live._detached:
+                raise LetGo(e.address)
+            e.html = html
+            e.rebuild_failure = None
+            e.log, e.first, e.images_scope = kept.get("log", e.log), False, kept.get("scope", e.images_scope)
         return branch
 
     def _settings(self, address: str) -> dict:
         s = self.docs.get(address)
         return {k: s.get(k) for k in SETTING_KEYS}
 
-    def _build(self, e: Entry, text: str, *, mount: bool = False, count: bool = True, branch: str | None = None) -> str:
+    def _build(self, e: Entry, text: str, *, mount: bool = False, count: bool = True, branch: str | None = None,
+               keep: dict | None = None) -> str:
+        """The page of `text` for `e`. With `keep`, the render log and the image rule come back in it and nothing is set on
+        `e` (`_install` sets them with the page, once the entry is known to be still held)."""
+        html, log, scope = self._compose(e, text, mount=mount, count=count, branch=branch)
+        if keep is not None:
+            keep.update(log=log, scope=scope)
+        elif count:
+            e.log, e.first = log, False
+            e.images_scope = scope          # once the build worked
+        return html
+
+    def _compose(self, e: Entry, text: str, *, mount: bool = False, count: bool = True, branch: str | None = None):
+        """(the page, its render log, its image rule) of `text` for `e`; keeps nothing on `e`."""
         s = self._settings(e.address)
         root = self._file_root(e)
         meta = {"doc": e.address, "root": e.root_id, "boot": self.boot, "version": self.version,
@@ -746,10 +810,7 @@ class Hub:
                            script_nonce=self.placeholder, image_ok=self._image_rule(root, e.path, e.address, scope),
                            image_read=self._image_read(root) if self.proxy is not None else None,
                            warn=e.warnings.append if e.first and count else None, mount=mount)
-        if count:
-            e.log, e.first = log, False
-            e.images_scope = scope          # once the build worked
-        return html
+        return html, log, scope
 
     def share_copy(self, e: Entry) -> str:
         """The share copy of the document as the file is now, with the settings it is shown with."""
@@ -1266,10 +1327,12 @@ class Hub:
             # then for the late forget to leave them (`LiveDocument.detach`).
             for a in held:
                 self.entries[a].live.detach()   # no wait for its lock here: a render holds it for up to 120 s
+                self._regenerate(self.entries[a], 1)    # a save's page is installed only while it holds (26 D)
             # An entry still in its first render is detached too: its maker finds the root gone and forgets it (200).
             making = [m for a, m in self._making.items() if a.startswith(prefix)]
             for m in making:
                 m.entry.live.detach()
+                self._regenerate(m.entry, 1)
                 m.detached = True
             known = self.roots.held(name)     # a private root too, which `get` hides
             try:
@@ -1279,8 +1342,10 @@ class Hub:
                 if self.roots.held(name) is not None:
                     for a in held:      # the registry still holds the root: it stays, and so do its documents' versions
                         self.entries[a].live.reattach()
+                        self._regenerate(self.entries[a], -1)
                     for m in making:
                         m.entry.live.reattach()
+                        self._regenerate(m.entry, -1)
                         m.detached = False
                     raise
                 # The registry let the name go, and another folder may take it now: the forget goes on, its documents
@@ -1450,11 +1515,31 @@ class Hub:
         root nested inside one of theirs stays another root."""
         return bool(self.members_owning([member], address))
 
-    def members_owning(self, members, address: str) -> list:
+    @contextlib.contextmanager
+    def within_root(self, root_id: str):
+        """For the calls of `entry` made by this thread inside the block: only the root of this id (ticket 30). A context, not a
+        parameter, so `entry` keeps the one argument its callers and their stand-ins give it."""
+        before = getattr(self._only_root, "id", None)
+        self._only_root.id = root_id
+        try:
+            yield
+        finally:
+            self._only_root.id = before
+
+    def owned_root(self, member, address: str):
+        """The root `address` names, once, when the document there is the member's and visible to them (`member_owns`, then
+        `visible`), else None. The caller resolves the entry within that root by its id (`entry(address, root_id=...)`),
+        so a name given to another root afterwards serves nothing and nothing of it is read (ticket 30)."""
+        root = self.roots.get(roots_mod.Address.parse(address).root)
+        if root is None or not self.members_owning([member], address, root) or not self.visible(member, address):
+            return None
+        return root
+
+    def members_owning(self, members, address: str, root=None) -> list:
         """Those of `members` whose the document at `address` is, as `member_owns` judges, with one lookup of
-        its root for them all."""
+        its root for them all (`root`: the one the caller already holds, so the name is not looked up again)."""
         at = roots_mod.Address.parse(address)
-        root = self.roots.get(at.root)
+        root = root or self.roots.get(at.root)
         if root is None or not at.plain:
             return []
         # A clone the tiroir serves is a shared root: any member reaches it, and each page is theirs by `judged` (SPEC 14).
@@ -1877,7 +1962,7 @@ class Hub:
                     st = e.stat()
                 except (OSError, roots_mod.NotFound):      # a bound entry's file may be gone from its root
                     continue
-                key = (st.st_mtime_ns, st.st_size)
+                key = beneath.stat_key(st)
                 if key == e.last_stat:
                     continue
                 # After the refresh, and only when it decided the file: a rebuild that failed, or a file it could not
@@ -1951,7 +2036,7 @@ class Hub:
         served; it is tried again on the next request."""
         try:
             st = e.stat()
-            key = (st.st_mtime_ns, st.st_size)
+            key = beneath.stat_key(st)
             if key != e.last_stat and self._refreshed(e) is not RETRY:
                 e.last_stat = key
             if self._images_moved(e):           # projects.toml or the owners moved: its images are judged otherwise
@@ -2094,7 +2179,7 @@ class Hub:
                 st = e.stat()
                 got = e.live.rebuild() if moved else e.live.refresh()
                 if got is not RETRY:         # one it could not decide is left to the watcher, which looks again
-                    e.last_stat = (st.st_mtime_ns, st.st_size)
+                    e.last_stat = beneath.stat_key(st)
             except Exception as ex:
                 self._rebuild_failed(e, ex)
         self.writes.told(address)
@@ -2107,7 +2192,9 @@ class Hub:
         """A rebuild that fails is tried again every tick and on every request while the file
         stays broken; the log hears of it once, so the retry cannot push older rows out of
         the capped file. The same failure is the same only while no rebuild has worked in
-        between (`_rendered` clears it) and the file is the same."""
+        between (`_rendered` clears it) and the file is the same. An entry let go is no failure: its tabs hear `gone`."""
+        if isinstance(ex, LetGo):
+            return
         try:
             st = e.stat()
             key = (st.st_mtime_ns, st.st_size)

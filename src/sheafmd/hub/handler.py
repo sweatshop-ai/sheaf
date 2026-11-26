@@ -848,9 +848,19 @@ class Handler:
         exist, before anything is made or rendered for it (9.9)."""
         if readthrough.is_clients(doc):          # a client page is read through (9.9): only its comments are relayed
             raise Refuse(403, "A client page is read here: comment on it, or edit it on the client tiroir.")
-        self._owned(req, doc)
+        if req.member is None:
+            self._owned(req, doc)
+            root = self.hub.roots.get(Address.parse(doc).root)
+        else:
+            _shape(isinstance(doc, str), "doc is missing")
+            root = self.hub.owned_root(req.member, doc)
+            if root is None:
+                raise Refuse(404, "no such document")
+        # Authorised against the root, then resolved within that root alone (by its id): a name given to another root in
+        # between names nothing, and nothing of the replacement is read or rendered (ticket 30).
         try:
-            return self.hub.entry(doc)
+            with self.hub.within_root(root.id if root is not None else ""):
+                return self.hub.entry(doc)
         except NotFound:
             raise Refuse(404, "no such document") from None
 

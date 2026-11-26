@@ -111,7 +111,12 @@ class Service:
         self._writing = threading.Lock()      # one write at a time, from the file's check to the end of its commit
         self._head_before = ""
         self._broken = False                  # set when a failed write could not be cleaned up: the service takes no write until restarted
-        busy = (self._busy() or self._unclean()) if self.git else self._unreadable()
+        self.gdir = ""
+        busy = None
+        if self.git:
+            busy = self._resolve_gdir() or self._busy() or self._unclean()
+        else:
+            busy = self._unreadable()
         if busy:
             self.close()
             raise SystemExit(f"{self.top}: {busy}; the service does not start until the repository is quiet (repair by hand: see Failure in docs/source-service.md)")
@@ -146,6 +151,9 @@ class Service:
         for dirpath, dirs, files in os.walk(self.top, followlinks=False):
             dirs[:] = sorted(d for d in dirs if not d.startswith(".") and not os.path.islink(os.path.join(dirpath, d)))
             here = Path(dirpath).relative_to(self.top)
+            if str(here) != "." and (".git" in files or os.path.lexists(os.path.join(dirpath, ".git"))):
+                dirs[:] = []                    # a nested checkout or a submodule is another repository's: not listed, not descended into
+                continue
             for f in files:
                 full = os.path.join(dirpath, f)
                 if self.served((here / f).as_posix()) and not os.path.islink(full) and stat.S_ISREG(os.lstat(full).st_mode):
@@ -249,11 +257,15 @@ class Service:
             if text == old:
                 return rda.written(base)               # the text the member was shown is the text now: nothing to commit
             self._head_before = self._git("rev-parse", "-q", "--verify", "HEAD").stdout.strip() if self.git else ""
+            if self.git and not self._mark(f"WRITING {rel}: HEAD before {self._head_before or '-'}"):
+                return rda.refused("the write could not be recorded: the document is as it was")      # before the file is touched
             outcome = "untouched"
             try:
                 try:
                     self._put(rel, text.encode("utf-8"), mode)
                 except (OSError, Fault):
+                    if self.git:
+                        self._unmark()
                     return rda.refused("the document could not be written: it is as it was")
                 outcome = "unknown"                    # the file has been replaced: from here a failure is not guessed at
                 got = self.commit(rel, who, note)
@@ -263,11 +275,34 @@ class Service:
                     outcome = "unknown"
                 if outcome == "unknown":
                     self._stop(rel)
+                elif outcome in ("ok", "failed") and self.git:
+                    self._unmark()                      # committed, or refused with the document put back
             if outcome == "unknown":
                 raise Fault("unavailable", "git failed in the middle of a write and the service stopped: see Failure in docs/source-service.md")
             if outcome == "failed":
                 return rda.refused("the change could not be recorded in the folder's history: the document is as it was")
         return rda.written(rds.md_hash(text))
+
+    def _mark(self, line: str) -> bool:
+        """Append a line to the marker in the git dir and sync it: the intent of a write before the file is touched, and what a
+        stop adds. False when it cannot be written."""
+        try:
+            fd = os.open(os.path.join(self.gdir, self.MARKER), os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+            try:
+                os.write(fd, f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')} {line}\n".encode("utf-8", "surrogateescape"))
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+            return True
+        except OSError:
+            return False
+
+    def _unmark(self) -> None:
+        """The write ended cleanly (committed, or refused with the document as it was): the intent is no longer pending."""
+        try:
+            os.unlink(os.path.join(self.gdir, self.MARKER))
+        except OSError:
+            print("source service: the write marker could not be removed; remove it by hand", file=sys.stderr, flush=True)
 
     def _stop(self, rel: str) -> None:
         """Fail-stop: no guess is made about a git step that failed or timed out after the file was replaced. The service
@@ -282,11 +317,7 @@ class Service:
         line = (f"STOPPED after a failed write of {rel}: HEAD before {self._head_before or '-'}, HEAD now {state['HEAD']}; "
                 f"status {state['status']!r}")
         print(f"source service: {line}; repair by hand, see Failure in docs/source-service.md", file=sys.stderr, flush=True)
-        try:                                    # the same lines in the git dir: a restart is refused until the operator removes it
-            gdir = self._git("rev-parse", "--absolute-git-dir").stdout.strip()
-            with open(os.path.join(gdir, self.MARKER), "a", encoding="utf-8") as f:
-                f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')} {line}\n")
-        except (OSError, subprocess.SubprocessError):
+        if not self._mark(line):
             print("source service: the stop marker could not be written", file=sys.stderr, flush=True)
 
     def _put(self, rel: str, data: bytes, mode: int) -> None:
@@ -349,7 +380,7 @@ class Service:
 
     # ── git ─────────────────────────────────────────────────────────────────
     def _git(self, *args, env=None):
-        return subprocess.run(["git", "-C", str(self.top), *args], capture_output=True, text=True, timeout=30,
+        return subprocess.run(["git", "-C", str(self.top), *args], capture_output=True, text=True, errors="surrogateescape", timeout=30,
                               env={**os.environ, **(env or {}), "GIT_LITERAL_PATHSPECS": "1"})   # a name is a file, never a glob or a magic pathspec
 
     def _inside_git(self) -> bool:
@@ -365,15 +396,25 @@ class Service:
             return "git cannot read the repository"
         return None
 
+    def _resolve_gdir(self) -> str | None:
+        """The git dir, resolved once: the exit code checked, only the trailing newline removed, an existing directory. Everything
+        that reads or writes the git dir (the markers, the lock check) uses this path."""
+        try:
+            got = self._git("rev-parse", "--absolute-git-dir")
+        except (OSError, subprocess.SubprocessError):
+            return "the git directory cannot be resolved"
+        path = got.stdout[:-1] if got.stdout.endswith("\n") else got.stdout
+        if got.returncode != 0 or not path or not os.path.isabs(path) or not os.path.isdir(path):
+            return "the git directory cannot be resolved"
+        self.gdir = path
+        return None
+
     def _busy(self) -> str | None:
         """Why the repository takes no write now, or None: a merge, rebase, cherry-pick or revert in progress, or staged changes
         that a commit of one file must not be mixed with. Where git cannot say, it is busy."""
         try:
-            gdir = self._git("rev-parse", "--absolute-git-dir")
-            if gdir.returncode != 0:
-                return "the repository cannot be read"
             for marker in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply", "sequencer"):
-                if os.path.lexists(os.path.join(gdir.stdout.strip(), marker)):
+                if os.path.lexists(os.path.join(self.gdir, marker)):
                     return "a merge, rebase, cherry-pick or revert is in progress"
             # the whole repository, whatever `diff.relative` says
             if self._git("-c", "diff.relative=false", "diff", "--cached", "--quiet", "--no-relative").returncode != 0:
@@ -388,9 +429,9 @@ class Service:
         """Why the service does not start, beyond `_busy`: a marker left by a fail-stop, an index lock, or a `git status` that fails.
         The marker is in the git dir, so it is never listed or served; the operator removes it after the repair by hand."""
         try:
-            gdir = self._git("rev-parse", "--absolute-git-dir").stdout.strip()
+            gdir = self.gdir
             if os.path.lexists(os.path.join(gdir, self.MARKER)):
-                return f"a fail-stop left {os.path.join(gdir, self.MARKER)}; remove it after the repair"
+                return f"a write began and did not finish, or a fail-stop: {os.path.join(gdir, self.MARKER)} is there; remove it after the repair"
             if os.path.lexists(os.path.join(gdir, "index.lock")):
                 return "an index.lock exists"
             if self._git("status", "--porcelain", "--", ".").returncode != 0:

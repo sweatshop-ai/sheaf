@@ -89,11 +89,14 @@ write, HEAD now and the path.
 
 
 
-Do not restart it. The stop is also written to a marker, `<git-dir>/sheaf-source-stopped`, with the time, the path, HEAD before and HEAD now. It
-lies inside the git dir, so it is never listed or served, and the service does not start while it exists. Inspect the repository with
-Git, starting from `git status` and the logged HEADs, and repair it by hand, keeping any operator edits in both the working file and the
-index. Then remove the marker and restart.
+Do not restart it. A marker, `<git-dir>/sheaf-source-stopped`, is written and synced before the file of each write is replaced, with the
+time, the path and HEAD before. It is removed only after a successful commit, or after a refusal that put the document back. A fail-stop
+leaves it and adds HEAD now; a crash of the service between the replace and the commit leaves it too. If the marker cannot be written, the
+write is refused before the file is touched. The marker lies inside the git dir, so it is never listed or served, and the service does
+not start while it exists. Inspect the repository with Git, starting from `git status` and the logged HEADs, and repair it by hand,
+keeping any operator edits in both the working file and the index. Then remove the marker and restart.
 
-At startup the service refuses only in these cases: the marker exists; an index lock exists; a merge, rebase, cherry-pick, revert or
-sequencer operation is in progress; changes are staged; `git status` exits with an error; or a `.git` exists that Git cannot read.
-Ignored, untracked and unstaged files do not affect a start. The refusal names this section.
+At startup the service refuses only in these cases: the git directory cannot be resolved; the marker exists; an index lock exists; a merge,
+rebase, cherry-pick, revert or sequencer operation is in progress; changes are staged; `git status` exits with an error; or a `.git` exists
+that Git cannot read. Ignored, untracked and unstaged files do not affect a start. The listing skips a directory that holds its own `.git`
+(a nested checkout or a submodule). The refusal names this section.

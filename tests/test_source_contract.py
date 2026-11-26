@@ -1030,7 +1030,7 @@ def test_a_fail_stop_writes_a_marker_in_the_git_dir_and_a_restart_refuses_until_
     svc.close()
     text = marker.read_text()
     assert "b.md" in text and head in text and "HEAD before" in text and "HEAD now" in text
-    git("checkout", "--", "b.md")                                       # the repair by hand: the working file as committed
+    git("checkout", "HEAD", "--", "b.md")                               # the repair by hand: the working file and the index as committed
     git("reset", "-q")
     with pytest.raises(SystemExit) as e:                                # the repair is done, the marker is still there
         sourceservice.Service(folder, "b" * 20, {})
@@ -1105,3 +1105,129 @@ def test_the_failure_section_names_the_marker_and_the_startup_guards_and_prescri
         assert command not in failure
     assert "sheaf-source-stopped" in failure and "HEAD before" in failure and "remove" in failure
     assert "Ignored, untracked and unstaged files do not affect a start" in failure.replace("\n", " ") and "git-ignored" not in failure
+
+
+class Crash(BaseException):
+    """What a killed process is: nothing after it runs, no handler answers."""
+
+
+def _gdir(git):
+    return Path(git("rev-parse", "--absolute-git-dir").strip())
+
+
+def test_the_intent_marker_exists_while_the_commit_runs_and_is_gone_after_a_good_write(tmp_path, monkeypatch):
+    svc, folder, git = _git_service(tmp_path)
+    marker, real, seen = _gdir(git) / "sheaf-source-stopped", svc._git, {}
+
+    def watching(*args, **kw):
+        if "commit" in args:
+            seen["text"] = marker.read_text() if marker.exists() else None
+        return real(*args, **kw)
+    monkeypatch.setattr(svc, "_git", watching)
+    assert svc.write(_write_body(svc, "b.md", "bee two\n"))["outcome"] == "written"
+    assert seen["text"] and "b.md" in seen["text"] and "HEAD before" in seen["text"]
+    assert not marker.exists()
+
+
+def test_a_crash_between_the_replace_and_the_commit_leaves_the_marker_and_a_restart_refuses(tmp_path, monkeypatch):
+    from sheafmd import sourceservice
+    svc, folder, git = _git_service(tmp_path)
+    marker = _gdir(git) / "sheaf-source-stopped"
+
+    def killed(*args, **kw):
+        raise Crash()
+    monkeypatch.setattr(svc, "commit", killed)
+    monkeypatch.setattr(svc, "_stop", lambda rel: None)                 # the process is gone: no handler runs
+    body = _write_body(svc, "b.md", "bee two\n")
+    with pytest.raises(Crash):
+        svc.write(body)
+    assert (folder / "b.md").read_text() == "bee two\n" and marker.exists()
+    svc.close()
+    with pytest.raises(SystemExit) as e:
+        sourceservice.Service(folder, "b" * 20, {})
+    assert "sheaf-source-stopped" in str(e.value)
+
+
+def test_a_clean_refusal_removes_the_marker_and_a_restart_starts(tmp_path, monkeypatch):
+    from sheafmd import sourceservice
+    svc, folder, git = _git_service(tmp_path)
+    marker, real = _gdir(git) / "sheaf-source-stopped", svc._git
+    monkeypatch.setattr(svc, "_git", lambda *a, **k: subprocess.CompletedProcess(a, 1, "", "no") if a[:1] == ("add",) else real(*a, **k))
+    assert svc.write(_write_body(svc, "b.md", "bee two\n"))["outcome"] == "refused"
+    assert not marker.exists()
+    svc.close()
+    sourceservice.Service(folder, "b" * 20, {}).close()
+
+
+def test_a_marker_that_cannot_be_written_refuses_the_write_before_the_file_is_touched(tmp_path):
+    svc, folder, git = _git_service(tmp_path)
+    (_gdir(git) / "sheaf-source-stopped").mkdir()                       # a directory where the marker goes: it cannot be written
+    before = (folder / "b.md").read_bytes()
+    out = svc.write(_write_body(svc, "b.md", "bee two\n"))
+    assert out["outcome"] == "refused" and (folder / "b.md").read_bytes() == before
+    _no_leftovers(folder)
+
+
+def test_a_fail_stop_adds_head_now_to_the_intent_marker(tmp_path, monkeypatch):
+    svc, folder, git, marker, head = _stopped(tmp_path, monkeypatch)
+    text = marker.read_text()
+    assert "HEAD before" in text and "HEAD now" in text and text.count("b.md") >= 2
+
+
+def test_the_git_dir_is_resolved_once_checked_and_a_failed_lookup_refuses_the_start(tmp_path, monkeypatch):
+    from sheafmd import sourceservice
+    svc, folder, git = _git_service(tmp_path)
+    svc.close()
+    real = sourceservice.Service._git
+    monkeypatch.setattr(sourceservice.Service, "_git",
+                        lambda self, *a, **k: subprocess.CompletedProcess(a, 128, "", "fatal") if "--absolute-git-dir" in a else real(self, *a, **k))
+    with pytest.raises(SystemExit):
+        sourceservice.Service(folder, "b" * 20, {})
+
+
+def test_a_git_dir_whose_name_ends_in_a_space_gets_the_marker_inside_it(tmp_path):
+    from sheafmd import sourceservice
+    gdir = tmp_path / "g "
+    folder = tmp_path / "w"
+    folder.mkdir()
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.org", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.org"}
+    subprocess.run(["git", "init", "-q", f"--separate-git-dir={gdir}", str(folder)], check=True, env=env)
+    (folder / "b.md").write_text("bee\n")
+    subprocess.run(["git", "-C", str(folder), "add", "b.md"], check=True, env=env)
+    subprocess.run(["git", "-C", str(folder), "commit", "-q", "-m", "x"], check=True, env=env)
+    svc = sourceservice.Service(folder, "b" * 20, {"Ada": ("Ada Writer", "ada@example.org")})
+    real = svc._git
+    seen = {}
+
+    def watching(*args, **kw):
+        if "commit" in args:
+            seen["there"] = (gdir / "sheaf-source-stopped").exists()
+        return real(*args, **kw)
+    svc._git = watching
+    svc.write({"document": "b.md", "author": "Ada", "note": "n", "base": svc.read("b.md")["base"], "tree": {"text": "bee two\n"}})
+    assert seen["there"] is True
+    assert not any(p.name == "sheaf-source-stopped" for p in Path.cwd().iterdir())
+
+
+def test_a_filename_that_is_not_utf8_cannot_crash_the_start(tmp_path):
+    from sheafmd import sourceservice
+    svc, folder, git = _git_service(tmp_path)
+    svc.close()
+    git("config", "core.quotePath", "false")
+    with open(os.path.join(os.fsencode(folder), b"bad\xff.md"), "w") as f:
+        f.write("odd\n")
+    sourceservice.Service(folder, "b" * 20, {}).close()
+
+
+def test_the_listing_skips_nested_checkouts_and_submodules(tmp_path):
+    svc, folder, git = _git_service(tmp_path)
+    (folder / "nested" / ".git").mkdir(parents=True)
+    (folder / "nested" / "n.md").write_text("n\n")
+    (folder / "sub").mkdir()
+    (folder / "sub" / ".git").write_text("gitdir: ../elsewhere\n")     # a submodule's .git is a file
+    (folder / "sub" / "s.md").write_text("s\n")
+    (folder / "plain").mkdir()
+    (folder / "plain" / "p.md").write_text("p\n")
+    names = sorted(svc.names())
+    assert "plain/p.md" in names and "b.md" in names
+    assert not [n for n in names if n.startswith(("nested/", "sub/"))]

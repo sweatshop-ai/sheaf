@@ -152,15 +152,16 @@ class Shared:
             self._news += 1
             self._wake.notify_all()
 
-    def join(self, key: str, sub):
+    def join(self, key: str, sub) -> bool:
         """Adds the stream `sub` under `key`, or the refusal status a stream of its own was answered
-        with. A key joined again replaces its stream."""
+        with. A key joined again replaces its stream. False when this stream is closed: `sub` is
+        closed and nothing was added."""
         with self._lock:
             old = self._subs.pop(key, None)
             if self.closed:
                 if not isinstance(sub, int):
                     sub.close()
-                return
+                return False
             if isinstance(sub, int):
                 self._out.put(("m", {"k": key, "e": "refused", "d": {"status": sub}}))
             else:
@@ -171,6 +172,7 @@ class Shared:
         if old is not None:
             old.on_put = None
             old.close()
+        return True
 
     def leave(self, key: str):
         with self._lock:

@@ -325,47 +325,47 @@ def _again(folder: Path, commit: str, onto: str):
     return made.stdout.decode().strip(), []
 
 
-def _untrack_pin_times(folder: Path) -> str | None:
-    """A pin time is each hub's own (7.4): every one git holds in the versions store of the root at `folder`, taken in
-    before the store's `.gitignore` kept it out (an older hub, a `.gitignore` that let it in), leaves git in a commit of
-    its own, `versions: pin times out of git`, and the index; the file stays on disk. `commit -- paths` would take it
-    back from the work tree, so the commit is made on an index of the hub's own, from HEAD less those files (ticket 203
-    C). Run before a commit of the store, under the repo's lock, so that commit starts from what this one left.
-    (made, error): `made`, a commit was made, owed a push whatever comes after; `error`, what git refused or timed out
-    on (HEAD then as it was, unless `made`): the store's versions are then not committed, since its index may still
-    hold a pin time."""
-    held = [p for p in _git(folder, "ls-files", "-z", "--", str(state.INSIDE)).stdout.split("\0")
-            if p.endswith(state.PINNED_AT)]
+def _untrack_pin_times(folder: Path) -> tuple[bool, str | None]:
+    """A pin time is each hub's own (7.4): every one git holds in the versions store of the root at `folder`, in HEAD or
+    the index, taken in before the store's `.gitignore` kept it out (an older hub, a `.gitignore` that let it in), leaves
+    git; the file stays on disk (ticket 203 C). The index first: once it holds none, any commit, the hub's or a person's,
+    takes them out. Then HEAD, in a commit of its own, `versions: pin times out of git`, made on an index of the hub's
+    own from HEAD less those files: `commit -- paths` would take them back from the work tree. Run under the repo's lock
+    before a commit of the store. (made, error): `made`, that commit was made, owed a push whatever comes after;
+    `error`, what git refused: the store's versions are then not committed, since its index may still hold a pin time."""
+    head = _git(folder, "rev-parse", "-q", "--verify", "HEAD").stdout.strip()
+    listed = _git(folder, "ls-files", "-z", "--", str(state.INSIDE)).stdout.split("\0")
+    if head:
+        listed += _git(folder, "ls-tree", "-r", "--name-only", "-z", head, "--", str(state.INSIDE)).stdout.split("\0")
+    held = sorted({p for p in listed if p.endswith(state.PINNED_AT)})
     if not held:
         return False, None
-    head = _git(folder, "rev-parse", "-q", "--verify", "HEAD").stdout.strip()
-    if head and _git(folder, "ls-tree", "--name-only", "-z", head, "--", *held).stdout.strip("\0"):
-        index = _git(folder, "rev-parse", "--path-format=absolute", "--git-path", "sheaf-untrack.index").stdout.strip()
-        try:
-            steps = [("read-tree", head), ("update-index", "--force-remove", "--", *held)]
-            if any(_git(folder, *step, index=index).returncode for step in steps):
-                return False, "a pin time git holds could not be taken out of it"
-            tree = _git(folder, "write-tree", index=index).stdout.strip()
-            made = _git(folder, "-c", f"user.name={COMMITTER[0]}", "-c", f"user.email={COMMITTER[1]}", "commit-tree",
-                        tree, "-p", head, "-m", "versions: pin times out of git", author=Author(*COMMITTER))
-            new = made.stdout.strip()
-            if made.returncode or not new or _git(folder, "update-ref", "HEAD", new, head).returncode:
-                return False, "a pin time git holds could not be taken out of it"
-        finally:
-            try:
-                os.unlink(index)
-            except OSError:
-                pass
-        return True, _unstage(folder, held)            # the commit is made: the index follows it
-    return False, _unstage(folder, held)               # in the index alone, never committed
-
-
-def _unstage(folder: Path, held: list) -> str | None:
     try:
-        r = _locking(folder, "update-index", "--force-remove", "--", *held)
+        if _locking(folder, "update-index", "--force-remove", "--", *held).returncode:
+            return False, "a pin time git holds could not be taken out of the index"
     except subprocess.SubprocessError as e:
-        return str(e)[:300] or type(e).__name__
-    return None if r.returncode == 0 else "a pin time git holds could not be taken out of the index"
+        return False, str(e)[:300] or type(e).__name__
+    in_head = [p for p in _git(folder, "ls-tree", "--name-only", "-z", head, "--", *held).stdout.split("\0") if p] \
+        if head else []
+    if not in_head:
+        return False, None
+    index = _git(folder, "rev-parse", "--path-format=absolute", "--git-path", "sheaf-untrack.index").stdout.strip()
+    try:
+        steps = [("read-tree", head), ("update-index", "--force-remove", "--", *in_head)]
+        if any(_git(folder, *step, index=index).returncode for step in steps):
+            return False, "a pin time git holds could not be taken out of it"
+        tree = _git(folder, "write-tree", index=index).stdout.strip()
+        made = _git(folder, "-c", f"user.name={COMMITTER[0]}", "-c", f"user.email={COMMITTER[1]}", "commit-tree",
+                    tree, "-p", head, "-m", "versions: pin times out of git", author=Author(*COMMITTER))
+        new = made.stdout.strip()
+        if made.returncode or not new or _git(folder, "update-ref", "HEAD", new, head).returncode:
+            return False, "a pin time git holds could not be taken out of it"
+    finally:
+        try:
+            os.unlink(index)
+        except OSError:
+            pass
+    return True, None
 
 
 def root_config(root) -> "config.RootConfig":
@@ -476,6 +476,7 @@ class Commits:
             return os.path.relpath(os.path.realpath(root.path / d), top)
         paths = [file(rel)] + ([str(state.INSIDE / state.doc_key(key))] if rc.versions_inside else [])
         subject = f"move: {gone} -> {rel}" if gone else f"{what}: {rel}"
+        untracked = False                               # a commit taking pin times out of git: owed a push, whatever follows
         try:
             with self._repo_lock(root.path):
                 untracked, error = _untrack_pin_times(root.path) if rc.versions_inside else (False, None)
@@ -487,7 +488,8 @@ class Commits:
                     return
         except (OSError, subprocess.SubprocessError) as e:
             self._record("commit-failed", address, error=str(e)[:300])
-            return
+            if not untracked:
+                return
         if rc.push:
             try:
                 self._push_later(_repo(root.path), root, address)

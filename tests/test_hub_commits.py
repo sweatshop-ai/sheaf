@@ -2219,9 +2219,8 @@ def test_a_sweep_with_only_pin_times_changed_takes_every_one_git_holds_out_of_it
 
 @pytest.mark.parametrize("step", ["commit-tree", "update-index"])
 def test_a_pin_time_that_cannot_leave_git_keeps_the_versions_out_of_the_writes_commit(tmp_path, monkeypatch, step):
-    """Ticket 203 C (Codex on #687, round 3): git refuses a step of taking a tracked pin time out. The write's document is
-    committed alone, never its versions folder, whose index may still hold the time; a commit that was made already is
-    owed its push."""
+    """Ticket 203 C (Codex on #687, rounds 3 and 4): git refuses a step of taking a tracked pin time out. The write's
+    document is committed alone, never its versions folder; the new time reaches git neither way."""
     from sheafmd.hub import commits, state
     from sheafmd.hub.roots import Root
     repo = tmp_path / "repo"
@@ -2249,6 +2248,36 @@ def test_a_pin_time_that_cannot_leave_git_keeps_the_versions_out_of_the_writes_c
         Root("r", repo, True), "plan.md", commits.Author("Bea", "bea@example.com"), "edit")
     assert "commit-failed" in made
     assert git(repo, "show", "--name-only", "--format=", "HEAD").split() == ["plan.md"]
-    held = [p for p in git(repo, "ls-tree", "-r", "--name-only", "HEAD").split() if p.endswith(state.PINNED_AT)]
-    assert held == ([] if step == "update-index" else [str(at.relative_to(repo))])   # never the new time, either way
-    assert git(repo, "show", f"HEAD:{at.relative_to(repo)}").strip() != at.read_text() if held else True
+    rel = str(at.relative_to(repo))
+    assert git(repo, "show", f"HEAD:{rel}").strip() != at.read_text()            # the new time never reaches git
+    staged = git(repo, "diff", "--cached", "--name-status").split()
+    # The index refused: as it was. HEAD refused: the index already lets the time go, with whatever commit comes next.
+    assert staged == ([] if step == "update-index" else ["D", rel])
+
+
+def test_a_commit_that_took_pin_times_out_of_git_is_owed_its_push_when_the_writes_commit_fails(tmp_path, monkeypatch):
+    """Ticket 203 C (Codex on #687, round 4): the hub's commit taking pin times out of git is made, then the write's own
+    commit raises (a git on its time bound). The first is still pushed, or the remote keeps the times."""
+    from sheafmd.hub import commits, state
+    from sheafmd.hub.roots import Root
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    git(repo, "config", "user.name", "the box")
+    git(repo, "config", "user.email", "box@example.com")
+    (repo / ".sheaf.toml").write_text('commit = true\npush = true\nversions = "root"\n', encoding="utf-8")
+    (repo / "plan.md").write_text("# plan\n", encoding="utf-8")
+    v = state.Versions(repo, "r")
+    at = next(repo.rglob(f"pins/{v.pin('r/plan.md', '# plan\n')}.at"))
+    git(repo, "add", "-A")
+    git(repo, "add", "-f", str(at.relative_to(repo)))
+    git(repo, "commit", "-q", "-m", "first")
+    hub = commits.Commits(lambda kind, doc, **detail: None)
+    def timed_out(*args, **kw):
+        raise subprocess.TimeoutExpired("git", 1)
+    pushed = []
+    monkeypatch.setattr(hub, "_commit", timed_out)
+    monkeypatch.setattr(hub, "_push_later", lambda *args: pushed.append(args))
+    hub.saved(Root("r", repo, True), "plan.md", commits.Author("Bea", "bea@example.com"), "edit")
+    assert git(repo, "log", "-1", "--format=%s").strip() == "versions: pin times out of git"
+    assert pushed

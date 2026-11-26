@@ -2,7 +2,7 @@
 
 **Claimed by:** Kenji
 
-**Status:** done (2026-11-26, PR #699): box A does not hold; a regression test pins why
+**Status:** done (2026-11-26, PR #699, merged 4b23aeb9): box A does not hold; a regression test pins why
 
 **Blocked by:** none
 

@@ -28,7 +28,12 @@ class Attr:
     name: str
     values: tuple          # the allowed values, or the allowed steps, as stored
     default: str
-    css: str = ""          # declarations for one value; `{v}` is the value. Empty: no rule is generated.
+    css: object = ""       # declarations for one value, `{v}` being the value; or a dict value -> declarations. Empty: no rule.
+
+    @property
+    def wire(self) -> str:
+        """The attribute as pandoc writes it into the HTML: `size` stays `size`, the others become `data-<name>`."""
+        return self.name if self.name == "size" else f"data-{self.name}"
 
     @property
     def wire(self) -> str:
@@ -43,6 +48,8 @@ class BlockType:
     tag: str
     attrs: tuple = ()
     children: tuple = ()   # the child types the Container rule allows
+    top: bool = True       # False: only ever a child of another type (a column of columns), never a block of its own
+    base: str = ""         # the type's structure in the base stylesheet, written once
 
 
 CALLOUT = BlockType(
@@ -54,7 +61,50 @@ CALLOUT = BlockType(
         Attr("pad", ("none", "s", "m", "l"), "m", "padding:var(--sheaf-pad-{v})"),
     ),
     children=PLAIN + LAYOUT,
+    base=("div.callout{margin:1.25rem 0;padding:var(--sheaf-pad-m);border-left:4px solid var(--callout-accent);"
+          "border-radius:var(--sheaf-callout-radius);background:var(--callout-bg);"
+          "--callout-accent:var(--sheaf-callout-info-accent);--callout-bg:var(--sheaf-callout-info-bg)}\n"
+          "div.callout>:first-child{margin-top:0}\ndiv.callout>:last-child{margin-bottom:0}\n"),
 )
+
+ALIGN = ("left", "center", "right")
+PAD = ("none", "s", "m", "l")
+# A column's share of the row, in %: 5 % steps from 15 to 85 (ADR 0008), plus the thirds 33 and 67 that the 33/67 and
+# 67/33 presets and the spec's wire sample write. A drag never lands on them; a preset does.
+SPLIT = tuple(str(n) for n in sorted({*range(15, 86, 5), 33, 67}))
+IMAGE_SIZE = ("25", "50", "75", "100")                   # an image's share of its column, in %
+
+# Columns: a row of columns that sit side by side at their split. Below 600 px on a screen they stack in source order
+# and their split is ignored; in print and the PDF they stay side by side.
+COLUMNS = BlockType(
+    "columns", "div", children=("column",),
+    base=("div.columns{display:flex;gap:1rem;margin:1.25rem 0}\n"
+          "@media screen and (max-width:599px){div.columns{flex-direction:column}"
+          "div.columns>div.column{flex:0 0 auto;width:auto}}\n"),
+)
+COLUMN = BlockType(
+    "column", "div",
+    attrs=(Attr("size", SPLIT, "", "flex:0 1 {v}%"),),
+    children=PLAIN + LAYOUT, top=False,
+    base="div.column{flex:1 1 0;min-width:0}\ndiv.column>:first-child{margin-top:0}\ndiv.column>:last-child{margin-bottom:0}\n",
+)
+# A box: a plain block (or several) that carries only layout.
+BOX = BlockType(
+    "box", "div",
+    attrs=(Attr("align", ALIGN, "left", "text-align:{v}"),
+           Attr("pad", PAD, "none", "padding:var(--sheaf-pad-{v})")),
+    children=PLAIN,
+)
+# An image on a line of its own, resized to a share of its container and aligned in it.
+IMAGE = BlockType(
+    "image", "div",
+    attrs=(Attr("size", IMAGE_SIZE, "100", "width:{v}%"),
+           Attr("align", ALIGN, "left", {"left": "margin-right:auto", "center": "margin-left:auto;margin-right:auto",
+                                          "right": "margin-left:auto"})),
+    children=("paragraph",),
+    base="div.image{max-width:100%}\ndiv.image img{width:100%;height:auto;display:block}\ndiv.image p{margin:0}\n",
+)
+
 
 # Inline content: a bracketed span around one link, so it sits in a paragraph, a table cell, a column or a callout.
 # It is never a block of the tree, so it is not in DECLARED (the reader reads a div's class against that), and it
@@ -70,7 +120,7 @@ BUTTON = BlockType(
     ),
 )
 
-DECLARED = {t.name: t for t in (CALLOUT,)}
+DECLARED = {t.name: t for t in (CALLOUT, COLUMNS, COLUMN, BOX, IMAGE)}
 INLINE = {t.name: t for t in (BUTTON,)}
 _ALL = {**DECLARED, **INLINE}
 
@@ -184,6 +234,16 @@ def check_children(type_: str, kids) -> str | None:
     return None
 
 
+def top_fault(type_: str) -> str | None:
+    """The reason a block of `type_` may not stand on its own at the top of a document, or None."""
+    if not DECLARED[type_].top:
+        holders = [t.name for t in DECLARED.values() if type_ in t.children]
+        return f"a {type_} may not stand alone: it belongs inside a {' or a '.join(holders)}"
+    return None
+
+
+
+
 def check_plain_container(container: str, kids) -> str | None:
     """A quote or a list item holds plain blocks only: a Rich block inside is refused."""
     for k in kids:
@@ -215,11 +275,8 @@ def css() -> str:
     """The base stylesheet's block rules: Theme property defaults, each type's structure, and one rule per
     allowed step of each attribute. Loaded before every Theme, so a Theme written before blocks lays them out."""
     out = [_properties()]
-    out.append(
-        "div.callout{margin:1.25rem 0;padding:var(--sheaf-pad-m);border-left:4px solid var(--callout-accent);"
-        "border-radius:var(--sheaf-callout-radius);background:var(--callout-bg);"
-        "--callout-accent:var(--sheaf-callout-info-accent);--callout-bg:var(--sheaf-callout-info-bg)}\n"
-        "div.callout>:first-child{margin-top:0}\ndiv.callout>:last-child{margin-bottom:0}\n")
+    for t in DECLARED.values():
+        out.append(t.base)
     out.append(
         "span.button{display:inline-block;--button-pad:var(--sheaf-button-pad-m);--button-font:var(--sheaf-button-font-m);"
         "--button-bg:var(--sheaf-button-primary-bg);--button-fg:var(--sheaf-button-primary-fg);"
@@ -230,9 +287,10 @@ def css() -> str:
         "span.button>a:hover{filter:brightness(.94)}\n")
     for t in _ALL.values():
         for a in t.attrs:
-            if a.css:
-                for v in a.values:
-                    out.append(f'{t.tag}.{t.name}[{a.wire}="{v}"]{{{a.css.format(v=v)}}}\n')
+            for v in a.values:
+                rule = a.css.get(v) if isinstance(a.css, dict) else a.css.format(v=v)
+                if rule:
+                    out.append(f'{t.tag}.{t.name}[{a.wire}="{v}"]{{{rule}}}\n')
     return "".join(out)
 
 

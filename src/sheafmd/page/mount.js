@@ -55,10 +55,10 @@
 
   const GLOBAL_ATTRS = set('id class title lang dir');
   /* BLOCKS:begin (generated from sheafmd.blocks.declarations: python -m sheafmd.blocks.declarations --write) */
-  const BLOCK_TYPES = {"button": {"attrs": {"data-variant": ["primary", "secondary", "outline"], "size": ["s", "m", "l"]}, "tag": "span"}, "callout": {"attrs": {"data-align": ["left", "center", "right"], "data-pad": ["none", "s", "m", "l"], "data-tone": ["info", "success", "warning", "danger"]}, "tag": "div"}};
+  const BLOCK_TYPES = {"box": {"attrs": {"data-align": ["left", "center", "right"], "data-pad": ["none", "s", "m", "l"]}, "tag": "div"}, "button": {"attrs": {"data-variant": ["primary", "secondary", "outline"], "size": ["s", "m", "l"]}, "tag": "span"}, "callout": {"attrs": {"data-align": ["left", "center", "right"], "data-pad": ["none", "s", "m", "l"], "data-tone": ["info", "success", "warning", "danger"]}, "tag": "div"}, "column": {"attrs": {"size": ["15", "20", "25", "30", "33", "35", "40", "45", "50", "55", "60", "65", "67", "70", "75", "80", "85"]}, "tag": "div"}, "columns": {"attrs": {}, "tag": "div"}, "image": {"attrs": {"data-align": ["left", "center", "right"], "size": ["25", "50", "75", "100"]}, "tag": "div"}};
   /* BLOCKS:end */
   // A declared block is an element of its type's tag (a div, or the inline span of a button) whose class is its type: it
-  // keeps its id (a button has none), its class (the type alone) and exactly its declared attributes with an allowed
+  // keeps its id (a button has none), its class (the type alone) and exactly its declared attributes (data-<attr>, or a bare size) with an allowed
   // value. No style, free class, title or handler.
   function blockType(n) {
     for (const c of Array.from(n.classList)) {

@@ -281,3 +281,16 @@ span.rd-actword{display:none}
 .rd-editing span.rd-actword{display:inline}
 
 .rd-readonly { margin: 0 0 1em; padding: .5em .75em; border-left: 3px solid #b8860b; background: rgba(184, 134, 11, .08); font: .9em/1.4 system-ui, sans-serif; }
+
+/* The diagram viewer (SPEC 6.9): the diagram's markup is not touched, so the cursor is by selector. */
+main .mermaid-svg svg,main .chart svg,main img[src^="data:image/svg+xml"]{cursor:zoom-in}
+#rd-zoom{position:fixed;inset:0;z-index:2147483000;background:rgba(10,10,12,.82);touch-action:none;user-select:none;
+ -webkit-user-select:none;overflow:hidden;outline:0;cursor:grab}
+#rd-zoom.rd-panning{cursor:grabbing}
+#rd-zoom .rd-zoom-stage{position:absolute;left:0;top:0;transform-origin:0 0;border-radius:4px;box-shadow:0 8px 40px rgba(0,0,0,.5)}
+#rd-zoom .rd-zoom-stage svg,#rd-zoom .rd-zoom-stage img{display:block;width:100%;height:100%;max-width:none;margin:0;pointer-events:none}
+#rd-zoom .rd-zoom-bar{position:absolute;top:max(10px,env(safe-area-inset-top));right:max(10px,env(safe-area-inset-right));display:flex;gap:8px}
+#rd-zoom .rd-zoom-bar button{min-width:44px;height:44px;padding:0 12px;font:600 18px/1 system-ui,sans-serif;color:#fff;
+ background:rgba(24,24,28,.9);border:1px solid rgba(255,255,255,.4);border-radius:8px;cursor:pointer}
+#rd-zoom .rd-zoom-bar button:focus-visible{outline:2px solid #6ea2ff;outline-offset:2px}
+@media print{#rd-zoom{display:none}}

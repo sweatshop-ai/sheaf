@@ -107,3 +107,25 @@ def test_a_repeated_attribute_is_validated_on_its_first_value():
     assert stub.type == "stub" and "42" in stub.attrs["reason"]
     # the other way round: the first value is declared, the last is not, and the first is what is rendered
     assert read_tree(_cols('size="40" size="999"')).get("a").attrs["size"] == "40"
+
+
+def test_a_repeated_callout_attribute_reads_its_first_value():
+    tone = next(a for a in dec.DECLARED["callout"].attrs if a.name == "tone")
+    first, last = tone.values[0], tone.values[-1]
+    callout = read_tree(f'::: {{#c .callout tone="{first}" tone="{last}"}}\nhi\n:::\n').blocks[0]
+    assert callout.type == "callout" and callout.attrs["tone"] == first
+
+
+def test_a_repeated_image_attribute_is_validated_on_its_first_value():
+    ok = read_tree('::: {#i .image size="50" size="60"}\n![a](https://example.org/a.png)\n:::\n').blocks[0]
+    assert ok.type == "image" and ok.attrs["size"] == "50"
+    bad = read_tree('::: {#i .image size="60" size="50"}\n![a](https://example.org/a.png)\n:::\n').blocks[0]
+    assert bad.type == "stub" and "60" in bad.attrs["reason"]
+
+
+def test_a_callout_never_shares_its_stored_id_with_a_plain_block():
+    para = read_tree("Hello.\n").blocks[0].id
+    tree = read_tree(f"Hello.\n\n::: {{#{para} .callout}}\nhi\n:::\n")
+    ids = [b.id for b in tree.walk()]
+    assert len(ids) == len(set(ids)), ids
+    assert tree.get(tree.blocks[1].id).type == "callout"

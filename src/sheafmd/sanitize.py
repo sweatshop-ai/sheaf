@@ -333,7 +333,7 @@ def _mount_attrs(tag, name: str, log: list[str]) -> None:
 
 def _block_attrs(tag, log: list[str], mount: bool = False) -> None:
     """A declared block (`blocks.declarations`: `div.callout`, `span.button`) keeps its id (a button has none), its type as
-    the only class and exactly its declared attributes with an allowed value. No style, free class, title or handler,
+    the only class and exactly its declared attributes (`data-<attr>`, or a bare `size`: `Attr.wire`) with an allowed value. No style, free class, title or handler,
     whatever the mode. The link inside a button keeps its href alone, and only for http, https, mailto or a relative
     address (`declarations.link_ok`), so no target, no `file:` and no script in either mode."""
     name = tag.name

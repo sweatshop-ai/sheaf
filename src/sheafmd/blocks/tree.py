@@ -104,20 +104,21 @@ def _type_and_attrs(blocks: list, kind: str):
 
 
 def _children(blocks: list) -> list:
-    """(type, attrs, ast, its own children) for the blocks held by a quote or a list, from the AST."""
+    """(type, attrs, ast, its own children, stored id) for the blocks held by a quote, a list or a div, from the AST."""
     out = []
     for b in blocks:
         t, attrs = _type_and_attrs([b], "")
         ast = [b]
-        kids = []
+        kids, stored = [], ""
         if b["t"] == "BlockQuote":
             kids = _children(b["c"])
         elif b["t"] == "Div":
             kids = _children(b["c"][1])
+            stored = b["c"][0][0] if t in decl.DECLARED else ""
         elif b["t"] in ("BulletList", "OrderedList"):
             items = b["c"] if b["t"] == "BulletList" else b["c"][1]
-            kids = [("item", {}, [{"t": "Item", "c": item}], _children(item)) for item in items]
-        out.append((t, attrs, ast, kids))
+            kids = [("item", {}, [{"t": "Item", "c": item}], _children(item), "") for item in items]
+        out.append((t, attrs, ast, kids, stored))
     return out
 
 
@@ -143,9 +144,9 @@ class _Ids:
 
 def _build(kids, ids: _Ids) -> tuple:
     out = []
-    for t, attrs, ast, sub in kids:
+    for t, attrs, ast, sub, stored in kids:
         a = _canon(ast)
-        out.append(Block(id=ids(t, a), type=t, attrs=attrs, caps=ALL, ast=a, children=_build(sub, ids)))
+        out.append(Block(id=ids.take(stored, t, a), type=t, attrs=attrs, caps=ALL, ast=a, children=_build(sub, ids)))
     return tuple(out)
 
 
@@ -185,8 +186,9 @@ def _rich_found(blocks: list):
     return None
 
 
-def _div_fault(b: dict):
-    """(type, reason) for a top-level Div: the reason is None when it is a valid declared Rich block."""
+def _div_fault(b: dict, top: bool = True):
+    """(type, reason) for a Div: the reason is None when it is a valid declared Rich block, whatever it holds.
+    The Container rules are checked down through every div the block holds."""
     (_, classes, kvs), content = b["c"][0], b["c"][1]
     t = classes[0] if classes else ""
     if t not in decl.DECLARED:
@@ -194,8 +196,18 @@ def _div_fault(b: dict):
     for extra in classes[1:]:
         return t, f"{t} has class {extra!r}, which is not declared"
     kid_types = [_type_and_attrs([k], "")[0] for k in content]
-    return t, (decl.check_attrs(t, {k: v for k, v in kvs}) or decl.check_children(t, kid_types)
-               or _nested_fault(content))
+    why = (decl.top_fault(t) if top else None) or decl.check_attrs(t, {k: v for k, v in kvs}) \
+        or decl.check_children(t, kid_types) or _nested_fault(content)
+    why = why or (t == "image" and _image_fault(content))
+    why = why or next((f for k in content if k["t"] == "Div" and (f := _div_fault(k, top=False)[1])), None)
+    return t, why or None
+
+
+def _image_fault(content: list):
+    """An image div holds one paragraph that is one image and nothing else: the image on a line of its own."""
+    ok = len(content) == 1 and content[0]["t"] in ("Para", "Plain") and len(content[0]["c"]) == 1 \
+        and content[0]["c"][0]["t"] == "Image"
+    return None if ok else "an image holds one image on a line of its own"
 
 
 def _nested_fault(content: list):

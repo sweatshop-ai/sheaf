@@ -16,7 +16,7 @@ import threading
 import time
 
 from .. import config
-from ..remote import RemoteSource, SourceError, Unreachable, VersionMismatch
+from ..remote import RemoteSource, SourceError, VersionMismatch
 
 RETRY_AFTER = 5.0       # seconds before an unreachable service is asked again
 
@@ -50,7 +50,7 @@ class Sources:
             self._by[decl.name] = Source(decl.name, decl)
         for name, why in (problems or {}).items():
             s = self._by.setdefault(name, Source(name, None))
-            s.error, s.shown, s.sticky = why, why, True
+            s.error, s.shown, s.sticky = why, f"source {name!r} is not set up correctly: ask the owner of this hub", True
 
     @classmethod
     def load(cls, *, serves, warn=None) -> "Sources":
@@ -104,8 +104,9 @@ class Sources:
         except VersionMismatch as e:
             self._set(s, e.message, e.message, True)
         except SourceError as e:          # Unreachable too: asked again later; the service's `version` code is a mismatch
-            self._set(s, e.message, f"source {s.name!r} cannot be reached just now" if isinstance(e, Unreachable) else e.message,
-                      getattr(e, "code", "") == "version")
+            mismatch = getattr(e, "code", "") == "version"
+            self._set(s, e.message, f"source {s.name!r} speaks another interface version than this hub" if mismatch
+                      else f"source {s.name!r} cannot be reached just now", mismatch)
         else:
             self._set(s, "", "", False, client)
 

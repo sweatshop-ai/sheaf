@@ -1007,7 +1007,7 @@ class Handler:
             raise Refuse(404, "no such root")          # a source is a member's only when their `sources` names it, like their `roots`
         source = self.hub.sources.ensure(at.root)
         if source is None or not source.served:
-            res = _html(503, _sign_in_page(f"The source {escape(at.root)} is not served", escape(source.shown if source else "no such source")))
+            res = _html(503, _sign_in_page(f"The source {escape(at.root)} is not served", escape((source.shown or f"source {at.root!r} is being checked: try again in a moment") if source else "no such source")))
             res.error = "source unserved"
             return res
         client = source.client

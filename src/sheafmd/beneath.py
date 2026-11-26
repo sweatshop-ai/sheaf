@@ -82,6 +82,12 @@ def _openat2(dirfd: int, rel: str, flags: int, resolve: int = _RESOLVE_BENEATH) 
     return fd
 
 
+def stat_key(st) -> tuple:
+    """What the watcher compares to see that a file was written to: its identity, size and both times. A write or a rename
+    moves the change time even where the modification time is put back, and a replacement is another inode."""
+    return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns
+
+
 def ident(fd: int) -> tuple:
     st = os.fstat(fd)
     return (st.st_dev, st.st_ino)
@@ -94,6 +100,7 @@ class Opened:
     def __init__(self, fd, file, dirs, parent, name, how, top, rel, st=None):
         self.fd, self.file, self.dirs, self._parent, self.name, self.how = fd, file, dirs, parent, name, how
         self.top, self.rel, self._st = top, rel, st
+        self.written = None         # `stat_key` of the file `write` made, taken from its descriptor once it was in place
 
     def idents(self) -> list:
         return [*self.dirs, self.file]
@@ -125,6 +132,7 @@ class Opened:
         mode = stat.S_IMODE(os.fstat(self.fd).st_mode)
         out = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=pfd)
         try:
+            keep = os.dup(out)              # the new file's descriptor outlives the rename: its status is asked of it, never of a name
             with os.fdopen(out, "wb") as f:
                 f.write(text.encode("utf-8"))
                 f.flush()
@@ -138,7 +146,13 @@ class Opened:
             if (st.st_dev, st.st_ino) != self.file:
                 raise OSError(errno.ESTALE, "the file is no longer the one that was opened", name)
             os.rename(tmp, name, src_dir_fd=pfd, dst_dir_fd=pfd)
+            self.written = stat_key(os.fstat(keep))
+            os.close(keep)
         except BaseException:
+            try:
+                os.close(keep)
+            except (OSError, UnboundLocalError):
+                pass
             try:
                 os.unlink(tmp, dir_fd=pfd)
             except OSError:

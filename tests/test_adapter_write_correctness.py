@@ -328,9 +328,10 @@ def test_a_get_for_the_old_root_after_its_forget_installs_and_serves_nothing_of_
     finish()
 
 
-def test_a_write_that_lands_after_a_save_is_read_back_once_through_the_same_install(world, work):
-    """3: the disk's hash is not the text the save wrote, so the latest text is rendered and published once; the watcher's
-    (mtime, size) key plays no part."""
+def test_a_write_that_lands_after_a_save_is_taken_in_by_the_watcher_even_with_the_size_and_mtime_kept(world, work):
+    """3: the save reads nothing after its write and hands the watcher the status its write took of the file (identity, size,
+    both times). An outside write right after it, of the same size and with the modification time put back, moves the change
+    time: the watcher sees it, renders it and tells the tabs once. The save's own write is no change to it."""
     hub = world.hub
     e = hub.entry("work/start.md")
     f = work / "start.md"
@@ -338,25 +339,19 @@ def test_a_write_that_lands_after_a_save_is_read_back_once_through_the_same_inst
     i = next(n for n, b in enumerate(split_md_blocks(text)) if b.content.startswith("First paragraph"))
     sub = e.bus.subscribe()
     sub.drain()
-    real = e.live.install
-    calls = []
-
-    def install(t, g):
-        calls.append(t)
-        out = real(t, g)
-        if len(calls) == 1:                        # an outside write after the save's own, the same size and mtime kept
-            st = f.stat()
-            f.write_text(f.read_text(encoding="utf-8").replace("Edited words.", "Edxted words."), encoding="utf-8")
-            os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
-        return out
-    e.live.install = install
-    e.live._render = lambda t: (calls.append(t), hub._rendered(e, t))[1]
     e.live.save(rds.md_hash(text), [{"i": i, "html": "<p>Edited words.</p>"}])
-    on_disk = f.read_text(encoding="utf-8")
-    assert "Edxted words." in on_disk
-    assert e.live.current()[1] == on_disk and "Edxted words." in e.html
-    assert len(calls) == 2 and "Edited words." in calls[0] and "Edxted words." in calls[1]
     assert [n for n, _ in sub.drain()] == ["changed"]
+    assert e.last_stat == beneath.stat_key(f.stat())      # the watcher holds the key of the file the save made
+    hub.tick()
+    assert sub.drain() == []                               # its own write is not seen again
+    st = f.stat()
+    f.write_text(f.read_text(encoding="utf-8").replace("Edited words.", "Edxted words."), encoding="utf-8")
+    os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
+    after = f.stat()
+    assert after.st_size == st.st_size and after.st_mtime_ns == st.st_mtime_ns
+    hub.tick()
+    assert [n for n, _ in sub.drain()] == ["changed"]
+    assert "Edxted words." in e.html and e.live.current()[1] == f.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("hook", ["between", "kept"])
@@ -421,28 +416,24 @@ def test_a_root_let_go_after_the_page_swap_does_not_fail_the_save_through_its_re
     assert [n for n, _ in events][-1:] == ["gone"], events
 
 
-def test_the_read_back_of_a_save_never_resolves_the_name_so_a_name_given_to_a_fifo_cannot_hang_it(world, work, tmp_path):
-    """26 D: between the check that the entry was not let go and the read-back, the root name goes to another folder whose
-    file of that name is a FIFO. The read-back reads through the folder the save wrote in, so it never opens that FIFO: the
-    save returns promptly, written, with the edit on disk."""
-    import os
-    import threading
+def test_a_save_opens_nothing_after_its_write_so_a_name_given_to_a_fifo_cannot_hang_it(world, work, tmp_path):
+    """26 D: after the page is installed the root name goes to another folder whose file of that name is a FIFO. The save has
+    no file to open or follow any more: it returns promptly, written, with the edit on disk."""
     hub = world.hub
     e = hub.entry("work/start.md")
     f = work / "start.md"
     text = f.read_text(encoding="utf-8")
     i = next(n for n, b in enumerate(split_md_blocks(text)) if b.content.startswith("First paragraph"))
     finishes = []
-    real = e.live._let_go
+    real = e.live.install
 
-    def let_go_then_the_name_moves(gen):
-        out = real(gen)
-        if not out and not finishes:
-            finish, other = retake_the_name(hub, tmp_path, {"other.md": b"# Other\n"})
-            os.mkfifo(other / "start.md")
-            finishes.append(finish)
+    def install_then_the_name_moves(t, g):
+        out = real(t, g)
+        finish, other = retake_the_name(hub, tmp_path, {"other.md": b"# Other\n"})
+        os.mkfifo(other / "start.md")
+        finishes.append(finish)
         return out
-    e.live._let_go = let_go_then_the_name_moves
+    e.live.install = install_then_the_name_moves
     done = {}
 
     def save():
@@ -451,7 +442,7 @@ def test_the_read_back_of_a_save_never_resolves_the_name_so_a_name_given_to_a_fi
     t.start()
     t.join(10)
     try:
-        assert not t.is_alive(), "the save hangs on the read-back of the replacement's FIFO"
+        assert not t.is_alive(), "the save hangs on the replacement's FIFO"
         assert done["out"]["changed"] and "Edited words." in f.read_text(encoding="utf-8")
     finally:
         if t.is_alive():                    # let a blocked open end, so the test does not leave a thread behind

@@ -704,6 +704,7 @@ class Hub:
         e.live.keep_page = lambda: self._keep_page(e)
         e.live.generation = lambda: e.generation
         e.live.install = lambda text, gen: self._install(e, gen, text)    # raises LetGo
+        e.live.watch_key = lambda key, gen: self._watch_key(e, gen, key)
         return e
 
     @staticmethod
@@ -715,6 +716,13 @@ class Hub:
         def put_back():
             e.html, e.log, e.first, e.images_scope = kept
         return put_back
+
+    def _watch_key(self, e, gen, key):
+        """What the watcher compares the file's status with: the one the save's own write took, so a later change of it (an
+        outside write that restored the time too) is seen. Of an entry let go, nothing."""
+        with e.swap:
+            if e.generation == gen and not e.live._detached:
+                e.last_stat = key
 
     def _rendered(self, e: Entry, text: str) -> str | None:
         """Render `text` for `e`; answers the branch the page was rendered on (a clone's page), which the live document keeps
@@ -1926,7 +1934,7 @@ class Hub:
                     st = e.stat()
                 except (OSError, roots_mod.NotFound):      # a bound entry's file may be gone from its root
                     continue
-                key = (st.st_mtime_ns, st.st_size)
+                key = beneath.stat_key(st)
                 if key == e.last_stat:
                     continue
                 # After the refresh, and only when it decided the file: a rebuild that failed, or a file it could not
@@ -2000,7 +2008,7 @@ class Hub:
         served; it is tried again on the next request."""
         try:
             st = e.stat()
-            key = (st.st_mtime_ns, st.st_size)
+            key = beneath.stat_key(st)
             if key != e.last_stat and self._refreshed(e) is not RETRY:
                 e.last_stat = key
             if self._images_moved(e):           # projects.toml or the owners moved: its images are judged otherwise
@@ -2143,7 +2151,7 @@ class Hub:
                 st = e.stat()
                 got = e.live.rebuild() if moved else e.live.refresh()
                 if got is not RETRY:         # one it could not decide is left to the watcher, which looks again
-                    e.last_stat = (st.st_mtime_ns, st.st_size)
+                    e.last_stat = beneath.stat_key(st)
             except Exception as ex:
                 self._rebuild_failed(e, ex)
         self.writes.told(address)

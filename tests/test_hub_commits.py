@@ -1861,6 +1861,7 @@ def test_a_rename_that_arrives_on_a_pull_writes_a_forward_and_carries_the_versio
     address to the new one, and the versions kept under the old address are the new page's."""
     poll = roomy_git(monkeypatch)
     edit(box, rectoversos)
+    assert box.hub.commits.settle(timeout=1200)  # ticket 208: the edit is out before the rename is pushed
     pushed(box, remote)
     root = box.hub.roots.get("rectoversos")
     versions = box.hub._versions_of(root) or box.hub.versions

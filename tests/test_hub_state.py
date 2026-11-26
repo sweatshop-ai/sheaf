@@ -605,3 +605,38 @@ def test_the_trim_of_a_roots_own_store_leaves_the_pins_another_clone_made(tmp_pa
     assert all((pins / f"{md_hash(t)}.md").is_file() for t in theirs)
     mine = [p for p in pins.glob("*.md") if p.with_suffix(state.PINNED_AT).is_file()]
     assert len(mine) == state.PINS_KEPT                                   # this hub's own pins are still trimmed
+
+
+def test_a_pin_two_clones_share_keeps_its_text_when_this_clones_trim_drops_it(tmp_path):
+    """Ticket 203, Codex round 13 on #687: a pin text git carries may be pinned by another clone too. Once this clone pins
+    the same version, its trim used to delete the text, and the committed deletion took the other clone's merge base away.
+    In a root's own store the trim takes away this hub's time of a pin only, never its text."""
+    v = state.Versions(tmp_path, "r")
+    v.pin("r/plan.md", "mine\n")
+    pins = next(v.dir.rglob("pins"))
+    shared = "shared\n"
+    (pins / f"{md_hash(shared)}.md").write_text(shared)                     # pulled from the clone that pinned it
+    v.pin("r/plan.md", shared)                                              # this clone pins it too
+    for n in range(state.PINS_KEPT + 3):
+        v.pin("r/plan.md", f"mine {n}\n")
+    assert (pins / f"{md_hash(shared)}.md").read_text() == shared
+    assert not (pins / f"{md_hash(shared)}{state.PINNED_AT}").exists()     # no longer this hub's pin
+    assert v.get("r/plan.md", md_hash(shared)) is None
+    assert (pins / f"{md_hash('mine\n')}.md").is_file()                     # this hub's own old pins keep their text too
+    mine = [p for p in pins.glob("*.md") if p.with_suffix(state.PINNED_AT).is_file()]
+    assert len(mine) == state.PINS_KEPT
+
+
+@pytest.mark.parametrize("rel, clock", [
+    (".sheaf/versions/0123456789abcdef/pins/0123456789abcdef.at", True),
+    (".sheaf/versions/0123456789abcdef/pins/m-fedcba9876543210/0123456789abcdef.at", True),
+    (".sheaf/versions/0123456789abcdef/pins/notes.at", False),
+    (".sheaf/versions/0123456789abcdef/0123456789abcdef.at", False),
+    (".sheaf/versions/0123456789abcdef/pins/m-x/0123456789abcdef.at", False),
+    (".sheaf/versions/0123456789ABCDEF/pins/0123456789abcdef.at", False),
+    ("docs/.sheaf/versions/0123456789abcdef/pins/0123456789abcdef.at", False),
+    (".sheaf/versions/a.at", False),
+])
+def test_only_a_hash_named_time_in_a_pins_folder_is_a_pin_clock(rel, clock):
+    """Ticket 203, Codex round 13 on #687: the cleanup of pin times treated any tracked `*.at` as one."""
+    assert state.is_pin_clock(rel) is clock

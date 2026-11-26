@@ -35,6 +35,7 @@ import re
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from contextlib import nullcontext
@@ -328,20 +329,19 @@ def _again(folder: Path, commit: str, onto: str):
 def _untrack_pin_times(folder: Path) -> tuple[bool, str | None]:
     """A pin time is each hub's own (7.4): every one git holds in the versions store of the root at `folder`, in HEAD or
     the index, taken in before the store's `.gitignore` kept it out (an older hub, a `.gitignore` that let it in), leaves
-    git; the file stays on disk (ticket 203 C). The index first: once it holds none, any commit, the hub's or a person's,
-    takes them out. Then HEAD, in a commit of its own, `versions: pin times out of git`, made on an index of the hub's
-    own from HEAD less those files: `commit -- paths` would take them back from the work tree. Run under the repo's lock
-    before a commit of the store. (made, error): `made`, that commit was made, owed a push whatever comes after;
-    `error`, what git refused: the store's versions are then not committed, since its index may still hold a pin time."""
-    try:
-        state.times_out_of_git(folder / state.INSIDE)      # before anything stages the store, here or in the sweep
-    except OSError as e:
-        return False, f"the store's .gitignore could not be set: {e}"[:300]
+    git; the file stays on disk (ticket 203 C). Only git's index and HEAD change, never a file of the work tree, so who owns
+    a folder of the store, or a link there, cannot matter; and only a pin time (`state.is_pin_clock`) leaves. The index
+    first, through `_locking`: once it holds none, any commit, the hub's or a person's, takes them out. Then HEAD, in a
+    commit of its own, `versions: pin times out of git`, made on an index of the hub's own from HEAD less those files
+    (`commit -- paths` would take them back from the work tree), in a folder made new for it and removed whole, its lock
+    with it, however git ends. Run under the repo's lock before a commit of the store. (made, error): `made`, that commit
+    was made, owed a push whatever comes after; `error`, what git refused: the store's versions are then not committed,
+    since its index may still hold a pin time."""
     head = _git(folder, "rev-parse", "-q", "--verify", "HEAD").stdout.strip()
     listed = _git(folder, "ls-files", "-z", "--", str(state.INSIDE)).stdout.split("\0")
     if head:
         listed += _git(folder, "ls-tree", "-r", "--name-only", "-z", head, "--", str(state.INSIDE)).stdout.split("\0")
-    held = sorted({p for p in listed if p.endswith(state.PINNED_AT)})
+    held = sorted({p for p in listed if state.is_pin_clock(p)})
     if not held:
         return False, None
     try:
@@ -353,23 +353,30 @@ def _untrack_pin_times(folder: Path) -> tuple[bool, str | None]:
         if head else []
     if not in_head:
         return False, None
-    index = _git(folder, "rev-parse", "--path-format=absolute", "--git-path", "sheaf-untrack.index").stdout.strip()
-    try:
-        steps = [("read-tree", head), ("update-index", "--force-remove", "--", *in_head)]
-        if any(_git(folder, *step, index=index).returncode for step in steps):
-            return False, "a pin time git holds could not be taken out of it"
-        tree = _git(folder, "write-tree", index=index).stdout.strip()
-        made = _git(folder, "-c", f"user.name={COMMITTER[0]}", "-c", f"user.email={COMMITTER[1]}", "commit-tree",
-                    tree, "-p", head, "-m", "versions: pin times out of git", author=Author(*COMMITTER))
-        new = made.stdout.strip()
-        if made.returncode or not new or _git(folder, "update-ref", "HEAD", new, head).returncode:
-            return False, "a pin time git holds could not be taken out of it"
-    finally:
+    new = ""
+    with tempfile.TemporaryDirectory(prefix="sheaf-untrack-", ignore_cleanup_errors=True) as own:
+        index = Path(own) / "index"
         try:
-            os.unlink(index)
-        except OSError:
-            pass
+            steps = [("read-tree", head), ("update-index", "--force-remove", "--", *in_head)]
+            if any(_git(folder, *step, index=index).returncode for step in steps):
+                return False, "a pin time git holds could not be taken out of it"
+            tree = _git(folder, "write-tree", index=index).stdout.strip()
+            made = _git(folder, "-c", f"user.name={COMMITTER[0]}", "-c", f"user.email={COMMITTER[1]}", "commit-tree",
+                        tree, "-p", head, "-m", "versions: pin times out of git", author=Author(*COMMITTER))
+            new = made.stdout.strip()
+            if made.returncode or not new or _git(folder, "update-ref", "HEAD", new, head).returncode:
+                return False, "a pin time git holds could not be taken out of it"
+        except subprocess.SubprocessError as e:
+            moved = bool(new) and _git(folder, "rev-parse", "-q", "--verify", "HEAD").stdout.strip() == new
+            return moved, None if moved else (str(e)[:300] or type(e).__name__)
     return True, None
+
+
+def _clocks_out_of_index(folder: Path, paths: list) -> bool:
+    """Whatever `add` staged of `paths`, no pin time (`state.is_pin_clock`) stays staged: a `.gitignore` may be missing, a
+    link, or undone by a `!*.at` lower down, and a pin time is each hub's own (7.4, ticket 203). False: git refused."""
+    staged = [p for p in _git(folder, "ls-files", "-z", "--", *paths).stdout.split("\0") if state.is_pin_clock(p)]
+    return not staged or _locking(folder, "update-index", "--force-remove", "--", *staged).returncode == 0
 
 
 def root_config(root) -> "config.RootConfig":
@@ -538,6 +545,8 @@ class Commits:
     def _add_and_commit(self, folder: Path, paths: list, before: dict, author: Author, subject: str, address: str,
                         record) -> bool:
         r = _locking(folder, "add", "-A", "--", *paths)   # a file an ignore rule names, in the folder, stays out
+        if r.returncode == 0 and not _clocks_out_of_index(folder, paths):
+            r = subprocess.CompletedProcess(r.args, 1, "", "a pin time could not be kept out of the commit")
         if r.returncode != 0:
             kept = _restage(folder, before, paths)
             record("commit-failed", address,
@@ -876,7 +885,8 @@ class Commits:
             folders: dict[Path, list] = {}
             for p in map(Path, filter(None, listed.stdout.split("\0"))):
                 # By name, not the folder: a version half written (`state.write_text_private`) is never staged.
-                if len(p.parts) > 3 and not (p.name.startswith(".") and p.name.endswith(".tmp")):
+                if len(p.parts) > 3 and not (p.name.startswith(".") and p.name.endswith(".tmp")) \
+                        and not state.is_pin_clock(p.as_posix()):    # a pin time is this hub's alone (7.4)
                     folders.setdefault(Path(*p.parts[:3]), []).append(str(p))
             for f, files in sorted(folders.items()):
                 key = _address(r.path / f)

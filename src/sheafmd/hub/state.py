@@ -43,6 +43,8 @@ _PIN_CLOCK_AHEAD = 60           # seconds a pin time may lie ahead of this clock
 PINNED_AT = _PINNED_AT = ".at"              # in a root's own store, beside a pin `<hash>.md`: when it was last pinned, ns since the epoch
 _LOCAL_ONLY = f"*{_PINNED_AT}\n.gitignore\n"   # `.gitignore` of a root's own store: each hub's pin times stay out of git
 INSIDE = Path(".sheaf") / "versions"    # a root's own versions store, inside it (7.4)
+_PIN_CLOCK_RE = re.compile(rf"{re.escape(INSIDE.as_posix())}/[0-9a-f]{{16}}/{_PINS_DIR}/({_MEMBER_PINS}[0-9a-f]{{16}}/)?"
+                           rf"[0-9a-f]{{16}}{re.escape(_PINNED_AT)}")
 
 
 def inside_dir(path: Path) -> Path:
@@ -182,32 +184,10 @@ class _Claims:
     by_hash: dict = field(default_factory=dict)     # hash -> {writer, ...}; None is a writer that is no document
 
 
-def times_out_of_git(store: Path):
-    """Keep every pin time of a root's own store at `store` out of git, whether or not this hub has pinned there: the
-    store's `.gitignore` is written unless it is a file of its own holding the hub's lines, and any other `.gitignore`
-    in the store, which could say `!*.at`, goes (ticket 203 C, round 8). A clone gets no store `.gitignore` from git:
-    the file ignores itself. Nothing is made when the store holds no pin time. Nothing is touched through `.sheaf` or a store
-    that is a link or a folder of another account (7.4, rounds 9 and 10): `PermissionError`, since nothing then keeps
-    pin times out. OSError: the caller must not stage the store."""
-    for d in (store.parent, store):
-        try:
-            st = os.lstat(d)
-        except FileNotFoundError:
-            return
-        if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid():
-            raise PermissionError(f"{d.name} is not a folder of this account; its pin times cannot be kept out of git")
-    planted, timed = [], False
-    for d, dirs, names in os.walk(store):
-        timed = timed or any(n.endswith(_PINNED_AT) for n in names)
-        if d != str(store) and ".gitignore" in names + dirs:
-            planted.append(Path(d) / ".gitignore")
-    if not timed:
-        return              # no pin time to keep out: the store stays as the hub left it
-    if read_small(store / ".gitignore") != _LOCAL_ONLY:
-        write_text_private(store / ".gitignore", _LOCAL_ONLY, True)
-    for p in planted:
-        if not stat.S_ISDIR(os.lstat(p).st_mode):
-            os.unlink(p)
+def is_pin_clock(rel: str) -> bool:
+    """Whether `rel`, a path relative to a root as git names it, is a pin time of the root's own store: `<hash>.at` in a
+    document folder's `pins/` or a member's folder in it (7.4). No other file is one, whatever its name ends in (ticket 203)."""
+    return _PIN_CLOCK_RE.fullmatch(rel) is not None
 
 
 class Versions:
@@ -269,7 +249,8 @@ class Versions:
         """Write `text` under its hash in `folder` (or count it as written now), and keep the
         `newest` files there. Only a file named by a hash counts or is deleted here: anything else
         is not a version (`get` would not believe it) and takes no slot. A pin of a root's own store
-        has its time in a file beside it (`_pinned_at`)."""
+        has its time in a file beside it (`_pinned_at`); there the trim takes away only that time, never the text, which
+        git carries and another clone may pin too (ticket 203). Only the pins this hub timed count there."""
         h = md_hash(text)
         timed = pinned and self._root is not None
         if timed:                                   # first: a pin with no time is never believed
@@ -291,7 +272,13 @@ class Versions:
                     continue        # another clone's pin, pulled with no time here: theirs to trim, never this hub's (203 B)
                 files.append((at, p.name, p))
         for _, _, p in sorted(files)[:-newest]:
-            _drop(p)
+            if timed:       # this hub's time only: git carries the text, which another clone may pin too (203, round 13)
+                try:
+                    p.with_suffix(_PINNED_AT).unlink()
+                except OSError:
+                    pass
+            else:
+                _drop(p)
         return h
 
     def _times_out_of_git(self, folder: Path):

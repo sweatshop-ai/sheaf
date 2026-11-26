@@ -1063,15 +1063,18 @@ class Handler:
             raise Refuse(400, "a shared stream needs an id of 16 to 64 letters, digits, - or _")
         owner = req.member.id if req.member is not None else None
         stream = _SharedStream(self, sid, owner)
-        with self._shared_lock:
-            old = self._shared.get(sid)
-            if old is not None and old.owner != owner:
-                raise Refuse(409, "that stream id is someone else's")   # an id read from a log closes no one's tabs
-            self._shared[sid] = stream
-            self._shared_opened += 1
-            stream.seq = self._shared_opened
-        if old is not None:
-            old.close()                  # the same browser came back before the old connection was seen to close
+        # Under `_join_lock`, as a join's look at the list and its join are (ticket 211): a join that found the old stream
+        # listed is wholly before the replacement and the close, never between them with the key taken onto a closing stream.
+        with self._join_lock:
+            with self._shared_lock:
+                old = self._shared.get(sid)
+                if old is not None and old.owner != owner:
+                    raise Refuse(409, "that stream id is someone else's")   # an id read from a log closes no one's tabs
+                self._shared[sid] = stream
+                self._shared_opened += 1
+                stream.seq = self._shared_opened
+            if old is not None:
+                old.close()              # the same browser came back before the old connection was seen to close
         return _stream(stream)
 
     def _shared_of(self, req: Req) -> "events.Shared":

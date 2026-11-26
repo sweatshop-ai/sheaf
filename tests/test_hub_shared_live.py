@@ -354,3 +354,45 @@ def test_a_tab_that_left_no_longer_wakes_the_writer(world, docs):
     sub = world.hub.entries[docs[0]].bus._subs.copy().pop()
     world.post("/_/live/leave", {"stream": SID, "key": "a"})
     assert sub.on_put is None
+
+
+def test_a_reopen_under_the_id_waits_for_a_join_that_found_the_old_stream_listed(world, docs, monkeypatch):
+    """Ticket 211 (Codex on #690): the join looks its stream up as listed under `_join_lock`, then joins it. A reopen under
+    the same id listed the fresh stream with no `_join_lock`, and closed the old one after: a join between the two took
+    the key from the browser's other connections onto a stream about to close, and the tab was counted nowhere. The
+    reopen now waits for the join, so the stream joined is still the listed one when it is joined."""
+    import threading
+    stale = shared(world)
+    registry = stale._handler._shared
+    closing, go, seen, fresh = threading.Event(), threading.Event(), [], []
+    real_close, real_join = stale.close, stale.join
+
+    def held_close():                                          # the reopen's close of the old stream waits for the join
+        closing.set()
+        go.wait(30)
+        real_close()
+
+    def reopen_in_the_window(key):                             # after the look at the list, before the join
+        t = threading.Thread(target=lambda: fresh.append(shared(world)))
+        t.start()
+        closing.wait(2)                                        # a limit: before the fix the reopen gets this far at once
+        threads.append(t)
+        return False
+
+    def join_and_look(key, sub):
+        seen.append(registry.get(SID) is stale)
+        return real_join(key, sub)
+
+    threads = []
+    monkeypatch.setattr(stale, "close", held_close)
+    monkeypatch.setattr(stale, "bars", reopen_in_the_window)
+    monkeypatch.setattr(stale, "join", join_and_look)
+    try:
+        assert join(world, "t1:1", docs[0]).status == 200
+    finally:
+        go.set()
+        for t in threads:
+            t.join(30)
+    assert seen == [True]                                     # joined while it was still the listed one
+    assert fresh and fresh[0] is registry.get(SID) and stale.closed
+    fresh[0].close()

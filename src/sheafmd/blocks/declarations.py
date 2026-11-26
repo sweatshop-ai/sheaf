@@ -137,6 +137,12 @@ DESCRIPTIONS = {
     "rule": ("A horizontal rule.", "---"),
     "callout": ("A highlighted note; `tone` sets its colour, `align` its text and `pad` its padding.",
                 '::: {.callout tone="info"}\nA note for the reader.\n:::'),
+    "columns": ("A row of columns side by side; it holds `column` blocks only, each with a `size` (its share of the row, in %).",
+                '::: {.columns}\n::: {.column size="50"}\nLeft.\n:::\n::: {.column size="50"}\nRight.\n:::\n:::'),
+    "box": ("A box around plain blocks that carries only layout: `align` its text and `pad` its padding.",
+            '::: {.box align="center" pad="m"}\nText in a box.\n:::'),
+    "image": ("An image on a line of its own; `size` is its share of its container in %, `align` its place in it.",
+              '::: {.image size="50" align="center"}\n![A description](https://example.org/a.png)\n:::'),
 }
 # As `blocks` reports them (tree.py): a heading's level is a number, a list's `ordered` a boolean; `lang` is free text.
 PLAIN_ATTRS = {"heading": (("level", (1, 2, 3, 4, 5, 6), 1),),
@@ -161,8 +167,9 @@ def structural(type_: str, attrs: dict) -> dict:
 
 
 def insertable() -> list:
-    """The names of every insertable Block type: the plain ones, then the declared Rich ones."""
-    return list(PLAIN) + list(DECLARED)
+    """The names of every insertable Block type: the plain ones, then the declared Rich ones that may stand
+    on their own (a column is only ever a child of a row of columns)."""
+    return list(PLAIN) + [n for n, t in DECLARED.items() if t.top]
 
 
 def describe(name: str) -> dict:
@@ -177,12 +184,11 @@ def describe(name: str) -> dict:
 
 def containers() -> dict:
     """Which types each container may hold: the document, each declared type by its Container rule, and the
-    plain containers (a quote, a list item), which hold plain blocks only. Types that are not insertable yet
-    (the layout divs) are left out."""
-    names = set(insertable())
+    plain containers (a quote, a list item), which hold plain blocks only. A type that may only be a child
+    (a column) is listed in its container, not in the document."""
     out = {"document": insertable()}
     for t in DECLARED.values():
-        out[t.name] = [k for k in t.children if k in names]
+        out[t.name] = list(t.children)
     out["quote"] = list(PLAIN)
     out["item"] = list(PLAIN)
     return out

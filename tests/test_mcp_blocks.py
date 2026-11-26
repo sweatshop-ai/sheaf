@@ -130,11 +130,13 @@ def test_block_types_matches_the_declarations(browser, page):
     callout = types["callout"]
     assert callout["attributes"] == [
         {"name": a.name, "values": list(a.values), "default": a.default} for a in decl.CALLOUT.attrs]
-    assert set(types) >= set(decl.PLAIN) | set(decl.DECLARED)
+    assert set(types) == set(decl.insertable()) and "column" not in types     # a column is only a child
     assert got["containers"]["document"] == list(types)
-    assert got["containers"]["callout"] == [t for t in decl.CALLOUT.children if t in types]
+    assert got["containers"]["callout"] == list(decl.CALLOUT.children)
+    assert got["containers"]["columns"] == ["column"]
     assert "callout" not in got["containers"]["quote"]
-    assert "box" not in got["containers"]["callout"]               # declared as a child, not yet a Block type
+    for name, kids in got["containers"].items():                   # a container only holds types that are declared
+        assert set(kids) <= set(decl.PLAIN) | set(decl.DECLARED), name
 
 
 def test_every_example_block_types_gives_is_accepted_by_the_document_service(browser, page, tmp_path):

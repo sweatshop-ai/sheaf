@@ -82,12 +82,12 @@ service's words (an error message, a refusal's `reason`) are redacted of the bea
 
 ## Failure
 
-The reference service stops rather than guess. When `git commit`, or a Git step after the file was replaced, fails, times out or cannot
+The reference service stops rather than guess, except a `git add` that fails cleanly, with the previous bytes put back: that stays an ordinary `refused`, the document as it was. When `git commit`, or a Git step after the file was replaced, fails, times out or cannot
 be run, or the rollback of a failed `git add` fails, the service has stopped: the write is answered `unavailable` (never `written`, never
 `refused`), it changes nothing further, and every later read, write and listing is answered `unavailable`. It logs HEAD before the
 write, HEAD now and the path.
 
-A `git add` that fails cleanly, with the previous bytes put back, is an ordinary `refused`: the document is as it was.
+
 
 Do not restart it. Inspect the repository with Git, starting from `git status` and the logged HEADs, and repair it by hand, keeping any
 operator edits in both the working file and the index. Restart once `git status` is clean. The service refuses to start while an index lock exists, a

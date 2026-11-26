@@ -136,13 +136,19 @@ class Service:
         raise Fault("bad_request", f"unknown call {verb!r}")
 
     # ── documents ───────────────────────────────────────────────────────────
+    @staticmethod
+    def served(rel: str) -> bool:
+        """Whether a path below the folder is one the service lists or reads: a `.md` file, no component starting with a dot."""
+        parts = rel.split("/")
+        return rel.endswith(".md") and not any(p.startswith(".") or not p for p in parts)
+
     def names(self):
         for dirpath, dirs, files in os.walk(self.top, followlinks=False):
             dirs[:] = sorted(d for d in dirs if not d.startswith(".") and not os.path.islink(os.path.join(dirpath, d)))
             here = Path(dirpath).relative_to(self.top)
             for f in files:
                 full = os.path.join(dirpath, f)
-                if f.endswith(".md") and not f.startswith(".") and not os.path.islink(full) and stat.S_ISREG(os.lstat(full).st_mode):
+                if self.served((here / f).as_posix()) and not os.path.islink(full) and stat.S_ISREG(os.lstat(full).st_mode):
                     yield (here / f).as_posix()
 
     def documents(self, cursor) -> dict:
@@ -377,13 +383,23 @@ class Service:
             gdir = self._git("rev-parse", "--absolute-git-dir").stdout.strip()
             if os.path.lexists(os.path.join(gdir, "index.lock")):
                 return "an index.lock exists"
-            got = self._git("status", "--porcelain", "--untracked-files=all", "--ignored", "--", ".")
+            got = self._git("status", "--porcelain=v1", "-z", "--ignored", "--untracked-files=all", "--", ".")
             if got.returncode != 0:
                 return "git status failed"
-            for line in got.stdout.splitlines():
-                if line.startswith("!!") and not line.rstrip().endswith(".md"):
-                    continue                    # ignored build output, an environment: not a document the service reads
-                return "the folder has unstaged, untracked or ignored Markdown files that are not committed"
+            prefix = self._git("rev-parse", "--show-prefix").stdout.strip()     # status paths are from the repository's top
+            entries = got.stdout.split("\0")
+            i = 0
+            while i < len(entries) and len(entries[i]) > 3:
+                code, path = entries[i][:2], entries[i][3:]
+                paths = [path]
+                if "R" in code or "C" in code:                  # a rename or copy: the next entry is the other path, with no code
+                    i += 1
+                    paths.append(entries[i] if i < len(entries) else "")
+                i += 1
+                for one in paths:
+                    rel = one[len(prefix):] if prefix and one.startswith(prefix) else one
+                    if self.served(rel):
+                        return f"{rel} is a document that differs from what is committed (or is ignored)"
         except (OSError, subprocess.SubprocessError):
             return "the repository cannot be read"
         return None

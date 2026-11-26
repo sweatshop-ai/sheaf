@@ -1065,3 +1065,41 @@ def test_the_overview_says_a_git_add_that_fails_cleanly_is_refused_and_anything_
     text = (Path(__file__).resolve().parent.parent / "docs" / "source-service.md").read_text()
     overview = text[text.index("## What the reference service assumes"):text.index("## Failure")]
     assert "fails cleanly" in overview and "stops" in overview and "or the rollback" in overview
+
+
+def test_the_start_guard_looks_at_the_documents_the_service_would_serve_and_no_others(tmp_path):
+    from sheafmd import sourceservice
+    svc, folder, git = _git_service(tmp_path)
+    svc.close()
+    (folder / ".gitignore").write_text("caf\u00e9.md\n.venv/\n")
+    git("add", ".gitignore")
+    git("-c", "user.name=t", "-c", "user.email=t@example.org", "commit", "-q", "-m", "ignore")
+    (folder / ".venv" / "pkg").mkdir(parents=True)
+    (folder / ".venv" / "pkg" / "README.md").write_text("a package readme\n")
+    sourceservice.Service(folder, "b" * 20, {}).close()                 # the service never lists a dot folder: it starts
+    (folder / "caf\u00e9.md").write_text("an ignored document at a listed place\n")
+    with pytest.raises(SystemExit):
+        sourceservice.Service(folder, "b" * 20, {})
+    (folder / "caf\u00e9.md").unlink()
+    sourceservice.Service(folder, "b" * 20, {}).close()
+    (folder / "b.md").write_text("a tracked document that was modified\n")
+    with pytest.raises(SystemExit):
+        sourceservice.Service(folder, "b" * 20, {})
+
+
+def test_the_start_guard_sees_a_renamed_document(tmp_path):
+    from sheafmd import sourceservice
+    svc, folder, git = _git_service(tmp_path)
+    svc.close()
+    git("mv", "b.md", "moved.md")                                       # staged rename: the guard refuses (staged), and its parse must not choke
+    with pytest.raises(SystemExit):
+        sourceservice.Service(folder, "b" * 20, {})
+    git("reset", "-q")
+    with pytest.raises(SystemExit):                                     # unstaged: b.md gone, moved.md untracked
+        sourceservice.Service(folder, "b" * 20, {})
+
+
+def test_the_failure_section_says_a_cleanly_failed_git_add_stays_refused():
+    text = (Path(__file__).resolve().parent.parent / "docs" / "source-service.md").read_text()
+    failure = text[text.index("## Failure"):]
+    assert "except a `git add` that fails cleanly" in failure

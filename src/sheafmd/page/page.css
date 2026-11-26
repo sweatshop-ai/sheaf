@@ -295,3 +295,10 @@ main .mermaid-svg svg,main .chart svg,main img[src^="data:image/svg+xml"]{cursor
  background:rgba(24,24,28,.9);border:1px solid rgba(255,255,255,.4);border-radius:8px;cursor:pointer}
 #rd-zoom .rd-zoom-bar button:focus-visible{outline:2px solid #6ea2ff;outline-offset:2px}
 @media print{#rd-zoom{display:none}}
+/* The block editor (ADR 0003): the document's blocks in TipTap, in the place of the rendered page */
+#rd-be .sheaf-be-doc{outline:none;min-height:50vh;padding:0 0 4rem}
+#rd-be .sheaf-be-doc:focus-within{outline:none}
+#rd-be .sheaf-be-doc pre.sheaf-raw{white-space:pre-wrap;background:rgba(120,120,120,.12);border:1px dashed rgba(120,120,120,.55);padding:.5rem .75rem;border-radius:4px;font-size:.85em;opacity:.8;cursor:default}
+#rd-be .sheaf-be-doc pre.sheaf-raw.ProseMirror-selectednode{outline:2px solid #2563eb}
+#rd-be .sheaf-be-doc table{border-collapse:collapse}
+#rd-be .sheaf-be-doc td,#rd-be .sheaf-be-doc th{border:1px solid rgba(120,120,120,.5);padding:.25rem .5rem}

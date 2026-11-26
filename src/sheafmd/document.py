@@ -163,6 +163,10 @@ class DocumentService:
             return self._texts.get(h)
 
     # ── the page session record ─────────────────────────────────────────────
+    def record(self, old: str, new: str, session: str) -> None:
+        """Note that `session` wrote `new` over `old`, for a write the caller made itself (the page's save)."""
+        self._record(old, new, session)
+
     def _record(self, old: str, new: str, session: str) -> None:
         a, b = rds.md_hash(old), rds.md_hash(new)
         self._remember(old, a)

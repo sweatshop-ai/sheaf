@@ -27,7 +27,7 @@ DEFAULT_PORT = 27419
 ROOT_FILE = ".sheaf.toml"
 
 USER_KEYS = {"port": int, "name": str, "browser": bool, "proxy": dict, "jump": dict,
-             "reopen": dict, "list": dict, "transcribe": dict, "tiroir": str}   # proxy: hub.proxy reads it (9.9); list: hub.the_list (9.10); transcribe: hub.transcribe
+             "reopen": dict, "list": dict, "transcribe": dict, "tiroir": str, "block_editor": bool}   # proxy: hub.proxy reads it (9.9); list: hub.the_list (9.10); transcribe: hub.transcribe
 JUMP_KEYS = {"command": list}
 ROOT_KEYS = {"theme": str, "for": str, "links": bool, "link_tlds": list, "credit": bool,
              "versions": str, "commit": bool, "push": bool, "tiroir": str, "branch": str,
@@ -91,6 +91,14 @@ def load_user_config(warn=None) -> UserConfig:
     if port is not None and not 0 < port < 65536:
         raise ConfigError(f"{path}: 'port' must be between 1 and 65535, not {port}")
     return UserConfig(port=port, name=data.get("name") or None, browser=data.get("browser"), tiroir=data.get("tiroir") or None)
+
+
+def block_editor(warn=None) -> bool:
+    """Whether the page edits in the block editor (SPEC 4.3): `SHEAF_BLOCK_EDITOR=1` or `0`, then `block_editor`, then false."""
+    v = os.environ.get("SHEAF_BLOCK_EDITOR", "").strip()
+    if v:
+        return v not in ("0", "false")
+    return bool(read_toml(paths.config_file(), USER_KEYS, warn).get("block_editor"))
 
 
 def port(warn=None) -> int:

@@ -1,0 +1,26 @@
+{
+  "name": "sheaf-block-editor",
+  "version": "0.0.0",
+  "private": true,
+  "description": "The TipTap block editor of the sheaf page (ADR 0003), built into src/sheafmd/page/editor.bundle.js.",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": "22.21.1",
+    "npm": "10.9.4"
+  },
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "@tiptap/core": "3.35.0",
+    "@tiptap/extension-code-block": "3.35.0",
+    "@tiptap/extension-list": "3.35.0",
+    "@tiptap/extension-table": "3.35.0",
+    "@tiptap/pm": "3.35.0",
+    "@tiptap/starter-kit": "3.35.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2"
+  }
+}

@@ -50,3 +50,14 @@ def load(version: str, page=None) -> dict:
             body = body.replace(SCRIPT_MARK, json.dumps(source).encode(), 1)
         out[name] = Asset(body, _tag(body), source)
     return out
+
+
+EDITOR_BUNDLE = "editor.bundle.js"
+
+
+def editor_bundle(page=None) -> Asset:
+    """The block editor's bundle (ADR 0003, built from `editor/` and committed), as the hub read it at start. It is its own file,
+    not part of the mount assets: the page asks for it only when it edits in the block editor."""
+    page = installed() if page is None else page
+    body = (page / EDITOR_BUNDLE).read_bytes()
+    return Asset(body, _tag(body), _tag(body))

@@ -125,6 +125,33 @@ jobs:
         # `loadgroup`, not `worksteal`: only `loadgroup` keeps a file with IN_ORDER = True on one worker (tests/conftest.py).
         run: uv run --no-sync python tools/ci/stall_watch.py -- uv run --no-sync pytest -v ${{ runner.environment == 'self-hosted' && '-n 16 --dist loadgroup' || '-n 4' }} --durations=25 -m "not page"
 
+      # The page's block editor is TipTap, built into src/sheafmd/page/editor.bundle.js and committed, so a wheel
+      # needs no Node (ADR 0003). The bundle is rebuilt here with the Node of editor/.node-version, fetched from
+      # nodejs.org and checked against its published SHA-256 (no third-party action), and the dependencies of the
+      # lockfile with `npm ci --ignore-scripts`. The rebuilt file must equal the committed one byte for byte:
+      # never relaxed to "it builds". Linux only; a manual macOS run checks the same files on the Linux job.
+      - name: Rebuild the editor bundle
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          v="$(cat editor/.node-version)"
+          case "$(uname -m)" in
+            x86_64)  arch=x64;   sum=680d3f30b24a7ff24b98db5e96f294c0070f8f9078df658da1bce1b9c9873c88 ;;
+            aarch64) arch=arm64; sum=e660365729b434af422bcd2e8e14228637ecf24a1de2cd7c916ad48f2a0521e1 ;;
+            *) echo "no pinned Node for $(uname -m)"; exit 1 ;;
+          esac
+          [ "$v" = "22.21.1" ] || { echo "editor/.node-version moved: update the checksums here"; exit 1; }
+          tool="$RUNNER_TEMP/node"; mkdir -p "$tool"
+          curl -fsSL "https://nodejs.org/dist/v$v/node-v$v-linux-$arch.tar.xz" -o "$tool/node.tar.xz"
+          echo "$sum  $tool/node.tar.xz" | sha256sum -c -
+          tar -xJf "$tool/node.tar.xz" -C "$tool" --strip-components=1
+          export PATH="$tool/bin:$PATH"
+          node --version
+          cd editor
+          npm ci --ignore-scripts
+          npm run build
+          git diff --exit-code -- ../src/sheafmd/page/editor.bundle.js
+
       # The page tests drive Chromium through Playwright (tests/page) and take about half of a pull
       # request's run. A pull request that changes no path they load skips them, and says so here
       # (tools/ci/page_paths.py holds the list). A push to main, the nightly run and a manual run

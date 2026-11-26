@@ -575,3 +575,24 @@ def test_a_collection_that_fails_fails_the_step_instead_of_installing_chromium_a
     r = run_engine_step(text, tmp_path, "tests/page/test_mount_page.py::test_b[webkit]\n", uv_exit=2)
     assert r.returncode == 1 and "did not collect" in r.stdout
     assert not (tmp_path / "out").exists(), "no answer is written"
+
+
+# ---- the block editor's bundle (ADR 0003) ---------------------------------------------------------------------
+
+def test_the_workflow_rebuilds_the_editor_bundle_and_fails_on_any_difference(text):
+    i = text.index("- name: Rebuild the editor bundle")
+    block = text[i:text.index("\n      # ", i + 1)]
+    assert "npm ci --ignore-scripts" in block and "npm run build" in block
+    assert "git diff --exit-code -- ../src/sheafmd/page/editor.bundle.js" in block
+    assert "sha256sum -c" in block, "the Node download is checked against its published checksum"
+    assert text.index("- name: Tests") < i < text.index("- name: Decide whether the page tests run")
+
+
+def test_the_editor_is_pinned_exactly_and_installs_run_no_scripts():
+    import json
+    pkg = json.loads((ROOT / "editor" / "package.json").read_text(encoding="utf-8"))
+    for name, version in {**pkg.get("dependencies", {}), **pkg.get("devDependencies", {})}.items():
+        assert re.fullmatch(r"\d+\.\d+\.\d+", version), f"{name} is not pinned to an exact version: {version}"
+    assert re.fullmatch(r"\d+\.\d+\.\d+\n?", (ROOT / "editor" / ".node-version").read_text())
+    assert "ignore-scripts=true" in (ROOT / "editor" / ".npmrc").read_text()
+    assert (ROOT / "editor" / "package-lock.json").is_file()

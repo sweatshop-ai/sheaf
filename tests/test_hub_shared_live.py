@@ -233,16 +233,16 @@ def test_a_join_whose_connection_was_opened_again_meanwhile_leaves_the_fresh_one
     again in that time, and the tab joined the fresh connection first: the stale join must not take the key from it."""
     from sheafmd.hub.handler import Handler
     stale = shared(world)
-    made = Handler._joined_sub
+    real = Handler._joined_sub
     fresh = []
 
-    def slow(self, req, doc):
+    def reopen_meanwhile(self, req, doc):
         if not fresh:                                          # the stale join, between its look-up and its lock
             fresh.append(shared(world))
             assert join(world, "t1:1", doc).status == 200      # the tab joins the fresh connection first
-        return made(self, req, doc)
+        return real(self, req, doc)
 
-    monkeypatch.setattr(Handler, "_joined_sub", slow)
+    monkeypatch.setattr(Handler, "_joined_sub", reopen_meanwhile)
     assert join(world, "t1:1", docs[0]).status == 200          # dropped, as a late join is
     assert stale.closed and fresh[0].keys() == ["t1:1"] and world.hub.tabs(docs[0]) == 1
     fresh[0].close()

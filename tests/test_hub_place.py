@@ -355,17 +355,19 @@ def _leases(folder) -> bool:
     """Whether this system grants a write lease on a file in `folder` (Linux, with a filesystem and a setting that have
     them): where it does not, a take-back keeps the file it made aside (ticket 212 B)."""
     import fcntl
-    probe = Path(folder) / ".lease-probe"
-    probe.write_text("", encoding="utf-8")
+    import tempfile
+    made, probe = tempfile.mkstemp(dir=folder, prefix=".lease-probe-")     # one per test worker
+    os.close(made)
     fd = os.open(probe, os.O_RDONLY)
     try:
+        fcntl.fcntl(fd, fcntl.F_SETSIG, 23)         # SIGURG: a worker that opens it is no SIGIO here
         fcntl.fcntl(fd, fcntl.F_SETLEASE, fcntl.F_WRLCK)
         return True
     except (OSError, AttributeError):
         return False
     finally:
         os.close(fd)
-        probe.unlink()
+        os.unlink(probe)
 
 
 LEASES = sys.platform.startswith("linux") and _leases(os.environ.get("TMPDIR", "/tmp"))
@@ -489,6 +491,40 @@ def test_a_take_back_whose_lease_another_opens_lives_and_deletes_nothing(tmp_pat
     assert got.returncode == 0, (got.returncode, got.stderr)
     assert got.stdout.split() == ["False", "2"], got.stdout
     assert aside.read_text(encoding="utf-8") == "# Made\n"
+
+
+OPENED_RIGHT_BEFORE_THE_DELETE = r"""
+import os, subprocess, sys, time, types
+from sheafmd import mcp
+aside = sys.argv[1]
+with open(aside, "w", encoding="utf-8") as f:
+    f.write("# Made\n")
+st = os.stat(aside)
+made = types.SimpleNamespace(text="# Made\n", ident=(st.st_dev, st.st_ino))
+real_unlink, opener = os.unlink, []
+OPEN = "import sys\ntry:\n    open(sys.argv[1], 'a').write('late')\n    print('opened')\nexcept PermissionError:\n    print('refused')"
+
+def opened_by_another_right_before(path, *args, **kwargs):
+    # after the take-back's last look at its lease: another process opens the sibling by its name to write in it
+    opener.append(subprocess.Popen([sys.executable, "-c", OPEN, aside], stdout=subprocess.PIPE, text=True))
+    time.sleep(1)
+    return real_unlink(path, *args, **kwargs)
+mcp.os.unlink = opened_by_another_right_before
+print(mcp._delete_if_made(mcp.Path(aside), made), opener[0].communicate(timeout=60)[0].strip())
+"""
+
+
+@pytest.mark.skipif(not LEASES or os.geteuid() == 0, reason="no write lease here, or root, whom no mode keeps out")
+def test_a_take_back_lets_no_process_open_the_file_it_deletes(tmp_path):
+    """Ticket 212 B, round 2: a process that opens the hidden sibling after the take-back's last look at its lease, and
+    before the delete, waits for the lease and would then be given a file with no name, and what it writes lost. Under
+    the lease the file's mode is taken to none first, so such an open is refused, and the look comes after it."""
+    aside = tmp_path / ".a.md.sheaf-gone-0"
+    got = subprocess.run([sys.executable, "-c", OPENED_RIGHT_BEFORE_THE_DELETE, str(aside)], capture_output=True,
+                         text=True, timeout=120, env={**os.environ, "PYTHONPATH": str(Path(__file__).parents[1] / "src")})
+    assert got.returncode == 0, (got.returncode, got.stderr)
+    assert got.stdout.split() == ["True", "refused"], got.stdout
+    assert not aside.exists()
 
 
 def test_a_folder_taken_back_is_never_renamed_over_an_empty_folder_that_came_to_its_name(tmp_path, monkeypatch):

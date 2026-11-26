@@ -1658,7 +1658,7 @@ def _delete_if_made(aside: Path, made: "_Made") -> bool | None:
     the file's times or size, taken again before the delete, still let such a write in between, and on a filesystem with
     coarse times one of the same size moved nothing: a write lease (Linux) is granted only while no other descriptor or
     mapping holds the file, and while it is held nobody can open it without waiting for it. The bytes are read, and the file
-    deleted, under that lease."""
+    deleted, under that lease, its mode taken to none first (ticket 212 B)."""
     want = made.text.encode("utf-8")
     try:
         fd = os.open(aside, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -1675,13 +1675,27 @@ def _delete_if_made(aside: Path, made: "_Made") -> bool | None:
             return False
         if alone is None:
             return None
-        if not _lease_held(fd):     # another opened it by its name meanwhile (a sync client, an indexer): kept
-            return False
+        # An open of the sibling by its name from now on would wait for the lease, and then be given a file with no name:
+        # its mode goes to none first, which refuses such an open before it reaches the lease, and the look at the lease
+        # comes after, for an open that began before. Not kept out: root, whom no mode stops, and an open already past
+        # its permission check, in the kernel, as the mode changed.
         try:
-            os.unlink(aside)
+            os.fchmod(fd, 0)
         except OSError:
             return False
+        if not _lease_held(fd) or not _unlinked(aside):     # opened by another meanwhile (a sync client, an indexer)
+            with contextlib.suppress(OSError):
+                os.fchmod(fd, stat_mod.S_IMODE(st.st_mode))
+            return False
         return True
+
+
+def _unlinked(path: Path) -> bool:
+    try:
+        os.unlink(path)
+    except OSError:
+        return False
+    return True
 
 
 _F_SETLEASE = getattr(fcntl, "F_SETLEASE", None)     # Linux only

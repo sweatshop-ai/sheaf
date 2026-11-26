@@ -1,4 +1,5 @@
 """Ticket 210: the Codex re-check of #685 (ticket 201's fix) and of #691 (ticket 207's fix). One test per box."""
+import pytest
 from test_edit_191 import saved_as
 
 from sheafmd import edit as rde
@@ -33,13 +34,39 @@ def test_an_escape_moved_across_the_anchors_of_a_cut_diff_is_placed_by_its_neigh
     assert out.endswith("A \\:smile: :smile: end\n"), out[-40:]     # the one the reader typed stays the emoji
 
 
-def test_an_escape_the_reader_deleted_gives_its_escape_to_no_shortcode_typed_after_the_same_characters():
-    # The review of 210: a literal the diff left unmatched within one stretch is one the reader deleted, and a
-    # `:smile:` typed after the same twelve characters elsewhere stays the emoji (#594).
-    later = " ".join(f"v{i}" for i in range(400))
-    for n in range(395, 415):
-        first = " ".join(f"w{i}" for i in range(n))
-        src = f"{first} Mood today: \\:smile: fine. {later} Mood today: sad. end"
-        html = f"<p>{first} Mood today: fine. {later} Mood today: :smile: sad. :smile: end</p>"
-        out = saved_as(src, html)
-        assert "\\:smile:" not in out, (n, out[-50:])
+
+def _deleted_and_typed_elsewhere(n):
+    # the reader deletes the escape after "Mood today:" and types `:smile:` after the same words further on, and one
+    # more at the end (with as many `:smile:` on each side the k-th rule would place it)
+    first, later = " ".join(f"w{i}" for i in range(n)), " ".join(f"v{i}" for i in range(n))
+    src = f"start {first} Mood today: \\:smile: fine. {later} Mood today: sad. end"
+    html = f"<p>begin {first} Mood today: fine. {later} Mood today: :smile: sad. :smile: finish</p>"
+    return src, html
+
+
+@pytest.mark.parametrize("n", [400, 800], ids=["one diff", "a cut diff"])
+def test_an_escape_the_reader_deleted_gives_its_escape_to_no_shortcode_typed_after_the_same_characters(n):
+    # The review of 210 (spec half, then round 02): a literal the diff left unmatched with the words beside it
+    # matched where they were is one the reader deleted, and a `:smile:` typed after the same characters elsewhere
+    # stays the emoji (#594), within the bound and past it.
+    src, html = _deleted_and_typed_elsewhere(n)
+    out = saved_as(src, html)
+    assert "\\:smile:" not in out, out[-50:]
+    assert out.endswith("Mood today: :smile: sad. :smile: finish\n"), out[-50:]
+
+
+
+
+def test_the_second_case_is_past_the_bound_of_one_word_diff():
+    src, html = _deleted_and_typed_elsewhere(800)
+    old, new = rde._DIFF_WORD.findall(src), rde._DIFF_WORD.findall(html)
+    assert len(old) * len(new) > rde._DIFF_BOUND
+
+
+def test_an_escape_moved_with_its_words_within_one_diff_is_placed_by_its_neighbours():
+    # Codex on the fix of 210: `A \:smile: B` moved past a stretch of repeated words is matched by no word, but A and
+    # B went with it, so it is a move and keeps its escape; the `:smile:` typed after it stays the emoji.
+    repeated = " ".join(["x y"] * 400)
+    out = saved_as(f"A \\:smile: B {repeated} end", f"<p>{repeated} A :smile: B :smile: end</p>")
+    assert out.count("\\:smile:") == 1, out[-40:]
+    assert out.endswith("A \\:smile: B :smile: end\n"), out[-40:]

@@ -1565,9 +1565,8 @@ def _once_on_both_sides(wa: list, alo: int, ahi: int, wb: list, blo: int, bhi: i
     return run[::-1]
 
 
-def _word_pairs(wa: list, wb: list, stretches=None):
-    """[(i, j)]: the words wa[i] and wb[j] a diff of the two lists matches, or None where it cannot (`_by_words`).
-    Each stretch it diffs, (alo, ahi, blo, bhi), is appended to `stretches` when given."""
+def _word_pairs(wa: list, wb: list):
+    """[(i, j)]: the words wa[i] and wb[j] a diff of the two lists matches, or None where it cannot (`_by_words`)."""
     pairs, spent, todo = [], 0, [(0, len(wa), 0, len(wb), False)]
     while todo:
         alo, ahi, blo, bhi, cut = todo.pop()
@@ -1576,8 +1575,6 @@ def _word_pairs(wa: list, wb: list, stretches=None):
             spent += size
             if spent > _DIFF_TOTAL:
                 return None
-            if stretches is not None:
-                stretches.append((alo, ahi, blo, bhi))
             for i, j, n in difflib.SequenceMatcher(None, wa[alo:ahi], wb[blo:bhi],
                                                    autojunk=False).get_matching_blocks():
                 pairs.extend((alo + i + k, blo + j + k) for k in range(n))
@@ -1601,24 +1598,17 @@ def _word_pairs(wa: list, wb: list, stretches=None):
     return pairs
 
 
-def _by_words(old: str, new: str, stretches=None):
+def _by_words(old: str, new: str):
     """{start of a word of `old`: start of the same word in `new`} for the words a diff of the two word lists
     matches. A word is a shortcode, a run of letters and digits, or one other character that is not white space
     (`_DIFF_WORD`): a `(` glued to a literal, or a letter typed beside it, leaves the literal a word of its own that
     still matches. Lists too long for one diff (`_DIFF_BOUND`) are cut at their common start and end and at the words
     found once on each side, and each stretch between those is diffed on its own (ticket 207): two long changed stretches
     with unchanged words between them are each placed. None where a stretch is still too long and holds no such
-    word, or where the stretches add up past `_DIFF_TOTAL`. Each stretch diffed is appended to `stretches` when
-    given, as the characters it spans: (start in `old`, end in `old`, start in `new`, end in `new`)."""
+    word, or where the stretches add up past `_DIFF_TOTAL`."""
     a, b = list(_DIFF_WORD.finditer(old)), list(_DIFF_WORD.finditer(new))
-    cut = [] if stretches is not None else None
-    found = _word_pairs([m.group() for m in a], [m.group() for m in b], cut)
-    if found is None:
-        return None
-    for alo, ahi, blo, bhi in cut or ():
-        stretches.append((a[alo].start() if alo < ahi else len(old), a[ahi - 1].end() if alo < ahi else len(old),
-                          b[blo].start() if blo < bhi else len(new), b[bhi - 1].end() if blo < bhi else len(new)))
-    return {a[i].start(): b[j].start() for i, j in found}
+    found = _word_pairs([m.group() for m in a], [m.group() for m in b])
+    return None if found is None else {a[i].start(): b[j].start() for i, j in found}
 
 
 def _in_its_gap(old: str, new: str, words: dict):
@@ -1658,11 +1648,11 @@ def _places_by_order(old: str, new: str, olds) -> set:
     `old` is the k-th of `new` where both hold as many of that name. Where they do not, by a diff of the two texts'
     words (`_by_words`), whose bound reaches as many words in each changed stretch as the characters' diff reaches
     characters: a literal in a word the diff matches keeps its place, and a shortcode the reader typed is a new word,
-    which stays the emoji (#594). Past that bound, or where the diff matched no word to it, by the literal's
-    neighbours: the `_NEIGHBOURS` characters before it, or after it, with it, found once in `new`. A literal placed
-    by none of these is written bare: one the source escaped then shows as its emoji, on a changed stretch of over
-    about 1 400 words on each side, with no word found once on each side, around a name typed or deleted beside
-    it."""
+    which stays the emoji (#594). Past that bound, or where the diff matched neither it nor the word beside it on a
+    side (it moved), by the literal's neighbours on that side: the `_NEIGHBOURS` characters before it, or after it,
+    with it, found once in `new`. A literal placed by none of these is written bare: one the source escaped then
+    shows as its emoji, on a changed stretch of over about 1 400 words on each side, with no word found once on each
+    side, around a name typed or deleted beside it."""
     def starts(text):
         by_name = {}
         for m in _SHORTCODE_TEXT.finditer(text):
@@ -1676,14 +1666,14 @@ def _places_by_order(old: str, new: str, olds) -> set:
             places.add(after[before.index(start)])
             continue
         if words is False:
-            stretches = []
-            words, word_starts = _by_words(old, new, stretches), [m.start() for m in _DIFF_WORD.finditer(old)]
+            words, word_starts = _by_words(old, new), [m.start() for m in _DIFF_WORD.finditer(old)]
             gap = _in_its_gap(old, new, words) if words is not None else None
         if words is not None:
             # The word the literal is in starts at the last word start at or before it; `old[start]` is its `:`. It is
             # the literal itself unless a shortcode-like word took its first colon (`:b:smile:`): then it is placed
             # only where `new` holds it at the same distance.
-            word = word_starts[bisect.bisect_right(word_starts, start) - 1]
+            k = bisect.bisect_right(word_starts, start) - 1
+            word = word_starts[k]
             if word in words:
                 at = words[word] + start - word
                 if word == start:
@@ -1691,15 +1681,18 @@ def _places_by_order(old: str, new: str, olds) -> set:
                 if new.startswith(f":{name}:", at):
                     places.add(at)
                 continue
-            # A literal the diff did not match is one the reader deleted, unless the stretch of `new` it was diffed
-            # against holds no `:name:` to match it to: then it was moved across the words a long text was cut at
-            # (ticket 210), and goes to its neighbours, as it would if the diff had given None.
-            if any(lo <= start < hi and new.find(f":{name}:", nlo, nhi) >= 0 for lo, hi, nlo, nhi in stretches):
-                continue
+            # A literal the diff did not match was deleted or moved (a move across the words a long text was cut
+            # at matches nothing, ticket 210). A deleted one leaves the words beside it matched where they were, so
+            # a `:name:` typed after the same characters elsewhere stays the emoji; a moved one took a word beside
+            # it along, and goes to its neighbours on that side.
+            moved = (k == 0 or word_starts[k - 1] not in words,
+                     k + 1 == len(word_starts) or word_starts[k + 1] not in words)
+        else:
+            moved = (True, True)
         code, end = f":{name}:", start + len(name) + 2
         before_it, after_it = old[max(0, start - _NEIGHBOURS):start], old[end:end + _NEIGHBOURS]
-        for probe, offset in ((before_it + code, len(before_it)), (code + after_it, 0)):
-            if len(probe) > len(code) and new.count(probe) == 1:
+        for side, (probe, offset) in enumerate(((before_it + code, len(before_it)), (code + after_it, 0))):
+            if moved[side] and len(probe) > len(code) and new.count(probe) == 1:
                 places.add(new.index(probe) + offset)
                 break
     return places

@@ -142,6 +142,10 @@ class DocumentService:
         for b, i in zip(new.blocks, got):
             if i is None and b.type == "stub" and b.attrs.get("type") in decl.DECLARED:
                 raise rda.Refused(b.attrs["reason"], b.id)
+            if i is None and b.type != "stub":
+                why = decl.button_fault(b.ast)         # a block that is new or edited may hold valid buttons only
+                if why:
+                    raise rda.Refused(why, b.id)
         if held_ids is not None:
             by_id = {b.id: b for b in cur.blocks}
             for j, b in enumerate(new.blocks):

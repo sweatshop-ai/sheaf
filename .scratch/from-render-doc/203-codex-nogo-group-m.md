@@ -1,8 +1,8 @@
 # 203: Codex NO-GO findings on merged PR #659 (group M)
 
-**Claimed by:** Boris
+**Claimed by:** Boris, then Stellan
 
-**Status:** in progress
+**Status:** done: #687 merged as 20854dbb on head 6b24e98c (CI run 45764342412 green; recorded rounds 14 and 15, provisional GO from the fallback review)
 
 **Blocked by:** none
 
@@ -12,14 +12,16 @@
 
 ## Serious
 
-- [ ] **A** (from #659, `state.py` `_keep`): any `.sheaf/versions/.gitignore` that is a file is trusted: one with other lines, a link to a file, or a `.gitignore` deeper in the store that re-includes `*.at` lets git commit this clone's pin times, so other clones believe pins they did not make and two clones' times conflict. Fix: the store's `.gitignore` is written again unless it is a regular file holding exactly the hub's lines, and a `.gitignore` in a store folder between it and a pin is removed before the pin time is written.
-- [ ] **B** (from #659, `state.py` `_keep`): a pin pulled from another clone has no `.at` here, so the trim ranks it at time 0 and deletes its `.md`, a tracked file. The deletion is committed and can take away a merge base the other clone's open page holds (a wrong 409). Fix: in a root's own store the trim counts and deletes only the pins this hub timed; another clone's pins take no slot and are left alone.
-- [ ] **C** (from the Codex review of #687, `commits.py`): a `.gitignore` hides only untracked files, so a pin time git took in before A (an older hub, a planted `.gitignore`) goes on being committed. Fix: before any commit of the store (a write's, the sweep's), under the repo's lock, every tracked `<hash>.at` of the store leaves HEAD in a hub commit of its own (`versions: pin times out of git`, made on an index of the hub's own, since `commit -- paths` takes a tracked file back from the work tree) and leaves the index; the file stays on disk. The commit is owed a push, and the write's or sweep's own commit starts from it (Codex round 2 on #687).
+- [x] **A** (from #659, `state.py` `_keep`): any `.sheaf/versions/.gitignore` that is a file is trusted: one with other lines, a link to a file, or a `.gitignore` deeper in the store that re-includes `*.at` lets git commit this clone's pin times, so other clones believe pins they did not make and two clones' times conflict. Fix: the store's `.gitignore` is written again unless it is a regular file holding exactly the hub's lines, and a `.gitignore` in a store folder between it and a pin is removed before the pin time is written.
+- [x] **B** (from #659, `state.py` `_keep`): a pin pulled from another clone has no `.at` here, so the trim ranks it at time 0 and deletes its `.md`, a tracked file. The deletion is committed and can take away a merge base the other clone's open page holds (a wrong 409). Fix: in a root's own store the trim counts and deletes only the pins this hub timed; another clone's pins take no slot and are left alone.
+- [x] **C** (from the Codex review of #687, `commits.py`): a `.gitignore` hides only untracked files, so a pin time git took in before A (an older hub, a planted `.gitignore`) goes on being committed. Fix: before any commit of the store (a write's, the sweep's), under the repo's lock, every tracked `<hash>.at` of the store leaves HEAD in a hub commit of its own (`versions: pin times out of git`, made on an index of the hub's own, since `commit -- paths` takes a tracked file back from the work tree) and leaves the index; the file stays on disk. The commit is owed a push, and the write's or sweep's own commit starts from it (Codex round 2 on #687). Redesigned after round 13 (design note below): the cleanup changes git's index and HEAD only, matches `<16 hex>.at` in a pins folder only (`state.is_pin_time`), builds its HEAD commit on an index in a fresh temporary folder, and no hub commit carries a pin time; the trim of a root's own store drops this hub's time, never a pin text. Tests: `tests/test_hub_state.py`, `tests/test_hub_commits.py`.
 
 ## Minor, left open
 
 - A pin of this hub whose `.at` is garbled or more than a minute ahead is not believed or counted until it is pinned again. Since round 13 the trim deletes no pin text in a root's own store, so nothing is lost meanwhile.
 - The two open limits of the design note below.
+- A refusal to take a staged pin time back out of the index fails that write's commit whole, document included, until the next write; a refusal in the cleanup before it commits the document alone (spec review of #687).
+- SPEC 7.4 does not name the second open limit (an untracked pin time in `git status`).
 
 ## Design of C, after Codex round 13 on #687 (2026-11-26)
 

@@ -419,3 +419,44 @@ def test_a_root_let_go_after_the_page_swap_does_not_fail_the_save_through_its_re
     events = sub.drain()
     assert "Replacement" not in repr(events) and "Replacement" not in e.live._text
     assert [n for n, _ in events][-1:] == ["gone"], events
+
+
+def test_the_read_back_of_a_save_never_resolves_the_name_so_a_name_given_to_a_fifo_cannot_hang_it(world, work, tmp_path):
+    """26 D: between the check that the entry was not let go and the read-back, the root name goes to another folder whose
+    file of that name is a FIFO. The read-back reads through the folder the save wrote in, so it never opens that FIFO: the
+    save returns promptly, written, with the edit on disk."""
+    import os
+    import threading
+    hub = world.hub
+    e = hub.entry("work/start.md")
+    f = work / "start.md"
+    text = f.read_text(encoding="utf-8")
+    i = next(n for n, b in enumerate(split_md_blocks(text)) if b.content.startswith("First paragraph"))
+    finishes = []
+    real = e.live._let_go
+
+    def let_go_then_the_name_moves(gen):
+        out = real(gen)
+        if not out and not finishes:
+            finish, other = retake_the_name(hub, tmp_path, {"other.md": b"# Other\n"})
+            os.mkfifo(other / "start.md")
+            finishes.append(finish)
+        return out
+    e.live._let_go = let_go_then_the_name_moves
+    done = {}
+
+    def save():
+        done["out"] = e.live.save(rds.md_hash(text), [{"i": i, "html": "<p>Edited words.</p>"}])
+    t = threading.Thread(target=save, daemon=True)
+    t.start()
+    t.join(10)
+    try:
+        assert not t.is_alive(), "the save hangs on the read-back of the replacement's FIFO"
+        assert done["out"]["changed"] and "Edited words." in f.read_text(encoding="utf-8")
+    finally:
+        if t.is_alive():                    # let a blocked open end, so the test does not leave a thread behind
+            fd = os.open(tmp_path / "again" / "work" / "start.md", os.O_RDWR | os.O_NONBLOCK)
+            t.join(5)
+            os.close(fd)
+        for fin in finishes:
+            fin()

@@ -13,6 +13,8 @@ Neither may call back into the Live Document (that raises instead of deadlocking
 on anything another of its calls holds.
 """
 import contextlib
+import os
+import stat
 import threading
 import time
 from pathlib import Path
@@ -273,17 +275,38 @@ class LiveDocument:
         """The entry a save pinned (`gen`) was let go since: its root's name may be another folder's, whose files are none to read."""
         return self._detached or self.generation() != gen
 
-    def _disk_hash(self, gen):
-        """The hash of the file as the disk holds it, or None when the entry was let go meanwhile (a read that fails then is
-        the root's going, not the save's failure, 26 D)."""
-        try:
-            return rds.md_hash(self._read())
-        except Exception:
-            if self._let_go(gen):
-                return None
-            raise
+    @staticmethod
+    def _close_folder(folder):
+        for dfd, _ in folder:
+            try:
+                os.close(dfd)
+            except OSError:
+                pass
+        folder.clear()
 
-    def _install_page(self, text: str, gen, before: str, rid=None) -> bool:
+    @staticmethod
+    def _read_back(held):
+        """The text the file holds now, read through the folder the save wrote in (`held`: its descriptor and the file's name),
+        never through the root's name: that may be another folder's by now. None when the file is not there, is not a plain file
+        (a FIFO is never opened for reading: it would block) or is not text: the save is written, and there is nothing to read back."""
+        if held is None:
+            return None
+        dfd, name = held
+        try:
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, dir_fd=dfd)
+        except OSError:
+            return None
+        try:
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                return None
+            with os.fdopen(os.dup(fd), "rb") as f:
+                return f.read().decode("utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
+        finally:
+            os.close(fd)
+
+    def _install_page(self, text: str, gen, before: str, rid=None, folder=None) -> bool:
         """The page of a save that wrote `text`, and the one `changed` event for it. A document of a root renders the text the
         save wrote against the entry the save pinned (`gen`), through the hub's one install, which refuses an entry let go
         (it raises, nothing is installed, and its tabs hear `gone`, ticket 26 D). A write that landed on the file after ours
@@ -297,9 +320,12 @@ class LiveDocument:
             self._text, self._hash = text, rds.md_hash(text)
             self._branch = branch if isinstance(branch, str) else None
             self._remember(text)
-            disk = None if self._let_go(gen) else self._disk_hash(gen)
-            if disk is not None and disk != self._hash:
-                self._rerender(written=text)
+            disk = None if self._let_go(gen) else self._read_back(folder)
+            if disk is not None and rds.md_hash(disk) != self._hash:
+                branch = self.install(disk, gen)
+                self._text, self._hash = disk, rds.md_hash(disk)
+                self._branch = branch if isinstance(branch, str) else None
+                self._remember(disk)
         # Measured from the text the tabs hold, or, when someone wrote between our write and the render (the watcher will not
         # see that either), from the text we wrote: the tab that saved holds that one.
         start = text if self._hash != rds.md_hash(text) else before
@@ -395,11 +421,15 @@ class LiveDocument:
             got = {}
 
             pinned = []                 # the file a document with no entry writes, asked once
+            folder = []                 # the folder the save wrote in, kept for its read-back: never the root's name again
 
             def change(text, op):
                 # The file as this save opened it, never found again: a root forgotten while the save waited for the lock
                 # leaves nothing to look up (ticket 26 D). For the edit alone: the seam and the Versions record run after it.
                 token = rde.DOC.set(Path(op.top) / op.rel if op is not None else pinned[0])
+                if op is not None and not folder:
+                    pfd, name = op._folder()
+                    folder.append((os.dup(pfd), name))
                 try:
                     return decide(text)
                 finally:
@@ -428,16 +458,24 @@ class LiveDocument:
                 return guard(text, new, got["report"]["toggled"]) if guard is not None else new
             # The version check happens inside change(), under the file lock: the CLI and an
             # Tell job write this file from other processes.
-            _, new_text = self._update(change, move=move, remember=True, pin=pinned)
-            report = got["report"]
+            try:
+                _, new_text = self._update(change, move=move, remember=True, pin=pinned)
+                report = got["report"]
+                held = folder[0] if folder else None
+            except BaseException:
+                self._close_folder(folder)
+                raise
             # A root forgotten while the save waited has no page to render for, and its file is not found again: the
             # edit is written and answered (its tabs heard `gone`), never failed by a look-up after it (ticket 26 D).
-            if report["changed"] and not self._detached:
-                try:
-                    self._install_page(new_text, gen, before, rid)
-                except NotFound:
-                    if not self._detached:      # a root forgotten after the check above: its detach came first
-                        raise
+            try:
+                if report["changed"] and not self._detached:
+                    try:
+                        self._install_page(new_text, gen, before, rid, held)
+                    except NotFound:
+                        if not self._detached:      # a root forgotten after the check above: its detach came first
+                            raise
+            finally:
+                self._close_folder(folder)
             answer = {"hash": rds.md_hash(new_text), "changed": report["changed"],
                       "skipped": report["skipped"], "remap": report["remap"],
                       "merged": bool(report.get("merged")),

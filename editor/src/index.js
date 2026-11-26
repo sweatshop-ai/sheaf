@@ -63,7 +63,7 @@ function hash(s) {
 }
 
 // Enter in a table cell is a line break: a Markdown cell is one line, and a second paragraph would be lost.
-const enterBreaks = { addKeyboardShortcuts() { return { Enter: () => this.editor.commands.setHardBreak() }; } };
+const enterBreaks = { addKeyboardShortcuts() { return { Enter: () => (this.editor.isActive(this.name) ? this.editor.commands.setHardBreak() : false) }; } };
 const TableCell = BaseCell.extend(enterBreaks);
 const TableHeader = BaseHeader.extend(enterBreaks);
 

@@ -94,3 +94,28 @@ def test_the_page_script_keeps_an_svg_image_and_nothing_else_of_that_kind(env): 
                            '<p><img src="data:image/svg+xml;charset=utf-8;base64,PHN2Zy8+" alt="dropped two"></p>')
     got = env.evaluate("Array.from(document.querySelectorAll('#out img')).map(i => i.getAttribute('src'))")
     assert got == [svg], (env.engine, got)
+
+
+def test_a_large_local_svg_image_is_kept_on_a_mounted_page_and_one_past_the_limit_is_not(env):  # noqa: F811
+    import base64
+    body = "<svg xmlns='http://www.w3.org/2000/svg'><!--" + "x" * 60000 + "--></svg>"
+    big = "data:image/svg+xml;base64," + base64.b64encode(body.encode()).decode()
+    huge = "data:image/svg+xml;base64," + "A" * 4_100_000
+    rebuild_into_page(env, f'<p><img src="{big}" alt="kept"></p><p><img src="{huge}" alt="dropped"></p>')
+    got = env.evaluate("Array.from(document.querySelectorAll('#out img')).map(i => i.getAttribute('alt'))")
+    assert got == ["kept"], (env.engine, got)
+
+
+def test_a_legend_that_wraps_in_a_short_pane_leaves_the_chart_inside_the_pane(front, site):  # noqa: F811
+    labels = ", ".join(f'{{"from": {i}, "to": {i + 1}, "color": "green", "label": "a long label number {i} of the bands"}}'
+                       for i in range(14))
+    rewrite(site.file, '# Plan\n\n```chart\n{"type": "bar", "x": ["a", "b"], "series": [{"name": "S", "values": [5, 9]}],\n'
+                       f' "bands": [{labels}]}}\n```\n')
+    f = front.open()
+    f.page.evaluate("() => { const p = document.getElementById('pane'); p.style.width = '420px'; p.style.height = '260px'; }")
+    f.click("main .chart svg")
+    until(lambda: f.has(VIEWER), what="the viewer")
+    pane = f.page.evaluate("(() => { const r = document.getElementById('pane').getBoundingClientRect(); "
+                           "return {x: r.x, y: r.y, w: r.width, h: r.height}; })()")
+    st = rect(f, STAGE)
+    assert st["y"] >= pane["y"] - 1 and st["h"] > 20, (st, pane)

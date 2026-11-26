@@ -398,6 +398,8 @@ var create = function (ROOT, CFG, opts) {
   // A diagram or an SVG image that is no link has a tab stop and the role of a button, so the keyboard can open the viewer.
   // Written before the blocks' first reading (below), so a block's pristine text carries the marks and a mark is no edit.
   function markViewable() {
+    // Only where the viewer's handlers are installed: a page that stops short of them (below) is a plain copy of the file.
+    if (!((!CFG.readonly && (location.protocol === 'http:' || location.protocol === 'https:')) || COMMENTS.length || (CFG.malformed || []).length)) return;
     Array.prototype.forEach.call(main.querySelectorAll('.mermaid-svg svg, .chart svg, img'), function (n) {
       if (!zoomTarget(n) || inLink(n)) return;
       n.setAttribute('tabindex', '0');
@@ -865,7 +867,7 @@ var create = function (ROOT, CFG, opts) {
       copy.draggable = false;
     } else {
       copy = src.cloneNode(true);
-      copy.removeAttribute('style');
+      ['style', 'tabindex', 'role', 'aria-label'].forEach(function (a) { copy.removeAttribute(a); });   // the viewer's copy is no button
     }
     stage.style.background = zoomGround(src);
     stage.appendChild(copy);
@@ -894,7 +896,7 @@ var create = function (ROOT, CFG, opts) {
     if (legend) el.appendChild(legend);
     el.appendChild(bar);
 
-    var MIN = 0.5, MAX = 40, fit = 1, sw = 0, sh = 0, k = 1, x = 0, y = 0;
+    var MIN = 0.5, MAX = 40, fit = 1, sw = 0, sh = 0, k = 1, x = 0, y = 0, fitX = 0, fitY = 0;
     function place() {
       stage.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + k + ')';
       stage.setAttribute('data-k', k.toFixed(4));
@@ -905,11 +907,11 @@ var create = function (ROOT, CFG, opts) {
     function usableH() { return box().height - (legend ? legend.offsetHeight + 20 : 0); }   // the legend's own band is not the diagram's
     function reset() {
       var r = box(), vw = r.width, vh = usableH();
-      fit = Math.max(0.01, Math.min(vw * 0.94 / w, (vh - 24) * 0.94 / h));
+      fit = Math.max(0.01, Math.min(vw * 0.94 / w, Math.max(vh - 24, 40) * 0.94 / h));
       sw = w * fit; sh = h * fit;
       stage.style.width = sw + 'px';
       stage.style.height = sh + 'px';
-      k = 1; x = (vw - sw) / 2; y = (vh - sh) / 2;
+      k = 1; x = fitX = (vw - sw) / 2; y = fitY = (vh - sh) / 2;
       place();
     }
     function mid() { return { x: box().width / 2, y: usableH() / 2 }; }
@@ -1003,7 +1005,7 @@ var create = function (ROOT, CFG, opts) {
       } else return false;
       return true;
     };
-    z.resize = function () { if (k === 1) reset(); };
+    z.resize = function () { if (k === 1 && x === fitX && y === fitY) reset(); };
     // A pane that changes size while the window does not (a side bar opening) fits the diagram again, as a window does.
     if (typeof ResizeObserver === 'function') { z.ro = new ResizeObserver(function () { z.resize(); }); z.ro.observe(el); }   // a zoom or pan the person made stays when the phone's bars move the window
   }

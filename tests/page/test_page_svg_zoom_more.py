@@ -14,7 +14,7 @@ PIC = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 100" width="200
        '<rect width="200" height="100" fill="#fde68a"/></svg>')
 LINKED = ('<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 200 100" '
           'width="200" height="100"><a xlink:href="#elsewhere"><rect id="hot" width="200" height="100" fill="#fde68a"/></a></svg>')
-MD = f"# Plan\n\n{BANDED}\n![A round thing](pic.svg)\n\n{LINKED}\n\nAfter.\n"
+MD = f'# Plan\n\n{BANDED}\n![A round thing](pic.svg)\n\n<div class="mermaid-svg">{LINKED}</div>\n\nAfter.\n'
 PTR = """([type, id, x, y]) => document.querySelector('#rd-zoom').dispatchEvent(new PointerEvent(type,
   {pointerId: id, pointerType: 'touch', clientX: x, clientY: y, bubbles: true, isPrimary: id === 1}))"""
 

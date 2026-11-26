@@ -310,7 +310,9 @@
         if (a.namespaceURI) continue;              // xlink:href, xml:*, xmlns:*: none is kept
         const name = ns === SVG_NS ? a.name : a.name.toLowerCase();
         const value = a.value;
-        if (value.length > 20000) continue;
+        // A local SVG image is its file, base64: longer than any other attribute, and the one kind the viewer opens (4 MB at most).
+        if (value.length > 20000 && !(local === 'img' && name === 'src' && value.length <= 4000000 &&
+                                      SVG_DATA.test(value.replace(CONTROL, '')))) continue;
         if (bt) {
           if (name === 'id') { if (bt !== 'button') htmlAttr(el, local, name, value); }
           else if (Object.prototype.hasOwnProperty.call(BLOCK_TYPES[bt].attrs, name) && BLOCK_TYPES[bt].attrs[name].includes(value)) el.setAttribute(name, value);

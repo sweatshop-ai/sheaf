@@ -100,6 +100,8 @@ class DocumentService:
             outcome, old, new = here.apply(change, author=author, note=note, move=move, **hooks)
         except rda.Refused as r:
             return rda.refused(r.reason, r.block)
+        except rda.POLICY as e:
+            return rda.policy_refusal(name, e)
         if outcome["outcome"] == "written":
             self._record(old, new, session)
             outcome["blocks"] = self._ids(new)

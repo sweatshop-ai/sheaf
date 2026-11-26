@@ -40,6 +40,14 @@ def _as_read(text: str) -> str:
     return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
+POLICY = (Escapes, Linked)      # the source's own policy: a file it does not serve (read elsewhere as one that is not there)
+
+
+def policy_refusal(name: str, error: Exception) -> dict:
+    """The outcome `refused` for a write the source's policy turned away, for every door that returns outcomes."""
+    return {"outcome": "refused", "block": "", "reason": f"{name} is not a file this source serves ({type(error).__name__.lower()})"}
+
+
 class Refused(Exception):
     """A write the adapter will not make (an outcome `refused`, for a caller that raises)."""
 
@@ -115,8 +123,8 @@ class MarkdownFileAdapter:
             return refused(f"{name} is not a .md file")
         try:
             out, _, _ = here.apply(lambda t, opened: tree.text, expected=base, move=move, author=author, note=note)
-        except (Escapes, Linked) as e:      # the source's own policy: a file that is not served, read as one that is not there
-            return refused(f"{name} is not a file this source serves ({type(e).__name__.lower()})")
+        except POLICY as e:
+            return policy_refusal(name, e)
         return out
 
     def apply(self, change: Callable, *, expected: str | None = None, move=None, author: str = "", note: str = "",
@@ -138,11 +146,13 @@ class MarkdownFileAdapter:
                 old, new = (by or rds.update_file)(self._file(), lambda t: judged(t, None), move=move)
         except Conflict as c:
             return conflict(c.base, c.blocks), None, None
+        if self._beneath is None:
+            new = _as_read(new)         # what the next read gives back: the base, the record and the caller's text are all of that
         if between is not None:
             between()
         if kept is not None:
             kept(new)
-        return written(rds.md_hash(new if self._beneath is not None else _as_read(new))), old, new
+        return written(rds.md_hash(new)), old, new
 
     @staticmethod
     def creating(top, rel: str, text: str, judge=None, by=None):

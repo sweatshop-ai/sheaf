@@ -57,6 +57,28 @@ def test_a_write_of_crlf_text_returns_the_base_its_next_read_computes(tmp_path):
     assert again["outcome"] == "written", again
 
 
+def test_a_write_of_lone_cr_text_hands_back_the_text_as_read_too(tmp_path):
+    md = tmp_path / "a.md"
+    md.write_text(DOC, encoding="utf-8")
+    kept = []
+    out, _, new = rda.MarkdownFileAdapter(md).apply(lambda t, op: "One.\rTwo.\r\nThree.\n", kept=kept.append)
+    assert new == "One.\nTwo.\nThree.\n" == kept[0]
+    assert out["base"] == rds.md_hash(new) == rda.MarkdownFileAdapter(md).read()[1]
+
+
+def test_the_document_service_refuses_a_path_that_leaves_its_root_too(tmp_path):
+    from sheafmd.document import DocumentService
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside.md"
+    outside.write_text(DOC, encoding="utf-8")
+    (root / "link.md").symlink_to(outside)
+    svc = DocumentService(rda.MarkdownFileAdapter(beneath=lambda: (root, "link.md")))
+    out = svc.write(lambda t, op: "Changed.\n")
+    assert out["outcome"] == "refused"
+    assert outside.read_text(encoding="utf-8") == DOC
+
+
 def test_a_write_in_a_root_of_crlf_text_returns_the_base_its_next_read_computes(tmp_path):
     (tmp_path / "a.md").write_text(DOC, encoding="utf-8")
     a = rda.MarkdownFileAdapter(beneath=lambda: (tmp_path, "a.md"))

@@ -334,10 +334,12 @@ class LiveDocument:
             before = self._text
             got = {}
 
+            here = self._file() if self._entry is None else None     # asked before the lock, for the diagnostics label only
+
             def change(text, op):
                 # The file as this save opened it, never found again: a root forgotten while the save waited for the lock
                 # leaves nothing to look up (ticket 26 D). For the edit alone: the seam and the Versions record run after it.
-                token = rde.DOC.set(Path(op.top) / op.rel if op is not None else self._file())
+                token = rde.DOC.set(Path(op.top) / op.rel if op is not None else here)
                 try:
                     return decide(text)
                 finally:

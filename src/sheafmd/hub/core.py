@@ -612,9 +612,20 @@ class Hub:
             e.live.session_to = lambda: self.session_name(address)
             e.live.agent_tells = lambda: self.waiting_tells.waits(address, None, sweep=False)   # the hub person's (9.8)
             e.live.tells_lock = self.waiting_tells._lock
+            e.live.keep_page = lambda: self._keep_page(e)
             e.live.refresh(force=True)           # the first render: e.html
             self.entries[address] = e
             return e
+
+    @staticmethod
+    def _keep_page(e: Entry):
+        """What a build of `e` replaces (the page, its render log, its image rule, whether a build has run), kept; answers a
+        callable that puts it back (`LiveDocument.keep_page`)."""
+        kept = (e.html, e.log, e.first, e.images_scope)
+
+        def put_back():
+            e.html, e.log, e.first, e.images_scope = kept
+        return put_back
 
     def _rendered(self, e: Entry, text: str) -> str | None:
         """Render `text` for `e`; answers the branch the page was rendered on (a clone's page), which the live document keeps
@@ -1109,6 +1120,12 @@ class Hub:
         with self._lock:
             e = self.entries.pop(address, None)
         if e is not None:
+            # Outside the hub's lock, as `_forget_entries`: a render that took the entry before it went tells its `changed`
+            # first, and none after `gone` (ticket 204 B).
+            try:
+                e.live.close()
+            except Exception:       # no page is kept from `gone`
+                self.record_exception("forget-failed", address)
             e.bus.publish("gone", {"doc": address})
 
     def forget_root(self, name: str):

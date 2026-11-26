@@ -196,28 +196,75 @@ def _source_break_runs(source) -> list:
     return runs
 
 
+def _line_kept(line: str, was: str) -> float:
+    """How much of a line beside a run of the source is still there: 1 when it is the same, else the share of its
+    words and the edited line's words that both have (0 when they have none). A word is one without the punctuation
+    beside it (`Alpha.` is `Alpha`)."""
+    if line == was:
+        return 1.0
+    words, had = set(re.findall(r"\w+", line.lower())), set(re.findall(r"\w+", was.lower()))
+    return len(words & had) / len(words | had) if words and had else 0.0
+
+
+def _source_runs_kept(soup, source) -> set:
+    """The ids of the <br> in `soup` that make up a run of the source's own (`_source_break_runs`). The page's runs
+    and the source's are paired in order, each pair of the same length and with some words of a line beside it still
+    there (`_line_kept`); the pairing has the most pairs, and among those keeps the most of those lines. A run of
+    the source stays the source's when both lines beside it were edited, a new run takes no pair from a run that kept
+    more of its lines, before it or after it, one run close to another's lines takes no pair from two that keep fewer,
+    and a new run with none of the source's words beside it is no run of the source's."""
+    page_runs = []
+    for p in soup.find_all("p"):
+        if _page_own(p):
+            continue
+        kids = list(p.children)
+        page_runs += [(_run_key(kids, a, b), [id(c) for c in kids[a:b + 1] if getattr(c, "name", None) == "br"])
+                      for a, b in _break_runs(kids, lambda c: True)]
+    had = _source_break_runs(source)
+    if not page_runs or not had:
+        return set()
+    # best[i][j]: (pairs, lines kept) of the best pairing of page_runs[i:] with had[j:]; paired: whether it pairs i, j
+    best = [[(0, 0.0)] * (len(had) + 1) for _ in range(len(page_runs) + 1)]
+    paired = [[False] * len(had) for _ in range(len(page_runs))]
+    for i in range(len(page_runs) - 1, -1, -1):
+        for j in range(len(had) - 1, -1, -1):
+            best[i][j] = max(best[i + 1][j], best[i][j + 1])
+            (n, before, after), (m, was_before, was_after) = page_runs[i][0], had[j]
+            lines = _line_kept(before, was_before) + _line_kept(after, was_after)
+            pairs, kept_lines = best[i + 1][j + 1]
+            if n == m and lines > 0 and (pairs + 1, kept_lines + lines) > best[i][j]:
+                best[i][j] = (pairs + 1, kept_lines + lines)
+                paired[i][j] = True
+    kept, i, j = set(), 0, 0
+    while i < len(page_runs) and j < len(had):
+        if paired[i][j]:
+            kept.update(page_runs[i][1])
+            i, j = i + 1, j + 1
+        elif best[i][j] == best[i + 1][j]:
+            i += 1
+        else:
+            j += 1
+    return kept
+
+
 def _split_at_double_breaks(soup, new_br, source=None) -> None:
     """Two <br> in a row, none of them in the source, inside a paragraph with words on both sides (an online word
     processor's Shift+Enter twice, each <br> in a span of its own): a blank line, so the paragraph is two. Pandoc
     would write them as two lines of a lone backslash. One <br> stays a line break. A run the source's render has
-    too (markdown hard breaks: `Alpha\\` `\\` `Beta`), told by its length and a line beside it, stays as it is."""
+    too (markdown hard breaks: `Alpha\\` `\\` `Beta`) stays as it is (`_source_runs_kept`)."""
     def blank(c):
         return getattr(c, "name", None) is None and not str(c).strip()
 
     def words(c):
         return _shows(str(c)) or getattr(c, "name", None) in ("img", "a", "b", "i", "strong", "em", "code")
 
-    had = None      # the source's runs, read once a run with words on both sides is found
+    kept = None     # the <br> of the source's runs, read once a run with words on both sides is found
 
-    def kept(kids, first, last):
-        nonlocal had
-        if had is None:
-            had = _source_break_runs(source)
-        n, before, after = _run_key(kids, first, last)
-        old = next((r for r in had if r[0] == n and (r[1] == before or r[2] == after)), None)
-        if old is not None:
-            had.remove(old)
-        return old is not None
+    def in_source_run(kids, first, last):
+        nonlocal kept
+        if kept is None:
+            kept = _source_runs_kept(soup, source)
+        return any(id(c) in kept for c in kids[first:last + 1])
 
     for p in soup.find_all("p"):
         if _page_own(p):
@@ -228,7 +275,7 @@ def _split_at_double_breaks(soup, new_br, source=None) -> None:
             # and the scan goes on past it.
             cut = next(((a, b) for a, b in _break_runs(kids, lambda c: id(c) in new_br)
                         if any(words(c) for c in kids[:a]) and not all(blank(c) for c in kids[b + 1:])
-                        and not kept(kids, a, b)), None)
+                        and not in_source_run(kids, a, b)), None)
             if cut is None:
                 break
             first, last = cut
@@ -641,14 +688,17 @@ def _strip_tag_data(tag: str) -> str:
     name on, so whitespace then `data-` inside a quoted value (`title="the data-sheet"`) is never taken for one. One
     is dropped with the white space after it: the white space, quote or `/` before it stays, and keeps the name of
     the one after it apart (`<div data-x="1"title=t>` is `<div title=t>`); after a quote or `/`, its white space stays too."""
-    pos = _TAG_NAME_RE.match(tag, 1).end()
+    name = _TAG_NAME_RE.match(tag, 1)
+    pos = name.end()
     out, dropped, bare = tag[:pos], False, False
+    kept = name.end(1)                  # where the tag's name, or the last name or value kept, ends in `out`
     while (m := _ATTR_RE.match(tag, pos)) and m.end() > pos:
         if _DATA_NAME_RE.match(m.group(1)):
             dropped = True
             if out[-1] in "'\"/":
                 out += tag[m.end(2) if m.group(2) else m.end(1):m.end()]
         else:
+            kept = len(out) + (m.end(3) if m.group(2) else m.end(1)) - m.start()
             out += m.group(0)
             bare = m.group(2) is not None and m.group(3)[:1] not in ("'", '"')
         pos = m.end()
@@ -657,6 +707,11 @@ def _strip_tag_data(tag: str) -> str:
     # itself (`<div/>`).
     if dropped and (tag.startswith(">", pos) or not bare) and not out.rstrip().endswith("/"):
         out = out.rstrip()
+    # A `/` before a dropped attribute is left last (`<div/data-x>`): it would close a tag the parser read as open.
+    # What follows the last name or value kept goes, not a `/` a bare value ends in, which a space keeps from the `>`
+    # (`<a href=x/ /data-x>` is `<a href=x/ >`).
+    if dropped and tag.startswith(">", pos) and out.endswith("/") and not tag.endswith("/>"):
+        out = out[:kept] + (" " if out[:kept].endswith("/") else "")
     return out + tag[pos:]
 
 
@@ -711,9 +766,19 @@ def _lines_as_paragraphs(soup, comments=frozenset()):
 
     def remnant(el):
         # What an emptied half leaves: white space, or a mark the browser kept with no text in it (`<em></em>`,
-        # `<em><br></em>`). An image, a box or a comment's placeholder is something.
+        # `<em><br></em>`). An image, a box or a comment's placeholder is something. An empty link target in it
+        # (`<a id="x"></a>`) shows nothing, and goes on with the heading (`targets`).
         return blank(el) or (getattr(el, "name", None) not in (None, "img", "input") and not is_line(el)
                              and not el.get_text().strip() and el.find(["img", "input"]) is None)
+
+    def targets(el):
+        # The elements in a remnant that something can link to, outermost first: one with an id or a name (not the
+        # page's own markup).
+        if isinstance(el, NavigableString):
+            return []
+        if (el.has_attr("id") or el.has_attr("name")) and not _page_own(el):
+            return [el]
+        return [t for c in el.children for t in targets(c)]
 
     def trim(el, end):
         # Only the cut: a no-break space at the start of the paragraph, at the end of its last line or in code
@@ -764,8 +829,12 @@ def _lines_as_paragraphs(soup, comments=frozenset()):
             # typed above the heading, and stay above it.
             half = next((c for c in kids if is_line(c) and c.has_attr(_SPLIT) and said(c)), None)
             if half is not None:
-                for c in kids:
-                    if not is_line(c) and not blank(c):
+                gone = [c for c in kids if not is_line(c) and not blank(c)]
+                keep = [t for c in gone for t in targets(c)]
+                for t in reversed(keep):
+                    half.insert(0, t.extract())
+                for c in gone:
+                    if not any(t is c for t in keep):
                         c.decompose()
                 trim(half, end=False)
                 half.unwrap()
@@ -1461,19 +1530,81 @@ _NEIGHBOURS = 12
 _DIFF_WORD = re.compile(r":[a-z0-9_+-]+:|\w+|[^\w\s]")
 
 
+# The most words squared that `_by_words` diffs in all, over the stretches it cuts a long text into, each within
+# `_DIFF_BOUND`: about 100 ms of CPU at worst, measured (stretches at the bound, of a few words repeated, or a chain
+# of cuts that each find one word once on each side).
+_DIFF_TOTAL = 4 * _DIFF_BOUND
+# What a cut costs against `_DIFF_TOTAL`, per word of its stretch: counting a word costs about as much as this many
+# cells of a diff.
+_CUT_WEIGHT = 32
+
+
+def _once_on_both_sides(wa: list, alo: int, ahi: int, wb: list, blo: int, bhi: int) -> list:
+    """[(i, j)]: the words found once in wa[alo:ahi] and once in wb[blo:bhi], at i and at j, the longest run of
+    them in the same order on both sides (the anchors of a patience diff)."""
+    ca, cb = Counter(wa[alo:ahi]), Counter(wb[blo:bhi])
+    at = {wb[j]: j for j in range(blo, bhi) if cb[wb[j]] == 1 and ca[wb[j]] == 1}
+    found = [(i, at[wa[i]]) for i in range(alo, ahi) if wa[i] in at]
+    ends, end_at, back = [], [], []       # the least j that ends a run of each length, where it is, and what precedes
+    for k, (_, j) in enumerate(found):
+        n = bisect.bisect_left(ends, j)
+        back.append(end_at[n - 1] if n else -1)
+        if n == len(ends):
+            ends.append(j)
+            end_at.append(k)
+        else:
+            ends[n], end_at[n] = j, k
+    run, k = [], end_at[-1] if end_at else -1
+    while k >= 0:
+        run.append(found[k])
+        k = back[k]
+    return run[::-1]
+
+
+def _word_pairs(wa: list, wb: list):
+    """[(i, j)]: the words wa[i] and wb[j] a diff of the two lists matches, or None where it cannot (`_by_words`)."""
+    pairs, spent, todo = [], 0, [(0, len(wa), 0, len(wb), False)]
+    while todo:
+        alo, ahi, blo, bhi, cut = todo.pop()
+        size = (ahi - alo) * (bhi - blo)
+        if size <= _DIFF_BOUND:
+            spent += size
+            if spent > _DIFF_TOTAL:
+                return None
+            for i, j, n in difflib.SequenceMatcher(None, wa[alo:ahi], wb[blo:bhi],
+                                                   autojunk=False).get_matching_blocks():
+                pairs.extend((alo + i + k, blo + j + k) for k in range(n))
+            continue
+        if not cut:      # its common start and end first: what is left may be within the bound
+            while alo < ahi and blo < bhi and wa[alo] == wb[blo]:
+                pairs.append((alo, blo))
+                alo, blo = alo + 1, blo + 1
+            while alo < ahi and blo < bhi and wa[ahi - 1] == wb[bhi - 1]:
+                ahi, bhi = ahi - 1, bhi - 1
+                pairs.append((ahi, bhi))
+            todo.append((alo, ahi, blo, bhi, True))
+            continue
+        spent += _CUT_WEIGHT * ((ahi - alo) + (bhi - blo))
+        anchors = _once_on_both_sides(wa, alo, ahi, wb, blo, bhi)
+        if not anchors or spent > _DIFF_TOTAL:
+            return None
+        pairs.extend(anchors)
+        for (i0, j0), (i1, j1) in zip([(alo - 1, blo - 1)] + anchors, anchors + [(ahi, bhi)]):
+            todo.append((i0 + 1, i1, j0 + 1, j1, False))
+    return pairs
+
+
 def _by_words(old: str, new: str):
     """{start of a word of `old`: start of the same word in `new`} for the words a diff of the two word lists
-    matches, or None where the lists are too long for it (`_DIFF_BOUND`). A word is a shortcode, a run of letters and
-    digits, or one other character that is not white space (`_DIFF_WORD`): a `(` glued to a literal, or a letter
-    typed beside it, leaves the literal a word of its own that still matches."""
+    matches. A word is a shortcode, a run of letters and digits, or one other character that is not white space
+    (`_DIFF_WORD`): a `(` glued to a literal, or a letter typed beside it, leaves the literal a word of its own that
+    still matches. Lists too long for one diff (`_DIFF_BOUND`) are cut at their common start and end and at the words
+    found once on each side, and each stretch between those is diffed on its own (ticket 207): two long changed stretches
+    with unchanged words between them are each placed. None where a stretch is still too long and holds no such
+    word, or where the stretches add up past `_DIFF_TOTAL`."""
     a, b = list(_DIFF_WORD.finditer(old)), list(_DIFF_WORD.finditer(new))
-    if len(a) * len(b) > _DIFF_BOUND:
-        return None
-    pairs = {}
-    for i, j, size in difflib.SequenceMatcher(None, [m.group() for m in a], [m.group() for m in b],
-                                              autojunk=False).get_matching_blocks():
-        pairs.update((a[i + k].start(), b[j + k].start()) for k in range(size))
-    return pairs
+    found = _word_pairs([m.group() for m in a], [m.group() for m in b])
+    return None if found is None else {a[i].start(): b[j].start() for i, j in found}
 
 
 def _in_its_gap(old: str, new: str, words: dict):
@@ -1481,11 +1612,12 @@ def _in_its_gap(old: str, new: str, words: dict):
     `words` (`_by_words`) matched to the `:name:` at `at`. Where the words around it changed, that match can be any
     `:name:` between the words that still match on either side, the first the diff finds, which may be one the reader
     typed (#658). Of the `:name:` there that no other word of `old` matched, it is the one at the same share of the
-    way between those words, the first on a tie."""
+    way between those words, the first on a tie; one it gives a literal is given to no other (two escaped literals
+    side by side keep two places), and the one the diff matched it to is free again."""
     a, b = list(_DIFF_WORD.finditer(old)), list(_DIFF_WORD.finditer(new))
     ia, ib = {m.start(): k for k, m in enumerate(a)}, {m.start(): k for k, m in enumerate(b)}
     matched = {ia[o]: ib[n] for o, n in words.items()}
-    order, taken = sorted(matched), Counter(matched.values())
+    order, taken, placed = sorted(matched), Counter(matched.values()), set()
 
     def place(start, at):
         i = ia[start]
@@ -1494,10 +1626,15 @@ def _in_its_gap(old: str, new: str, words: dict):
         hi = order[k + 1] if k + 1 < len(order) else len(a)
         nlo, nhi = matched.get(lo, -1), matched.get(hi, len(b))
         share = (i - lo) / (hi - lo)
-        here = [n for n in range(nlo + 1, nhi) if b[n].group() == a[i].group() and (n == ib[at] or not taken[n])]
+        here = [n for n in range(nlo + 1, nhi)
+                if b[n].group() == a[i].group() and n not in placed and (n == ib[at] or not taken[n])]
         if not here:
             return at
-        return b[min(here, key=lambda n: abs((n - nlo) / (nhi - nlo) - share))].start()
+        chosen = min(here, key=lambda n: abs((n - nlo) / (nhi - nlo) - share))
+        taken[ib[at]] -= 1
+        taken[chosen] += 1
+        placed.add(chosen)
+        return b[chosen].start()
 
     return place
 
@@ -1505,11 +1642,12 @@ def _in_its_gap(old: str, new: str, words: dict):
 def _places_by_order(old: str, new: str, olds) -> set:
     """The places in `new` of the literals `olds`, (place in `old`, name) pairs, by order: the k-th `:name:` of
     `old` is the k-th of `new` where both hold as many of that name. Where they do not, by a diff of the two texts'
-    words (`_by_words`), whose bound reaches as many words as the characters' diff reaches characters: a literal in a word
-    the diff matches keeps its place, and a shortcode the reader typed is a new word, which stays the emoji (#594).
-    Past that bound, by the literal's neighbours: the `_NEIGHBOURS` characters before it, or after it, with it, found
-    once in `new`. A literal placed by none of these is written bare: one the source escaped then shows as its emoji,
-    on a change of over about 1 400 words on each side around a name typed or deleted beside it."""
+    words (`_by_words`), whose bound reaches as many words in each changed stretch as the characters' diff reaches
+    characters: a literal in a word the diff matches keeps its place, and a shortcode the reader typed is a new word,
+    which stays the emoji (#594). Past that bound, by the literal's neighbours: the `_NEIGHBOURS` characters before it,
+    or after it, with it, found once in `new`. A literal placed by none of these is written bare: one the source
+    escaped then shows as its emoji, on a changed stretch of over about 1 400 words on each side, with no word found
+    once on each side, around a name typed or deleted beside it."""
     def starts(text):
         by_name = {}
         for m in _SHORTCODE_TEXT.finditer(text):

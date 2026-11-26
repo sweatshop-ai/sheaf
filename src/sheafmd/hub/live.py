@@ -70,7 +70,7 @@ class LiveDocument:
         self._written = set()        # the hashes this document put in the store: what a forget that came late takes out
         self._detached = False       # `detach`: its root was forgotten, and nothing of it reaches a store now
         self._detached_store = None  # the store it had then, for `forget` to take its texts out of
-        self._forgotten = False      # `forget` ran: its tabs heard `gone` after it, so a refresh or rebuild tells them nothing
+        self._forgotten = False      # `forget` or `close` ran: its tabs heard `gone` after it, so it tells them nothing more
         self._lock = threading.Lock()
         self._owner = None
         text = self._read()
@@ -96,6 +96,8 @@ class LiveDocument:
         self.session_to = lambda: ""
         self.agent_tells = lambda: []
         self.tells_lock = contextlib.nullcontext()      # the lock of the Tells' file: held while `telling` is read and published (`_publish_telling`)
+        # Keeps the page served now and answers a callable that puts it back: a torn read's render replaced it (ticket 204 C).
+        self.keep_page = lambda: (lambda: None)
         # The question the told session put to its person in its own chat, while it waits for
         # them there ("" when it is not waiting).
         self._question = ""
@@ -506,6 +508,11 @@ class LiveDocument:
         out) under that lock, so the page never hears `queued` in a snapshot after the `tell-seen` of the same Tell."""
         with self.tells_lock:
             data["telling"] = self._telling_view()
+            self._tell_tabs(event, data)
+
+    def _tell_tabs(self, event, data):
+        """Every event of this document goes out here: none after `gone`, the last of its tabs' stream (8.8, ticket 204 B)."""
+        if not self._forgotten:
             self._publish(event, data)
 
     def _answer(self, cid, base_hash, snap=None):
@@ -578,6 +585,13 @@ class LiveDocument:
         store, self._detached_store = self._detached_store, None
         if store is not None and self._address is not None:
             store.forget_texts(self._address, (), writer=self)
+
+    def close(self):
+        """Its page left its address (deleted into the trash, 8.6) and its tabs are told `gone` next, the last event of their
+        stream (8.8): from now on it tells them nothing. Under the lock, so a render under way tells its `changed`
+        first. Its versions stay, unlike `forget`'s: they come back with the page."""
+        with self._held():
+            self._forgotten = True
 
     def forget(self):
         """Its root was forgotten (SPEC 8.2): drop its versions on disk, and keep the texts it hands out in
@@ -684,14 +698,14 @@ class LiveDocument:
             if q:
                 if q != self._question:
                     self._question = q
-                    self._publish("tell-waiting", {"ids": ids, "question": q})
+                    self._tell_tabs("tell-waiting", {"ids": ids, "question": q})
             elif self._question:
                 self._question = ""
                 now = self._clock()
                 for cid in ids:
                     self._told_at[cid] = now
                 if ids:
-                    self._publish("tell-working", {"ids": ids})
+                    self._tell_tabs("tell-working", {"ids": ids})
 
     def session_question(self):
         """The question the told session is waiting on its person for, or ""."""
@@ -712,7 +726,7 @@ class LiveDocument:
                 elif now - t0 > wait:
                     self._telling.pop(cid, None)
                     self._told_at.pop(cid, None)
-                    self._publish("tell-failed", {"id": cid, "error":
+                    self._tell_tabs("tell-failed", {"id": cid, "error":
                                   f"no reply from the {product} session after {wait // 60} min. "
                                   "It may be busy, closed, or it answered in its own chat. "
                                   "Tell again, or reply here."})
@@ -746,10 +760,15 @@ class LiveDocument:
         torn file: the text the tabs hold is kept and rendered again, and False says so; the watcher sees the file move and
         comes back. A file that cannot be stat-ed is not known to have held still."""
         kept = (self._text, self._hash, self._branch)
+        put_back = self.keep_page()         # the page served now, of the text the tabs hold
         self._rerender(remember=False)      # a read that may be torn is no version: kept once the file has not moved under it
         if seen is None or self._stamp() != seen:
             self._text, self._hash, self._branch = kept
-            branch = self._render(self._text)         # the page the hub serves is the one the tabs hold, not the torn one
+            try:
+                branch = self._render(self._text)     # the page the hub serves is the one the tabs hold, not the torn one
+            except BaseException:
+                put_back()      # never the torn page, served with the text and hash kept (ticket 204 C)
+                raise
             self._branch = branch if isinstance(branch, str) else None
             return False
         self._remember(self._text)

@@ -1507,11 +1507,21 @@ class Hub:
         root nested inside one of theirs stays another root."""
         return bool(self.members_owning([member], address))
 
-    def members_owning(self, members, address: str) -> list:
+    def member_owns_entry(self, member, e) -> bool:
+        """Whether the entry `e`, already resolved, is the member's and visible to them: judged against the root the entry
+        was made for (its id), never against the root its name holds by now, so a name given to another root between
+        the resolve and the check is no one's to read (a document of the replacement root is refused, ticket 30)."""
+        root = self.roots.get(roots_mod.Address.parse(e.address).root)
+        if root is None or root.id != e.root_id:
+            return False
+        return bool(self.members_owning([member], e.address, root)) and self.visible(member, e.address) \
+            and self.roots.get(root.name) is root
+
+    def members_owning(self, members, address: str, root=None) -> list:
         """Those of `members` whose the document at `address` is, as `member_owns` judges, with one lookup of
-        its root for them all."""
+        its root for them all (`root`: the one the caller already holds, so the name is not looked up again)."""
         at = roots_mod.Address.parse(address)
-        root = self.roots.get(at.root)
+        root = root or self.roots.get(at.root)
         if root is None or not at.plain:
             return []
         # A clone the tiroir serves is a shared root: any member reaches it, and each page is theirs by `judged` (SPEC 14).

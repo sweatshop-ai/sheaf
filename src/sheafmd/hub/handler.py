@@ -850,9 +850,14 @@ class Handler:
             raise Refuse(403, "A client page is read here: comment on it, or edit it on the client tiroir.")
         self._owned(req, doc)
         try:
-            return self.hub.entry(doc)
+            e = self.hub.entry(doc)
         except NotFound:
             raise Refuse(404, "no such document") from None
+        # Judged again on the entry that was resolved, by its root: a name given to another root between the first check
+        # and the resolve must not hand a member the replacement's document (ticket 30).
+        if req.member is not None and not self.hub.member_owns_entry(req.member, e):
+            raise Refuse(404, "no such document")
+        return e
 
     # ── who is at the other end (9.3) ────────────────────────────────────────
     def _owner(self, req: Req):

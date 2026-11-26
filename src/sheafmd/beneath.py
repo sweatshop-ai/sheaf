@@ -203,8 +203,9 @@ def _root_dirs(rootfd: int) -> list:
         os.close(fd)
 
 
-def _folders_of(rootfd: int, rel: str, file: tuple) -> list:
-    """The identities of the folders that hold the file `openat2` opened: the root's, its parents' and every folder
+def _folders_of(rootfd: int, rel: str, file: tuple) -> tuple:
+    """(the identities of the folders, a descriptor of the file's own folder, which the caller closes). The folders that hold
+    the file `openat2` opened: the root's, its parents' and every folder
     between the root and the file. The file's folder is opened beneath the root the same way (no link), the name in it
     must be the file opened (else ESTALE: something moved meanwhile), and the folders above it are read by `..` up to
     the root, so what is judged is what the file lies in, not a path read again."""
@@ -213,22 +214,27 @@ def _folders_of(rootfd: int, rel: str, file: tuple) -> list:
         raise OSError(errno.ESTALE, "a path with dots is walked, not opened by the kernel", rel)
     out = _root_dirs(rootfd)
     if len(parts) == 1:
-        return out
+        return out, os.dup(rootfd)
     here = _openat2(rootfd, "/".join(parts[:-1]), os.O_RDONLY | os.O_DIRECTORY, _RESOLVE_BENEATH | _RESOLVE_NO_SYMLINKS)
     try:
         st = os.stat(parts[-1], dir_fd=here, follow_symlinks=False)
         if (st.st_dev, st.st_ino) != file:
             raise OSError(errno.ESTALE, "the file is no longer the one that was opened", rel)
-        root, mid = ident(rootfd), []
-        for _ in range(len(parts)):
-            now = ident(here)
-            if now == root:
-                return [*mid, *out]
-            mid.append(now)
-            up = os.open("..", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=here)
-            os.close(here)
-            here = up
-        raise OSError(errno.ESTALE, "the file's folders do not lead up to its root", rel)
+        own = os.dup(here)
+        try:
+            root, mid = ident(rootfd), []
+            for _ in range(len(parts)):
+                now = ident(here)
+                if now == root:
+                    return [*mid, *out], own
+                mid.append(now)
+                up = os.open("..", os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC, dir_fd=here)
+                os.close(here)
+                here = up
+            raise OSError(errno.ESTALE, "the file's folders do not lead up to its root", rel)
+        except BaseException:
+            os.close(own)
+            raise
     finally:
         os.close(here)
 
@@ -261,7 +267,7 @@ def _walk(top, rel: str, meta: bool = False):
             while True:
                 try:
                     try:
-                        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | (0 if last else os.O_DIRECTORY),
+                        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | (os.O_NONBLOCK if last else os.O_DIRECTORY),
                                      dir_fd=stack[-1])
                     except PermissionError:
                         if not (meta and last):
@@ -326,7 +332,7 @@ def open_beneath(top, rel: str, meta: bool = False) -> Opened:
             try:
                 # No link at all, first: the kernel alone then decides, and every name of the path is the one checked above.
                 try:
-                    fd = _openat2(rootfd, rel, os.O_RDONLY, _RESOLVE_BENEATH | _RESOLVE_NO_SYMLINKS)
+                    fd = _openat2(rootfd, rel, os.O_RDONLY | os.O_NONBLOCK, _RESOLVE_BENEATH | _RESOLVE_NO_SYMLINKS)
                 except PermissionError:
                     if not meta:
                         raise
@@ -345,11 +351,13 @@ def open_beneath(top, rel: str, meta: bool = False) -> Opened:
                     os.close(fd)
                     raise Linked(rel)
                 try:
-                    dirs = _folders_of(rootfd, rel, (st.st_dev, st.st_ino))
+                    dirs, parent = _folders_of(rootfd, rel, (st.st_dev, st.st_ino))
                 except BaseException:
                     os.close(fd)
                     raise
-                return Opened(fd, (st.st_dev, st.st_ino), dirs, None, None, "openat2", top, rel)
+                # The file's folder is kept from this first walk: a write goes through it and is refused when the name no
+                # longer holds this file, and the path is never walked again (a name turned into a FIFO would be waited on).
+                return Opened(fd, (st.st_dev, st.st_ino), dirs, parent, rel.split("/")[-1], "openat2", top, rel)
         finally:
             os.close(rootfd)
     fd, file, dirs, parent, name, st = _walk(top, rel, meta)

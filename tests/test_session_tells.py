@@ -315,3 +315,22 @@ def test_a_write_answers_with_the_session_id_the_door_recorded_for_it(laptops):
     assert not bad and got["session"] == "old-id-2"
     bad, got = say(laptops, "bea-one", "reply", None, doc=DOC, id="c1", text="No header.")
     assert not bad and "session" not in got
+
+
+def test_a_poll_is_written_to_the_diagnostics_once_a_minute_per_session_with_no_token(laptops):
+    from helpers import hub_rows
+    from sheafmd.hub import session_tells
+    tells = laptops.hub.session_tells
+    now = [1000.0]
+    tells._now = lambda: now[0]
+    declare(laptops)
+    poll(laptops)
+    poll(laptops)                                                    # a second poll a moment later: no second row
+    rows = hub_rows("tells-poll")
+    assert len(rows) == 1 and rows[0]["laptop_session"] == SESSION and rows[0]["token"] == "bea-one"
+    assert laptops.tokens["bea-one"] not in str(rows)                # the name of the token, never its secret
+    poll(laptops, session="another-session-id")                       # another session: its own row
+    assert len(hub_rows("tells-poll")) == 2
+    now[0] += session_tells.LISTENING + 1
+    poll(laptops)                                                    # a minute on: the session is heard again
+    assert len(hub_rows("tells-poll")) == 3

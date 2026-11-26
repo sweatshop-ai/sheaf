@@ -45,7 +45,8 @@ from .hub.auth import agent_name, clean_display, name_key
 from .hub.handler import LINK_LIMIT
 from .hub.state import PEER_SCOPES, TokenError, Tokens
 from .render import RenderError, UnclosedComment, render_file
-from .source import StaleError, Source, now, update_file
+from .adapter import MarkdownFileAdapter
+from .source import StaleError, Source, now
 
 
 # name -> function(argv) -> exit code, and name -> (usage line, what it does) for --help.
@@ -690,7 +691,7 @@ def _change_doc(md: Path, kind: str, change) -> bool:
     write a diagnostics row of `kind` (SPEC 15) and return False. A missing file is a
     typing mistake, not a failed write: said, not recorded."""
     try:
-        update_file(md, change)
+        MarkdownFileAdapter(md).apply(lambda t, opened: change(t))
         return True
     except FileNotFoundError as e:
         _err(f"sheaf: {md}: {_reason(e)}")

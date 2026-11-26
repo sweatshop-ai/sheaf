@@ -42,6 +42,7 @@ from .hub import waiting as waiting_mod
 from .hub.state import TokenRow
 from .render import COMMENT_RE as HTML_COMMENT_RE, strip_comments
 from .beneath import Private
+from .adapter import MarkdownFileAdapter
 from .source import _folder_of, check_create, create_file, md_hash, now, update_beneath
 
 PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
@@ -604,7 +605,7 @@ class Door:
         roots, md = self.hub.roots, Path(path)
         try:
             if caller.may_add_roots:
-                if not path.endswith(".md") or not paths.is_file(md):
+                if not MarkdownFileAdapter.accepts(path) or not paths.is_file(md):
                     raise ToolError(f"{path} is not an existing .md file.")
                 try:
                     return roots.address(md, alias=lambda root, rel: place.alias(self.hub, root, rel))
@@ -699,8 +700,9 @@ class Door:
                                                guard=guard, before_announce=note)["wrote"]
                 else:
                     top, rel = self._located_in(address, rid)
-                    old, new = update_beneath(top.path, rel, lambda t, o: rdc.apply_op(
-                        guard(t, o) or t, op, fields, caller.display, now(), role))
+                    _, old, new = MarkdownFileAdapter(beneath=lambda: (top.path, rel)).apply(
+                        lambda t, o: rdc.apply_op(guard(t, o) or t, op, fields, caller.display, now(), role),
+                        author=caller.display, by=update_beneath)
                     wrote = new != old
                 if wrote:                               # a write that changed nothing commits nothing (8.11)
                     self.hub.committed(address, by=caller.display, what="comment", root_id=rid)     # under the lock, as every write's
@@ -1125,7 +1127,7 @@ class Door:
         if root is None or self._hidden_root(root, caller):
             raise ToolError(f"{doc} {NOT_IN_A_ROOT}", "path")     # a root of another member's is none (9.11)
         parts = rel.split("/")
-        if (not rel.endswith(".md") or any(p in ("", ".", "..") or p.startswith(".") or "\0" in p
+        if (not MarkdownFileAdapter.accepts(rel) or any(p in ("", ".", "..") or p.startswith(".") or "\0" in p
                                             for p in parts)):
             raise ToolError(f"{doc} cannot be made: a page is a .md file, and no part of its path is "
                             "empty, `..` or a hidden name.", "path")
@@ -1158,7 +1160,7 @@ class Door:
         except ValueError as e:
             raise ToolError(f"{e}.", "path") from None
         # What a create refuses by its name and its text alone, before a root or a folder is made for it.
-        if not doc.endswith(".md") or doc.startswith(".") or "\0" in doc:
+        if not MarkdownFileAdapter.accepts(doc) or doc.startswith(".") or "\0" in doc:
             raise ToolError(f"{doc} cannot be made: a page is a .md file, and no part of its path is empty, `..` or "
                             "a hidden name.", "path")
         text = _as_read(args["text"])
@@ -1343,9 +1345,9 @@ class Door:
                 with place.folders_lock(top, name):     # so no move's tidying takes them before the file is in
                     made.folders = _missing_folders(top, rel)
                     os.close(place.make_folders(top, rel, judge)[0])
-                    made.ident = create_file(top, rel, text, judge)
+                    made.ident = MarkdownFileAdapter.creating(top, rel, text, judge, by=create_file)()
             else:
-                made.ident = create_file(top, rel, text, judge)
+                made.ident = MarkdownFileAdapter.creating(top, rel, text, judge, by=create_file)()
         except BaseException as e:
             self._take_back(address, made, written=False)      # a page that was not made leaves nothing behind
             if isinstance(e, Private) or not isinstance(e, OSError):
@@ -1462,7 +1464,8 @@ class Door:
         try:
             top, rel = self._located_in(address, rid)
             try:
-                before, _ = update_beneath(top.path, rel, change, move=move)
+                _, before, _ = MarkdownFileAdapter(beneath=lambda: (top.path, rel)).apply(
+                    change, move=move, author=caller.display, by=update_beneath)
             except BaseException:
                 self.hub.writes.told(address)           # a write that failed after it was expected leaves nothing to expect
                 if marked:                              # the text was not written: nor is its mark (ticket 183 Z)

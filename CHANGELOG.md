@@ -18,13 +18,14 @@ changes whenever an asset does. The entries name pull requests of sweatshop-ai/s
 - `sheaf open` gets its answer on a slow page: a render the hub has not finished within 120 seconds goes on and publishes its page, and the command says that the next `sheaf open` serves it, instead of failing. Each pandoc run keeps its own 120 seconds, and a wait for the document's lock no longer counts against them.
 - `sheaf FILE.md` calls a tiroir's tools under the names the server lists in `tools/list` (`sheaf_create` on a door that prefixes them, `create` on a laptop hub), instead of always sending the bare name, which a door refused with 403. A 403 now shows the door's own words instead of the sentence about a revoked token (a revoked token still answers 401).
 - A conflict copy (`FILE.tiroir.md`) is never overwritten: a second conflict leaves the next free name, `FILE.tiroir-2.md`, `-3`, and the same text reuses the copy already there; `pull` does the same.
+- A client page read through an agency tiroir keeps each agency member's unsent comment and edit drafts apart: the agency hub, not the client tiroir, says which member the page is for (#684, from the review of #655).
+- `sheaf peer use --store file` keeps the token of a peer whose host is long or non-ASCII: a credential file name that would pass 255 bytes is cut and ends in a hash of the origin (#684, from the review of #655).
 - A send whose folder git cannot place (git missing, timed out, dubious ownership, unsafe repository) stops with the cause instead of sending the page as a loose one.
 - A failure after a write no longer says "Nothing was sent": it says whether the page arrived is not known, and the next run takes up a page that did arrive.
 - A pin in a root's own versions store keeps its age through a clone or checkout: its time is in `<hash>.at` beside it, kept out of git by `.sheaf/versions/.gitignore`, so a pin older than 7 days is not believed again. A pin written before has no such file: after the upgrade it counts only once pinned again, so a page that holds its reload across the hub's restart can get "version no longer known" (409) on its save until its next daily pin.
 - `sheaf connect` checks that `config.toml` can be written before it stores the token.
 - A page opened on its own address keeps the link of its byline's session name (the session kit moved to `session.js`, loaded by the page script and the mount bundle).
-- A client page read through an agency tiroir keeps each agency member's unsent comment and edit drafts apart: the agency hub, not the client tiroir, says which member the page is for (#684, from the review of #655).
-- `sheaf peer use --store file` keeps the token of a peer whose host is long or non-ASCII: a credential file name that would pass 255 bytes is cut and ends in a hash of the origin (#684, from the review of #655).
+- The list page (`/list`, and the list in Open WebUI's pane) asks git once per folder, not about 20 times per row: on a box with some 60 rows it made about 1,200 `git rev-parse` runs and took 5 s to answer, so the pane showed the chat page for 5 s before Sheaf. A rehearsal with 43 rows went from 862 runs to 2.
 
 ## 1.3.0 (2026-11-20)
 
@@ -32,6 +33,8 @@ Everything merged since 1.2.1 (#472), up to #534. Version 1.2.1 was never tagged
 
 ### Added
 
+- A poll of a laptop session writes a `tells-poll` row to the hub's diagnostics (session id, no token secret), at most one a minute per session, so whether a session listens can be checked from the box.
+- A Tell that waits for a laptop session says, on the page, what the Sheaf plugin does and how to install it (the README link and the two commands), so a Tell that waits because the plugin was never installed says why.
 - A diagram (mermaid or chart) or an SVG image opens in a full-window viewer on a click or tap: wheel and pinch zoom about the pointer, drag to pan, double click or Fit to reset, Esc, the close button or a click outside to close. It works in Comment and Edit mode, on a phone, and in both themes (SPEC 6.9).
 - A page a job generates can be marked as generated, read-only for text edits: the mark is set, shown and guarded by the door (#486, #503, #534, ticket 156). The hub refuses a save, a tick or a share on such a page with a sentence that names who generated it; comments, replies and resolve stay open.
 - The comment box moves by its band, with a mouse or a finger (#501, ticket 174).

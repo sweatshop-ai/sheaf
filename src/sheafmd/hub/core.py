@@ -76,6 +76,20 @@ class MemberTarget:
     picks: list
 
 
+class _Making:
+    """An entry being made outside the hub's lock (200). `done` is set when its maker has inserted it or given it up. Set
+    under the hub's lock meanwhile: `dropped` by a delete or move of its address (`Hub._drop_making`), and the maker makes
+    it again from the file the address names then; `detached` by a move of its address or a forget of its root
+    (`_let_go_root`), as the entries the hub holds are detached: the maker that gives it up forgets it, which takes out
+    only the texts it stored itself."""
+
+    def __init__(self, entry: "Entry"):
+        self.entry = entry
+        self.done = threading.Event()
+        self.dropped = False
+        self.detached = False
+
+
 @dataclass
 class Entry:
     address: str
@@ -183,6 +197,9 @@ class Hub:
         self.session_tells = session_tells_mod.SessionTells(self)    # the Tells that wait for a laptop session (9.8)
         self.box_waits = boxwait.BoxWaits(lambda: self.clock())    # the drops for James's window (9.12, #115)
         self.entries: dict[str, Entry] = {}
+        # The entries being made (200): address -> `_Making`, under the hub's lock. A first render runs outside that lock, and
+        # a second open of the same address waits for the first one's instead of rendering again.
+        self._making: dict[str, _Making] = {}
         self.index_bus = Bus()                   # the index streams (SPEC 8.8)
         self._index_opening = threading.Lock()   # one index stream opens at a time
         self._lock = threading.RLock()
@@ -570,6 +587,11 @@ class Hub:
         return e
 
     def _entry(self, address: str) -> Entry:
+        """`entry` under the name's lock. The entry is looked up, and a new one made, under the hub's lock; its first render
+        (pandoc, up to 120 s a run) runs outside it, so no request for another document waits for it (200). A second open
+        of the same address meanwhile waits for that render (`_Making`) and is given the same entry. After the render the
+        root is looked at again under the hub's lock: one forgotten meanwhile makes the address name nothing, and no entry
+        is kept."""
         name = roots_mod.Address.parse(address).root
         root = self.roots.get(name)
         path = self.roots.document(address)
@@ -590,32 +612,78 @@ class Hub:
                 return e
             if self.roots.get(name) != root:
                 raise roots_mod.NotFound(address)
-            if place.applies(self, name):
-                # Keyed by the rectoverso's name: its file is found again at each read, and under the name's lock at
-                # each write, so a move of the file changes nothing the hub keeps (9.11).
-                def file():
-                    return Path(os.path.realpath(self.file(address, placed=True, bound=e.file_root)))
-
-                def hold():
-                    return place.held(self, address)
-            else:
-                file, hold = (lambda: path), None
-            e = Entry(address, file, root.id)
-            at = place.file_at(self, address) if self.private_roots and place.applies(self, name) else None
-            e.file_root = at[0].id if at else root.id
-            e.where = lambda: self._where_of(e, name)
-            e.judge = lambda op: self.check_opened(op, self.private_roots.get(e.file_root))
-            e.live = LiveDocument(file, render=lambda text: self._rendered(e, text), entry=e,
-                                  publish=e.bus.publish, by=self.person, clock=self.clock,
-                                  versions=(lambda: self._store_of(address, root, e.file_root)) if self.private_roots and place.applies(self, name)
-                                  else (lambda: self._versions_of(root)), address=address, hold=hold)
-            e.live.session_to = lambda: self.session_name(address)
-            e.live.agent_tells = lambda: self.waiting_tells.waits(address, None, sweep=False)   # the hub person's (9.8)
-            e.live.tells_lock = self.waiting_tells._lock
-            e.live.keep_page = lambda: self._keep_page(e)
-            e.live.refresh(force=True)           # the first render: e.html
-            self.entries[address] = e
+            other = self._making.get(address)
+            if other is None:
+                # Made before it is marked: a new entry that raises (a private root not seen) leaves no mark to wait on.
+                e = self._new_entry(address, name, root, path)
+                mine = self._making[address] = _Making(e)
+        if other is not None:                 # another thread makes it: its entry, once rendered, or a new try
+            other.done.wait()
+            return self._entry(address)
+        kept = gone = False
+        try:
+            e.live.refresh(force=True)           # the first render: e.html, with no lock of the hub held
+            with self._lock:
+                gone = self.roots.get(name) != root
+                if not gone and not mine.dropped:
+                    self.entries[address] = e
+                    kept = True
+        finally:
+            with self._lock:
+                if self._making.get(address) is mine:
+                    del self._making[address]
+                forget = not kept and mine.detached
+            if forget:                       # what its first render stored goes, as for an entry the hub dropped
+                try:
+                    e.live.forget()
+                except Exception:
+                    self.record_exception("forget-failed", address)
+            mine.done.set()
+        if kept:
             return e
+        if gone:
+            raise roots_mod.NotFound(address)
+        return self._entry(address)          # deleted or moved meanwhile: made again from what the address names now
+
+    def _drop_making(self, address: str, forget: bool = False):
+        """Under the hub's lock: an entry being made at `address` is not kept by its maker, which makes it again (200). With
+        `forget` (a move), it is detached first, as a forgotten root's are: from then on nothing it renders reaches the
+        store, and its forget takes out only the texts it put there itself, never a version the page brings back to the
+        address before that render ends."""
+        m = self._making.get(address)
+        if m is not None:
+            m.dropped = True
+            if forget and not m.detached:
+                m.entry.live.detach()
+                m.detached = True
+
+    def _new_entry(self, address: str, name: str, root, path: Path) -> Entry:
+        """A new entry for `address`, not rendered yet: under the hub's lock, with no pandoc run."""
+        e = None
+        if place.applies(self, name):
+            # Keyed by the rectoverso's name: its file is found again at each read, and under the name's lock at
+            # each write, so a move of the file changes nothing the hub keeps (9.11).
+            def file():
+                return Path(os.path.realpath(self.file(address, placed=True, bound=e.file_root)))
+
+            def hold():
+                return place.held(self, address)
+        else:
+            file, hold = (lambda: path), None
+        e = Entry(address, file, root.id)
+        at = place.file_at(self, address) if self.private_roots and place.applies(self, name) else None
+        e.file_root = at[0].id if at else root.id
+        e.where = lambda: self._where_of(e, name)
+        e.judge = lambda op: self.check_opened(op, self.private_roots.get(e.file_root))
+        e.live = LiveDocument(file, render=lambda text: self._rendered(e, text), entry=e,
+                              publish=e.bus.publish, by=self.person, clock=self.clock,
+                              versions=(lambda: self._store_of(address, root, e.file_root)) if self.private_roots and place.applies(self, name)
+                              else (lambda: self._versions_of(root)), address=address, hold=hold)
+        e.live.session_to = lambda: self.session_name(address)
+        e.live.agent_tells = lambda: self.waiting_tells.waits(address, None, sweep=False)   # the hub person's (9.8)
+        e.live.tells_lock = self.waiting_tells._lock
+        e.live.keep_page = lambda: self._keep_page(e)
+        return e
 
     @staticmethod
     def _keep_page(e: Entry):
@@ -1000,20 +1068,26 @@ class Hub:
             raise RenderError(f"{md} is not in a root the hub serves.") from None
         done, gate, out = threading.Event(), threading.Lock(), {}
 
+        def hand(answer: dict) -> bool:
+            """The answer to the request, when it still waits: False once it was answered `pending`. Called by
+            `_render_held` under the name's lock and the hub's, so warnings nobody took are back on the entry before an
+            open that waits for those locks reads them."""
+            with gate:
+                if out.get("late"):
+                    return False
+                out["answer"] = answer
+                done.set()
+                return True
+
         def work():
             try:
-                got = ("answer", self._render_held(address, md, settings, target))
+                got = ("answer", self._render_held(address, md, settings, target, hand))
             except BaseException as ex:            # the request's, while it waits; else written down
                 got, trace = ("error", ex), traceback.format_exc()[-1900:]
             with gate:
-                out[got[0]] = got[1]
+                out.setdefault(got[0], got[1])
                 late = out.get("late", False)
                 done.set()
-            if late and got[0] == "answer" and got[1].get("warnings"):
-                with self._lock:                   # nobody took this answer: the next open is handed its warnings
-                    e = self.entries.get(address)
-                    if e is not None:
-                        e.warnings = [*got[1]["warnings"], *e.warnings]
             if late and got[0] == "error":
                 known = isinstance(got[1], (RenderError, config.ConfigError))    # a bug keeps its traceback (`record_exception`)
                 self.record("render-failed", address, error=f"{type(got[1]).__name__}: {got[1]}"[:500],
@@ -1029,12 +1103,14 @@ class Hub:
             raise out["error"]
         return out["answer"]
 
-    def _render_held(self, address: str, md: Path, settings: dict, target: dict | None) -> dict:
-        """The render of `render`, on its own thread: every lock it needs it takes here."""
+    def _render_held(self, address: str, md: Path, settings: dict, target: dict | None, hand=None) -> dict:
+        """The render of `render`, on its own thread: every lock it needs it takes on this thread, the name's here, the
+        hub's in `_render_entry` and below, never over a pandoc run (200). `hand(answer)` gives the answer to the request
+        that waits for it, and says False when none does: the warnings then stay on the entry for the next open, put
+        back before the locks are let go."""
         with place.held(self, address):  # the name's lock first (9.11), as `entry` takes it
-            with self._lock:
-                e, rebuild, existed = self._render_entry(address, md, settings, target)
-            # A delete, move or forget between the two parts under the hub's lock has taken the entry: its page is not read
+            e, rebuild, existed = self._render_entry(address, md, settings, target)
+            # A delete, move or forget since `_render_entry` found the entry has taken it: its page is not read
             # again (its file may be gone, and its tabs were told `gone`, after which they hear nothing more).
             kept, gone = self.entries.get(address) is e, RenderError(f"{md} went away while its page was rendered.")
             if not kept and not md.exists():
@@ -1059,13 +1135,17 @@ class Hub:
                     e.opened, e.rendered = False, True
                     warnings, e.warnings = e.warnings, []
                     self.index.touch(address)
-                return {"doc": address, "url": self.url(address), "tabs": e.bus.count(),
-                        "log": list(e.log), "warnings": warnings}
+                answer = {"doc": address, "url": self.url(address), "tabs": e.bus.count(),
+                          "log": list(e.log), "warnings": warnings}
+                if hand is not None and not hand(answer) and warnings and self.entries.get(address) is e:
+                    e.warnings = [*warnings, *e.warnings]       # nobody took this answer: the next open is handed them
+                return answer
 
     def _render_entry(self, address: str, md: Path, settings: dict, target: dict | None):
-        """The part of `render` that is done with the hub's lock held by the caller: the settings are recorded and the entry is
-        found or made. Returns it, whether the page is to be rebuilt, and whether the entry was there before (the caller
-        takes in a write on disk since then, with the hub's lock let go)."""
+        """The first part of `render`: the settings are recorded under the hub's lock, then the entry is found or made, its
+        first render outside that lock (200). Returns it, whether the page is to be rebuilt, and whether the entry was there
+        before (the caller takes in a write on disk since then, with the hub's lock let go). An entry another thread was
+        making counts as there before: its render may have read the settings these replace."""
         live = self.tell_live(address)         # beside the docs lock, not inside it
         def settle(new: dict) -> dict:
             old = dict(new)
@@ -1086,8 +1166,9 @@ class Hub:
             else:
                 new.setdefault("target", None)
             return new
-        old, new = self.docs.change(address, settle)
-        existed = address in self.entries
+        with self._lock:
+            old, new = self.docs.change(address, settle)
+            existed = address in self.entries or address in self._making
         e = self.entry(address)
         rebuild = existed and (e.rebuild_due or any(old.get(k) != new[k] for k in SETTING_KEYS)
                                or old.get("target") != new.get("target"))
@@ -1119,6 +1200,7 @@ class Hub:
         versions stay, and come back with it when it does (8.6)."""
         with self._lock:
             e = self.entries.pop(address, None)
+            self._drop_making(address)       # its versions stay, as a deleted page's do (8.6)
         if e is not None:
             # Outside the hub's lock, as `_forget_entries`: a render that took the entry before it went tells its `changed`
             # first, and none after `gone` (ticket 204 B).
@@ -1158,6 +1240,11 @@ class Hub:
             # then for the late forget to leave them (`LiveDocument.detach`).
             for a in held:
                 self.entries[a].live.detach()   # no wait for its lock here: a render holds it for up to 120 s
+            # An entry still in its first render is detached too: its maker finds the root gone and forgets it (200).
+            making = [m for a, m in self._making.items() if a.startswith(prefix)]
+            for m in making:
+                m.entry.live.detach()
+                m.detached = True
             known = self.roots.held(name)     # a private root too, which `get` hides
             try:
                 root = roots_mod.forget(self.roots, self.docs, self.seen, self.versions, name,
@@ -1166,6 +1253,9 @@ class Hub:
                 if self.roots.held(name) is not None:
                     for a in held:      # the registry still holds the root: it stays, and so do its documents' versions
                         self.entries[a].live.reattach()
+                    for m in making:
+                        m.entry.live.reattach()
+                        m.detached = False
                     raise
                 # The registry let the name go, and another folder may take it now: the forget goes on, its documents
                 # detached, and only an entry store that was not emptied is left (a row in the diagnostics log).
@@ -1223,6 +1313,8 @@ class Hub:
                  lambda: self.session_tells.rename(old, new), lambda: self.writes.rename(old, new),
                  lambda: (self._versions_of(root) or self.versions).rename(old, new),
                  lambda: loose_mod.marks_moved(root.path, rel_old, rel_new)]
+        with self._lock:        # before the versions are carried: a first render that ends meanwhile stores none at `old`
+            self._drop_making(old, forget=True)
         for step in steps:
             try:
                 step()
@@ -1231,6 +1323,8 @@ class Hub:
         with self._lock:
             e = self.entries.pop(old, None)
             self.entries.pop(new, None)         # an entry made for the address before the page came is made again
+            self._drop_making(old, forget=True)     # as the entry popped here: what it holds at `old` goes
+            self._drop_making(new)
         if e is not None:
             # After the versions were carried (a version kept under the old key is the last of the old page, none of
             # the new one's): what the entry's document still holds at the old address goes, as `forget_root` does it.
@@ -1273,6 +1367,12 @@ class Hub:
                  lambda: forget(self.member_opened), lambda: forget(self.shared_ids),
                  lambda: (self._versions_of(root) or self.versions).forget(old, inside=True),
                  lambda: loose_mod.marks_gone(root.path, at.rel)]
+        # Before the versions are forgotten, an entry still being made is detached, so a first render that ends meanwhile
+        # stores nothing at `old`. Without the hub's lock, which comes before the file's the caller holds: `detach` takes
+        # none and does it once, and `finish` marks the entry dropped under the hub's lock (200).
+        making = self._making.get(old)
+        if making is not None:
+            making.entry.live.detach()
         for step in steps:
             try:
                 step()
@@ -1282,6 +1382,7 @@ class Hub:
         def finish():
             with self._lock:
                 e = self.entries.pop(old, None)
+                self._drop_making(old, forget=True)
             if e is not None:
                 try:
                     e.live.forget()

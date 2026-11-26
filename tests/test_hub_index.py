@@ -385,22 +385,50 @@ def test_a_render_the_hub_answers_in_time_raises_its_error_in_the_request(world,
         world.hub.render(work / "start.md", {}, None)
 
 
+def _late_warnings(world, monkeypatch, go):
+    """The render's entry is found, given a link-rule warning, and held until `go`: past the hub's answer limit."""
+    entered = world.hub._render_entry
+
+    def warned(*a, **kw):
+        got = entered(*a, **kw)
+        got[0].warnings = ["a link that no longer leads anywhere"]
+        go.wait(10)
+        return got
+    monkeypatch.setattr(world.hub, "_render_entry", warned)
+    monkeypatch.setattr(core, "RENDER_ANSWER_WITHIN", 0.2)
+    return entered
+
+
 def test_the_warnings_of_a_render_that_answered_pending_go_to_the_next_open(world, work, monkeypatch):
     """199 (review round 1): a render answered `pending` hands its link-rule warnings to nobody; they stay with the
     document, and the next `sheaf open` gets them."""
-    go, held = threading.Event(), world.hub._render_held
-
-    def late(*a, **kw):
-        go.wait(10)
-        got = held(*a, **kw)
-        return {**got, "warnings": ["a link that no longer leads anywhere"]}
-    monkeypatch.setattr(world.hub, "_render_held", late)
-    monkeypatch.setattr(core, "RENDER_ANSWER_WITHIN", 0.2)
+    go, within = threading.Event(), core.RENDER_ANSWER_WITHIN
+    entered = _late_warnings(world, monkeypatch, go)
     assert world.hub.render(work / "start.md", {}, None).get("pending") is True
     go.set()
     _join_renders()
-    monkeypatch.setattr(world.hub, "_render_held", held)
+    monkeypatch.setattr(world.hub, "_render_entry", entered)
+    monkeypatch.setattr(core, "RENDER_ANSWER_WITHIN", within)      # the next open waits its answer out, on a slow runner too
     assert world.hub.render(work / "start.md", {}, None)["warnings"] == ["a link that no longer leads anywhere"]
+
+
+def test_the_warnings_of_a_late_render_are_with_the_document_before_its_locks_are_let_go(world, work, monkeypatch):
+    """200 (Codex, round 3 of #673): the warnings of a render answered `pending` are back on the entry before the render
+    lets go of the name's lock and the hub's, so an open that comes in right then is handed them, never an empty list."""
+    go, seen = threading.Event(), []
+    entered = _late_warnings(world, monkeypatch, go)
+    held = world.hub._render_held
+
+    def then_the_next_open(*a, **kw):          # the next open, at once after the late render let go of its locks
+        got = held(*a, **kw)
+        monkeypatch.setattr(world.hub, "_render_entry", entered)
+        seen.append(held(a[0], a[1], {}, None)["warnings"])
+        return got
+    monkeypatch.setattr(world.hub, "_render_held", then_the_next_open)
+    assert world.hub.render(work / "start.md", {}, None).get("pending") is True
+    go.set()
+    _join_renders()
+    assert seen == [["a link that no longer leads anywhere"]], seen
 
 
 def test_a_render_whose_rebuild_for_new_settings_failed_is_rebuilt_by_the_next_render_with_the_same_settings(world, work,
@@ -622,3 +650,218 @@ def test_a_legacy_action_reply_counts_as_claudes_as_the_door_counts_it():
     text = with_threads(thread("c1", "Bob", "Claude (action)"))
     assert index_mod.summarize(text).threads == (("c1", 2, "Claude"),)
     assert [c.last_by for c in rdc.parse(text).comments] == ["Claude"]
+
+
+# ── 200: a first render runs outside the hub's lock ──────────────────────────
+HELD_MARK = "quinces held by the test"
+
+
+@pytest.fixture
+def held_pandoc(monkeypatch):
+    """Pandoc held for every document whose text carries HELD_MARK, until `go` is set; every run is counted in `runs`
+    (held or not), and `begun` is set when a held run starts."""
+    from sheafmd import _pandoc
+    real, go, begun, runs = subprocess.run, threading.Event(), threading.Event(), []
+
+    def run(cmd, timeout=None, input=None, **kw):
+        if cmd[0] == _pandoc.pypandoc.get_pandoc_path():
+            runs.append(HELD_MARK in (input or ""))
+            if HELD_MARK in (input or ""):
+                begun.set()
+                go.wait(20)
+        return real(cmd, timeout=timeout, input=input, **kw)
+    monkeypatch.setattr(_pandoc.subprocess, "run", run)
+    yield go, begun, runs
+    go.set()
+    _join_renders()
+
+
+def _in_thread(fn, *a):
+    """Run `fn(*a)` on a thread; gives (the thread, the list its result or exception lands in)."""
+    out = []
+
+    def work():
+        try:
+            out.append(fn(*a))
+        except BaseException as ex:
+            out.append(ex)
+    t = threading.Thread(target=work, daemon=True)
+    t.start()
+    return t, out
+
+
+def _timed(fn, *a, within=1.0):
+    """`fn(*a)` on a thread, joined for `within` seconds: gives its result, or fails when it is still waiting."""
+    t, out = _in_thread(fn, *a)
+    t.join(within)
+    assert not t.is_alive(), f"{fn} still waits after {within} s"
+    if isinstance(out[0], BaseException):
+        raise out[0]
+    return out[0]
+
+
+def test_a_first_render_held_in_pandoc_never_delays_a_document_already_opened(world, work, put, held_pandoc):
+    """200 A: while the first render of document A waits in pandoc, the entry of an opened document B and a render of B with
+    the same settings answer at once: the hub's lock is not held by A's render."""
+    go, begun, _ = held_pandoc
+    world.hub.render(work / "start.md", {}, None)
+    put("held.md", PLAN + f"\n{HELD_MARK}\n")
+    world.hub.roots.for_document(work / "held.md")
+    a, out = _in_thread(world.hub.entry, "work/held.md")
+    assert begun.wait(10)
+    assert _timed(world.hub.entry, "work/start.md").address == "work/start.md"
+    assert not _timed(world.hub.render, work / "start.md", {}, None).get("pending")
+    assert a.is_alive() and not out, "A's render ended before its pandoc was let go"
+    go.set()
+    a.join(10)
+    assert out and out[0].address == "work/held.md", out
+
+
+def test_a_first_render_held_in_pandoc_never_delays_the_first_render_of_another_document(world, work, put, held_pandoc):
+    """200 B: two first renders run side by side; B's is made and rendered while A's pandoc is held."""
+    go, begun, _ = held_pandoc
+    put("held.md", PLAN + f"\n{HELD_MARK}\n")
+    world.hub.roots.for_document(work / "held.md")
+    a, out = _in_thread(world.hub.entry, "work/held.md")
+    assert begun.wait(10)
+    e = _timed(world.hub.entry, "work/start.md", within=10)
+    assert e.address == "work/start.md" and "apples" in e.html
+    assert a.is_alive() and not out
+    go.set()
+    a.join(10)
+    assert out and out[0].address == "work/held.md", out
+
+
+def test_a_root_forgotten_during_a_held_first_render_leaves_its_address_naming_nothing(world, work, put, held_pandoc):
+    """200 C1: `forget_root` while A's first render is held in pandoc: A's open is NotFound, the hub keeps no entry, and
+    the version its first render stored is taken out of the store, as a forgotten document's are."""
+    from sheafmd.hub import roots as roots_mod
+    go, begun, _ = held_pandoc
+    put("held.md", PLAN + f"\n{HELD_MARK}\n")
+    world.hub.roots.for_document(work / "held.md")
+    store = world.hub._versions_of(world.hub.roots.get("work"))
+    a, out = _in_thread(world.hub.entry, "work/held.md")
+    assert begun.wait(10)
+    _timed(world.hub.forget_root, "work", within=10)
+    go.set()
+    a.join(10)
+    assert out and isinstance(out[0], roots_mod.NotFound), out
+    assert "work/held.md" not in world.hub.entries
+    assert store.texts("work/held.md") == []
+
+
+def test_two_opens_of_one_new_document_make_one_entry_rendered_once(world, work, put, held_pandoc):
+    """200 C2: two threads open the same new document while its pandoc is held: one entry, one render."""
+    go, begun, runs = held_pandoc
+    put("held.md", PLAN + f"\n{HELD_MARK}\n")
+    world.hub.roots.for_document(work / "held.md")
+    first, first_out = _in_thread(world.hub.entry, "work/held.md")
+    assert begun.wait(10)
+    second, second_out = _in_thread(world.hub.entry, "work/held.md")
+    second.join(0.5)
+    assert second.is_alive(), "the second open did not wait for the first one's render"
+    go.set()
+    first.join(10)
+    second.join(10)
+    assert first_out and second_out and first_out[0] is second_out[0] is world.hub.entries["work/held.md"]
+    one_render = runs.count(True)
+    assert one_render >= 1
+    # the second open rendered nothing: a fresh first render of the same text runs pandoc as many times as both opens did
+    world.hub.forget_document("work/held.md")
+    world.hub.entry("work/held.md")
+    assert runs.count(True) == 2 * one_render, runs
+
+
+def test_a_document_deleted_during_its_held_first_render_keeps_no_entry(world, work, put, held_pandoc):
+    """200 D: a delete (`forget_document`, its file gone) while the first render is held in pandoc: the maker keeps no entry
+    for the file that went; it looks again and finds the address names nothing."""
+    from sheafmd.hub import roots as roots_mod
+    go, begun, _ = held_pandoc
+    f = put("held.md", PLAN + f"\n{HELD_MARK}\n")
+    world.hub.roots.for_document(work / "held.md")
+    a, out = _in_thread(world.hub.entry, "work/held.md")
+    assert begun.wait(10)
+    f.unlink()
+    _timed(world.hub.forget_document, "work/held.md")
+    go.set()
+    a.join(10)
+    assert out and isinstance(out[0], roots_mod.NotFound), out
+    assert "work/held.md" not in world.hub.entries
+
+
+def test_a_new_entry_that_cannot_be_made_leaves_no_mark_for_the_next_open(world, work, monkeypatch):
+    """200 D: an entry whose making raises before its render (a private root not seen) leaves no mark of a render under
+    way: the next open of the address makes it, and does not wait for a render that never comes."""
+    made = world.hub._new_entry
+
+    def refused(*a, **kw):
+        monkeypatch.setattr(world.hub, "_new_entry", made)
+        raise RuntimeError("not now")
+    monkeypatch.setattr(world.hub, "_new_entry", refused)
+    with pytest.raises(RuntimeError):
+        world.hub.entry("work/start.md")
+    assert _timed(world.hub.entry, "work/start.md", within=10).address == "work/start.md"
+
+
+def test_a_page_moved_away_and_back_during_its_held_first_render_keeps_its_versions(world, work, put, held_pandoc):
+    """200 (Codex, round 2 of #679): a move of the address while its first render is held drops that entry, and the entry
+    given up takes out only what it stored itself: the versions the page brought back to the address stay."""
+    go, begun, _ = held_pandoc
+    put("held.md", PLAN + f"\n{HELD_MARK}\n")
+    world.hub.roots.for_document(work / "held.md")
+    store = world.hub._versions_of(world.hub.roots.get("work"))
+    a, out = _in_thread(world.hub.entry, "work/held.md")
+    assert begun.wait(10)
+    world.hub.moved_page("work/held.md", "work/away.md", "test")
+    store.put("work/held.md", "# Back\n\nThe page came back with this version.\n")    # as a move back carries it
+    go.set()
+    a.join(10)
+    assert any("came back" in t for t in store.texts("work/held.md")), store.texts("work/held.md")
+
+
+def _render_ends_in(monkeypatch, step, go, maker):
+    """`step` of a move (a function of `core.loose_mod`, the last store a move carries) lets the held first render end,
+    and waits for its maker: pandoc finishes after the versions were carried, before the move lets go of the entry."""
+    was = getattr(core.loose_mod, step)
+
+    def then_the_render_ends(*a, **kw):
+        got = was(*a, **kw)
+        go.set()
+        maker.join(10)
+        return got
+    monkeypatch.setattr(core.loose_mod, step, then_the_render_ends)
+
+
+def test_a_first_render_that_ends_while_its_page_moves_leaves_no_version_at_the_old_address(world, work, put, held_pandoc,
+                                                                                            monkeypatch):
+    """200 (Codex, round 7 of #679): the entry being made is let go of before the move carries the versions, so a first
+    render that ends meanwhile stores nothing under the address the page left."""
+    go, begun, _ = held_pandoc
+    (work / ".sheaf.toml").write_text('versions = "root"\n', encoding="utf-8")     # kept in the root, never forgotten
+    put("held.md", PLAN + f"\n{HELD_MARK}\n")
+    world.hub.roots.for_document(work / "held.md")
+    store = world.hub._versions_of(world.hub.roots.get("work"))
+    a, _ = _in_thread(world.hub.entry, "work/held.md")
+    assert begun.wait(10)
+    _render_ends_in(monkeypatch, "marks_moved", go, a)
+    os.replace(work / "held.md", work / "away.md")        # a move renames the file before the hub carries the rest
+    world.hub.moved_page("work/held.md", "work/away.md", "test")
+    assert not any(HELD_MARK in t for t in store.texts("work/held.md")), store.texts("work/held.md")
+
+
+def test_a_first_render_that_ends_while_its_page_lands_elsewhere_leaves_no_version_at_the_old_address(world, work, put,
+                                                                                                     held_pandoc, monkeypatch):
+    """200 (Codex, round 7 of #679): as for a move in the hub, for a page that lands on another tiroir: the entry being
+    made is let go of before its versions are forgotten."""
+    go, begun, _ = held_pandoc
+    (work / ".sheaf.toml").write_text('versions = "root"\n', encoding="utf-8")     # kept in the root, never forgotten
+    put("held.md", PLAN + f"\n{HELD_MARK}\n")
+    world.hub.roots.for_document(work / "held.md")
+    store = world.hub._versions_of(world.hub.roots.get("work"))
+    a, _ = _in_thread(world.hub.entry, "work/held.md")
+    assert begun.wait(10)
+    _render_ends_in(monkeypatch, "marks_gone", go, a)
+    finish = world.hub.moved_remote("work/held.md", "https://other.example", "work/held.md", "test", "0" * 64)
+    os.unlink(work / "held.md")                           # as the move does, before its `finish`
+    finish()
+    assert not any(HELD_MARK in t for t in store.texts("work/held.md")), store.texts("work/held.md")

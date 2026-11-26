@@ -243,9 +243,9 @@ class Versions:
         is not a version (`get` would not believe it) and takes no slot. A pin of a root's own store
         has its time in a file beside it (`_pinned_at`)."""
         h = md_hash(text)
-        if pinned and self._root is not None:      # first: a pin with no time is never believed
-            if not (self.dir / ".gitignore").is_file():
-                write_text_private(self.dir / ".gitignore", _LOCAL_ONLY, True)
+        timed = pinned and self._root is not None
+        if timed:                                   # first: a pin with no time is never believed
+            self._times_out_of_git(folder)
             write_text_private(folder / f"{h}{_PINNED_AT}", str(int(time.time() * 1e9)), True)
         f = folder / f"{h}.md"
         if f.is_file():
@@ -256,12 +256,31 @@ class Versions:
         for p in folder.glob("*.md"):
             if _HASH_RE.fullmatch(p.stem) and p.is_file():
                 try:
-                    files.append((self._pin_time(p) if pinned else p.stat().st_mtime_ns, p.name, p))
+                    at = self._pin_time(p) if pinned else p.stat().st_mtime_ns
                 except OSError:
-                    pass
+                    continue
+                if timed and not at:
+                    continue        # another clone's pin, pulled with no time here: theirs to trim, never this hub's (203 B)
+                files.append((at, p.name, p))
         for _, _, p in sorted(files)[:-newest]:
             _drop(p)
         return h
+
+    def _times_out_of_git(self, folder: Path):
+        """Keep the pin times of a root's own store out of git before one is written in `folder`: the store's `.gitignore`
+        is written again unless it is a file of its own holding the hub's lines (git reads no link, and other lines may
+        not ignore `*.at`), and a `.gitignore` in a folder of the store between it and `folder`, which could say `!*.at`,
+        goes (ticket 203 A). The store is the hub's: no other `.gitignore` belongs in it."""
+        if read_small(self.dir / ".gitignore") != _LOCAL_ONLY:
+            write_text_private(self.dir / ".gitignore", _LOCAL_ONLY, True)
+        d = folder
+        while d != self.dir and self.dir in d.parents:
+            try:
+                if not stat.S_ISDIR(os.lstat(d / ".gitignore").st_mode):    # a folder of that name is no ignore file
+                    os.unlink(d / ".gitignore")
+            except FileNotFoundError:
+                pass
+            d = d.parent
 
     def _pin_time(self, pin: Path) -> int:
         """When the pin `pin` was last pinned, in ns: its mtime in the state folder, the file beside it in a root's own

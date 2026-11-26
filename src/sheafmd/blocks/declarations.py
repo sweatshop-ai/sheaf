@@ -124,6 +124,82 @@ DECLARED = {t.name: t for t in (CALLOUT, COLUMNS, COLUMN, BOX, IMAGE)}
 INLINE = {t.name: t for t in (BUTTON,)}
 _ALL = {**DECLARED, **INLINE}
 
+# What an agent is told about each insertable Block type: one line, and one example the Document service accepts.
+# The plain types have no declaration of their own (they are plain Markdown), so their attributes are listed here.
+DESCRIPTIONS = {
+    "paragraph": ("A paragraph of text.", "A short paragraph of text."),
+    "heading": ("A heading; `level` is the number of # signs.", "## A heading"),
+    "list": ("A bulleted or numbered list.", "- first item\n- second item"),
+    "quote": ("A quotation; it holds plain blocks only.", "> A quoted line."),
+    "table": ("A table in pipe form.", "| a | b |\n|---|---|\n| 1 | 2 |"),
+    "code": ("A fenced code block; `lang` names the language. It is locked: moved or removed, never edited in place.",
+             "```python\nprint(1)\n```"),
+    "rule": ("A horizontal rule.", "---"),
+    "callout": ("A highlighted note; `tone` sets its colour, `align` its text and `pad` its padding.",
+                '::: {.callout tone="info"}\nA note for the reader.\n:::'),
+    "columns": ("A row of columns side by side; it holds `column` blocks only, each with a `size` (its share of the row, in %).",
+                '::: {.columns}\n::: {.column size="50"}\nLeft.\n:::\n::: {.column size="50"}\nRight.\n:::\n:::'),
+    "column": ("One column of a `columns` row: it only ever stands inside one, never on its own; `size` is its share of the row, in %; leave it out for an equal share.",
+               '::: {.column size="50"}\nText in a column.\n:::'),
+    "box": ("A box around plain blocks that carries only layout: `align` its text and `pad` its padding.",
+            '::: {.box align="center" pad="m"}\nText in a box.\n:::'),
+    "image": ("An image on a line of its own; `size` is its share of its container in %, `align` its place in it; leave out what you do not set.",
+              '::: {.image size="50" align="center"}\n![A description](https://example.org/a.png)\n:::'),
+}
+# As `blocks` reports them (tree.py): a heading's level is a number, a list's `ordered` a boolean; `lang` is free text.
+PLAIN_ATTRS = {"heading": (("level", (1, 2, 3, 4, 5, 6), 1),),
+               "code": (("lang", (), ""),),
+               "list": (("ordered", (True, False), False),)}
+
+
+# Attributes that say how a block is laid out, never what a person wrote: the only ones a caller who may not read
+# the page's text (a token without --write, SPEC 9.7) is shown. A declared type's attributes all take one of a
+# fixed list of values, so they are all structural; of the plain types only these are. Everything else
+# (a code fence's language, a Stub's type name and reason, any attribute a type may come to hold text in) is withheld.
+STRUCTURAL_PLAIN = {"heading": ("level",), "list": ("ordered", "start")}
+
+
+def structural(type_: str, attrs: dict) -> dict:
+    """`attrs` of a block of `type_`, cut to what holds no text of the page."""
+    if type_ in DECLARED:
+        keep = {a.name for a in DECLARED[type_].attrs if a.values}
+    else:
+        keep = set(STRUCTURAL_PLAIN.get(type_, ()))
+    return {k: v for k, v in attrs.items() if k in keep}
+
+
+def insertable() -> list:
+    """The names of every insertable Block type: the plain ones, then the declared Rich ones that may stand
+    on their own (a column is only ever a child of a row of columns)."""
+    return list(PLAIN) + [n for n, t in DECLARED.items() if t.top]
+
+
+def describe(name: str) -> dict:
+    """What `block_types` says of one type: its attributes with allowed values and default, a line, an example."""
+    if name in DECLARED:
+        attrs = [{"name": a.name, "values": list(a.values), "default": a.default} for a in DECLARED[name].attrs]
+    else:
+        attrs = [{"name": n, "values": list(v), "default": d} for n, v, d in PLAIN_ATTRS.get(name, ())]
+    line, example = DESCRIPTIONS[name]
+    return {"type": name, "attributes": attrs, "description": line, "example": example}
+
+
+def child_only() -> list:
+    """The names of the declared types that may only be a child of another (a column)."""
+    return [n for n, t in DECLARED.items() if not t.top]
+
+
+def containers() -> dict:
+    """Which types each container may hold: the document, each declared type by its Container rule, and the
+    plain containers (a quote, a list item), which hold plain blocks only. A type that may only be a child
+    (a column) is listed in its container, not in the document."""
+    out = {"document": insertable()}
+    for t in DECLARED.values():
+        out[t.name] = list(t.children)
+    out["quote"] = list(PLAIN)
+    out["item"] = list(PLAIN)
+    return out
+
 # The Theme properties: documented, stable through 1.x (ADR 0008). A Theme's `theme.css` may override any.
 TONES = {"info": ("#1f5fd6", "#eef3fd"),
          "success": ("#1e7e46", "#edf8f1"),

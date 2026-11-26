@@ -50,6 +50,8 @@ from .hub.state import TokenRow
 from .render import COMMENT_RE as HTML_COMMENT_RE, strip_comments
 from .beneath import Private
 from .adapter import MarkdownFileAdapter
+from .blocks import Unreadable, describe, read_tree
+from .blocks import declarations as decl
 from .source import _folder_of, check_create, create_file, md_hash, now, update_beneath
 
 PROTOCOLS = ("2025-06-18", "2025-03-26", "2024-11-05")
@@ -191,6 +193,34 @@ TOOLS = {
             "path": {"type": "string", "description": "The page's path in the repo, ending in .md."},
             "commit": {"type": "string", "description": "The commit id the page was rendered at."}},
         "required": ["repo", "path", "commit"]},
+    "blocks": {
+        "description": "The block tree of a page: per block its `id` (stable: name it in an edit), `type`, `attrs`, "
+                       "`capabilities` (edit, move, remove: a locked block, such as a code fence, and a Stub have only "
+                       "move and remove), `markdown` and `children`, and the page's `base`. A nested block's `markdown` "
+                       "describes it and is not round-trip source. A token made without `--write` may not read page "
+                       "text: it gets no `base`, no `markdown`, only layout attributes, and opaque positional ids "
+                       "(`p1`, `p2`, ... in document order, good for that page as it is). A Stub is a block of a type "
+                       "this sheaf does not know or a Rich block that breaks its declaration: `type` is `stub`, "
+                       "`attrs.type` its type name and `markdown` its raw source. `depth` limits the levels shown "
+                       "(1: the top level; a block cut by it has `more`, the number of children left out); `ids` "
+                       "returns only those blocks, wherever they sit.",
+        "annotations": {"readOnlyHint": True},
+        "properties": {
+            "doc": _DOC,
+            "depth": {"type": "integer", "minimum": 1, "maximum": 50,
+                      "description": "How many levels of the tree to show (default all)."},
+            "ids": {"type": "array", "items": {"type": "string"},
+                    "description": "Only the blocks with these ids, each with its own children."}},
+        "required": ["doc"]},
+    "block_types": {
+        "description": "Every Block type that may be inserted in a page, each with its `attributes` (allowed `values` "
+                       "and `default`), a one-line `description` and an `example` in Markdown; and `containers`, the "
+                       "types each container (the document, a callout, a quote, a list item) may hold. An attribute whose `default` is empty is left out of "
+                       "the block to get its default (equal shares, for a `size`); never write it as empty. `child_types` describes a "
+                       "type that may only stand inside another (a `column`, in `columns`), never on its own.",
+        "annotations": {"readOnlyHint": True},
+        "properties": {"doc": _DOC},
+        "required": ["doc"]},
 }
 PAGE_TOOLS = ("read", "create", "update", "move")    # the key, or a token made with --write (SPEC 9.7); a render report sends no text and needs only a member's token
 WRITE_TOOLS = ("create", "update", "move")         # each call leaves a row in the diagnostics log (SPEC 15) and a line in the Write log (9.12)
@@ -282,8 +312,14 @@ def _check(name: str, args: dict) -> dict:
             raise ToolError(f"{k} must be text.")
         if spec["type"] == "boolean" and not isinstance(v, bool):
             raise ToolError(f"{k} must be true or false.")
-        if spec["type"] == "integer" and (type(v) is not int or not 0 <= v <= 25):
-            raise ToolError(f"{k} must be a whole number of seconds, 0 to 25.")
+        if spec["type"] == "integer":
+            ranged = "minimum" in spec and "maximum" in spec        # the tells wait declares no range: seconds, 0 to 25
+            lo, hi = (spec["minimum"], spec["maximum"]) if ranged else (0, 25)
+            if type(v) is not int or not lo <= v <= hi:
+                raise ToolError(f"{k} must be a whole number, {lo} to {hi}." if ranged
+                                else f"{k} must be a whole number of seconds, 0 to 25.")
+        if spec["type"] == "array" and (not isinstance(v, list) or not all(isinstance(i, str) for i in v)):
+            raise ToolError(f"{k} must be a list of text.")
         if "enum" in spec and v not in spec["enum"]:
             raise ToolError(f"{k} must be one of {', '.join(spec['enum'])}.")
     return args
@@ -313,7 +349,7 @@ class Door:
         self._tools = {"documents": self._documents, "threads": self._threads,
                        "reply": self._reply, "resolve": self._resolve, "read": self._read,
                        "create": self._create, "update": self._update, "move": self._move, "tells": self._session_tells,
-                       "render_report": self._render_report}
+                       "render_report": self._render_report, "blocks": self._blocks, "block_types": self._block_types}
 
     # ── JSON-RPC ─────────────────────────────────────────────────────────────
     def handle(self, raw: bytes, caller: Caller) -> tuple[int, dict | None]:
@@ -977,6 +1013,41 @@ class Door:
         return {"doc": address, "url": self.hub.url(address), "hash": md_hash(text), "text": out,
                 "generated": self._generated(address),
                 **({"moved_from": followed[0]} if followed else {})}
+
+    def _page_text(self, args: dict, caller: Caller):
+        """(address, text) of the page `args["doc"]` names, read as `read` reads it and shown only to a caller who may see it."""
+        address = self._address(args["doc"], caller)
+        try:
+            with place.held(self.hub, address), self._open(address) as op:
+                text, private = op.text(), place.opened_private(self.hub, op)
+        except (OSError, UnicodeDecodeError, NotFound):
+            raise _unreadable(address) from None
+        return address, self._seen(text, address, caller, args["doc"], private)
+
+    def _blocks(self, args: dict, caller: Caller):
+        address, text = self._page_text(args, caller)
+        try:
+            tree = read_tree(text)
+        except Unreadable:
+            raise ToolError(f"{address} cannot be read as blocks: pandoc does not read it. `read` gives its text.",
+                            "unreadable") from None
+        try:
+            rows = describe.rows(tree, args.get("depth"), args.get("ids"), text=caller.may_write)
+        except describe.NotFound as e:
+            raise ToolError(f"{address} has no block with the id {e.args[0]}; `blocks` lists the ids.", "no block") from None
+        except describe.WriteFailed:
+            raise ToolError(f"The Markdown of a nested block of {address} could not be written just now; ask again.",
+                            "unavailable") from None
+        out = {"doc": address, "url": self.hub.url(address), "blocks": rows}
+        if caller.may_write:
+            out["base"] = md_hash(text)               # a token that may not read page text gets no hash either (9.7)
+        return out
+
+    def _block_types(self, args: dict, caller: Caller):
+        address, _ = self._page_text(args, caller)
+        return {"doc": address, "url": self.hub.url(address),
+                "types": [decl.describe(n) for n in decl.insertable()],
+                "child_types": [decl.describe(n) for n in decl.child_only()], "containers": decl.containers()}
 
     def _generated(self, address: str) -> dict | None:
         """The page's mark as `read` shows it, `{by, at}`, or None for a page that is not generated (SPEC 8.3, 12)."""

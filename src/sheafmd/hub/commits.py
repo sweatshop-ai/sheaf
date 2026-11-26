@@ -96,6 +96,10 @@ class Stopped(Exception):
         self.ended = ended
 
 
+class LookFailed(Exception):
+    """A look of git's that a pull needs ran out of time, could not start or failed: not knowing, never "none" (ticket 209)."""
+
+
 class Children:
     """The fetches and pushes running, which a stopping hub ends (#95). Once `end` has run, none starts."""
 
@@ -664,17 +668,26 @@ class Commits:
             self._last_seen(folder, name, theirs)
             return EVEN if _git(folder, "rev-parse", "HEAD").stdout.strip() == theirs else True
         top = Path(_git(folder, "rev-parse", "--show-toplevel").stdout.strip())
-        changed = [p for p in _git(folder, "diff", "--name-only", "--no-renames", "-z", base, theirs).stdout.split("\0")
-                   if p]
+        listed = _git(folder, "diff", "--name-only", "--no-renames", "-z", base, theirs)
+        if listed.returncode != 0:                     # no empty list: the pull would move the files under no lock (ticket 209)
+            record("push-failed", address, error=_last_line(listed))
+            return False
+        changed = [p for p in listed.stdout.split("\0") if p]
         # The writers' locks first, the repo's last (9.11): no write of a file the remote changed comes between
         # the look at it and its new text, and no commit of any root of the repo between the hub's HEAD read and moved.
         # The Write log's window opens now and closes however the pull ends, so the page that takes the pull in is never
         # taken for a disk write, nor a later write for the pull.
         pages = [top / p for p in changed if p.endswith(".md")]
-        named = self._tell(self._pulling, address, folder, [(path, "?") for path in pages])
         # The save side and this list read `--no-renames`: a rename is then a delete and an add, and both paths are locked and
-        # told to the Write log. Renames are looked at apart, for the Forward a moved page leaves (9.11), once the pull went through.
-        renames = self._renames(folder, base, theirs, top)
+        # told to the Write log. Renames are looked at apart, for the Forward a moved page leaves (9.11), which is written once the
+        # pull went through. The look itself comes before anything opens or moves (ticket 209): a look that fails holds the whole
+        # pull, never "no rename", since a page moved without its Forward is not repaired by a later poll, whose base is then theirs.
+        try:
+            renames = self._renames(folder, base, theirs, top, self._children)
+        except LookFailed as e:
+            record("push-failed", address, error=f"the rename look: {e}")
+            return False
+        named = self._tell(self._pulling, address, folder, [(path, "?") for path in pages])
         go, left = False, {}
         try:
             with self._guard(root, [top / p for p in changed]), self._repo_lock(folder):
@@ -693,13 +706,20 @@ class Commits:
         return go
 
     @staticmethod
-    def _renames(folder: Path, base: str, theirs: str, top: Path) -> list:
+    def _renames(folder: Path, base: str, theirs: str, top: Path, children=None) -> list:
         """The pages the remote renamed between `base` and `theirs`, `[(old, new)]` as absolute paths: git's own detection
-        (`-M`), `.md` files only. A file copied or changed beyond what git calls a rename is no rename."""
+        (`-M`), `.md` files only. A file copied or changed beyond what git calls a rename is no rename. `LookFailed` when git
+        ran out of time, could not start or failed (ticket 209): that is not knowing, never "no rename". It is given a push's
+        time, not a commit's: rename detection over a large pull is slower than the other looks. `children`: as a fetch's, so
+        a stopping hub ends it; its `Stopped` is no `SubprocessError` and goes up as the stop it is."""
         try:
-            out = _git(folder, "diff", "--name-status", "-M", "--diff-filter=R", "-z", base, theirs).stdout.split("\0")
-        except (subprocess.SubprocessError, OSError):
-            return []                                  # no Forward is worth a pull that never starts: the Write log's window would stay open
+            r = _git(folder, "diff", "--name-status", "-M", "--diff-filter=R", "-z", base, theirs, seconds=PUSH_SECONDS,
+                     children=children)
+        except (subprocess.SubprocessError, OSError) as e:
+            raise LookFailed(str(e)[:300] or type(e).__name__) from e
+        if r.returncode != 0:
+            raise LookFailed(_last_line(r))
+        out = r.stdout.split("\0")
         found, i = [], 0
         while i + 2 < len(out) and out[i].startswith("R"):
             old, new = out[i + 1], out[i + 2]
@@ -716,8 +736,10 @@ class Commits:
         path a clone's files move by besides `_pull`; a checker of the lock order (17) lists both."""
         folder = root.path
         top = Path(_git(folder, "rev-parse", "--show-toplevel").stdout.strip())
-        changed = [p for p in _git(folder, "diff", "--name-only", "--no-renames", "-z", "HEAD", target).stdout.split("\0")
-                   if p]
+        listed = _git(folder, "diff", "--name-only", "--no-renames", "-z", "HEAD", target)
+        if listed.returncode != 0:                     # no empty list: the files would move under no lock (ticket 209)
+            return _last_line(listed)
+        changed = [p for p in listed.stdout.split("\0") if p]
         pages = [top / p for p in changed if p.endswith(".md")]
         named = self._tell(self._pulling, address, folder, [(path, "?") for path in pages])
         why, left = "move failed", {}

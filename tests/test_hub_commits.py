@@ -1875,6 +1875,83 @@ def test_a_rename_that_arrives_on_a_pull_writes_a_forward_and_carries_the_versio
     assert box.hub.forwards.entry(DOC)["by"] == "git"
 
 
+@pytest.mark.parametrize("failure", ["timeout", "exit"])
+def test_a_rename_look_that_fails_holds_the_pull_and_the_next_poll_writes_the_forward(box, rectoversos, remote, tmp_path,
+                                                                                    monkeypatch, failure):
+    """Ticket 209: a `git diff -M` that runs out of time (a loaded machine), or exits non-zero, is no "no rename". The pull
+    is held with a `push-failed` row and nothing moves; the next poll takes the rename in, its Forward and its versions."""
+    from sheafmd.hub import commits
+    poll = roomy_git(monkeypatch)
+    edit(box, rectoversos)
+    assert box.hub.commits.settle(timeout=1200)
+    pushed(box, remote)
+    root = box.hub.roots.get("rectoversos")
+    versions = box.hub._versions_of(root) or box.hub.versions
+    kept = md_hash((rectoversos / "acme" / "blog" / "2026-10-28-plan.md").read_text(encoding="utf-8"))
+    renamed_on_github(tmp_path, remote, "acme/blog/2026-10-28-plan.md", "acme/blog/2026-10-30-plan.md")
+    real = commits._git
+    head = git(rectoversos, "rev-parse", "HEAD")
+    seen = git(rectoversos, "for-each-ref", commits.LAST_SEEN)
+
+    def failing(folder, *args, **kwargs):
+        if "-M" in args and "--diff-filter=R" in args:
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired(["git", *args], 600)
+            return subprocess.CompletedProcess(["git", *args], 128, "", "fatal: the rename look failed")
+        return real(folder, *args, **kwargs)
+
+    monkeypatch.setattr(commits, "_git", failing)
+    poll(box, rectoversos)
+    assert git(rectoversos, "rev-parse", "HEAD") == head
+    assert git(rectoversos, "for-each-ref", commits.LAST_SEEN) == seen
+    assert not box.hub.writes._pulling
+    assert (rectoversos / "acme" / "blog" / "2026-10-28-plan.md").exists()
+    assert not (rectoversos / "acme" / "blog" / "2026-10-30-plan.md").exists()
+    assert box.hub.forwards.snapshot() == {}
+    (row,) = [r for r in rows("push-failed") if "rename" in (r.get("error") or "")]
+    monkeypatch.setattr(commits, "_git", real)
+    poll(box, rectoversos)
+    assert (rectoversos / "acme" / "blog" / "2026-10-30-plan.md").exists()
+    assert box.hub.forwards.follow(DOC) == NEW
+    assert versions.get(NEW, kept) is not None and versions.get(DOC, kept) is None
+
+
+def test_a_list_of_the_changed_files_that_fails_holds_the_pull(box, rectoversos, remote, tmp_path, monkeypatch):
+    """Ticket 209 B: the `--name-only` diff that names the files a pull locks and tells the Write log, when it exits non-zero,
+    is no empty list: the pull would then move the files under no writer's lock. It is held with a `push-failed` row."""
+    from sheafmd.hub import commits
+    real = commits._git
+
+    def failing(folder, *args, **kwargs):
+        if "--name-only" in args and "--no-renames" in args:
+            return subprocess.CompletedProcess(["git", *args], 128, "", "fatal: the list failed")
+        return real(folder, *args, **kwargs)
+
+    monkeypatch.setattr(commits, "_git", failing)
+    rename_pull(box, rectoversos, remote, tmp_path)
+    assert (rectoversos / "acme" / "blog" / "2026-10-28-plan.md").exists()
+    assert not (rectoversos / "acme" / "blog" / "2026-10-30-plan.md").exists()
+    assert [r for r in rows("push-failed") if "the list failed" in (r.get("error") or "")]
+
+
+def test_a_list_of_the_changed_files_that_fails_holds_a_branch_switch(box, rectoversos, monkeypatch):
+    """Ticket 209 B, review round 2: `moved`, the other path a clone's files move by, reads the same list; a non-zero exit
+    holds the switch, never moves it under no writer's lock."""
+    from sheafmd.hub import commits
+    real, ran = commits._git, []
+
+    def failing(folder, *args, **kwargs):
+        if "--name-only" in args and "--no-renames" in args:
+            return subprocess.CompletedProcess(["git", *args], 128, "", "fatal: the list failed")
+        return real(folder, *args, **kwargs)
+
+    monkeypatch.setattr(commits, "_git", failing)
+    root = box.hub.roots.get("rectoversos")
+    why = box.hub.commits.moved(root, "rectoversos", "HEAD", lambda: ran.append(1) or "")
+    assert ran == [] and "the list failed" in why
+    assert not box.hub.writes._pulling
+
+
 def test_a_pull_without_a_rename_writes_no_forward(box, rectoversos, remote, tmp_path):
     merged_on_github(tmp_path, remote, {"README.md": "# The rectoversos\n"}, "a README")
     poll_now(box, rectoversos)
@@ -1961,8 +2038,9 @@ def test_the_write_log_of_a_renamed_page_is_at_its_new_address_alone(box, rectov
     assert [w.via for w in box.hub.writes.lines(NEW)][-1] == "pull"
 
 
-def test_a_read_of_the_renames_that_times_out_is_no_renames_and_the_pull_goes_through(box, rectoversos, remote, tmp_path, monkeypatch):
-    """The Write log's window of a pull closes however the pull ends: the look for renames is no reason to leave it open."""
+def test_a_read_of_the_renames_that_times_out_holds_the_pull_and_leaves_no_window_open(box, rectoversos, remote, tmp_path, monkeypatch):
+    """The Write log's window of a pull closes however the pull ends: the look for renames is no reason to leave it open.
+    Ticket 209: nor to take the pull in without its Forward; the look comes before the window opens, and the pull waits."""
     from sheafmd.hub import commits
     real = commits._git
 
@@ -1973,7 +2051,8 @@ def test_a_read_of_the_renames_that_times_out_is_no_renames_and_the_pull_goes_th
 
     monkeypatch.setattr(commits, "_git", slow)
     rename_pull(box, rectoversos, remote, tmp_path)
-    assert (rectoversos / "acme" / "blog" / "2026-10-30-plan.md").exists()
+    assert (rectoversos / "acme" / "blog" / "2026-10-28-plan.md").exists()
+    assert not (rectoversos / "acme" / "blog" / "2026-10-30-plan.md").exists()
     assert box.hub.forwards.snapshot() == {}
     assert not box.hub.writes._pulling
 

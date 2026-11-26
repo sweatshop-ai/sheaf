@@ -279,9 +279,15 @@ class Service:
                 state[key] = self._git(*args).stdout.strip() or "-"
             except (OSError, subprocess.SubprocessError):
                 state[key] = "unknown"
-        print(f"source service: STOPPED after a failed write of {rel}: HEAD before {self._head_before or '-'}, now {state['HEAD']}; "
-              f"status {state['status']!r}; "
-              f"repair by hand, see Failure in docs/source-service.md", file=sys.stderr, flush=True)
+        line = (f"STOPPED after a failed write of {rel}: HEAD before {self._head_before or '-'}, HEAD now {state['HEAD']}; "
+                f"status {state['status']!r}")
+        print(f"source service: {line}; repair by hand, see Failure in docs/source-service.md", file=sys.stderr, flush=True)
+        try:                                    # the same lines in the git dir: a restart is refused until the operator removes it
+            gdir = self._git("rev-parse", "--absolute-git-dir").stdout.strip()
+            with open(os.path.join(gdir, self.MARKER), "a", encoding="utf-8") as f:
+                f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')} {line}\n")
+        except (OSError, subprocess.SubprocessError):
+            print("source service: the stop marker could not be written", file=sys.stderr, flush=True)
 
     def _put(self, rel: str, data: bytes, mode: int) -> None:
         """The file `rel` replaced by `data` whole: a sibling made with O_EXCL through the folder's descriptor, written and
@@ -376,30 +382,19 @@ class Service:
             return "the repository cannot be read"
         return None
 
+    MARKER = "sheaf-source-stopped"
+
     def _unclean(self) -> str | None:
-        """Why the service does not start, beyond `_busy`: an index lock, or changes in the folder that are not committed. The
-        service is the folder's only owner; what a stopped one left behind is for its owner to repair."""
+        """Why the service does not start, beyond `_busy`: a marker left by a fail-stop, an index lock, or a `git status` that fails.
+        The marker is in the git dir, so it is never listed or served; the operator removes it after the repair by hand."""
         try:
             gdir = self._git("rev-parse", "--absolute-git-dir").stdout.strip()
+            if os.path.lexists(os.path.join(gdir, self.MARKER)):
+                return f"a fail-stop left {os.path.join(gdir, self.MARKER)}; remove it after the repair"
             if os.path.lexists(os.path.join(gdir, "index.lock")):
                 return "an index.lock exists"
-            got = self._git("status", "--porcelain=v1", "-z", "--ignored", "--untracked-files=all", "--", ".")
-            if got.returncode != 0:
+            if self._git("status", "--porcelain", "--", ".").returncode != 0:
                 return "git status failed"
-            prefix = self._git("rev-parse", "--show-prefix").stdout.strip()     # status paths are from the repository's top
-            entries = got.stdout.split("\0")
-            i = 0
-            while i < len(entries) and len(entries[i]) > 3:
-                code, path = entries[i][:2], entries[i][3:]
-                paths = [path]
-                if "R" in code or "C" in code:                  # a rename or copy: the next entry is the other path, with no code
-                    i += 1
-                    paths.append(entries[i] if i < len(entries) else "")
-                i += 1
-                for one in paths:
-                    rel = one[len(prefix):] if prefix and one.startswith(prefix) else one
-                    if self.served(rel):
-                        return f"{rel} is a document that differs from what is committed (or is ignored)"
         except (OSError, subprocess.SubprocessError):
             return "the repository cannot be read"
         return None

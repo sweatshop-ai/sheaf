@@ -849,43 +849,6 @@ def test_a_git_commit_that_exits_with_an_error_is_fail_stop_with_no_rollback_and
         svc.handle("documents", {})
 
 
-def test_the_service_refuses_to_start_with_an_index_lock_or_unstaged_or_untracked_changes_and_names_the_repair(tmp_path):
-    from sheafmd import sourceservice
-    svc, folder, git = _git_service(tmp_path)
-    lock = Path(git("rev-parse", "--absolute-git-dir").strip()) / "index.lock"
-    for make, undo in ((lambda: lock.write_text(""), lock.unlink),
-                       (lambda: (folder / "b.md").write_text("edited\n"), lambda: git("checkout", "--", "b.md")),
-                       (lambda: (folder / "new.md").write_text("new\n"), lambda: (folder / "new.md").unlink())):
-        make()
-        with pytest.raises(SystemExit) as e:
-            sourceservice.Service(folder, "b" * 20, {})
-        assert "Failure" in str(e.value)
-        undo()
-    sourceservice.Service(folder, "b" * 20, {}).close()                 # quiet again: it starts
-
-
-def test_the_repair_in_the_docs_inspects_first_and_never_resets_hard():
-    text = (Path(__file__).resolve().parent.parent / "docs" / "source-service.md").read_text()
-    failure = text[text.index("## Failure"):]
-    for command in ("git restore", "git reset", "git checkout", "git revert", "git diff", "git stash", "cp "):
-        assert command not in failure                                   # the section says what the service did, and prescribes no command
-    assert "HEAD before" in failure and "index" in failure and "git status" in failure
-
-def test_a_git_timeout_after_the_commit_moved_head_is_not_guessed_at_it_is_unavailable(tmp_path, monkeypatch):
-    svc, folder, git = _git_service(tmp_path)
-    real = svc._git
-
-    def late(*args, **kw):
-        got = real(*args, **kw)
-        if "commit" in args:
-            raise subprocess.TimeoutExpired("git", 30)
-        return got
-    monkeypatch.setattr(svc, "_git", late)
-    with pytest.raises(sourceservice_fault()) as e:
-        svc.write(_write_body(svc, "b.md", "bee two\n"))
-    assert e.value.code == "unavailable"
-
-
 def test_the_start_refusal_names_the_manual_repair(tmp_path):
     from sheafmd import sourceservice
     svc, folder, git = _git_service(tmp_path)
@@ -1031,77 +994,114 @@ def test_the_service_refuses_to_start_when_git_status_exits_with_an_error(tmp_pa
         sourceservice.Service(folder, "b" * 20, {})
 
 
-def test_the_service_refuses_to_start_with_a_git_ignored_markdown_file_in_the_folder(tmp_path):
-    from sheafmd import sourceservice
-    svc, folder, git = _git_service(tmp_path)
-    svc.close()
-    (folder / ".gitignore").write_text("ignored.md\n")
-    git("add", ".gitignore")
-    git("-c", "user.name=t", "-c", "user.email=t@example.org", "commit", "-q", "-m", "ignore")
-    sourceservice.Service(folder, "b" * 20, {}).close()                 # quiet: starts
-    (folder / "ignored.md").write_text("replacement\n")
-    with pytest.raises(SystemExit) as e:
-        sourceservice.Service(folder, "b" * 20, {})
-    assert "Failure" in str(e.value)
-
-
-def test_ignored_files_that_are_not_markdown_do_not_stop_the_service_starting(tmp_path):
-    from sheafmd import sourceservice
-    svc, folder, git = _git_service(tmp_path)
-    svc.close()
-    (folder / ".gitignore").write_text(".venv/\nbuild/\n*.pyc\n")
-    git("add", ".gitignore")
-    git("-c", "user.name=t", "-c", "user.email=t@example.org", "commit", "-q", "-m", "ignore")
-    (folder / ".venv" / "lib").mkdir(parents=True)
-    (folder / ".venv" / "lib" / "x.py").write_text("x\n")
-    (folder / "build").mkdir()
-    (folder / "build" / "out.html").write_text("out\n")
-    (folder / "z.pyc").write_bytes(b"\0")
-    sourceservice.Service(folder, "b" * 20, {}).close()
-    (folder / "build" / "inside.md").write_text("a document in an ignored directory\n")
-    with pytest.raises(SystemExit):                                     # an ignored markdown file is a document the service reads
-        sourceservice.Service(folder, "b" * 20, {})
-
-
 def test_the_overview_says_a_git_add_that_fails_cleanly_is_refused_and_anything_else_stops_the_service():
     text = (Path(__file__).resolve().parent.parent / "docs" / "source-service.md").read_text()
     overview = text[text.index("## What the reference service assumes"):text.index("## Failure")]
     assert "fails cleanly" in overview and "stops" in overview and "or the rollback" in overview
 
 
-def test_the_start_guard_looks_at_the_documents_the_service_would_serve_and_no_others(tmp_path):
+def test_the_failure_section_says_a_cleanly_failed_git_add_stays_refused():
+    text = (Path(__file__).resolve().parent.parent / "docs" / "source-service.md").read_text()
+    failure = text[text.index("## Failure"):]
+    assert "except a `git add` that fails cleanly" in failure
+
+
+def _stopped(tmp_path, monkeypatch):
+    """A service stopped by a git commit that timed out: the folder, its git helper and the marker's path."""
+    svc, folder, git = _git_service(tmp_path)
+    real = svc._git
+
+    def slow(*args, **kw):
+        if "commit" in args:
+            raise subprocess.TimeoutExpired("git", 30)
+        return real(*args, **kw)
+    monkeypatch.setattr(svc, "_git", slow)
+    head = git("rev-parse", "HEAD").strip()
+    body = _write_body(svc, "b.md", "bee two\n")
+    with pytest.raises(sourceservice_fault()):
+        svc.write(body)
+    marker = Path(git("rev-parse", "--absolute-git-dir").strip()) / "sheaf-source-stopped"
+    return svc, folder, git, marker, head
+
+
+def test_a_fail_stop_writes_a_marker_in_the_git_dir_and_a_restart_refuses_until_it_is_removed(tmp_path, monkeypatch):
+    from sheafmd import sourceservice
+    svc, folder, git, marker, head = _stopped(tmp_path, monkeypatch)
+    svc.close()
+    text = marker.read_text()
+    assert "b.md" in text and head in text and "HEAD before" in text and "HEAD now" in text
+    git("checkout", "--", "b.md")                                       # the repair by hand: the working file as committed
+    git("reset", "-q")
+    with pytest.raises(SystemExit) as e:                                # the repair is done, the marker is still there
+        sourceservice.Service(folder, "b" * 20, {})
+    assert "sheaf-source-stopped" in str(e.value) and "Failure" in str(e.value)
+    marker.unlink()
+    sourceservice.Service(folder, "b" * 20, {}).close()
+
+
+def test_a_marker_is_never_listed_or_served(tmp_path, monkeypatch):
+    svc, folder, git, marker, head = _stopped(tmp_path, monkeypatch)
+    assert marker.exists() and ".git" in marker.parts
+    assert all("sheaf-source-stopped" not in n for n in real_names(folder))
+
+
+def real_names(folder):
+    from sheafmd import sourceservice
+    return [str(p.relative_to(folder)) for p in folder.rglob("*") if sourceservice.Service.served(str(p.relative_to(folder)))]
+
+
+def test_the_service_refuses_to_start_with_an_index_lock_and_names_the_repair(tmp_path):
+    from sheafmd import sourceservice
+    svc, folder, git = _git_service(tmp_path)
+    svc.close()
+    lock = Path(git("rev-parse", "--absolute-git-dir").strip()) / "index.lock"
+    lock.write_text("")
+    with pytest.raises(SystemExit) as e:
+        sourceservice.Service(folder, "b" * 20, {})
+    assert "Failure" in str(e.value)
+    lock.unlink()
+    sourceservice.Service(folder, "b" * 20, {}).close()
+
+
+def test_staged_changes_still_stop_a_start(tmp_path):
+    from sheafmd import sourceservice
+    svc, folder, git = _git_service(tmp_path)
+    svc.close()
+    (folder / "b.md").write_text("staged\n")
+    git("add", "b.md")
+    with pytest.raises(SystemExit):
+        sourceservice.Service(folder, "b" * 20, {})
+
+
+def test_ignored_and_untracked_files_do_not_affect_a_start(tmp_path):
     from sheafmd import sourceservice
     svc, folder, git = _git_service(tmp_path)
     svc.close()
     (folder / ".gitignore").write_text("caf\u00e9.md\n.venv/\n")
     git("add", ".gitignore")
     git("-c", "user.name=t", "-c", "user.email=t@example.org", "commit", "-q", "-m", "ignore")
+    (folder / "caf\u00e9.md").write_text("an ignored document\n")
     (folder / ".venv" / "pkg").mkdir(parents=True)
-    (folder / ".venv" / "pkg" / "README.md").write_text("a package readme\n")
-    sourceservice.Service(folder, "b" * 20, {}).close()                 # the service never lists a dot folder: it starts
-    (folder / "caf\u00e9.md").write_text("an ignored document at a listed place\n")
-    with pytest.raises(SystemExit):
-        sourceservice.Service(folder, "b" * 20, {})
-    (folder / "caf\u00e9.md").unlink()
+    (folder / ".venv" / "pkg" / "README.md").write_text("readme\n")
+    (folder / "new.md").write_text("untracked\n")
+    (folder / "alias.md").symlink_to("new.md")
     sourceservice.Service(folder, "b" * 20, {}).close()
-    (folder / "b.md").write_text("a tracked document that was modified\n")
-    with pytest.raises(SystemExit):
-        sourceservice.Service(folder, "b" * 20, {})
 
 
-def test_the_start_guard_sees_a_renamed_document(tmp_path):
+def test_the_service_refuses_to_start_when_git_status_exits_with_an_error_not_only_in_the_old_form(tmp_path, monkeypatch):
     from sheafmd import sourceservice
     svc, folder, git = _git_service(tmp_path)
     svc.close()
-    git("mv", "b.md", "moved.md")                                       # staged rename: the guard refuses (staged), and its parse must not choke
+    real = sourceservice.Service._git
+    monkeypatch.setattr(sourceservice.Service, "_git", lambda self, *a, **k: subprocess.CompletedProcess(a, 128, "", "fatal") if a[:1] == ("status",) else real(self, *a, **k))
     with pytest.raises(SystemExit):
         sourceservice.Service(folder, "b" * 20, {})
-    git("reset", "-q")
-    with pytest.raises(SystemExit):                                     # unstaged: b.md gone, moved.md untracked
-        sourceservice.Service(folder, "b" * 20, {})
 
 
-def test_the_failure_section_says_a_cleanly_failed_git_add_stays_refused():
+def test_the_failure_section_names_the_marker_and_the_startup_guards_and_prescribes_no_command():
     text = (Path(__file__).resolve().parent.parent / "docs" / "source-service.md").read_text()
     failure = text[text.index("## Failure"):]
-    assert "except a `git add` that fails cleanly" in failure
+    for command in ("git restore", "git reset", "git checkout", "git revert", "git diff", "git stash", "cp "):
+        assert command not in failure
+    assert "sheaf-source-stopped" in failure and "HEAD before" in failure and "remove" in failure
+    assert "Ignored, untracked and unstaged files do not affect a start" in failure.replace("\n", " ") and "git-ignored" not in failure

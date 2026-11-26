@@ -89,7 +89,11 @@ write, HEAD now and the path.
 
 
 
-Do not restart it. Inspect the repository with Git, starting from `git status` and the logged HEADs, and repair it by hand, keeping any
-operator edits in both the working file and the index. Restart once `git status` is clean. The service refuses to start while an index lock exists, a
-merge, rebase, cherry-pick or revert is in progress, anything is staged, a tracked or untracked file differs, an ignored Markdown file is
-present, `git status` fails, or a `.git` exists that Git cannot read; the refusal names this section.
+Do not restart it. The stop is also written to a marker, `<git-dir>/sheaf-source-stopped`, with the time, the path, HEAD before and HEAD now. It
+lies inside the git dir, so it is never listed or served, and the service does not start while it exists. Inspect the repository with
+Git, starting from `git status` and the logged HEADs, and repair it by hand, keeping any operator edits in both the working file and the
+index. Then remove the marker and restart.
+
+At startup the service refuses only in these cases: the marker exists; an index lock exists; a merge, rebase, cherry-pick, revert or
+sequencer operation is in progress; changes are staged; `git status` exits with an error; or a `.git` exists that Git cannot read.
+Ignored, untracked and unstaged files do not affect a start. The refusal names this section.

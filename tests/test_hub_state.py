@@ -561,3 +561,83 @@ def test_a_pins_time_stays_out_of_git_so_two_clones_pinning_one_version_never_co
     assert any(p.endswith(f"pins/{h}.md") for p in listed)
     assert not [p for p in listed if p.endswith(".at") or p.endswith(".gitignore")]
     assert v.get("r/plan.md", h) == "pinned\n"
+
+
+def _untracked(root):
+    return subprocess.run(["git", "-C", str(root), "ls-files", "--others", "--exclude-standard", "--", str(state.INSIDE)],
+                          capture_output=True, text=True, check=True).stdout.split()
+
+
+@pytest.mark.parametrize("plant", ["other lines", "a link", "a re-include below"])
+def test_a_pins_time_stays_out_of_git_whatever_gitignore_the_store_was_given(tmp_path, plant):
+    """Ticket 203 A (Codex on #659): the store's `.gitignore` is the hub's only when it holds the hub's lines as a file of
+    its own; a link (git does not read one), other lines, or a `.gitignore` lower in the store that says `!*.at` would let
+    git commit this clone's pin times."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    v = state.Versions(tmp_path, "r")
+    v.pin("r/plan.md", "first\n")
+    ignore = v.dir / ".gitignore"
+    if plant == "other lines":
+        ignore.write_text("*.tmp\n")
+    elif plant == "a link":
+        (tmp_path / "kept").write_text(ignore.read_text())             # the right lines, behind a link git does not follow
+        ignore.unlink()
+        ignore.symlink_to(tmp_path / "kept")
+    else:
+        pins = next(v.dir.rglob("pins"))
+        (pins / ".gitignore").write_text("!*.at\n")
+        (pins.parent / ".gitignore").write_text("!*.at\n")
+    v.pin("r/plan.md", "second\n")
+    assert not [p for p in _untracked(tmp_path) if p.endswith(".at")]
+
+
+def test_the_trim_of_a_roots_own_store_leaves_the_pins_another_clone_made(tmp_path):
+    """Ticket 203 B (Codex on #659): a pin pulled from another clone has no time here. Ranked at 0 it was trimmed first, and
+    its deletion, committed, took a merge base away from the clone whose page holds it. The trim counts only this hub's pins."""
+    v = state.Versions(tmp_path, "r")
+    v.pin("r/plan.md", "mine\n")
+    pins = next(v.dir.rglob("pins"))
+    theirs = [f"theirs {n}\n" for n in range(state.PINS_KEPT)]
+    for text in theirs:
+        (pins / f"{md_hash(text)}.md").write_text(text)                # what a pull writes: the pin, never its time
+    for n in range(state.PINS_KEPT + 3):
+        v.pin("r/plan.md", f"mine {n}\n")
+    assert all((pins / f"{md_hash(t)}.md").is_file() for t in theirs)
+    mine = [p for p in pins.glob("*.md") if p.with_suffix(state.PINNED_AT).is_file()]
+    assert len(mine) == state.PINS_KEPT                                   # this hub's own pins are still trimmed
+
+
+def test_a_pin_two_clones_share_keeps_its_text_when_this_clones_trim_drops_it(tmp_path):
+    """Ticket 203, Codex round 13 on #687: a pin text git carries may be pinned by another clone too. Once this clone pins
+    the same version, its trim used to delete the text, and the committed deletion took the other clone's merge base away.
+    In a root's own store the trim takes away this hub's time of a pin only, never its text."""
+    v = state.Versions(tmp_path, "r")
+    v.pin("r/plan.md", "mine\n")
+    pins = next(v.dir.rglob("pins"))
+    shared = "shared\n"
+    (pins / f"{md_hash(shared)}.md").write_text(shared)                     # pulled from the clone that pinned it
+    v.pin("r/plan.md", shared)                                              # this clone pins it too
+    for n in range(state.PINS_KEPT + 3):
+        v.pin("r/plan.md", f"mine {n}\n")
+    assert (pins / f"{md_hash(shared)}.md").read_text() == shared
+    assert not (pins / f"{md_hash(shared)}{state.PINNED_AT}").exists()     # no longer this hub's pin
+    assert v.get("r/plan.md", md_hash(shared)) is None
+    first = md_hash("mine\n")
+    assert (pins / f"{first}.md").is_file()                     # this hub's own old pins keep their text too
+    mine = [p for p in pins.glob("*.md") if p.with_suffix(state.PINNED_AT).is_file()]
+    assert len(mine) == state.PINS_KEPT
+
+
+@pytest.mark.parametrize("rel, clock", [
+    (".sheaf/versions/0123456789abcdef/pins/0123456789abcdef.at", True),
+    (".sheaf/versions/0123456789abcdef/pins/m-fedcba9876543210/0123456789abcdef.at", True),
+    (".sheaf/versions/0123456789abcdef/pins/notes.at", False),
+    (".sheaf/versions/0123456789abcdef/0123456789abcdef.at", False),
+    (".sheaf/versions/0123456789abcdef/pins/m-x/0123456789abcdef.at", False),
+    (".sheaf/versions/0123456789ABCDEF/pins/0123456789abcdef.at", False),
+    ("docs/.sheaf/versions/0123456789abcdef/pins/0123456789abcdef.at", False),
+    (".sheaf/versions/a.at", False),
+])
+def test_only_a_hash_named_time_in_a_pins_folder_is_a_pin_time(rel, clock):
+    """Ticket 203, Codex round 13 on #687: the cleanup of pin times treated any tracked `*.at` as one."""
+    assert state.is_pin_time(rel) is clock

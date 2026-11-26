@@ -2251,3 +2251,336 @@ def test_a_door_write_never_lands_in_a_root_that_took_the_name_after_its_root_id
     assert other.read_text(encoding="utf-8") == before, got
     assert git(other.parents[2], "rev-parse", "HEAD") == head
     assert is_error, got
+
+
+def test_a_pin_time_git_already_holds_is_taken_out_of_it_with_the_next_commit_of_the_versions(tmp_path):
+    """Ticket 203 C (Codex on #687): a `.gitignore` hides only what git does not track. A pin time a repo took in before
+    the store kept it out (an older hub, a `.gitignore` that let it in) would go on being committed, each clone's own; the
+    next commit of the store's versions takes it out of git, and the file stays on disk for this hub."""
+    from sheafmd.hub import commits, state
+    from sheafmd.hub.roots import Root
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    git(repo, "config", "user.name", "the box")
+    git(repo, "config", "user.email", "box@example.com")
+    (repo / ".sheaf.toml").write_text('commit = true\nversions = "root"\n', encoding="utf-8")
+    (repo / "plan.md").write_text("# plan\n", encoding="utf-8")
+    v = state.Versions(repo, "r")
+    h = v.pin("r/plan.md", "# plan\n")
+    at = next(repo.rglob(f"pins/{h}.at"))
+    assert at.relative_to(repo).parts[:3] == (*state.INSIDE.parts, state.doc_key("plan.md"))
+    git(repo, "add", "-A")
+    git(repo, "add", "-f", str(at.relative_to(repo)))                  # what the old bug let in
+    git(repo, "commit", "-q", "-m", "first")
+    v.pin("r/plan.md", "# plan\n")                                      # a new time: a tracked file, changed
+    (repo / "plan.md").write_text("# plan, edited\n", encoding="utf-8")
+    made = []
+    commits.Commits(lambda kind, doc, **detail: made.append((kind, doc, detail))).saved(
+        Root("r", repo, True), "plan.md", commits.Author("Bea", "bea@example.com"), "edit")
+    assert not [r for r in made if "failed" in r[0]], made
+    assert not [p for p in git(repo, "ls-files").split() if p.endswith(".at")]
+    assert at.is_file()
+    assert "plan.md" in git(repo, "show", "--name-only", "--format=", "HEAD")
+
+
+def test_a_sweep_with_only_pin_times_changed_takes_every_one_git_holds_out_of_it_and_owes_the_push(tmp_path):
+    """Ticket 203 C (Codex on #687, round 2): the sweep's only change a tracked pin time, and another one git holds that
+    did not change, in another document's folder: both leave git in the hub's commit, the index stays without them,
+    and the commit is owed a push like any of the sweep's."""
+    from sheafmd.hub import commits, state
+    from sheafmd.hub.roots import Root
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    (repo / ".sheaf.toml").write_text('commit = true\npush = true\nversions = "root"\n', encoding="utf-8")
+    v = state.Versions(repo, "r")
+    times = []
+    for name in ("plan.md", "notes.md"):
+        (repo / name).write_text(f"# {name}\n", encoding="utf-8")
+        h = v.pin(f"r/{name}", f"# {name}\n")
+        times.append(next(repo.rglob(f"pins/{h}.at")))
+    git(repo, "add", "-A")
+    git(repo, "add", "-f", *[str(t.relative_to(repo)) for t in times])          # what the old bug let in
+    git(repo, "-c", "user.name=a", "-c", "user.email=a@example.com", "commit", "-q", "-m", "first")
+    times[0].write_text(str(time.time_ns()))                                   # a new time, and nothing else
+    made = []
+    hub = commits.Commits(lambda kind, doc, **detail: made.append((kind, doc, detail)), roots=lambda: [])
+    root = Root("r", repo, True)
+    hub._sweep(root, commits._repo(repo))
+    assert not [r for r in made if "failed" in r[0]], made
+    assert not [p for p in git(repo, "ls-files").split() if p.endswith(state.PINNED_AT)]
+    assert not [p for p in git(repo, "ls-tree", "-r", "--name-only", "HEAD").split() if p.endswith(state.PINNED_AT)]
+    assert "versions: pin times out of git" in git(repo, "log", "--format=%s")
+    assert all(t.is_file() for t in times)
+    assert hub._owed
+
+
+@pytest.mark.parametrize("store", ["no-gitignore", "re-include-elsewhere"])
+@pytest.mark.parametrize("via", ["write", "sweep"])
+def test_pin_times_taken_out_of_git_stay_out_when_this_hub_never_wrote_the_stores_gitignore(tmp_path, store, via):
+    """Ticket 203 C (fallback review of #687, round 8): a clone of a repo whose pin times were committed has no store
+    `.gitignore` until it pins (the file ignores itself), and a `.gitignore` in another document's folder may say
+    `!*.at`. The times taken out of git must not be staged again by the same commit or sweep, nor by the next sweep."""
+    from sheafmd.hub import commits, state
+    from sheafmd.hub.roots import Root
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    (repo / ".sheaf.toml").write_text('commit = true\nversions = "root"\n', encoding="utf-8")
+    v = state.Versions(repo, "r")
+    times = []
+    for name in ("plan.md", "notes.md"):
+        (repo / name).write_text(f"# {name}\n", encoding="utf-8")
+        h = v.pin(f"r/{name}", f"# {name}\n")
+        times.append(next(repo.rglob(f"pins/{h}.at")))
+    git(repo, "add", "-A")
+    git(repo, "add", "-f", *[str(t.relative_to(repo)) for t in times])          # what the old bug let in
+    git(repo, "-c", "user.name=a", "-c", "user.email=a@example.com", "commit", "-q", "-m", "first")
+    store_dir = repo / state.INSIDE
+    if store == "no-gitignore":
+        (store_dir / ".gitignore").unlink()                                   # a fresh clone: git never carried it
+    else:
+        (times[1].parent / ".gitignore").write_text("!*.at\n", encoding="utf-8")
+    made = []
+    hub = commits.Commits(lambda kind, doc, **detail: made.append((kind, doc, detail)), roots=lambda: [])
+    root = Root("r", repo, True)
+    if via == "write":
+        (repo / "plan.md").write_text("# plan, edited\n", encoding="utf-8")
+        hub.saved(root, "plan.md", commits.Author("Bea", "bea@example.com"), "edit")
+    else:
+        hub._sweep(root, commits._repo(repo))
+    hub._sweep(root, commits._repo(repo))
+    assert not [r for r in made if "failed" in r[0]], made
+    assert not [p for p in git(repo, "ls-files").split() if p.endswith(state.PINNED_AT)]
+    assert not [p for p in git(repo, "ls-tree", "-r", "--name-only", "HEAD").split() if p.endswith(state.PINNED_AT)]
+    assert git(repo, "log", "--format=%s").count("versions: pin times out of git") == 1
+    assert all(t.is_file() for t in times)
+
+
+@pytest.mark.parametrize("target", ["outside", "inside"])
+def test_a_sheaf_folder_that_is_a_link_has_no_gitignore_written_or_removed_through_it(tmp_path, target):
+    """Ticket 203 C (fallback review of #687, round 9), SPEC 7.4: `.sheaf` is never a link. A pulled repo whose `.sheaf`
+    links out of the root, or to a folder of the root, has no `.gitignore` written or removed through it by a write's
+    commit or a sweep, and no pin time behind it is committed."""
+    from sheafmd.hub import commits, state
+    from sheafmd.hub.roots import Root
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    (repo / ".sheaf.toml").write_text('commit = true\nversions = "root"\n', encoding="utf-8")
+    (repo / "plan.md").write_text("# plan\n", encoding="utf-8")
+    there = tmp_path / "elsewhere" if target == "outside" else repo / "docs"
+    (there / "versions" / "deep").mkdir(parents=True)
+    (there / "versions" / ".gitignore").write_text("build/\n", encoding="utf-8")
+    (there / "versions" / "deep" / ".gitignore").write_text("*.log\n", encoding="utf-8")
+    (repo / ".sheaf").symlink_to(there if target == "outside" else "docs")
+    git(repo, "add", "-A")
+    git(repo, "-c", "user.name=a", "-c", "user.email=a@example.com", "commit", "-q", "-m", "first")
+    hub = commits.Commits(lambda kind, doc, **detail: None, roots=lambda: [])
+    root = Root("r", repo, True)
+    (repo / "plan.md").write_text("# plan, edited\n", encoding="utf-8")
+    hub.saved(root, "plan.md", commits.Author("Bea", "bea@example.com"), "edit")
+    hub._sweep(root, commits._repo(repo))
+    assert (there / "versions" / ".gitignore").read_text(encoding="utf-8") == "build/\n"
+    assert (there / "versions" / "deep" / ".gitignore").read_text(encoding="utf-8") == "*.log\n"
+    assert "plan.md" in git(repo, "show", "--name-only", "--format=", "HEAD")
+
+
+@pytest.mark.parametrize("via", ["write", "sweep"])
+def test_a_store_of_another_account_has_its_versions_committed_and_never_a_pin_time(tmp_path, monkeypatch, via):
+    """Ticket 203 C (fallback review of #687, round 10; design after round 13): in a clone shared with a group, `.sheaf`
+    may be another member's folder. The cleanup touches no file there, and the hub's commit keeps every pin time out
+    whatever the ignore files say: the store's versions are committed, its pin times never."""
+    from sheafmd.hub import commits, state
+    from sheafmd.hub.roots import Root
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    (repo / ".sheaf.toml").write_text('commit = true\nversions = "root"\n', encoding="utf-8")
+    (repo / "plan.md").write_text("# plan\n", encoding="utf-8")
+    pins = repo / state.INSIDE / state.doc_key("plan.md") / "pins"
+    pins.mkdir(parents=True)
+    (pins / ("a" * 16 + ".md")).write_text("# plan\n", encoding="utf-8")
+    (pins / ("a" * 16 + state.PINNED_AT)).write_text("1", encoding="utf-8")
+    git(repo, "add", "plan.md", ".sheaf.toml")
+    git(repo, "-c", "user.name=a", "-c", "user.email=a@example.com", "commit", "-q", "-m", "first")
+    mine, lstat = os.getuid(), os.lstat
+    foreign = {repo / ".sheaf"}
+
+    def lstat_of(p, *a, **k):
+        st = lstat(p, *a, **k)
+        if Path(p) in foreign:
+            return os.stat_result((st.st_mode, st.st_ino, st.st_dev, st.st_nlink, mine + 1, *tuple(st)[5:]))
+        return st
+    monkeypatch.setattr(state.os, "lstat", lstat_of)
+    hub = commits.Commits(lambda kind, doc, **detail: None, roots=lambda: [])
+    root = Root("r", repo, True)
+    if via == "write":
+        (repo / "plan.md").write_text("# plan, edited\n", encoding="utf-8")
+        hub.saved(root, "plan.md", commits.Author("Bea", "bea@example.com"), "edit")
+        shown = git(repo, "show", "--name-only", "--format=", "HEAD").split()
+        assert "plan.md" in shown and any(p.startswith(".sheaf/versions/") and p.endswith(".md") for p in shown)
+    else:
+        hub._sweep(root, commits._repo(repo))
+    assert not [p for p in git(repo, "ls-files").split() if p.endswith(state.PINNED_AT)]
+    assert not [p for p in git(repo, "ls-tree", "-r", "--name-only", "HEAD").split() if p.endswith(state.PINNED_AT)]
+
+
+@pytest.mark.parametrize("step", ["commit-tree", "update-index"])
+def test_a_pin_time_that_cannot_leave_git_keeps_the_versions_out_of_the_writes_commit(tmp_path, monkeypatch, step):
+    """Ticket 203 C (Codex on #687, rounds 3 and 4): git refuses a step of taking a tracked pin time out. The write's
+    document is committed alone, never its versions folder; the new time reaches git neither way."""
+    from sheafmd.hub import commits, state
+    from sheafmd.hub.roots import Root
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    git(repo, "config", "user.name", "the box")
+    git(repo, "config", "user.email", "box@example.com")
+    (repo / ".sheaf.toml").write_text('commit = true\nversions = "root"\n', encoding="utf-8")
+    (repo / "plan.md").write_text("# plan\n", encoding="utf-8")
+    v = state.Versions(repo, "r")
+    h = v.pin("r/plan.md", "# plan\n")
+    at = next(repo.rglob(f"pins/{h}.at"))
+    git(repo, "add", "-A")
+    git(repo, "add", "-f", str(at.relative_to(repo)))
+    git(repo, "commit", "-q", "-m", "first")
+    at.write_text(str(time.time_ns()))
+    (repo / "plan.md").write_text("# plan, edited\n", encoding="utf-8")
+    real = commits._git
+    def refusing(folder, *args, **kw):
+        if step in args and (step != "update-index" or "index" not in kw or not kw["index"]):
+            return subprocess.CompletedProcess(args, 1, "", "refused")
+        return real(folder, *args, **kw)
+    monkeypatch.setattr(commits, "_git", refusing)
+    made = []
+    commits.Commits(lambda kind, doc, **detail: made.append(kind)).saved(
+        Root("r", repo, True), "plan.md", commits.Author("Bea", "bea@example.com"), "edit")
+    assert "commit-failed" in made
+    assert git(repo, "show", "--name-only", "--format=", "HEAD").split() == ["plan.md"]
+    rel = str(at.relative_to(repo))
+    assert git(repo, "show", f"HEAD:{rel}").strip() != at.read_text()            # the new time never reaches git
+    staged = git(repo, "diff", "--cached", "--name-status").split()
+    # The index refused: as it was. HEAD refused: the index already lets the time go, with whatever commit comes next.
+    assert staged == ([] if step == "update-index" else ["D", rel])
+
+
+def test_a_commit_that_took_pin_times_out_of_git_is_owed_its_push_when_the_writes_commit_fails(tmp_path, monkeypatch):
+    """Ticket 203 C (Codex on #687, round 4): the hub's commit taking pin times out of git is made, then the write's own
+    commit raises (a git on its time bound). The first is still pushed, or the remote keeps the times."""
+    from sheafmd.hub import commits, state
+    from sheafmd.hub.roots import Root
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    git(repo, "config", "user.name", "the box")
+    git(repo, "config", "user.email", "box@example.com")
+    (repo / ".sheaf.toml").write_text('commit = true\npush = true\nversions = "root"\n', encoding="utf-8")
+    (repo / "plan.md").write_text("# plan\n", encoding="utf-8")
+    v = state.Versions(repo, "r")
+    h = v.pin("r/plan.md", "# plan\n")
+    at = next(repo.rglob(f"pins/{h}.at"))
+    git(repo, "add", "-A")
+    git(repo, "add", "-f", str(at.relative_to(repo)))
+    git(repo, "commit", "-q", "-m", "first")
+    hub = commits.Commits(lambda kind, doc, **detail: None)
+    def timed_out(*args, **kw):
+        raise subprocess.TimeoutExpired("git", 1)
+    pushed = []
+    monkeypatch.setattr(hub, "_commit", timed_out)
+    monkeypatch.setattr(hub, "_push_later", lambda *args: pushed.append(args))
+    hub.saved(Root("r", repo, True), "plan.md", commits.Author("Bea", "bea@example.com"), "edit")
+    assert git(repo, "log", "-1", "--format=%s").strip() == "versions: pin times out of git"
+    assert pushed
+
+
+def _repo_with_committed_clock(tmp_path):
+    """A repo whose `.sheaf/versions` holds a pin time git took in (what the old bug let in): (repo, the time's file)."""
+    from sheafmd.hub import state
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    git(repo, "config", "user.name", "the box")
+    git(repo, "config", "user.email", "box@example.com")
+    (repo / ".sheaf.toml").write_text('commit = true\nversions = "root"\n', encoding="utf-8")
+    (repo / "plan.md").write_text("# plan\n", encoding="utf-8")
+    v = state.Versions(repo, "r")
+    h = v.pin("r/plan.md", "# plan\n")
+    at = next(repo.rglob(f"pins/{h}.at"))
+    git(repo, "add", "-A")
+    git(repo, "add", "-f", str(at.relative_to(repo)))
+    git(repo, "commit", "-q", "-m", "first")
+    return repo, at
+
+
+def test_a_tracked_file_ending_in_at_that_is_no_pin_time_stays_in_git(tmp_path):
+    """Ticket 203, Codex round 13 on #687: only `<16 hex>.at` in a pins folder is a pin time. Other `.at` files of the
+    store are files of the root, which the hub never takes out of git."""
+    from sheafmd.hub import commits, state
+    from sheafmd.hub.roots import Root
+    repo, at = _repo_with_committed_clock(tmp_path)
+    others = [at.parent / "notes.at", at.parent.parent / f"{'b' * 16}.at", repo / state.INSIDE / "a.at"]
+    for f in others:
+        f.write_text("kept\n", encoding="utf-8")
+    git(repo, "add", "-f", *[str(f.relative_to(repo)) for f in others])
+    git(repo, "commit", "-q", "-m", "others")
+    made = []
+    hub = commits.Commits(lambda kind, doc, **detail: made.append((kind, doc, detail)), roots=lambda: [])
+    hub._sweep(Root("r", repo, True), commits._repo(repo))
+    assert not [r for r in made if "failed" in r[0]], made
+    in_head = git(repo, "ls-tree", "-r", "--name-only", "HEAD").split()
+    assert str(at.relative_to(repo)) not in in_head
+    assert all(str(f.relative_to(repo)) in in_head for f in others)
+    assert all(str(f.relative_to(repo)) in git(repo, "ls-files").split() for f in others)
+
+
+def test_a_git_killed_while_taking_pin_times_out_of_head_never_blocks_the_next_cleanup(tmp_path, monkeypatch):
+    """Ticket 203, Codex round 13 on #687: a git killed on its bound in the HEAD step left the lock of the hub's own index
+    behind, at a name every later run used, so every later cleanup failed on it. The next run must go through."""
+    from sheafmd.hub import commits
+    from sheafmd.hub.roots import Root
+    repo, at = _repo_with_committed_clock(tmp_path)
+    real = commits._git
+
+    def killed(folder, *args, **kw):
+        if kw.get("index") and args[:1] == ("read-tree",):
+            Path(str(kw["index"]) + ".lock").write_text("")                     # what a killed git leaves
+            raise subprocess.TimeoutExpired("git", 1)
+        return real(folder, *args, **kw)
+    monkeypatch.setattr(commits, "_git", killed)
+    hub = commits.Commits(lambda kind, doc, **detail: None, roots=lambda: [])
+    root = Root("r", repo, True)
+    hub._sweep(root, commits._repo(repo))
+    assert str(at.relative_to(repo)) in git(repo, "ls-tree", "-r", "--name-only", "HEAD").split()
+    monkeypatch.setattr(commits, "_git", real)
+    made = []
+    hub = commits.Commits(lambda kind, doc, **detail: made.append((kind, doc, detail)), roots=lambda: [])
+    hub._sweep(root, commits._repo(repo))
+    assert not [r for r in made if "failed" in r[0]], made
+    assert str(at.relative_to(repo)) not in git(repo, "ls-tree", "-r", "--name-only", "HEAD").split()
+    gitdir = Path(git(repo, "rev-parse", "--absolute-git-dir").strip())
+    assert not [p.name for p in gitdir.iterdir() if p.name.startswith("sheaf-untrack")]
+
+
+@pytest.mark.parametrize("via", ["write", "sweep"])
+def test_the_cleanup_of_pin_times_removes_no_file_of_the_store(tmp_path, via):
+    """Ticket 203, Codex round 13 on #687: the cleanup walked the store and unlinked every `.gitignore` below it, whoever
+    owned its folder. It changes git's index and HEAD only: every file stays, and no pin time reaches git all the same."""
+    from sheafmd.hub import commits, state
+    from sheafmd.hub.roots import Root
+    repo, at = _repo_with_committed_clock(tmp_path)
+    planted = [at.parent / ".gitignore", at.parent.parent / ".gitignore"]
+    for f in planted:
+        f.write_text("!*.at\n", encoding="utf-8")
+    at.write_text(str(time.time_ns()))
+    hub = commits.Commits(lambda kind, doc, **detail: None, roots=lambda: [])
+    root = Root("r", repo, True)
+    if via == "write":
+        (repo / "plan.md").write_text("# plan, edited\n", encoding="utf-8")
+        hub.saved(root, "plan.md", commits.Author("Bea", "bea@example.com"), "edit")
+    hub._sweep(root, commits._repo(repo))
+    assert all(f.read_text(encoding="utf-8") == "!*.at\n" for f in planted)
+    assert at.is_file()
+    assert not [p for p in git(repo, "ls-files").split() if p.endswith(state.PINNED_AT)]
+    assert not [p for p in git(repo, "ls-tree", "-r", "--name-only", "HEAD").split() if p.endswith(state.PINNED_AT)]

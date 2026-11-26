@@ -40,9 +40,11 @@ _ADDRESS_FILE = "address"       # in each versions folder: the address it is the
 _PINS_DIR = "pins"              # in each versions folder: the versions pages keep
 _MEMBER_PINS = "m-"             # in `pins/`: the prefix of a member's own folder (`member_key`)
 _PIN_CLOCK_AHEAD = 60           # seconds a pin time may lie ahead of this clock (another clone's)
-_PINNED_AT = ".at"              # in a root's own store, beside a pin `<hash>.md`: when it was last pinned, ns since the epoch
+PINNED_AT = _PINNED_AT = ".at"              # in a root's own store, beside a pin `<hash>.md`: when it was last pinned, ns since the epoch
 _LOCAL_ONLY = f"*{_PINNED_AT}\n.gitignore\n"   # `.gitignore` of a root's own store: each hub's pin times stay out of git
 INSIDE = Path(".sheaf") / "versions"    # a root's own versions store, inside it (7.4)
+_PIN_TIME_RE = re.compile(rf"{re.escape(INSIDE.as_posix())}/[0-9a-f]{{16}}/{_PINS_DIR}/({_MEMBER_PINS}[0-9a-f]{{16}}/)?"
+                           rf"[0-9a-f]{{16}}{re.escape(_PINNED_AT)}")
 
 
 def inside_dir(path: Path) -> Path:
@@ -103,9 +105,9 @@ def file_locked(name: str):
         f.close()
 
 
-def _drop(version: Path):
-    """The version file `version` gone, with the pin time beside it if it has one."""
-    for f in (version, version.with_suffix(_PINNED_AT)):
+def _drop(version: Path, text: bool = True):
+    """The version file `version` gone, with the pin time beside it if it has one; `text` False: the pin time alone."""
+    for f in ((version,) if text else ()) + (version.with_suffix(_PINNED_AT),):
         try:
             f.unlink()
         except OSError:
@@ -182,6 +184,12 @@ class _Claims:
     by_hash: dict = field(default_factory=dict)     # hash -> {writer, ...}; None is a writer that is no document
 
 
+def is_pin_time(rel: str) -> bool:
+    """Whether `rel`, a path relative to a root as git names it, is a pin time of the root's own store: `<hash>.at` in a
+    document folder's `pins/` or a member's folder in it (7.4). No other file is one, whatever its name ends in (ticket 203)."""
+    return _PIN_TIME_RE.fullmatch(rel) is not None
+
+
 class Versions:
     """Every text the hub handed a page, on disk, so a save against a page rendered before a
     restart still merges. `<state>/versions/<doc-key>/<hash>.md`, the newest 60 per document,
@@ -241,11 +249,12 @@ class Versions:
         """Write `text` under its hash in `folder` (or count it as written now), and keep the
         `newest` files there. Only a file named by a hash counts or is deleted here: anything else
         is not a version (`get` would not believe it) and takes no slot. A pin of a root's own store
-        has its time in a file beside it (`_pinned_at`)."""
+        has its time in a file beside it (`_pinned_at`); there the trim takes away only that time, never the text, which
+        git carries and another clone may pin too (ticket 203). Only the pins this hub timed count there."""
         h = md_hash(text)
-        if pinned and self._root is not None:      # first: a pin with no time is never believed
-            if not (self.dir / ".gitignore").is_file():
-                write_text_private(self.dir / ".gitignore", _LOCAL_ONLY, True)
+        timed = pinned and self._root is not None
+        if timed:                                   # first: a pin with no time is never believed
+            self._times_out_of_git(folder)
             write_text_private(folder / f"{h}{_PINNED_AT}", str(int(time.time() * 1e9)), True)
         f = folder / f"{h}.md"
         if f.is_file():
@@ -256,12 +265,31 @@ class Versions:
         for p in folder.glob("*.md"):
             if _HASH_RE.fullmatch(p.stem) and p.is_file():
                 try:
-                    files.append((self._pin_time(p) if pinned else p.stat().st_mtime_ns, p.name, p))
+                    at = self._pin_time(p) if pinned else p.stat().st_mtime_ns
                 except OSError:
-                    pass
+                    continue
+                if timed and not at:
+                    continue        # another clone's pin, pulled with no time here: theirs to trim, never this hub's (203 B)
+                files.append((at, p.name, p))
         for _, _, p in sorted(files)[:-newest]:
-            _drop(p)
+            _drop(p, text=not timed)    # timed: this hub's time only; git carries the text, another clone may pin it (203)
         return h
+
+    def _times_out_of_git(self, folder: Path):
+        """Keep the pin times of a root's own store out of git before one is written in `folder`: the store's `.gitignore`
+        is written again unless it is a file of its own holding the hub's lines (git reads no link, and other lines may
+        not ignore `*.at`), and a `.gitignore` in a folder of the store between it and `folder`, which could say `!*.at`,
+        goes (ticket 203 A). The store is the hub's: no other `.gitignore` belongs in it."""
+        if read_small(self.dir / ".gitignore") != _LOCAL_ONLY:
+            write_text_private(self.dir / ".gitignore", _LOCAL_ONLY, True)
+        d = folder
+        while d != self.dir and self.dir in d.parents:
+            try:
+                if not stat.S_ISDIR(os.lstat(d / ".gitignore").st_mode):    # a folder of that name is no ignore file
+                    os.unlink(d / ".gitignore")
+            except FileNotFoundError:
+                pass
+            d = d.parent
 
     def _pin_time(self, pin: Path) -> int:
         """When the pin `pin` was last pinned, in ns: its mtime in the state folder, the file beside it in a root's own

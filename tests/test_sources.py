@@ -10,6 +10,7 @@ from two_hubs import Site
 
 from sheafmd import config, paths
 from sheafmd import adapter as rda
+from sheafmd.hub.sources import State
 
 UID = "d1000000-0000-4000-8000-000000000001"
 BEARER = "a-bearer-of-sixteen-plus-chars"
@@ -191,7 +192,7 @@ def test_a_service_that_is_down_is_asked_again_and_serves_when_it_is_back(tmp_pa
     assert get(site, "/shop/home.md").status == 503
     with site.inside():
         site.hub.sources.get("shop").decl = config.SourceDecl("shop", url, hub_secret, None)
-        site.hub.sources.get("shop").checked = 0.0
+        site.hub.sources.get("shop").state = State()          # the retry delay has passed
     assert get(site, "/shop/home.md").status == 200
 
 
@@ -332,3 +333,94 @@ def test_no_second_probe_starts_while_one_is_out_and_the_old_probe_ends_what_it_
     t.join(5)
     assert srcs.get("shop").served and srcs.get("shop").probing is None
     assert srcs.ensure("shop").served and len(calls) == 1
+
+
+def _srcs(tmp_path, make, now):
+    from sheafmd.hub.sources import Sources
+    return Sources([config.SourceDecl("shop", "unix:///run/s.sock", secret(tmp_path))], make=make, clock=lambda: now[0])
+
+
+def _fake(outcomes, gate=None):
+    """A service whose `info` answers by `outcomes` in turn: "ok", "down" or "version"; it counts the calls out at once."""
+    import threading
+    from sheafmd import remote
+    lock, box = threading.Lock(), {"out": 0, "most": 0, "calls": 0}
+
+    class Fake:
+        def __init__(self, name, url, bearer):
+            pass
+
+        def info(self):
+            with lock:
+                box["out"] += 1
+                box["most"] = max(box["most"], box["out"])
+                box["calls"] += 1
+                what = outcomes[(box["calls"] - 1) % len(outcomes)]
+            try:
+                if gate:
+                    gate.wait(5)
+                if what == "down":
+                    raise remote.Unreachable("down")
+                if what == "version":
+                    raise remote.VersionMismatch("shop", 2)
+            finally:
+                with lock:
+                    box["out"] -= 1
+    return Fake, box
+
+
+def test_a_source_moves_only_the_ways_its_state_allows(tmp_path):
+    from sheafmd.hub import sources as S
+    now = [100.0]
+    fake, box = _fake(["down", "ok"])
+    srcs = _srcs(tmp_path, fake, now)
+    s = srcs.get("shop")
+    assert s.state.kind == S.IDLE
+    assert srcs._move(s, S.SERVED, token=object()) is None and srcs._move(s, S.FAILED, token=object()) is None   # no probe, no result
+    first = srcs._move(s, S.PROBING)
+    assert first and s.state.kind == S.PROBING
+    assert srcs._move(s, S.PROBING) is None                                           # not while one is out
+    assert srcs._move(s, S.SERVED, token=object(), client=object()) is None           # not by a probe that is not the one out
+    assert srcs._move(s, S.FAILED, token=first.token, error="e", shown="e").kind == S.FAILED
+    assert srcs._move(s, S.PROBING) is None                                           # not before the retry delay
+    now[0] += S.RETRY_AFTER
+    second = srcs._move(s, S.PROBING)
+    assert second
+    assert srcs._move(s, S.SERVED, token=first.token, client=object()) is None        # the old probe's result is dropped
+    assert srcs._move(s, S.SERVED, token=second.token, client=object()).kind == S.SERVED
+    assert srcs._move(s, S.PROBING) is None                                           # a served source is not probed
+    assert srcs._move(s, S.FAILED, token=second.token, error="e", shown="e") is None  # nor taken down by a late failure
+    assert srcs._move(s, S.FAILED, error="laptop", shown="laptop") is None            # nor by the hub's "not a tiroir" answer
+    assert srcs._move(s, S.REFUSED, error="r", shown="r").kind == S.REFUSED           # the hub's own refusal is for good
+    now[0] += 10 * S.RETRY_AFTER
+    assert srcs._move(s, S.PROBING) is None and srcs._move(s, S.SERVED, token=second.token, client=object()) is None
+
+
+def test_many_callers_never_make_two_probes_at_once_and_a_served_source_stays_served(tmp_path):
+    import itertools
+    import threading
+    from sheafmd.hub.sources import RETRY_AFTER
+    tick = itertools.count()
+    tlock = threading.Lock()
+
+    class Clock:
+        def __getitem__(self, _):
+            with tlock:
+                return next(tick) * RETRY_AFTER             # every look at the clock finds the retry delay passed
+    fake, box = _fake(["down", "down", "ok", "down", "ok"])
+    srcs = _srcs(tmp_path, fake, Clock())
+    served_seen, lost = [], []
+
+    def caller():
+        for _ in range(60):
+            s = srcs.ensure("shop")
+            if served_seen and not s.served:
+                lost.append(1)
+            if s.served:
+                served_seen.append(1)
+    threads = [threading.Thread(target=caller) for _ in range(16)]
+    [t.start() for t in threads]
+    [t.join(30) for t in threads]
+    assert box["most"] == 1                                 # never more than one probe at a time
+    assert served_seen and not lost and srcs.get("shop").served
+    assert box["calls"] == 3                                # down, down, ok: a served source is never asked again

@@ -14,6 +14,7 @@ that says so.
 """
 import threading
 import time
+from dataclasses import dataclass
 
 from .. import adapter as rda
 from .. import config
@@ -21,21 +22,50 @@ from ..remote import RemoteSource, SourceError, VersionMismatch
 
 RETRY_AFTER = 5.0       # seconds before an unreachable service is asked again
 
+IDLE, PROBING, SERVED, FAILED, REFUSED = "idle", "probing", "served", "failed", "refused"
+
+
+@dataclass(frozen=True)
+class State:
+    """Where a source stands: never asked (idle), its `info` call out (probing, holding that call's token), served, unreachable
+    for now (failed, since `at`, asked again after RETRY_AFTER) or refused until the hub restarts."""
+    kind: str = IDLE
+    token: object = None
+    client: RemoteSource | None = None
+    error: str = ""                 # why it is unserved; "" when it is served
+    shown: str = ""                 # what a member is told of it: never a path or an OS error
+    at: float = 0.0
+
 
 class Source:
     def __init__(self, name: str, decl: config.SourceDecl | None):
         self.name = name
         self.decl = decl
-        self.client: RemoteSource | None = None
-        self.error = ""                 # why it is unserved; "" when it is served
-        self.shown = ""                 # what a member is told of it: never a path or an OS error
-        self.sticky = False             # unserved until the hub restarts (a version mismatch, a declaration that is wrong)
-        self.checked = 0.0
-        self.probing = None             # the token of the `info` call that is out, None for none: no second one is made
+        self.state = State()            # read as it is, changed only by `Sources._move`, under its lock
 
     @property
     def served(self) -> bool:
-        return not self.error and self.client is not None
+        return self.state.kind == SERVED
+
+    @property
+    def client(self) -> RemoteSource | None:
+        return self.state.client
+
+    @property
+    def error(self) -> str:
+        return self.state.error
+
+    @property
+    def shown(self) -> str:
+        return self.state.shown
+
+    @property
+    def sticky(self) -> bool:
+        return self.state.kind == REFUSED
+
+    @property
+    def probing(self):
+        return self.state.token if self.state.kind == PROBING else None
 
     @property
     def theme(self) -> str | None:
@@ -52,7 +82,7 @@ class Sources:
             self._by[decl.name] = Source(decl.name, decl)
         for name, why in (problems or {}).items():
             s = self._by.setdefault(name, Source(name, None))
-            s.error, s.shown, s.sticky = why, f"source {name!r} is not set up correctly: ask the owner of this hub", True
+            s.state = State(REFUSED, error=why, shown=f"source {name!r} is not set up correctly: ask the owner of this hub")
 
     @classmethod
     def load(cls, *, serves, warn=None) -> "Sources":
@@ -72,8 +102,7 @@ class Sources:
         """Leave the source `name` unserved until the hub restarts (its name is held by a folder root)."""
         s = self._by.get(name)
         if s is not None:
-            with self._lock:
-                s.error, s.shown, s.sticky, s.client = why, why, True, None
+            self._move(s, REFUSED, error=why, shown=why)
 
     def ensure(self, name: str) -> Source | None:
         """The source `name`, its service asked its `info` first when it never was, or could not be reached the last time and a
@@ -82,47 +111,63 @@ class Sources:
         if s is None or s.served:
             return s
         if not self.serves():
-            with self._lock:
-                s.error = s.shown = (f"source {name!r} is declared here, but a source is served by the hub of the tiroir that owns it, "
-                                     "never by a laptop's hub")
+            why = (f"source {name!r} is declared here, but a source is served by the hub of the tiroir that owns it, "
+                   "never by a laptop's hub")
+            self._move(s, FAILED, error=why, shown=why)
             return s
-        if not s.sticky and (s.checked == 0.0 or self._clock() - s.checked >= RETRY_AFTER):
-            self._check(s)
+        self._check(s)
         return s
 
-    def _check(self, s: Source) -> None:
+    def _move(self, s: Source, to: str, *, token=None, **fields) -> State | None:
+        """The one place a source changes state, decided on the state it has at that moment, under the lock; None when the move
+        is not allowed. A probe starts only from idle, or from failed once RETRY_AFTER has passed. A probe's result (it holds
+        the token) is written only while that probe is the one the state names: a refusal, or a later probe, outlives it, and a
+        served source is never touched by a result. A refusal by the hub is allowed at any time; a source this hub may not serve
+        is failed only while it is not served."""
         with self._lock:
-            if s.sticky or s.decl is None or s.probing:
-                return
-            token = s.probing = object()
-            s.checked = self._clock()
-            decl = s.decl
+            cur, now = s.state, self._clock()
+            if to == PROBING:
+                if s.decl is None or not (cur.kind == IDLE or (cur.kind == FAILED and now - cur.at >= RETRY_AFTER)):
+                    return None
+                token, fields = object(), {"error": cur.error, "shown": cur.shown}
+                at = cur.at
+            else:
+                if token is not None:
+                    allowed = cur.kind == PROBING and cur.token is token
+                elif to == REFUSED:
+                    allowed = True
+                else:
+                    allowed = cur.kind in (IDLE, FAILED)
+                if not allowed:
+                    return None
+                at = now
+            s.state = State(to, token if to == PROBING else None, at=at, **fields)
+            return s.state
+
+    def _check(self, s: Source) -> None:
+        began = self._move(s, PROBING)
+        if began is None:
+            return
         try:
-            self._probe(s, decl, token)
-        finally:
-            with self._lock:
-                if s.probing is token:    # only the probe that set the flag clears it, whatever it raised
-                    s.probing = None
+            self._probe(s, s.decl, began.token)
+        finally:                          # whatever was raised: a probe that has not settled the source leaves it asked again later
+            self._move(s, FAILED, token=began.token, error="the check did not finish", shown=f"source {s.name!r} cannot be reached just now")
 
     def _probe(self, s: Source, decl, token) -> None:
         try:
             client = self._make(s.name, decl.url, config.read_bearer(decl))
         except (config.ConfigError, ValueError) as e:
-            self._set(s, token, str(e), f"source {s.name!r} is not set up correctly: ask the owner of this hub", True)
+            self._move(s, REFUSED, token=token, error=str(e), shown=f"source {s.name!r} is not set up correctly: ask the owner of this hub")
             return
         try:
             client.info()                 # the network call is made without the lock: one slow service holds up no other
         except VersionMismatch as e:
-            self._set(s, token, e.message, e.message, True)
+            self._move(s, REFUSED, token=token, error=e.message, shown=e.message)
         except SourceError as e:          # Unreachable too: asked again later; the service's `version` code is a mismatch
-            mismatch = getattr(e, "code", "") == "version"
-            self._set(s, token, e.message, f"source {s.name!r} speaks another interface version, this hub speaks {rda.INTERFACE_VERSION}" if mismatch
-                      else f"source {s.name!r} cannot be reached just now", mismatch)
+            if getattr(e, "code", "") == "version":
+                self._move(s, REFUSED, token=token, error=e.message,
+                           shown=f"source {s.name!r} speaks another interface version, this hub speaks {rda.INTERFACE_VERSION}")
+            else:
+                self._move(s, FAILED, token=token, error=e.message, shown=f"source {s.name!r} cannot be reached just now")
         else:
-            self._set(s, token, "", "", False, client)
-
-    def _set(self, s: Source, token, error: str, shown: str, sticky: bool, client=None) -> None:
-        with self._lock:
-            if s.probing is not token or s.sticky:                  # a refusal is never lifted by a probe that was out meanwhile
-                return
-            s.error, s.shown, s.sticky, s.client = error, shown, sticky, client
+            self._move(s, SERVED, token=token, client=client)

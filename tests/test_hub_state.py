@@ -561,3 +561,47 @@ def test_a_pins_time_stays_out_of_git_so_two_clones_pinning_one_version_never_co
     assert any(p.endswith(f"pins/{h}.md") for p in listed)
     assert not [p for p in listed if p.endswith(".at") or p.endswith(".gitignore")]
     assert v.get("r/plan.md", h) == "pinned\n"
+
+
+def _untracked(root):
+    return subprocess.run(["git", "-C", str(root), "ls-files", "--others", "--exclude-standard", "--", str(state.INSIDE)],
+                          capture_output=True, text=True, check=True).stdout.split()
+
+
+@pytest.mark.parametrize("plant", ["other lines", "a link", "a re-include below"])
+def test_a_pins_time_stays_out_of_git_whatever_gitignore_the_store_was_given(tmp_path, plant):
+    """Ticket 203 A (Codex on #659): the store's `.gitignore` is the hub's only when it holds the hub's lines as a file of
+    its own; a link (git does not read one), other lines, or a `.gitignore` lower in the store that says `!*.at` would let
+    git commit this clone's pin times."""
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    v = state.Versions(tmp_path, "r")
+    v.pin("r/plan.md", "first\n")
+    ignore = v.dir / ".gitignore"
+    if plant == "other lines":
+        ignore.write_text("*.tmp\n")
+    elif plant == "a link":
+        (tmp_path / "kept").write_text(ignore.read_text())             # the right lines, behind a link git does not follow
+        ignore.unlink()
+        ignore.symlink_to(tmp_path / "kept")
+    else:
+        pins = next(v.dir.rglob("pins"))
+        (pins / ".gitignore").write_text("!*.at\n")
+        (pins.parent / ".gitignore").write_text("!*.at\n")
+    v.pin("r/plan.md", "second\n")
+    assert not [p for p in _untracked(tmp_path) if p.endswith(".at")]
+
+
+def test_the_trim_of_a_roots_own_store_leaves_the_pins_another_clone_made(tmp_path):
+    """Ticket 203 B (Codex on #659): a pin pulled from another clone has no time here. Ranked at 0 it was trimmed first, and
+    its deletion, committed, took a merge base away from the clone whose page holds it. The trim counts only this hub's pins."""
+    v = state.Versions(tmp_path, "r")
+    v.pin("r/plan.md", "mine\n")
+    pins = next(v.dir.rglob("pins"))
+    theirs = [f"theirs {n}\n" for n in range(state.PINS_KEPT)]
+    for text in theirs:
+        (pins / f"{md_hash(text)}.md").write_text(text)                # what a pull writes: the pin, never its time
+    for n in range(state.PINS_KEPT + 3):
+        v.pin("r/plan.md", f"mine {n}\n")
+    assert all((pins / f"{md_hash(t)}.md").is_file() for t in theirs)
+    mine = [p for p in pins.glob("*.md") if p.with_suffix(".at").is_file()]
+    assert len(mine) == state.PINS_KEPT                                   # this hub's own pins are still trimmed

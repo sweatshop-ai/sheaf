@@ -2152,3 +2152,34 @@ def test_a_door_write_never_lands_in_a_root_that_took_the_name_after_its_root_id
     assert other.read_text(encoding="utf-8") == before, got
     assert git(other.parents[2], "rev-parse", "HEAD") == head
     assert is_error, got
+
+
+def test_a_pin_time_git_already_holds_is_taken_out_of_it_with_the_next_commit_of_the_versions(tmp_path):
+    """Ticket 203 C (Codex on #687): a `.gitignore` hides only what git does not track. A pin time a repo took in before
+    the store kept it out (an older hub, a `.gitignore` that let it in) would go on being committed, each clone's own; the
+    next commit of the store's versions takes it out of git, and the file stays on disk for this hub."""
+    from sheafmd.hub import commits, state
+    from sheafmd.hub.roots import Root
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    git(repo, "config", "user.name", "the box")
+    git(repo, "config", "user.email", "box@example.com")
+    (repo / ".sheaf.toml").write_text('commit = true\nversions = "root"\n', encoding="utf-8")
+    (repo / "plan.md").write_text("# plan\n", encoding="utf-8")
+    v = state.Versions(repo, "r")
+    h = v.pin("r/plan.md", "# plan\n")
+    at = next(repo.rglob(f"pins/{h}.at"))
+    assert at.relative_to(repo).parts[:3] == (*state.INSIDE.parts, state.doc_key("plan.md"))
+    git(repo, "add", "-A")
+    git(repo, "add", "-f", str(at.relative_to(repo)))                  # what the old bug let in
+    git(repo, "commit", "-q", "-m", "first")
+    v.pin("r/plan.md", "# plan\n")                                      # a new time: a tracked file, changed
+    (repo / "plan.md").write_text("# plan, edited\n", encoding="utf-8")
+    made = []
+    commits.Commits(lambda kind, doc, **detail: made.append((kind, doc, detail))).saved(
+        Root("r", repo, True), "plan.md", commits.Author("Bea", "bea@example.com"), "edit")
+    assert not [r for r in made if "failed" in r[0]], made
+    assert not [p for p in git(repo, "ls-files").split() if p.endswith(".at")]
+    assert at.is_file()
+    assert "plan.md" in git(repo, "show", "--name-only", "--format=", "HEAD")

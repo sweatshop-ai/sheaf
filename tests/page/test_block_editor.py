@@ -196,3 +196,16 @@ def test_shift_enter_in_a_heading_does_nothing_and_a_pasted_list_in_a_cell_is_pa
     p.keyboard.press(key("End"))
     p.keyboard.press("Shift+Enter")
     assert p.evaluate("window.sheafBlockEditor.last.markdown()") == SAMPLE
+
+
+def test_an_empty_paragraph_before_a_block_the_editor_keeps_does_not_shift_its_id(doc, site):
+    p = open_editor(doc, site)
+    before = p.evaluate("window.sheafBlockEditor.last.ids()")
+    p.click(f"{DOC} p >> text=Last paragraph.")
+    p.keyboard.press(key("Home"))
+    p.keyboard.press("Enter")
+    p.keyboard.press("ArrowUp")
+    p.keyboard.press("Enter")                       # an empty paragraph, then the text moves down
+    ids = p.evaluate("window.sheafBlockEditor.last.ids()")
+    assert ids[:len(before) - 1] == before[:-1]
+    assert len(ids) == len(before) + 1

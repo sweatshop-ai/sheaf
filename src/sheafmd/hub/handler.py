@@ -1527,7 +1527,7 @@ class Handler:
             move, moved = self._mover(e, ticked)
             with self._moved_committed(e, req.member, "edit", moved):
                 try:
-                    got = e.live.save_markdown(b["hash"], md, ids, session, rid=rid, guard=guard, move=move)
+                    got = e.live.save_markdown(b["hash"], md, ids, f"{req.member_id}:{session}", rid=rid, guard=guard, move=move)
                 except (EditError, StaleError) as ex:
                     raise Refuse(409, str(ex)) from None
                 except UnicodeEncodeError:

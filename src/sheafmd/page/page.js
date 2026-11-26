@@ -1151,7 +1151,7 @@ var create = function (ROOT, CFG, opts) {
   }
   function beChanged() {
     if (beTimer) window.clearTimeout(beTimer);
-    beTimer = window.setTimeout(function () { beTimer = null; if (bke && !stale && !docGone) beSave(true); }, BE_PAUSE);
+    beTimer = window.setTimeout(function () { beTimer = null; if (bke && !stale && !docGone && bke.markdown() !== beRefused) beSave(true); }, BE_PAUSE);
     var st = q('#rd-state'); if (st) st.textContent = beOwed() ? 'Unsaved changes' : 'Saved';
   }
   async function beOpen() {
@@ -1207,7 +1207,7 @@ var create = function (ROOT, CFG, opts) {
       refresh();
       return true;
     } catch (e) {
-      if (e.status >= 400 && e.status < 500) beReq = null;
+      if (e.status >= 400 && e.status < 500) { beReq = null; beRefused = md; }      // the same refused text is not sent again by itself
       if (res) res.owed = true;
       say(e.unreachable ? e.message : 'save failed: ' + e.message, true);
       return false;
@@ -1216,14 +1216,14 @@ var create = function (ROOT, CFG, opts) {
       if (bke && md !== bke.markdown() && !stale) beChanged();
     }
   }
-  var beDiscard = false;
+  var beDiscard = 0, beRefused = null;
   async function blockEditing(on) {
     editing = on;
     BODY.classList.toggle('rd-editing', on);
     var tg = modes.querySelector('button'); if (tg) tg.setAttribute('data-m', on ? 'save' : 'edit');
-    if (on) { beDiscard = false; await beOpen(); } else if (bke) {
-      if (stale && !beDiscard) {          // the text typed since the conflict is not on disk: leaving throws it away, so ask once
-        beDiscard = true; editing = true; BODY.classList.add('rd-editing'); if (tg) tg.setAttribute('data-m', 'save');
+    if (on) { beDiscard = 0; await beOpen(); } else if (bke) {
+      if (stale && (!beDiscard || Date.now() - beDiscard < 800)) {      // a held key repeats: the second press must be a new one          // the text typed since the conflict is not on disk: leaving throws it away, so ask once
+        if (!beDiscard) beDiscard = Date.now(); editing = true; BODY.classList.add('rd-editing'); if (tg) tg.setAttribute('data-m', 'save');
         say('The document changed, so your last edits are not saved. Press Done again to discard them and reload.', true);
         return;
       }
@@ -4613,7 +4613,7 @@ var create = function (ROOT, CFG, opts) {
   // or edit being typed is asked about too: until it is sent, nothing but the form holds it. A form
   // that holds what the store keeps for it is not: the next page draws that text again (unkept).
   // Mounted, the front's loader asks the page's dirty() before it moves, and holds the tab's own beforeunload with it.
-  function unsavedNow() { return !!(dirty().length || unkept() || (docGone && storedTexts().length)); }
+  function unsavedNow() { return !!((bke && beOwed()) || dirty().length || unkept() || (docGone && storedTexts().length)); }
   if (!MOUNTED) listen(window, 'beforeunload', function (e) {
     if (unsavedNow()) { e.preventDefault(); e.returnValue = ''; }
   });

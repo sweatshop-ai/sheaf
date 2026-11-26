@@ -16,6 +16,7 @@ import contextlib
 import threading
 import time
 
+from .. import adapter as rda
 from .. import comments as rdc
 from .. import edit as rde
 from .. import source as rds
@@ -63,6 +64,8 @@ class LiveDocument:
         read. The first read, here, is its maker's to hold (`Hub.entry`)."""
         self._file = md if callable(md) else (lambda: md)
         self._entry = entry          # when given, its file is opened beneath its root, judged, for every read and write (9.11)
+        self._adapter = (rda.MarkdownFileAdapter(beneath=entry.where) if entry is not None
+                         else rda.MarkdownFileAdapter(self._file))
         self._hold = hold or contextlib.nullcontext
         self._render, self._publish = render, publish
         self._by, self._clock = by, clock
@@ -113,18 +116,21 @@ class LiveDocument:
             return self._entry.read()
         return self._file().read_text(encoding="utf-8")
 
-    def _update(self, change, move=None):
-        """`rds.update_file` of this document's file; `change(text, opened)`. With an entry the file is opened once beneath
-        its root, judged, read from that descriptor and written through it (`rds.update_beneath`); `opened` is that
-        open, None where the document has no entry."""
+    def _update(self, change, move=None, remember=False):
+        """The write of this document's file, through its Markdown-file adapter; `change(text, opened)`. With an entry
+        the file is opened once beneath its root, judged, read from that descriptor and written through it;
+        `opened` is that open, None where the document has no entry. With `remember`, the adapter calls `_after_write` and
+        then `_remember` (the Versions store) on the text written, as a save and a rewrite do. Returns (old text, new text)."""
+        hooks = {"between": self._after_write, "kept": self._remember} if remember else {}
         if self._entry is None:
-            return rds.update_file(self._file(), lambda t: change(t, None), move=move)
-        top, rel = self._entry.where()
+            _, old, new = self._adapter.apply(change, move=move, **hooks)
+            return old, new
 
         def judged(t, op):
             self._entry.judge(op)
             return change(t, op)
-        return rds.update_beneath(top, rel, judged, move=move)
+        _, old, new = self._adapter.apply(judged, move=move, **hooks)
+        return old, new
 
     # ── the lock, and the guard against a callback calling back in ─────────────
     def _held(self):
@@ -326,6 +332,13 @@ class LiveDocument:
             got = {}
 
             def change(text):
+                token = rde.DOC.set(self._file())       # for the edit alone: the seam and the Versions record run after it, as before
+                try:
+                    return decide(text)
+                finally:
+                    rde.DOC.reset(token)
+
+            def decide(text):
                 if base_hash and rds.md_hash(text) != base_hash:
                     # Saved against an older version: merge it onto this one.
                     base = self._known(base_hash)
@@ -339,15 +352,8 @@ class LiveDocument:
                 return guard(text, new, got["report"]["toggled"]) if guard is not None else new
             # The version check happens inside change(), under the file lock: the CLI and an
             # Tell job write this file from other processes.
-            md = self._file()
-            token = rde.DOC.set(md)
-            try:
-                _, new_text = self._update(lambda t, op: change(t), move=move)
-            finally:
-                rde.DOC.reset(token)
-            self._after_write()
+            _, new_text = self._update(lambda t, op: change(t), move=move, remember=True)
             report = got["report"]
-            self._remember(new_text)
             if report["changed"]:
                 self._rerender()
                 # One event for the whole write: the watcher compares the hash just taken and
@@ -531,9 +537,7 @@ class LiveDocument:
         written (9.12: the hub's own line in the front matter)."""
         with self._hold(), self._held():
             before = self._text
-            _, new_text = self._update(lambda t, op: change(t))
-            self._after_write()
-            self._remember(new_text)
+            _, new_text = self._update(lambda t, op: change(t), remember=True)
             if new_text != before:
                 self._rerender()
                 self._announce(self._snapshot(self._text), before)

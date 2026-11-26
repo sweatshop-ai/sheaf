@@ -50,6 +50,7 @@ class SessionTells:
         self._wake = threading.Condition(self._lock)
         self._polling: dict = {}      # (token name, tid) -> long-polls held now
         self._heard: dict = {}        # (token name, tid, session) -> when it last polled, `_now()`
+        self._logged: dict = {}       # the same key -> when a `tells-poll` row was last written for it
 
     # ── what the page and the log are told ───────────────────────────────────
     def _name(self, t: dict) -> str:
@@ -137,6 +138,13 @@ class SessionTells:
                     for k in [k for k, at in self._heard.items() if now - at >= LISTENING]:
                         del self._heard[k]              # no longer counts as listening: nothing to remember
                     self._heard[(*key, session)] = now
+                    for k in [k for k, at in self._logged.items() if now - at >= LISTENING]:
+                        del self._logged[k]
+                    first = (*key, session) not in self._logged
+                    if first:
+                        self._logged[(*key, session)] = now
+                if first:       # once a minute per session: whether a laptop session listens can be read from the log (9.8)
+                    self.hub.record("tells-poll", token=row.name, tid=row.id, laptop_session=session)
                 got = self._listed(row, session, message)
                 left = end - self._now()
                 if got or left <= 0 or (gone is not None and gone()):

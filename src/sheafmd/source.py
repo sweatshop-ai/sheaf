@@ -427,4 +427,10 @@ class Source:
         return text, md_hash(text)
 
     def update(self, change, expected_hash=None):
-        return update_file(self.path, change, expected_hash)
+        from .adapter import MarkdownFileAdapter       # the one door to the file; it imports this module
+        out, old, new = MarkdownFileAdapter(self.path).apply(lambda t, opened: change(t), expected=expected_hash or None)
+        if out["outcome"] == "conflict":
+            raise StaleError("the .md changed on disk since this page was rendered - "
+                             "reload the document before saving, or your edit would "
+                             "overwrite that change")
+        return old, new

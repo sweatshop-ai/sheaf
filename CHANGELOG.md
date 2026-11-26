@@ -21,9 +21,10 @@ changes whenever an asset does. The entries name pull requests of sweatshop-ai/s
 - A send whose folder git cannot place (git missing, timed out, dubious ownership, unsafe repository) stops with the cause instead of sending the page as a loose one.
 - A failure after a write no longer says "Nothing was sent": it says whether the page arrived is not known, and the next run takes up a page that did arrive.
 - A pin in a root's own versions store keeps its age through a clone or checkout: its time is in `<hash>.at` beside it, kept out of git by `.sheaf/versions/.gitignore`, so a pin older than 7 days is not believed again. A pin written before has no such file: after the upgrade it counts only once pinned again, so a page that holds its reload across the hub's restart can get "version no longer known" (409) on its save until its next daily pin.
+- A pin's time in a root's own versions store stays out of git when the store's `.gitignore` was changed, made a link, or overruled by a `.gitignore` lower in the store; and a pin another clone made is no longer trimmed here, so its merge base stays for the page that holds it; a pin time a repo already tracks is taken out of git in a commit of its own (#687, from the review of #659).
 - `sheaf connect` checks that `config.toml` can be written before it stores the token.
 - A page opened on its own address keeps the link of its byline's session name (the session kit moved to `session.js`, loaded by the page script and the mount bundle).
-- A pin's time in a root's own versions store stays out of git when the store's `.gitignore` was changed, made a link, or overruled by a `.gitignore` lower in the store; and a pin another clone made is no longer trimmed here, so its merge base stays for the page that holds it; a pin time a repo already tracks is taken out of git in a commit of its own (#687, from the review of #659).
+- The list page (`/list`, and the list in Open WebUI's pane) asks git once per folder, not about 20 times per row: on a box with some 60 rows it made about 1,200 `git rev-parse` runs and took 5 s to answer, so the pane showed the chat page for 5 s before Sheaf. A rehearsal with 43 rows went from 862 runs to 2.
 
 ## 1.3.0 (2026-11-20)
 
@@ -31,6 +32,8 @@ Everything merged since 1.2.1 (#472), up to #534. Version 1.2.1 was never tagged
 
 ### Added
 
+- A poll of a laptop session writes a `tells-poll` row to the hub's diagnostics (session id, no token secret), at most one a minute per session, so whether a session listens can be checked from the box.
+- A Tell that waits for a laptop session says, on the page, what the Sheaf plugin does and how to install it (the README link and the two commands), so a Tell that waits because the plugin was never installed says why.
 - A diagram (mermaid or chart) or an SVG image opens in a full-window viewer on a click or tap: wheel and pinch zoom about the pointer, drag to pan, double click or Fit to reset, Esc, the close button or a click outside to close. It works in Comment and Edit mode, on a phone, and in both themes (SPEC 6.9).
 - A page a job generates can be marked as generated, read-only for text edits: the mark is set, shown and guarded by the door (#486, #503, #534, ticket 156). The hub refuses a save, a tick or a share on such a page with a sentence that names who generated it; comments, replies and resolve stay open.
 - The comment box moves by its band, with a mouse or a finger (#501, ticket 174).

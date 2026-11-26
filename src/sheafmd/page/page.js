@@ -2677,6 +2677,13 @@ var create = function (ROOT, CFG, opts) {
     return TEAM !== null ? [{ k: 'client', label: 'Comment to client', choose: true }, { k: 'team', label: 'Comment to team' }] : sendButtons('Comment');
   }
   var DOTS = '<span class="rd-dots" aria-hidden="true"><i></i><i></i><i></i></span>';
+  // Said under a laptop Tell that waits: what the plugin is for and how to install it (a laptop without it never polls).
+  // The README address is joined here: it is a link the reader clicks, not a resource the page loads (test_the_page_is_self_contained).
+  var README = 'https:' + '//github.com/sweatshop-ai/sheaf#agents';
+  var INSTALL_HINT = ' <span class="rd-install-hint">The Sheaf plugin lets an agent session on your laptop receive what you send from a Sheaf page. ' +
+    'A session starts listening once the agent has sent a loose page (a file outside a git repo) to the shared Sheaf, by running the sheaf command itself or writing through the door. ' +
+    'If it is not installed, install it (<a href="' + README + '" target="_blank" rel="noopener">instructions</a>): ' +
+    '<code>claude plugin marketplace add sweatshop-ai/sheaf &amp;&amp; claude plugin install sheaf@sheaf --scope user</code></span>';
   // A Tell that waits for an agent: said in the thread, with no spinner and no clock, across a reload and a restart.
   function waitLine(id) {
     return waitList(id).map(function (w) {
@@ -2684,7 +2691,7 @@ var create = function (ROOT, CFG, opts) {
         ? esc(w.to) + ' has seen it; its action appears in this thread.'
         : w.laptop ? (w.state === 'queued'
             ? 'Queued for ' + esc(w.to) + ': it is listening and takes it at its next call.'
-            : 'Waiting for ' + esc(w.to) + ': it is not listening now. The Tell stays until it comes back; you can cancel it or retarget it to one of your own agents.')
+            : 'Waiting for ' + esc(w.to) + ': it is not listening now. The Tell stays until it comes back; you can cancel it or retarget it to one of your own agents.' + INSTALL_HINT)
         : 'Waiting for ' + esc(w.to) + ': it sees this the next time you talk to it.') + '</div>';
     }).join('');
   }

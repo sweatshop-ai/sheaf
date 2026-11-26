@@ -671,10 +671,15 @@ class Commits:
         # The Write log's window opens now and closes however the pull ends, so the page that takes the pull in is never
         # taken for a disk write, nor a later write for the pull.
         pages = [top / p for p in changed if p.endswith(".md")]
-        named = self._tell(self._pulling, address, folder, [(path, "?") for path in pages])
         # The save side and this list read `--no-renames`: a rename is then a delete and an add, and both paths are locked and
         # told to the Write log. Renames are looked at apart, for the Forward a moved page leaves (9.11), once the pull went through.
+        # Looked at before anything opens or moves (ticket 209): a look that fails holds the whole pull, never "no rename", since
+        # a page moved without its Forward is not repaired by a later poll, whose base is then the remote's.
         renames = self._renames(folder, base, theirs, top)
+        if renames is None:
+            record("push-failed", address, error="the rename look (git diff -M) failed or ran out of time; the next poll tries again")
+            return False
+        named = self._tell(self._pulling, address, folder, [(path, "?") for path in pages])
         go, left = False, {}
         try:
             with self._guard(root, [top / p for p in changed]), self._repo_lock(folder):
@@ -693,13 +698,17 @@ class Commits:
         return go
 
     @staticmethod
-    def _renames(folder: Path, base: str, theirs: str, top: Path) -> list:
+    def _renames(folder: Path, base: str, theirs: str, top: Path) -> list | None:
         """The pages the remote renamed between `base` and `theirs`, `[(old, new)]` as absolute paths: git's own detection
-        (`-M`), `.md` files only. A file copied or changed beyond what git calls a rename is no rename."""
+        (`-M`), `.md` files only. A file copied or changed beyond what git calls a rename is no rename. None when git ran out
+        of time, could not start or failed (ticket 209): that is not knowing, never "no rename"."""
         try:
-            out = _git(folder, "diff", "--name-status", "-M", "--diff-filter=R", "-z", base, theirs).stdout.split("\0")
+            r = _git(folder, "diff", "--name-status", "-M", "--diff-filter=R", "-z", base, theirs)
         except (subprocess.SubprocessError, OSError):
-            return []                                  # no Forward is worth a pull that never starts: the Write log's window would stay open
+            return None
+        if r.returncode != 0:
+            return None
+        out = r.stdout.split("\0")
         found, i = [], 0
         while i + 2 < len(out) and out[i].startswith("R"):
             old, new = out[i + 1], out[i + 2]

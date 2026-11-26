@@ -1,5 +1,5 @@
 // Builds ../src/sheafmd/page/editor.bundle.js from src/index.js. The same command runs on the laptop and in CI
-// (tests/test_editor_bundle.py and the CI step "Rebuild the editor bundle"): the output must be byte-identical.
+// (the CI step "Rebuild the editor bundle", tests/test_ci_workflow.py): the output must be byte-identical.
 import { build } from 'esbuild';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';

@@ -2,6 +2,7 @@
 is the one its own next read computes, a source policy refusal is an outcome, and a save that waits for the file lock
 looks nothing up again."""
 import os
+import sys
 import threading
 
 import pytest
@@ -341,9 +342,10 @@ def test_a_write_that_lands_after_a_save_is_taken_in_by_the_watcher_even_with_th
     sub.drain()
     e.live.save(rds.md_hash(text), [{"i": i, "html": "<p>Edited words.</p>"}])
     assert [n for n, _ in sub.drain()] == ["changed"]
-    assert e.last_stat == beneath.stat_key(f.stat())      # the watcher holds the key of the file the save made
+    assert e.last_stat == beneath.stat_key(f.stat())[:4] + (None,)   # the key of the file the save made, before its rename
     hub.tick()
-    assert sub.drain() == []                               # its own write is not seen again
+    assert sub.drain() == []                               # its own write is looked at once, and not told again
+    assert e.last_stat == beneath.stat_key(f.stat())      # the real key is stored by that first pass
     st = f.stat()
     f.write_text(f.read_text(encoding="utf-8").replace("Edited words.", "Edxted words."), encoding="utf-8")
     os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
@@ -451,3 +453,62 @@ def test_a_save_opens_nothing_after_its_write_so_a_name_given_to_a_fifo_cannot_h
             os.close(fd)
         for fin in finishes:
             fin()
+
+
+def test_an_outside_edit_in_place_between_the_rename_and_the_key_of_a_save_is_seen_by_the_watcher(world, work, monkeypatch):
+    """26: the status the save hands the watcher is taken from the new file before the rename, with no change time, so the
+    first pass after the save compares the file's hash with the text it wrote once. An editor that writes the new file in place
+    right after the rename (the same size, the time put back) is then published, never recorded as the save's own."""
+    hub = world.hub
+    e = hub.entry("work/start.md")
+    f = work / "start.md"
+    text = f.read_text(encoding="utf-8")
+    i = next(n for n, b in enumerate(split_md_blocks(text)) if b.content.startswith("First paragraph"))
+    sub = e.bus.subscribe()
+    sub.drain()
+    real = os.rename
+
+    def rename_then_edit(src, dst, **kw):
+        out = real(src, dst, **kw)
+        if str(dst) == "start.md":
+            st = f.stat()
+            with open(f, "r+b") as fh:                  # in place: the same inode, the same size
+                data = fh.read().replace(b"Edited words.", b"Edxted words.")
+                fh.seek(0)
+                fh.write(data)
+            os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
+        return out
+    monkeypatch.setattr(os, "rename", rename_then_edit)
+    e.live.save(rds.md_hash(text), [{"i": i, "html": "<p>Edited words.</p>"}])
+    monkeypatch.setattr(os, "rename", real)
+    assert "Edxted words." in f.read_text(encoding="utf-8")
+    sub.drain()
+    hub.tick()
+    assert "Edxted words." in e.html and e.live.current()[1] == f.read_text(encoding="utf-8")
+
+
+@pytest.mark.parametrize("fails", ["the status of the new file", "the rename"])
+def test_a_write_that_fails_leaks_no_descriptor_and_leaves_no_temporary_file(tmp_path, monkeypatch, fails):
+    """26: the write asks the new file's status of its own descriptor (no duplicate of it is made), and whatever fails, every
+    descriptor it opened is closed, the temporary file is removed and the original is untouched."""
+    (tmp_path / "a.md").write_text("Old.\n", encoding="utf-8")
+
+    def fds():
+        return len(os.listdir("/proc/self/fd"))
+    before = fds()
+    real_fstat, real_rename = os.fstat, os.rename
+
+    def fstat(fd):
+        if sys._getframe(1).f_code.co_name == "write":
+            raise OSError(24, "too many open files")
+        return real_fstat(fd)
+
+    def rename(*a, **k):
+        raise OSError(5, "input/output error")
+    monkeypatch.setattr(os, "fstat", fstat) if fails.startswith("the status") else monkeypatch.setattr(os, "rename", rename)
+    with pytest.raises(OSError):
+        rds.update_beneath(tmp_path, "a.md", lambda t, op: "New.\n")
+    monkeypatch.undo()
+    assert fds() == before
+    assert (tmp_path / "a.md").read_text(encoding="utf-8") == "Old.\n"
+    assert not [p.name for p in tmp_path.iterdir() if "sheaf-tmp" in p.name]

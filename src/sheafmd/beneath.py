@@ -82,10 +82,12 @@ def _openat2(dirfd: int, rel: str, flags: int, resolve: int = _RESOLVE_BENEATH) 
     return fd
 
 
-def stat_key(st) -> tuple:
+def stat_key(st, ctime: bool = True) -> tuple:
     """What the watcher compares to see that a file was written to: its identity, size and both times. A write or a rename
-    moves the change time even where the modification time is put back, and a replacement is another inode."""
-    return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns
+    moves the change time even where the modification time is put back, and a replacement is another inode. Without `ctime`
+    (a key taken before a rename, which moves it) the change time is None, a key no later status equals: the first pass that
+    meets it looks at the file's text once, and stores the real key."""
+    return st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns if ctime else None
 
 
 def ident(fd: int) -> tuple:
@@ -132,13 +134,15 @@ class Opened:
         mode = stat.S_IMODE(os.fstat(self.fd).st_mode)
         out = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=pfd)
         try:
-            keep = os.dup(out)              # the new file's descriptor outlives the rename: its status is asked of it, never of a name
             with os.fdopen(out, "wb") as f:
                 f.write(text.encode("utf-8"))
                 f.flush()
                 os.fchmod(f.fileno(), mode)
                 os.fsync(f.fileno())
                 made = ident(f.fileno())
+                # The status the watcher is handed, taken from the new file's descriptor before the rename: whatever an
+                # editor does in place after it is then no part of the key (it moves the size or the times it holds).
+                self.written = stat_key(os.fstat(f.fileno()), ctime=False)
             sib = os.stat(tmp, dir_fd=pfd, follow_symlinks=False)       # a folder writer may swap the sibling while it is written
             if (sib.st_dev, sib.st_ino) != made:
                 raise OSError(errno.ESTALE, "the new text was swapped out of its place", tmp)
@@ -146,13 +150,8 @@ class Opened:
             if (st.st_dev, st.st_ino) != self.file:
                 raise OSError(errno.ESTALE, "the file is no longer the one that was opened", name)
             os.rename(tmp, name, src_dir_fd=pfd, dst_dir_fd=pfd)
-            self.written = stat_key(os.fstat(keep))
-            os.close(keep)
         except BaseException:
-            try:
-                os.close(keep)
-            except (OSError, UnboundLocalError):
-                pass
+            self.written = None
             try:
                 os.unlink(tmp, dir_fd=pfd)
             except OSError:

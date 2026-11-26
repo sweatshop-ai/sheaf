@@ -1335,3 +1335,19 @@ def test_a_cursor_that_names_a_disallowed_path_is_bad_request(tmp_path):
         assert e.value.code == "bad_request"
     good = base64.urlsafe_b64encode(b"a.md").decode().rstrip("=")
     assert [d["name"] for d in svc.documents(good)["documents"]] == ["b.md"]
+
+
+def test_the_listing_leaves_out_a_file_that_is_not_valid_utf8(tmp_path):
+    svc, folder, git = _git_service(tmp_path)
+    (folder / "latin.md").write_bytes(b"caf\xe9\n")
+    assert sorted(svc.names()) == ["*.md", "b.md"]
+
+
+def test_a_cursor_whose_folder_became_a_checkout_is_skipped_not_rejected(tmp_path):
+    import base64
+    svc, folder, git = _git_service(tmp_path)
+    (folder / "d").mkdir()
+    (folder / "d" / "x.md").write_text("x\n")
+    cursor = base64.urlsafe_b64encode(b"d/x.md").decode().rstrip("=")
+    (folder / "d" / ".git").mkdir()                                     # after the page that gave the cursor
+    assert svc.documents(cursor) == {"documents": [], "next": None}

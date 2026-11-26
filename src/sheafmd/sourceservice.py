@@ -163,6 +163,18 @@ class Service:
             return False
         return not any(os.path.lexists(os.path.join(self.top, *parts[:i], ".git")) for i in range(1, len(parts)))
 
+    @staticmethod
+    def _cursor_syntax(rel: str) -> bool:
+        """A cursor is a name this service gave: its syntax is checked, never the folder's present state, so a cursor that has gone
+        stale is skipped past, not refused."""
+        try:
+            rel.encode("utf-8")
+        except UnicodeEncodeError:
+            return False
+        parts = rel.split("/")
+        return (rel.endswith(".md") and not any(ord(c) < 32 or ord(c) == 127 or c == "\\" for c in rel)
+                and not any(p in ("", ".", "..") for p in parts))
+
     def names(self):
         for dirpath, dirs, files in os.walk(self.top, followlinks=False):
             dirs[:] = sorted(d for d in dirs if not d.startswith(".") and not os.path.islink(os.path.join(dirpath, d)))
@@ -175,6 +187,10 @@ class Service:
                 if self.acceptable((here / f).as_posix()) and not os.path.islink(full):
                     st = os.lstat(full)
                     if stat.S_ISREG(st.st_mode) and st.st_nlink == 1:       # the same file `_bytes_of` serves
+                        try:
+                            self._text_of((here / f).as_posix())                # and one that reads: valid UTF-8 as `read` decodes it
+                        except (Fault, OSError):
+                            continue
                         yield (here / f).as_posix()
 
     def documents(self, cursor) -> dict:
@@ -184,7 +200,7 @@ class Service:
                 after = base64.b64decode(cursor.encode("ascii") + b"=" * (-len(cursor) % 4), altchars=b"-_", validate=True).decode("utf-8")
             except (AttributeError, UnicodeError, binascii.Error):
                 raise Fault("bad_request", "cursor is not one this service gave") from None
-            if after and not self.acceptable(after):
+            if after and not self._cursor_syntax(after):
                 raise Fault("bad_request", "cursor is not one this service gave")
         names = sorted(n for n in self.names() if n > after)
         page, more = names[:PAGE_MAX], len(names) > PAGE_MAX

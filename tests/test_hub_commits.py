@@ -2215,3 +2215,40 @@ def test_a_sweep_with_only_pin_times_changed_takes_every_one_git_holds_out_of_it
     assert "versions: pin times out of git" in git(repo, "log", "--format=%s")
     assert all(t.is_file() for t in times)
     assert hub._owed
+
+
+@pytest.mark.parametrize("step", ["commit-tree", "update-index"])
+def test_a_pin_time_that_cannot_leave_git_keeps_the_versions_out_of_the_writes_commit(tmp_path, monkeypatch, step):
+    """Ticket 203 C (Codex on #687, round 3): git refuses a step of taking a tracked pin time out. The write's document is
+    committed alone, never its versions folder, whose index may still hold the time; a commit that was made already is
+    owed its push."""
+    from sheafmd.hub import commits, state
+    from sheafmd.hub.roots import Root
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    git(repo, "config", "user.name", "the box")
+    git(repo, "config", "user.email", "box@example.com")
+    (repo / ".sheaf.toml").write_text('commit = true\nversions = "root"\n', encoding="utf-8")
+    (repo / "plan.md").write_text("# plan\n", encoding="utf-8")
+    v = state.Versions(repo, "r")
+    at = next(repo.rglob(f"pins/{v.pin('r/plan.md', '# plan\n')}.at"))
+    git(repo, "add", "-A")
+    git(repo, "add", "-f", str(at.relative_to(repo)))
+    git(repo, "commit", "-q", "-m", "first")
+    at.write_text(str(time.time_ns()))
+    (repo / "plan.md").write_text("# plan, edited\n", encoding="utf-8")
+    real = commits._git
+    def refusing(folder, *args, **kw):
+        if step in args and (step != "update-index" or "index" not in kw or not kw["index"]):
+            return subprocess.CompletedProcess(args, 1, "", "refused")
+        return real(folder, *args, **kw)
+    monkeypatch.setattr(commits, "_git", refusing)
+    made = []
+    commits.Commits(lambda kind, doc, **detail: made.append(kind)).saved(
+        Root("r", repo, True), "plan.md", commits.Author("Bea", "bea@example.com"), "edit")
+    assert "commit-failed" in made
+    assert git(repo, "show", "--name-only", "--format=", "HEAD").split() == ["plan.md"]
+    held = [p for p in git(repo, "ls-tree", "-r", "--name-only", "HEAD").split() if p.endswith(state.PINNED_AT)]
+    assert held == ([] if step == "update-index" else [str(at.relative_to(repo))])   # never the new time, either way
+    assert git(repo, "show", f"HEAD:{at.relative_to(repo)}").strip() != at.read_text() if held else True

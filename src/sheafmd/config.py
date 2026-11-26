@@ -10,6 +10,7 @@ through `read_toml` too, so the three files fail the same way.
 """
 import os
 import re
+import stat
 import subprocess
 import sys
 import threading
@@ -27,7 +28,7 @@ DEFAULT_PORT = 27419
 ROOT_FILE = ".sheaf.toml"
 
 USER_KEYS = {"port": int, "name": str, "browser": bool, "proxy": dict, "jump": dict,
-             "reopen": dict, "list": dict, "transcribe": dict, "tiroir": str}   # proxy: hub.proxy reads it (9.9); list: hub.the_list (9.10); transcribe: hub.transcribe
+             "reopen": dict, "list": dict, "transcribe": dict, "tiroir": str, "sources": dict}   # proxy: hub.proxy reads it (9.9); list: hub.the_list (9.10); transcribe: hub.transcribe
 JUMP_KEYS = {"command": list}
 ROOT_KEYS = {"theme": str, "for": str, "links": bool, "link_tlds": list, "credit": bool,
              "versions": str, "commit": bool, "push": bool, "tiroir": str, "branch": str,
@@ -173,6 +174,98 @@ def browser_enabled(warn=None) -> bool:
         return False
     b = load_user_config(warn).browser
     return True if b is None else b
+
+
+# ── [sources.<name>] ────────────────────────────────────────────────────────
+
+SOURCE_KEYS = {"url": str, "secrets": str, "theme": str}
+SOURCE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}")
+BEARER = re.compile(r"[\x21-\x7e]{16,512}")
+BEARER_FILE_MAX = 1024          # a file that holds one bearer is short: a longer one holds something else
+
+
+@dataclass(frozen=True)
+class SourceDecl:
+    """`[sources.<name>]`: a source served by a Source service (ADR 0006). The hub holds the service's URL, the path of the
+    file that holds its bearer, and the name of the Theme its pages take. It holds nothing else of the source."""
+    name: str
+    url: str
+    secrets: Path
+    theme: str | None = None
+
+
+def load_sources(warn=None) -> tuple[list[SourceDecl], dict[str, str]]:
+    """`(declared, problems)` of the `[sources]` of config.toml. A table that cannot be used is left out of `declared` and put in
+    `problems` as `{name: what is wrong}`: its root is unserved, the other roots are not touched. The words of a problem never hold
+    the bearer. A key other than `url`, `secrets` and `theme` is a problem, not a warning: a source's own keys live in its service."""
+    from .remote import BadUrl, check_url
+    path = paths.config_file()
+    tables = read_toml(path, USER_KEYS, warn).get("sources", {})
+    declared, problems = [], {}
+    for name, table in tables.items():
+        if not SOURCE_NAME.fullmatch(name) or name.lower() == "clients":
+            problems[repr(name)] = (
+                f"[sources.{name}] in {path}: the name must be letters, digits, '.', '_' or '-', start with a letter or digit, and not be 'clients'")
+            continue
+        if not isinstance(table, dict):
+            problems[name] = f"[sources.{name}] in {path} must be a table"
+            continue
+        wrong = [k for k in table if k not in SOURCE_KEYS]
+        if wrong:
+            problems[name] = (f"[sources.{name}] in {path} has the key '{wrong[0]}': a source takes {', '.join(SOURCE_KEYS)} only. "
+                              f"The hub holds the bearer for the service (in the secrets file) and no key to the site")
+            continue
+        bad = next((k for k, want in SOURCE_KEYS.items() if k in table and not isinstance(table[k], want)), None)
+        if bad:
+            problems[name] = f"[sources.{name}] in {path}: '{bad}' must be {_TYPE_WORDS[SOURCE_KEYS[bad]]}"
+            continue
+        if not table.get("url") or not table.get("secrets"):
+            problems[name] = f"[sources.{name}] in {path} needs 'url' and 'secrets'"
+            continue
+        try:
+            url = check_url(table["url"])
+        except BadUrl as e:
+            problems[name] = f"[sources.{name}] in {path}: 'url' {e}"
+            continue
+        try:
+            secrets_file = Path(table["secrets"]).expanduser()
+        except RuntimeError:             # `~name` of an account this machine does not have
+            problems[name] = f"[sources.{name}] in {path}: 'secrets' starts with ~ and an account this machine does not have"
+            continue
+        if not secrets_file.is_absolute():
+            problems[name] = f"[sources.{name}] in {path}: 'secrets' must be an absolute path"
+            continue
+        declared.append(SourceDecl(name=name, url=url, secrets=secrets_file, theme=table.get("theme") or None))
+    return declared, problems
+
+
+def read_bearer(decl: SourceDecl) -> str:
+    """The hub's bearer for the source, read from its secrets file. The file must be one the hub's account alone can read (owned by
+    it, no group or other permission), a regular file, short, and hold one line of printable characters. Raises `ConfigError`;
+    its message names the file and never holds what the file holds."""
+    path = decl.secrets
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)   # a FIFO opens at once and is refused below
+    except OSError as e:
+        raise ConfigError(f"source {decl.name!r}: the secrets file {path} cannot be opened ({e.strerror or e})") from None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise ConfigError(f"source {decl.name!r}: {path} is not a regular file")
+        if st.st_uid != os.geteuid() or st.st_mode & 0o077:
+            raise ConfigError(f"source {decl.name!r}: {path} must belong to the hub's account and be readable by it alone (chmod 600)")
+        if st.st_size > BEARER_FILE_MAX:
+            raise ConfigError(f"source {decl.name!r}: {path} holds more than the hub's bearer")
+        raw = os.read(fd, BEARER_FILE_MAX + 1)
+    finally:
+        os.close(fd)
+    try:
+        text = raw.decode("ascii").strip()
+    except UnicodeDecodeError:
+        raise ConfigError(f"source {decl.name!r}: {path} must hold the hub's bearer as one line of printable ASCII") from None
+    if not BEARER.fullmatch(text):
+        raise ConfigError(f"source {decl.name!r}: {path} must hold the hub's bearer alone: one line, 16 to 512 printable characters, no spaces")
+    return text
 
 
 # ── .sheaf.toml ─────────────────────────────────────────────────────────────

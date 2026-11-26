@@ -79,6 +79,7 @@ class Member:
     tokens: tuple = ()          # the names of the door tokens that act for them (9.7, 9.11)
     private_root: str = ""      # a git root of theirs alone, one of their `roots`; "" for none (private roots)
     agency: bool = False        # an agency member of a client tiroir: the only members an agent may Share with there (9.11)
+    sources: tuple = ()         # the names of the `[sources.<name>]` roots they may read (ADR 0006): none unless named
 
 
 @dataclass(frozen=True)
@@ -167,7 +168,7 @@ _EMAIL_RE = re.compile(r"[^\s<>@,;\"']+@[^\s<>@,;\"']+")
 _SHORT_RE = re.compile(r"[A-Za-z0-9._-]{1,40}")
 _OWNER_NAME_RE = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.-]*")      # what a Share box can name (`visibility._NAMES_RE`)
 _LOGIN_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
-OPTIONAL_MEMBER_KEYS = ("email", "short", "github", "shell", "tokens", "private_root", "agency")
+OPTIONAL_MEMBER_KEYS = ("email", "short", "github", "shell", "tokens", "private_root", "agency", "sources")
 OPTIONAL_TABLE_KEYS = ("client", "clients", "repos")
 _OPTIONAL_WORDS = {"short": "1 to 40 letters, digits, dots, dashes or underscores (nell)",
                    "github": "a GitHub login (tiroir)"}
@@ -443,6 +444,9 @@ def parse(t: dict, where, list_table: dict | None = None) -> ProxyConfig:
         if not isinstance(tokens, list) or not all(isinstance(t, str) and _SHORT_RE.fullmatch(t) for t in tokens):
             raise ProxyError(f"'tokens' must be a list of token names, each 1 to 40 letters, digits, dots, "
                              f"dashes or underscores, not {tokens!r}, in {mhere}")
+        member_sources = m.get("sources", [])
+        if not isinstance(member_sources, list) or not all(isinstance(t, str) and t for t in member_sources):
+            raise ProxyError(f"'sources' must be a list of source names, not {member_sources!r}, in {mhere}")
         _keys({k: v for k, v in m.items() if k not in OPTIONAL_MEMBER_KEYS}, MEMBER_KEYS, mhere)
         name = clean_display(m["name"])
         if not name:
@@ -456,7 +460,7 @@ def parse(t: dict, where, list_table: dict | None = None) -> ProxyConfig:
             roots.append(r.rstrip("/") or "/")
         members[mid] = Member(mid, name, tuple(roots), email or "", m.get("short", ""), m.get("github", ""),
                               m.get("shell", False), tuple(tokens), _private_root(m, roots, list_table, mhere),
-                              m.get("agency", False))
+                              m.get("agency", False), tuple(member_sources))
         for name_ in tokens:
             if any(name_ in o.tokens for o in members.values() if o.id != mid):
                 raise ProxyError(f"token {name_!r} of {mhere} acts for another member already")

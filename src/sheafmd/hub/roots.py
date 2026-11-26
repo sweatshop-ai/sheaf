@@ -252,6 +252,7 @@ class Roots:
         # judge a path against every root there is.
         self.hidden: Callable[[Root], bool] = lambda root: False
         self.registered: Callable[[Root], None] = lambda root: None     # called with each root as it is registered (set by the hub)
+        self.reserved: Callable[[], Iterable[str]] = tuple              # names that are another kind of root's, a source's (set by the hub)
         if self._load():
             with self._changing():
                 self._save()
@@ -338,12 +339,12 @@ class Roots:
                 if found is not None:
                     return found
             if name is not None:
-                if name in self._roots or name.casefold() == RESERVED:
+                if name in self._roots or name.casefold() == RESERVED or name in self.reserved():
                     raise NameTaken(f"the name {name} is held by another root")
             else:
                 base = clean_name(path.name)
                 name, n = base, 2
-                while name in self._roots or name.casefold() == RESERVED:      # `Clients` is the agency's folder of client tiroirs (9.9)
+                while name in self._roots or name.casefold() == RESERVED or name in self.reserved():      # `Clients` is the agency's folder of client tiroirs (9.9)
                     name, n = f"{base}-{n}", n + 1
             root = Root(name, path, git, _new_id(), clone)
             self._roots[name] = root

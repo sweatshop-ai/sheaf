@@ -35,7 +35,8 @@ from ..agents.base import Target
 from ..config import ConfigError
 from ..edit import EditError
 from ..mcp import Caller, Door
-from ..render import RenderError
+from ..render import RenderError, render_file
+from .. import paths, remote
 from ..source import StaleError, md_hash
 from . import archive as archive_mod
 from . import auth, boxwait, channel, codes, events, incoming, laptops, loose, moves, outgoing, peer, place, proxy, readthrough, sheaf_view, targets, team as team_mod, the_list, transcribe, visibility, work
@@ -958,12 +959,18 @@ class Handler:
         if req.path == "/":
             return _html(200, self.hub.index.page(nonce, member=req.member), nonce)
         address = address_of_url(req.path)
+        if address is not None and self._is_source(req, Address.parse(address).root):
+            return self._source_page(req, Address.parse(address), nonce)
         if address is None:
             # `/<root>` with no slash after it names the root's page, where the browser is sent.
             bare = req.path.count("/") == 1
             name = root_of_url(req.path + "/" if bare else req.path)
             if name is None:
                 raise Refuse(404, "no such page")
+            if self._is_source(req, name):
+                if bare:
+                    return Response(301, {"Location": req.path + "/"})
+                return self._source_page(req, Address(name, ""), nonce)
             root = self.hub.roots.get(name)
             if root is None or (req.member is not None and not self.hub.owns(req.member, root)):
                 raise Refuse(404, "no such root")
@@ -988,6 +995,54 @@ class Handler:
             e = self._entry(req, address)
             self.hub.catch_up(e)
             return _html(200, self.hub.page(e, nonce, member=req.member, mount=req.mount), nonce)
+
+    def _is_source(self, req: Req, name: str) -> bool:
+        """Whether `name` is a source root the member may reach, and not a folder root's (a folder root that holds the name keeps
+        it). For a member whose `sources` do not name it, a source is no root at all: the answer is the one for a name nobody has."""
+        return (req.member is not None and name in req.member.sources
+                and self.hub.sources.get(name) is not None and self.hub.roots.held(name) is None)
+
+    def _source_page(self, req: Req, at: Address, nonce: str, as_mount: bool = False) -> Response:
+        """A page of a source root (ADR 0006): read from its Source service and rendered with the Theme the source names. The page
+        is read-only here. A source that is unserved says why and touches no other root; the words never hold the bearer."""
+        if req.member is None or at.root not in req.member.sources:
+            raise Refuse(404, "no such root")          # a source is a member's only when their `sources` names it, like their `roots`
+        source = self.hub.sources.ensure(at.root)
+        if source is None or not source.served:
+            res = _html(503, _sign_in_page(f"The source {escape(at.root)} is not served", escape((source.shown or f"source {at.root!r} is being checked: try again in a moment") if source else "no such source")))
+            res.error = "source unserved"
+            return res
+        client = source.client
+        try:
+            if not at.rel:
+                links = "".join(f'<li><a href="/{quote(at.root)}/{quote(n)}">{escape(n)}</a></li>' for n in client.documents())
+                title = escape(client.display or at.root)
+                return _html(200, "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>" + title
+                             + "</title><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head><body><h1>"
+                             + title + "</h1><ul>" + links + "</ul></body></html>", nonce)
+            if not at.rel.endswith(".md"):
+                raise Refuse(404, "no such page")
+            tree, _base = client.adapter(at.rel).read()
+        except remote.SourceError as e:
+            if e.code in ("not_found", "bad_request"):
+                raise Refuse(404, "no such page") from None
+            said = f" (HTTP {e.status})" if e.status else ""
+            res = _html(503, _sign_in_page(f"The source {escape(at.root)} is not reachable",
+                                           f"The source did not answer as the hub needs{said}. Ask the owner of this hub."))   # its own words stay in the log
+            res.error = "source unreachable: " + remote.redact(e.message, getattr(client, "_bearer", ""))
+            return res
+        top = paths.state_dir() / "sources" / at.root
+        top.mkdir(parents=True, exist_ok=True)
+        page = render_file(top / at.rel, theme=source.theme, src=tree.text, root=top, script_nonce=nonce,
+                           image_ok=lambda _p: False,      # a source has no folder: no local image is embedded
+                           extra_meta={"readonly": True, "why_readonly": "This page belongs to a source this hub only reads: it cannot be saved here."},
+                           share=False, mount=True if as_mount else req.mount)
+        if as_mount:                      # the front's loader asks for the same page as data, as it does for a folder root's
+            got = json.loads(page)
+            got["version"] = self.hub.version
+            got.update(self.hub.mount_fields())
+            return _json(200, got, {"X-Content-Type-Options": "nosniff"})
+        return _html(200, page, nonce)
 
     def _asleep(self, req: Req, address: str) -> Response | None:
         """A page of a clone that sleeps has no file (SPEC 13): the clone wakes for the page's owner, who is then served the
@@ -1268,6 +1323,8 @@ class Handler:
         _shape(isinstance(doc, str) and doc.endswith(".md"), "doc must be the address of a rectoverso")
         if readthrough.is_clients(doc):
             return self._relay(req, doc, "mount")
+        if self._is_source(req, Address.parse(doc).root):
+            return self._source_page(req, Address.parse(doc), auth.new_nonce(), as_mount=True)
         with self._reading(doc):
             e = self._entry(req, doc)
             self.hub.catch_up(e)

@@ -185,20 +185,22 @@ def _build(kids, ids: _Ids) -> tuple:
     return tuple(out)
 
 
-def _div_ids(x, out: set) -> set:
-    """The id of every div in the AST `x` that is a block of the tree: not what an unknown div (a Stub) holds."""
-    if isinstance(x, dict):
-        if x.get("t") == "Div":
-            if x["c"][0][0]:
-                out.add(x["c"][0][0])
-            classes = x["c"][0][1]
-            if not (classes and classes[0] in decl.DECLARED):
-                return out
-        for v in x.values():
-            _div_ids(v, out)
-    elif isinstance(x, list):
-        for v in x:
-            _div_ids(v, out)
+def _div_ids(blocks: list, out: set) -> set:
+    """The id of every div that is a block of the tree, among `blocks` and the blocks they hold: through quotes, lists
+    and declared divs only, never into what an unknown div (a Stub) holds nor into a footnote inline."""
+    for b in blocks:
+        t = b["t"]
+        if t == "Div":
+            if b["c"][0][0]:
+                out.add(b["c"][0][0])
+            classes = b["c"][0][1]
+            if classes and classes[0] in decl.DECLARED:
+                _div_ids(b["c"][1], out)
+        elif t == "BlockQuote":
+            _div_ids(b["c"], out)
+        elif t in ("BulletList", "OrderedList"):
+            for item in (b["c"] if t == "BulletList" else b["c"][1]):
+                _div_ids(item, out)
     return out
 
 

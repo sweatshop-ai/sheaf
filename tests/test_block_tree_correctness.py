@@ -157,3 +157,12 @@ def test_an_id_hidden_inside_a_stub_does_not_move_a_paragraph_id():
     assert tree.blocks[0].id == para
     nested = read_tree(f"Hello.\n\n> ::: {{.mystery}}\n> ::: {{#{para} .callout}}\n> hi\n> :::\n> :::\n")
     assert nested.blocks[0].id == para
+
+
+def test_a_footnote_defined_inside_a_stub_does_not_move_a_paragraph_id():
+    para = read_tree("Hello.\n").blocks[0].id
+    text = (f"Hello.\n\nSee[^1].\n\n::: {{.mystery}}\nSomething.\n:::\n\n[^1]: Note.\n\n"
+            f"> Quote[^2].\n\n[^2]: ::: {{#{para} .callout}}\n    hi\n    :::\n")
+    tree = read_tree(text)
+    assert tree.blocks[0].id == para
+    assert len({b.id for b in tree.walk()}) == len(list(tree.walk()))

@@ -8,6 +8,8 @@ changes whenever an asset does. The entries name pull requests of sweatshop-ai/s
 
 ### Fixed
 
+- Raw HTML with a `data-` attribute right after a `/` (`<div/data-x>`) is compared as the open tag it is, instead of as one that closes itself (`<div/>`), so a block nobody touched is not rewritten (#PR).
+- Two shortcodes written as text (`\:smile: \:smile:`) in a long changed stretch keep both escapes, instead of one of them showing as its emoji (#PR).
 - A paragraph with hard breaks of its own (`Alpha\` `\` `Beta`) stays one paragraph when both lines beside the breaks are edited in one save, as long as a word of them is left; two new breaks typed before or after them still make two paragraphs, as do two new breaks with none of those words beside them (#685).
 - An empty link target (`<a id="x"></a>`) left at the start of a heading split with Enter goes on with the heading, in its order, instead of being deleted with the empty marks the browser leaves (#685).
 - `sheaf open` gets its answer on a slow page: a render the hub has not finished within 120 seconds goes on and publishes its page, and the command says that the next `sheaf open` serves it, instead of failing. Each pandoc run keeps its own 120 seconds, and a wait for the document's lock no longer counts against them.

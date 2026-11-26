@@ -959,7 +959,7 @@ class Handler:
         if req.path == "/":
             return _html(200, self.hub.index.page(nonce, member=req.member), nonce)
         address = address_of_url(req.path)
-        if address is not None and req.member is not None and self._is_source(Address.parse(address).root):
+        if address is not None and self._is_source(req, Address.parse(address).root):
             return self._source_page(req, Address.parse(address), nonce)
         if address is None:
             # `/<root>` with no slash after it names the root's page, where the browser is sent.
@@ -967,7 +967,7 @@ class Handler:
             name = root_of_url(req.path + "/" if bare else req.path)
             if name is None:
                 raise Refuse(404, "no such page")
-            if req.member is not None and self._is_source(name):
+            if self._is_source(req, name):
                 if bare:
                     return Response(301, {"Location": req.path + "/"})
                 return self._source_page(req, Address(name, ""), nonce)
@@ -996,9 +996,11 @@ class Handler:
             self.hub.catch_up(e)
             return _html(200, self.hub.page(e, nonce, member=req.member, mount=req.mount), nonce)
 
-    def _is_source(self, name: str) -> bool:
-        """Whether `name` is a source root and not a folder root's: a folder root that holds the name keeps it."""
-        return self.hub.sources.get(name) is not None and self.hub.roots.held(name) is None
+    def _is_source(self, req: Req, name: str) -> bool:
+        """Whether `name` is a source root the member may reach, and not a folder root's (a folder root that holds the name keeps
+        it). For a member whose `sources` do not name it, a source is no root at all: the answer is the one for a name nobody has."""
+        return (req.member is not None and name in req.member.sources
+                and self.hub.sources.get(name) is not None and self.hub.roots.held(name) is None)
 
     def _source_page(self, req: Req, at: Address, nonce: str) -> Response:
         """A page of a source root (ADR 0006): read from its Source service and rendered with the Theme the source names. The page

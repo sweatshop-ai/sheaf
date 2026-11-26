@@ -224,6 +224,7 @@ def test_a_member_whose_sources_do_not_name_a_source_cannot_read_it(tmp_path, re
     members[UID] = dataclasses.replace(members[UID], sources=())
     assert get(site, "/shop/home.md").status == 404
     assert get(site, "/shop/").status == 404
+    assert get(site, "/shop").status == get(site, "/nobody-has-this").status == 404     # the bare name does not tell it exists
 
 
 def test_a_member_is_told_nothing_of_a_path_when_the_secrets_file_is_wrong(tmp_path, request, service):

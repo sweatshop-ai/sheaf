@@ -198,10 +198,11 @@ def _source_break_runs(source) -> list:
 
 def _line_kept(line: str, was: str) -> float:
     """How much of a line beside a run of the source is still there: 1 when it is the same, else the share of its
-    words and the edited line's words that both have (0 when they have none)."""
+    words and the edited line's words that both have (0 when they have none). A word is one without the punctuation
+    beside it (`Alpha.` is `Alpha`)."""
     if line == was:
         return 1.0
-    words, had = set(line.lower().split()), set(was.lower().split())
+    words, had = set(re.findall(r"\w+", line.lower())), set(re.findall(r"\w+", was.lower()))
     return len(words & had) / len(words | had) if words and had else 0.0
 
 

@@ -19,8 +19,10 @@ from sheafmd import edit as rde
     # a new run after the source's, both lines of the source's edited: the new one splits (the review of 201)
     ("Alpha\\\n\\\nBeta\n", "<p>Alpha too<br>\n<br>\nBeta too<span><br></span><span><br></span>New</p>",
      "Alpha too\\\n\\\nBeta too\n\nNew"),
+    # a word is a word without the punctuation beside it (the second review of 201)
+    ("Alpha\\\n\\\nBeta\n", "<p>Alpha.<br>\n<br>\nBeta!</p>", "Alpha.\\\n\\\nBeta!"),
 ], ids=["both lines edited", "two spaces, both lines edited", "a new run takes no match from the old one",
-        "a new run after the source's"])
+        "a new run after the source's", "punctuation edited"])
 def test_the_source_run_of_hard_breaks_is_kept_whatever_the_lines_beside_it_say(src, page, md):
     got = rde.html_block_to_md(page, source=src, strays=[])
     assert got == md, got

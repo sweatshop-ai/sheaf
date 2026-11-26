@@ -12,6 +12,7 @@
 The text is built from the current version's own bytes for every block the page did not change, and from the
 page's bytes for what it did.
 """
+import re
 from dataclasses import dataclass
 
 from .changes import moved, pair
@@ -100,6 +101,25 @@ def rebase(base: Tree, current: Tree, page: Tree, held_ids=None):
     return _compose(items, current, page)
 
 
+_FENCE = re.compile(r"^( {0,3})(`{3,}|~{3,})")
+
+
+def _closed(content: str) -> str:
+    """`content` with its code fence closed, where the block is one that ends at the end of its text with the fence
+    still open: markdown closes it at the end of the document, but a block that is followed by another must close it
+    itself, or the next block is read as code."""
+    m = _FENCE.match(content)
+    if not m:
+        return content
+    fence = m.group(2)
+    lines = content.rstrip("\n").split("\n")
+    if len(lines) > 1:
+        last = lines[-1].strip()
+        if last and set(last) == {fence[0]} and len(last) >= len(fence):
+            return content                           # the fence is closed
+    return content + m.group(1) + fence + "\n"
+
+
 def _compose(items: list, current: Tree, page: Tree) -> str:
     parts = [current.lead]
     n = len(items)
@@ -111,6 +131,7 @@ def _compose(items: list, current: Tree, page: Tree) -> str:
         if k < n - 1:
             if not content.endswith("\n"):
                 content += "\n"
+            content = _closed(content)
             if not gap and items[k + 1] != (src, x + 1):
                 gap = "\n"
         elif not last_in_source:

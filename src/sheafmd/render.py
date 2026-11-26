@@ -33,7 +33,7 @@ from . import _pandoc, charts, config, copyblock, images, links, orderedtask
 from . import comments as rdc
 from . import sanitize as sanitizer
 from . import source as src_mod
-from .blocks import SENTINEL_RE, instrument, split_md_blocks
+from .blocks import SENTINEL_RE, declarations, instrument, split_md_blocks
 from .hub import visibility
 from .theme import Theme, css_string, font_css, load_theme
 
@@ -805,7 +805,7 @@ def _shown_head_line(src: str) -> int:
 
 def pandoc_html(text: str) -> str:
     """The bundled pandoc, never whatever is on PATH (SPEC 3.2)."""
-    r = _pandoc.run(["-f", "gfm", "-t", "html5", "--no-highlight"], orderedtask.hide(copyblock.hide(text)))
+    r = _pandoc.run(["-f", "gfm+fenced_divs+bracketed_spans", "-t", "html5", "--no-highlight"], orderedtask.hide(copyblock.hide(text)))
     if r.returncode != 0:
         raise RenderError(f"pandoc could not read this document: {r.stderr.strip()[:200]}")
     return orderedtask.show(r.stdout)
@@ -1141,7 +1141,7 @@ def build(md: Path, *, theme: Theme, share: bool = True, title: str | None = Non
     # 14. Assemble.
     title = title or (first_h1[0] if first_h1 and first_h1[0] else "") \
         or md.stem.replace("-", " ")
-    css = BASE_CSS + theme.css
+    css = BASE_CSS + declarations.css() + theme.css       # the blocks' structure and Theme property defaults come before every Theme
     if theme.pdf_footer:
         css += ("\n@media print{@page{@bottom-left{content:\"" + css_string(theme.pdf_footer)
                 + "\";font-size:7pt;color:#000;vertical-align:middle;padding-left:15pt}}}")

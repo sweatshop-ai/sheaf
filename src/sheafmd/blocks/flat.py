@@ -34,6 +34,10 @@ HTML_RE    = re.compile(r"^\s{0,3}(?:</?[A-Za-z][A-Za-z0-9-]*(?:[\s/>]|$)|<!--|<
 # "tag name" would be "https", terminated by ":"), and treating it as one splits
 # the paragraph that contains it.
 HR_RE      = re.compile(r"^\s{0,3}((\*\s*){3,}|(-\s*){3,}|(_\s*){3,})$")
+# A pandoc fenced div: an opening fence of three or more colons with a class or attributes after it, and a closing
+# fence of colons alone. The closing fence need not be as long as the opening one.
+DIV_OPEN_RE = re.compile(r"^ {0,3}:{3,}[ \t]*[^\s:]")
+DIV_CLOSE_RE = re.compile(r"^ {0,3}:{3,}[ \t]*$")
 IMG_TAG_RE = re.compile(r"<img\b", re.I)
 SETEXT_RE  = re.compile(r"^\s{0,3}(=+|-+)\s*$")
 TBLSEP_RE  = re.compile(r"^\s{0,3}\|?[\s:|-]*-[\s:|-]*$")
@@ -61,7 +65,7 @@ class Tile:
 
     @property
     def editable(self):
-        if self.kind in LOCKED_KINDS:
+        if self.kind in LOCKED_KINDS or self.kind == "div":     # a fenced div is a Rich block or a Stub: not edited as text
             return False
         # A block holding an image becomes a <figure> with an embedded data: URI that
         # cannot go back to markdown. Any `![` is taken for one: inline, reference
@@ -111,6 +115,28 @@ def _scan_fence(lines, i):
             return j + 1
         j += 1
     return len(lines)          # unterminated fence runs to EOF, as CommonMark says
+
+
+def _scan_div(lines, i):
+    """The end of the fenced div that opens at lines[i]: the line after its own closing fence, or the end of the text.
+    A colon fence inside a code fence in the div closes nothing."""
+    depth, j, n, code = 1, i + 1, len(lines), None
+    while j < n:
+        ln = lines[j]
+        m = FENCE_RE.match(ln)
+        if code:
+            if m and m.group(2)[0] == code[0] and len(m.group(2)) >= code[1] and not m.group(3).strip():
+                code = None
+        elif m:
+            code = (m.group(2)[0], len(m.group(2)))
+        elif DIV_CLOSE_RE.match(ln):
+            depth -= 1
+            if depth == 0:
+                return j + 1
+        elif DIV_OPEN_RE.match(ln):
+            depth += 1
+        j += 1
+    return n
 
 
 def _scan_list(lines, i):
@@ -197,7 +223,7 @@ def _interrupts_para(lines, i):
     """
     ln = lines[i]
     if ATX_RE.match(ln) or FENCE_RE.match(ln) or HR_RE.match(ln) \
-       or QUOTE_RE.match(ln) or HTML_RE.match(ln):
+       or QUOTE_RE.match(ln) or HTML_RE.match(ln) or DIV_OPEN_RE.match(ln):
         return True
     m = LIST_RE.match(ln)
     if m and len(m.group(1)) < 4 and ln[m.end():].strip():
@@ -262,6 +288,8 @@ def split_md_blocks(text):
             i = emit("indented_code", i, j)
         elif FENCE_RE.match(ln):
             i = emit("fence", i, _scan_fence(lines, i))
+        elif DIV_OPEN_RE.match(ln):
+            i = emit("div", i, _scan_div(lines, i))
         elif ATX_RE.match(ln):
             i = emit("heading", i, i + 1)
         elif HR_RE.match(ln):

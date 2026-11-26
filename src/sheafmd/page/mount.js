@@ -54,6 +54,16 @@
   const SVG_ELEMENTS = set(`svg g path rect circle ellipse line polyline polygon text tspan defs linearGradient stop title desc`);
 
   const GLOBAL_ATTRS = set('id class title lang dir');
+  /* BLOCKS:begin (generated from sheafmd.blocks.declarations: python -m sheafmd.blocks.declarations --write) */
+  const BLOCK_TYPES = {"callout": {"attrs": {"data-align": ["left", "center", "right"], "data-pad": ["none", "s", "m", "l"], "data-tone": ["info", "success", "warning", "danger"]}, "tag": "div"}};
+  /* BLOCKS:end */
+  // A declared Rich block is a div whose class is its type: it keeps its id, its class (the type alone) and exactly its
+  // declared data-<attr> with an allowed value. No style, free class, title or handler.
+  function blockType(n) {
+    if (n.localName !== 'div') return null;
+    for (const c of Array.from(n.classList)) if (Object.prototype.hasOwnProperty.call(BLOCK_TYPES, c)) return c;
+    return null;
+  }
   const HTML_ATTRS = {
     a: set('href'),
     img: set('src alt width height'),
@@ -285,11 +295,17 @@
 
       const el = ns === SVG_NS ? doc.createElementNS(SVG_NS, local) : doc.createElement(local);
       nodes++;
+      const bt = ns === HTML_NS ? blockType(n) : null;
       for (const a of Array.from(n.attributes)) {
         if (a.namespaceURI) continue;              // xlink:href, xml:*, xmlns:*: none is kept
         const name = ns === SVG_NS ? a.name : a.name.toLowerCase();
         const value = a.value;
         if (value.length > 20000) continue;
+        if (bt) {
+          if (name === 'id') htmlAttr(el, local, name, value);
+          else if (Object.prototype.hasOwnProperty.call(BLOCK_TYPES[bt].attrs, name) && BLOCK_TYPES[bt].attrs[name].includes(value)) el.setAttribute(name, value);
+          continue;
+        }
         if (ns === SVG_NS) {
           if (SVG_ATTRS.has(name)) svgAttr(el, name, value);
         } else if (GLOBAL_ATTRS.has(name) || (HTML_ATTRS[local] && HTML_ATTRS[local].has(name))) {
@@ -299,6 +315,7 @@
           if (c) el.setAttribute('style', c);
         }
       }
+      if (bt) el.setAttribute('class', bt);
       if (local === 'img' && !el.hasAttribute('src')) {      // an address the page does not load: what the reader was told instead
         const alt = (n.getAttribute('alt') || '').trim();
         if (alt) frame.to.appendChild(doc.createTextNode(alt));

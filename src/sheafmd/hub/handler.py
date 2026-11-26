@@ -1024,7 +1024,8 @@ class Handler:
         top = paths.state_dir() / "sources" / at.root
         top.mkdir(parents=True, exist_ok=True)
         page = render_file(top / at.rel, theme=source.theme, src=tree.text, root=top, script_nonce=nonce,
-                           image_ok=lambda _p: False, mount=req.mount)
+                           image_ok=lambda _p: False,      # a source has no folder: no local image is embedded
+                            mount=req.mount)
         return _html(200, page, nonce)
 
     def _asleep(self, req: Req, address: str) -> Response | None:

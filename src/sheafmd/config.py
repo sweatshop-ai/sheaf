@@ -203,9 +203,8 @@ def load_sources(warn=None) -> tuple[list[SourceDecl], dict[str, str]]:
     tables = read_toml(path, USER_KEYS, warn).get("sources", {})
     declared, problems = [], {}
     for name, table in tables.items():
-        label = name if SOURCE_NAME.fullmatch(name) else "?"
         if not SOURCE_NAME.fullmatch(name) or name.lower() == "clients":
-            problems[name if label != "?" else repr(name)] = (
+            problems[repr(name)] = (
                 f"[sources.{name}] in {path}: the name must be letters, digits, '.', '_' or '-', start with a letter or digit, and not be 'clients'")
             continue
         if not isinstance(table, dict):
@@ -228,7 +227,7 @@ def load_sources(warn=None) -> tuple[list[SourceDecl], dict[str, str]]:
         except BadUrl as e:
             problems[name] = f"[sources.{name}] in {path}: 'url' {e}"
             continue
-        secrets_file = Path(table["secrets"]).expanduser() if table["secrets"].startswith("~") else Path(table["secrets"])
+        secrets_file = Path(table["secrets"]).expanduser()
         if not secrets_file.is_absolute():
             problems[name] = f"[sources.{name}] in {path}: 'secrets' must be an absolute path"
             continue

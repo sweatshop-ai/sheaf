@@ -16,7 +16,7 @@ import threading
 import time
 
 from .. import config
-from ..remote import RemoteSource, SourceError, Unreachable, VersionMismatch
+from ..remote import RemoteSource, SourceError, VersionMismatch
 
 RETRY_AFTER = 5.0       # seconds before an unreachable service is asked again
 
@@ -79,8 +79,9 @@ class Sources:
         if s is None or s.served:
             return s
         if not self.serves():
-            s.error = (f"source {name!r} is declared here, but a source is served by the hub of the tiroir that owns it, "
-                       "never by a laptop's hub")
+            with self._lock:
+                s.error = (f"source {name!r} is declared here, but a source is served by the hub of the tiroir that owns it, "
+                           "never by a laptop's hub")
             return s
         if not s.sticky and (s.checked == 0.0 or self._clock() - s.checked >= RETRY_AFTER):
             self._check(s)
@@ -101,9 +102,7 @@ class Sources:
                 client.info()
             except VersionMismatch as e:
                 s.error, s.sticky, s.client = e.message, True, None
-            except Unreachable as e:
-                s.error, s.client = e.message, None
-            except SourceError as e:
+            except SourceError as e:          # Unreachable too: asked again later
                 s.error, s.client = e.message, None
             else:
                 s.error, s.client = "", client

@@ -11,6 +11,7 @@ types it may hold. It feeds everything that has to agree on what a Rich block ma
 A new Block type is one entry here; nothing else is written by hand.
 """
 import json
+import re
 from dataclasses import dataclass
 
 # Plain Markdown blocks: what a quote, a list item or a Rich block's content may be made of.
@@ -19,12 +20,21 @@ PLAIN = ("paragraph", "heading", "list", "quote", "table", "code", "rule")
 LAYOUT = ("box", "image")
 
 
+_BARE = frozenset({"size"})
+
+
 @dataclass(frozen=True)
 class Attr:
     name: str
     values: tuple          # the allowed values, or the allowed steps, as stored
     default: str
     css: str = ""          # declarations for one value; `{v}` is the value. Empty: no rule is generated.
+
+    @property
+    def wire(self) -> str:
+        """The attribute as pandoc writes it into HTML: `size` stays `size` (it is an HTML attribute), every other
+        one becomes `data-<name>`. The checks on write use `name`, the sanitisers and the CSS use `wire`."""
+        return self.name if self.name in _BARE else f"data-{self.name}"
 
 
 @dataclass(frozen=True)
@@ -46,7 +56,23 @@ CALLOUT = BlockType(
     children=PLAIN + LAYOUT,
 )
 
+# Inline content: a bracketed span around one link, so it sits in a paragraph, a table cell, a column or a callout.
+# It is never a block of the tree, so it is not in DECLARED (the reader reads a div's class against that), and it
+# holds no child types: its content is one link, checked by `button_fault`.
+BUTTON = BlockType(
+    "button", "span",
+    attrs=(
+        Attr("size", ("s", "m", "l"), "m",
+             "--button-pad:var(--sheaf-button-pad-{v});--button-font:var(--sheaf-button-font-{v})"),
+        Attr("variant", ("primary", "secondary", "outline"), "primary",
+             "--button-bg:var(--sheaf-button-{v}-bg);--button-fg:var(--sheaf-button-{v}-fg);"
+             "--button-border:var(--sheaf-button-{v}-border)"),
+    ),
+)
+
 DECLARED = {t.name: t for t in (CALLOUT,)}
+INLINE = {t.name: t for t in (BUTTON,)}
+_ALL = {**DECLARED, **INLINE}
 
 # The Theme properties: documented, stable through 1.x (ADR 0008). A Theme's `theme.css` may override any.
 TONES = {"info": ("#1f5fd6", "#eef3fd"),
@@ -55,11 +81,90 @@ TONES = {"info": ("#1f5fd6", "#eef3fd"),
          "danger": ("#b3261e", "#fdeeed")}       # (accent, background), light: a Theme with a dark page overrides them
 PADS = {"none": "0", "s": ".5rem", "m": "1rem", "l": "1.5rem"}
 RADIUS = ".4rem"
+# The button's Theme properties: per variant (background, text, border), per size (padding, font size) and one radius.
+BUTTONS = {"primary": ("#1f5fd6", "#ffffff", "#1f5fd6"),
+           "secondary": ("#e8eaee", "#1c2430", "#e8eaee"),
+           "outline": ("transparent", "#1f5fd6", "#1f5fd6")}
+BUTTON_SIZES = {"s": (".3rem .7rem", ".85rem"), "m": (".5rem 1.1rem", "1rem"), "l": (".7rem 1.5rem", "1.15rem")}
+BUTTON_RADIUS = ".4rem"
+
+LINK_SCHEMES = frozenset({"http", "https", "mailto"})
+_CONTROL = re.compile(r"[\x00-\x20\x7f]+")
+_SCHEME = re.compile(r"^([^/?#]*):")
+
+
+def link_ok(url: str) -> bool:
+    """The link rule of a button: http, https, mailto or a relative address. Read the way a browser reads it: control
+    characters and spaces are dropped (a newline inside `java` and `script:` still reads `javascript:`), any other scheme (javascript, data, file,
+    vbscript, blob, tel...) is refused, and so is a backslash, which some browsers read as a slash."""
+    v = _CONTROL.sub("", url)
+    if "\\" in v:
+        return False
+    m = _SCHEME.match(v)
+    return not m or m.group(1).lower() in LINK_SCHEMES
+
+
+def button_fault(ast: str) -> str | None:
+    """The reason a block holds a button that is not valid, or None. `ast` is a block's canonical AST (JSON): a button
+    is a Span of the class `button`; it must carry exactly the declared attributes with allowed values, no id and no
+    other class, and hold one link, with no attributes of its own and an address `link_ok` accepts, around plain text."""
+    try:
+        doc = json.loads(ast)
+    except ValueError:
+        return None
+    stack = [doc]
+    while stack:
+        x = stack.pop()
+        if isinstance(x, list):
+            stack.extend(x)
+        elif isinstance(x, dict):
+            if x.get("t") == "Span" and "button" in x["c"][0][1]:
+                why = _button_why(x["c"])
+                if why:
+                    return why
+            stack.append(x.get("c"))
+    return None
+
+
+def _button_why(c) -> str | None:
+    (ident, classes, kvs), inlines = c
+    if ident:
+        return "a button has no id"
+    if classes != ["button"]:
+        return "a button has no class but button"
+    why = check_attrs("button", {k: v for k, v in kvs})
+    if why:
+        return why
+    if len(kvs) != len({k for k, _ in kvs}):
+        return "a button has an attribute twice"
+    if len(inlines) != 1 or inlines[0]["t"] != "Link":
+        return "a button holds one link and nothing else"
+    (lid, lclasses, lkvs), label, (url, _title) = inlines[0]["c"]
+    if lid or lclasses or lkvs:
+        return "a button link has no attributes of its own, no target"
+    if not link_ok(url):
+        return f"a button link {url!r} is not http, https, mailto or a relative address"
+    if _inline_types(label) & {"Link", "Image", "Span", "RawInline", "Note", "Cite", "Math"}:
+        return "a button label is plain text"
+    return None
+
+
+def _inline_types(x) -> set:
+    out = set()
+    stack = [x]
+    while stack:
+        y = stack.pop()
+        if isinstance(y, list):
+            stack.extend(y)
+        elif isinstance(y, dict) and "t" in y:
+            out.add(y["t"])
+            stack.append(y.get("c"))
+    return out
 
 
 def check_attrs(type_: str, attrs: dict):
     """The reason `attrs` do not fit the declaration of `type_`, or None."""
-    decl = DECLARED[type_]
+    decl = _ALL[type_]
     declared = {a.name: a for a in decl.attrs}
     for name, value in attrs.items():
         a = declared.get(name)
@@ -72,7 +177,7 @@ def check_attrs(type_: str, attrs: dict):
 
 def check_children(type_: str, kids) -> str | None:
     """The reason the child types `kids` may not sit in a `type_`, or None."""
-    allowed = DECLARED[type_].children
+    allowed = _ALL[type_].children
     for k in kids:
         if k not in allowed:
             return f"a {k} may not sit inside a {type_}"
@@ -89,8 +194,7 @@ def check_plain_container(container: str, kids) -> str | None:
 
 def allow_list() -> dict:
     """`{type: {"tag", "attrs": {"data-<name>": [values]}}}`: what a sanitiser lets through on `<tag class=type>`."""
-    return {t.name: {"tag": t.tag, "attrs": {f"data-{a.name}": list(a.values) for a in t.attrs}}
-            for t in DECLARED.values()}
+    return {t.name: {"tag": t.tag, "attrs": {a.wire: list(a.values) for a in t.attrs}} for t in _ALL.values()}
 
 
 def _properties() -> str:
@@ -98,7 +202,13 @@ def _properties() -> str:
     for tone, (accent, bg) in TONES.items():
         tones += [f"--sheaf-callout-{tone}-accent:{accent}", f"--sheaf-callout-{tone}-bg:{bg}"]
     pads = [f"--sheaf-pad-{k}:{v}" for k, v in PADS.items()]
-    return f":root{{{';'.join(tones + pads + [f'--sheaf-callout-radius:{RADIUS}'])}}}\n"
+    buttons = []
+    for v, (bg, fg, border) in BUTTONS.items():
+        buttons += [f"--sheaf-button-{v}-bg:{bg}", f"--sheaf-button-{v}-fg:{fg}", f"--sheaf-button-{v}-border:{border}"]
+    for v, (pad, font) in BUTTON_SIZES.items():
+        buttons += [f"--sheaf-button-pad-{v}:{pad}", f"--sheaf-button-font-{v}:{font}"]
+    buttons.append(f"--sheaf-button-radius:{BUTTON_RADIUS}")
+    return f":root{{{';'.join(tones + pads + [f'--sheaf-callout-radius:{RADIUS}'] + buttons)}}}\n"
 
 
 def css() -> str:
@@ -110,11 +220,19 @@ def css() -> str:
         "border-radius:var(--sheaf-callout-radius);background:var(--callout-bg);"
         "--callout-accent:var(--sheaf-callout-info-accent);--callout-bg:var(--sheaf-callout-info-bg)}\n"
         "div.callout>:first-child{margin-top:0}\ndiv.callout>:last-child{margin-bottom:0}\n")
-    for t in DECLARED.values():
+    out.append(
+        "span.button{display:inline-block;--button-pad:var(--sheaf-button-pad-m);--button-font:var(--sheaf-button-font-m);"
+        "--button-bg:var(--sheaf-button-primary-bg);--button-fg:var(--sheaf-button-primary-fg);"
+        "--button-border:var(--sheaf-button-primary-border);line-height:1.2}\n"
+        "span.button>a{display:inline-block;padding:var(--button-pad);font-size:var(--button-font);font-weight:600;"
+        "color:var(--button-fg);background:var(--button-bg);border:1px solid var(--button-border);"
+        "border-radius:var(--sheaf-button-radius);text-decoration:none}\n"
+        "span.button>a:hover{filter:brightness(.94)}\n")
+    for t in _ALL.values():
         for a in t.attrs:
             if a.css:
                 for v in a.values:
-                    out.append(f'{t.tag}.{t.name}[data-{a.name}="{v}"]{{{a.css.format(v=v)}}}\n')
+                    out.append(f'{t.tag}.{t.name}[{a.wire}="{v}"]{{{a.css.format(v=v)}}}\n')
     return "".join(out)
 
 

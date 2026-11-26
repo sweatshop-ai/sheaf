@@ -1530,19 +1530,81 @@ _NEIGHBOURS = 12
 _DIFF_WORD = re.compile(r":[a-z0-9_+-]+:|\w+|[^\w\s]")
 
 
+# The most words squared that `_by_words` diffs in all, over the stretches it cuts a long text into, each within
+# `_DIFF_BOUND`: about 100 ms of CPU at worst, measured (stretches at the bound, of a few words repeated, or a chain
+# of cuts that each find one word once on each side).
+_DIFF_TOTAL = 4 * _DIFF_BOUND
+# What a cut costs against `_DIFF_TOTAL`, per word of its stretch: counting a word costs about as much as this many
+# cells of a diff.
+_CUT_WEIGHT = 32
+
+
+def _once_on_both_sides(wa: list, alo: int, ahi: int, wb: list, blo: int, bhi: int) -> list:
+    """[(i, j)]: the words found once in wa[alo:ahi] and once in wb[blo:bhi], at i and at j, the longest run of
+    them in the same order on both sides (the anchors of a patience diff)."""
+    ca, cb = Counter(wa[alo:ahi]), Counter(wb[blo:bhi])
+    at = {wb[j]: j for j in range(blo, bhi) if cb[wb[j]] == 1 and ca[wb[j]] == 1}
+    found = [(i, at[wa[i]]) for i in range(alo, ahi) if wa[i] in at]
+    ends, end_at, back = [], [], []       # the least j that ends a run of each length, where it is, and what precedes
+    for k, (_, j) in enumerate(found):
+        n = bisect.bisect_left(ends, j)
+        back.append(end_at[n - 1] if n else -1)
+        if n == len(ends):
+            ends.append(j)
+            end_at.append(k)
+        else:
+            ends[n], end_at[n] = j, k
+    run, k = [], end_at[-1] if end_at else -1
+    while k >= 0:
+        run.append(found[k])
+        k = back[k]
+    return run[::-1]
+
+
+def _word_pairs(wa: list, wb: list):
+    """[(i, j)]: the words wa[i] and wb[j] a diff of the two lists matches, or None where it cannot (`_by_words`)."""
+    pairs, spent, todo = [], 0, [(0, len(wa), 0, len(wb), False)]
+    while todo:
+        alo, ahi, blo, bhi, cut = todo.pop()
+        size = (ahi - alo) * (bhi - blo)
+        if size <= _DIFF_BOUND:
+            spent += size
+            if spent > _DIFF_TOTAL:
+                return None
+            for i, j, n in difflib.SequenceMatcher(None, wa[alo:ahi], wb[blo:bhi],
+                                                   autojunk=False).get_matching_blocks():
+                pairs.extend((alo + i + k, blo + j + k) for k in range(n))
+            continue
+        if not cut:      # its common start and end first: what is left may be within the bound
+            while alo < ahi and blo < bhi and wa[alo] == wb[blo]:
+                pairs.append((alo, blo))
+                alo, blo = alo + 1, blo + 1
+            while alo < ahi and blo < bhi and wa[ahi - 1] == wb[bhi - 1]:
+                ahi, bhi = ahi - 1, bhi - 1
+                pairs.append((ahi, bhi))
+            todo.append((alo, ahi, blo, bhi, True))
+            continue
+        spent += _CUT_WEIGHT * ((ahi - alo) + (bhi - blo))
+        anchors = _once_on_both_sides(wa, alo, ahi, wb, blo, bhi)
+        if not anchors or spent > _DIFF_TOTAL:
+            return None
+        pairs.extend(anchors)
+        for (i0, j0), (i1, j1) in zip([(alo - 1, blo - 1)] + anchors, anchors + [(ahi, bhi)]):
+            todo.append((i0 + 1, i1, j0 + 1, j1, False))
+    return pairs
+
+
 def _by_words(old: str, new: str):
     """{start of a word of `old`: start of the same word in `new`} for the words a diff of the two word lists
-    matches, or None where the lists are too long for it (`_DIFF_BOUND`). A word is a shortcode, a run of letters and
-    digits, or one other character that is not white space (`_DIFF_WORD`): a `(` glued to a literal, or a letter
-    typed beside it, leaves the literal a word of its own that still matches."""
+    matches. A word is a shortcode, a run of letters and digits, or one other character that is not white space
+    (`_DIFF_WORD`): a `(` glued to a literal, or a letter typed beside it, leaves the literal a word of its own that
+    still matches. Lists too long for one diff (`_DIFF_BOUND`) are cut at their common start and end and at the words
+    found once on each side, and each stretch between those is diffed on its own (ticket 207): two long changed stretches
+    with unchanged words between them are each placed. None where a stretch is still too long and holds no such
+    word, or where the stretches add up past `_DIFF_TOTAL`."""
     a, b = list(_DIFF_WORD.finditer(old)), list(_DIFF_WORD.finditer(new))
-    if len(a) * len(b) > _DIFF_BOUND:
-        return None
-    pairs = {}
-    for i, j, size in difflib.SequenceMatcher(None, [m.group() for m in a], [m.group() for m in b],
-                                              autojunk=False).get_matching_blocks():
-        pairs.update((a[i + k].start(), b[j + k].start()) for k in range(size))
-    return pairs
+    found = _word_pairs([m.group() for m in a], [m.group() for m in b])
+    return None if found is None else {a[i].start(): b[j].start() for i, j in found}
 
 
 def _in_its_gap(old: str, new: str, words: dict):
@@ -1580,11 +1642,12 @@ def _in_its_gap(old: str, new: str, words: dict):
 def _places_by_order(old: str, new: str, olds) -> set:
     """The places in `new` of the literals `olds`, (place in `old`, name) pairs, by order: the k-th `:name:` of
     `old` is the k-th of `new` where both hold as many of that name. Where they do not, by a diff of the two texts'
-    words (`_by_words`), whose bound reaches as many words as the characters' diff reaches characters: a literal in a word
-    the diff matches keeps its place, and a shortcode the reader typed is a new word, which stays the emoji (#594).
-    Past that bound, by the literal's neighbours: the `_NEIGHBOURS` characters before it, or after it, with it, found
-    once in `new`. A literal placed by none of these is written bare: one the source escaped then shows as its emoji,
-    on a change of over about 1 400 words on each side around a name typed or deleted beside it."""
+    words (`_by_words`), whose bound reaches as many words in each changed stretch as the characters' diff reaches
+    characters: a literal in a word the diff matches keeps its place, and a shortcode the reader typed is a new word,
+    which stays the emoji (#594). Past that bound, by the literal's neighbours: the `_NEIGHBOURS` characters before it,
+    or after it, with it, found once in `new`. A literal placed by none of these is written bare: one the source
+    escaped then shows as its emoji, on a changed stretch of over about 1 400 words on each side, with no word found
+    once on each side, around a name typed or deleted beside it."""
     def starts(text):
         by_name = {}
         for m in _SHORTCODE_TEXT.finditer(text):

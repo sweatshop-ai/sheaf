@@ -888,6 +888,30 @@ def test_a_door_that_does_not_answer_a_report_renders_the_page_on_the_laptop(
     assert "on this laptop" in err and "Traceback" not in err
 
 
+def test_a_door_whose_list_has_no_render_report_is_not_called_and_is_not_a_refusal(
+        tiroir, hub_repos, laptop, local, monkeypatch, capsys):
+    """Ticket 53: a door lists nine `sheaf_*` tools and no `sheaf_render_report`. The CLI read that
+    list and still called the tool, got `Unknown tool`, and printed "refused"."""
+    called = []
+
+    def answer(message):
+        if message.get("method") == "tools/list":
+            tools = [{"name": "sheaf_" + n} for n in ("documents", "read", "create", "update", "move", "tells")]
+            return 200, {"jsonrpc": "2.0", "id": message["id"], "result": {"tools": tools}}, {}
+        if message.get("method") == "tools/call":
+            called.append(message["params"]["name"])
+            return 200, {"jsonrpc": "2.0", "id": message["id"], "result": {
+                "isError": True, "content": [{"type": "text", "text": "Unknown tool: " + message["params"]["name"]}]}}, {}
+
+    _door_that(monkeypatch, tiroir, answer)
+    page = laptop / "docs" / "plan.md"
+    code, out, err = run(capsys, page)
+    assert code == 0, err
+    assert called == [] and local == [str(page)]
+    assert "refused" not in err and "Unknown tool" not in err
+    assert "does not take render reports" in err and "on this laptop" in err
+
+
 @pytest.mark.parametrize("status", [401, 403])
 def test_a_refused_token_on_a_report_still_fails_loudly(status, tiroir, hub_repos, laptop, local, monkeypatch, capsys):
     _door_that(monkeypatch, tiroir, lambda message: (status, None, {}))

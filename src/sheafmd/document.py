@@ -25,9 +25,10 @@ from collections import OrderedDict
 
 from . import adapter as rda
 from . import source as rds
-from .blocks import Unreadable, read_tree, write_back
+from .blocks import Clash, Unreadable, derive, read_tree, rebase, write_back
 
 RECORDS = 512       # the writes whose session is remembered: the page's chain is a few saves long
+TEXTS = 64          # the texts kept by hash, for a stale base to be rebased from
 TREES = 4           # the trees kept, by text hash: a save reads the file's and the page's, the next reads the one just written
 
 
@@ -37,11 +38,13 @@ class DocumentService:
         self._lock = threading.Lock()
         self._next = OrderedDict()       # hash of a text -> (hash of the text written over it, session)
         self._trees = OrderedDict()      # hash -> tree
+        self._texts = OrderedDict()      # hash -> text of a base the service has read or written
 
     # ── read ────────────────────────────────────────────────────────────────
     def tree(self, text: str):
         """The block tree of `text` (kept by its hash), or raises `Unreadable`."""
         h = rds.md_hash(text)
+        self._remember(text, h)
         with self._lock:
             t = self._trees.get(h)
             if t is not None:
@@ -61,9 +64,24 @@ class DocumentService:
         return self.tree(tree.text), base
 
     # ── save ────────────────────────────────────────────────────────────────
-    def save(self, markdown: str, held_ids, base: str, session: str, author: str = "", note: str = "", move=None) -> dict:
-        return self.write(lambda text, opened: self.settle(text, markdown, held_ids, base, session),
-                          session, author=author, note=note, move=move)
+    def save(self, markdown: str, held_ids, base: str, session: str, author: str = "", note: str = "", move=None,
+             base_text: str | None = None) -> dict:
+        """`base_text`: the text `base` names, for a base the service has not read or written itself."""
+        info = {}
+        out = self.write(lambda text, opened: self.settle(text, markdown, held_ids, base, session, base_text, info),
+                         session, author=author, note=note, move=move)
+        if out["outcome"] == "written":
+            out["changes"] = info.get("changes", [])
+        return out
+
+    def changes_since(self, base: str) -> list:
+        """The block changes that make the base `base` (its hash) into the document as it is now. Raises `KeyError`
+        for a base the service never held."""
+        old = self._text_of(base)
+        if old is None:
+            raise KeyError(base)
+        tree, _ = self.read()
+        return derive(self.tree(old), tree)
 
     def write(self, change, session: str = "", *, author: str = "", note: str = "", move=None, **hooks) -> dict:
         """The write `change(text, opened)` makes through the adapter, under its lock, recorded as this session's.
@@ -77,22 +95,51 @@ class DocumentService:
             outcome["blocks"] = self._ids(new)
         return outcome
 
-    def settle(self, current: str, markdown: str, held_ids, base: str, session: str) -> str:
+    def settle(self, current: str, markdown: str, held_ids, base: str, session: str, base_text: str | None = None,
+               info: dict | None = None) -> str:
         """The text to write for a page's `markdown` over the `current` text of the file. Raises `Conflict`
-        for a base that is stale by anyone else's writing."""
+        for a base that is stale by anyone else's writing and either unknown to the service or unreadable, or whose
+        changes clash with the page's (ADR 0007), the latter with the rows of the clashing blocks. `info`, if given, receives the page's block changes as `changes`."""
         here = rds.md_hash(current)
-        if base and base != here and not self._own(base, here, session):
-            raise rda.Conflict(here)
-        if markdown == current:
-            return current
+        if base_text is not None:
+            self._remember(base_text, base)
         try:
-            return write_back(self.tree(markdown), self.tree(current), held_ids)
+            page = self.tree(markdown)
+            old = self._text_of(base) if base and base != here else current
+            if info is not None and old is not None:
+                info["changes"] = derive(self.tree(old), page, held_ids)
+            if base and base != here and not self._own(base, here, session):
+                if old is None:
+                    raise rda.Conflict(here)
+                got = rebase(self.tree(old), self.tree(current), page, held_ids)
+                if isinstance(got, Clash):
+                    raise rda.Conflict(here, got.rows)
+                return got
+            if markdown == current:
+                return current
+            return write_back(page, self.tree(current), held_ids)
         except Unreadable:
+            if base and base != here and not self._own(base, here, session):
+                raise rda.Conflict(here) from None
             return markdown
+
+    def _remember(self, text: str, h: str | None = None) -> None:
+        h = h or rds.md_hash(text)
+        with self._lock:
+            self._texts[h] = text
+            self._texts.move_to_end(h)
+            while len(self._texts) > TEXTS:
+                self._texts.popitem(last=False)
+
+    def _text_of(self, h: str):
+        with self._lock:
+            return self._texts.get(h)
 
     # ── the page session record ─────────────────────────────────────────────
     def _record(self, old: str, new: str, session: str) -> None:
         a, b = rds.md_hash(old), rds.md_hash(new)
+        self._remember(old, a)
+        self._remember(new, b)
         if a == b:
             return
         with self._lock:

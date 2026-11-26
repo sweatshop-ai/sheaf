@@ -222,8 +222,9 @@ def test_another_page_session_on_that_old_base_is_a_conflict_and_writes_nothing(
     _, base0 = svc.read()
     save(svc, "One, a.\n\nTwo.\n", base0, session="page-1")
     out = save(svc, "One.\n\nTwo, theirs.\n", base0, session="page-2")
-    assert out["outcome"] == "conflict" and out["base"] == rds.md_hash(disk(p))
-    assert disk(p) == "One, a.\n\nTwo.\n"
+    # ticket 03 (ADR 0007): the two sessions edited different blocks, so the stale save is rebased and written
+    assert out["outcome"] == "written"
+    assert disk(p) == "One, a.\n\nTwo, theirs.\n"
 
 
 def test_a_write_from_outside_the_service_between_two_saves_of_a_page_breaks_its_own_chain(tmp_path):

@@ -41,9 +41,9 @@ class Refused(Exception):
 
 
 class Conflict(Exception):
-    def __init__(self, base: str):
+    def __init__(self, base: str, blocks=()):
         super().__init__(base)
-        self.base = base
+        self.base, self.blocks = base, list(blocks)
 
 
 class Tree(NamedTuple):
@@ -55,8 +55,8 @@ def written(base: str) -> dict:
     return {"outcome": "written", "base": base, "blocks": []}
 
 
-def conflict(base: str) -> dict:
-    return {"outcome": "conflict", "base": base, "blocks": []}
+def conflict(base: str, blocks=()) -> dict:
+    return {"outcome": "conflict", "base": base, "blocks": list(blocks)}
 
 
 def refused(reason: str, block: str = "") -> dict:
@@ -125,7 +125,7 @@ class MarkdownFileAdapter:
             else:
                 old, new = (by or rds.update_file)(self._file(), lambda t: judged(t, None), move=move)
         except Conflict as c:
-            return conflict(c.base), None, None
+            return conflict(c.base, c.blocks), None, None
         if between is not None:
             between()
         if kept is not None:

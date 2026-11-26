@@ -31,7 +31,7 @@ class Source:
         self.shown = ""                 # what a member is told of it: never a path or an OS error
         self.sticky = False             # unserved until the hub restarts (a version mismatch, a declaration that is wrong)
         self.checked = 0.0
-        self.probing = False            # an `info` call is out: no second one is made
+        self.probing = None             # the token of the `info` call that is out, None for none: no second one is made
 
     @property
     def served(self) -> bool:
@@ -94,35 +94,35 @@ class Sources:
         with self._lock:
             if s.sticky or s.decl is None or s.probing:
                 return
-            s.probing = True
+            token = s.probing = object()
             s.checked = self._clock()
             decl = s.decl
         try:
-            self._probe(s, decl)
+            self._probe(s, decl, token)
         finally:
             with self._lock:
-                s.probing = False         # whatever was raised: a source is never left probing for good
+                if s.probing is token:    # only the probe that set the flag clears it, whatever it raised
+                    s.probing = None
 
-    def _probe(self, s: Source, decl) -> None:
+    def _probe(self, s: Source, decl, token) -> None:
         try:
             client = self._make(s.name, decl.url, config.read_bearer(decl))
         except (config.ConfigError, ValueError) as e:
-            self._set(s, str(e), f"source {s.name!r} is not set up correctly: ask the owner of this hub", True)
+            self._set(s, token, str(e), f"source {s.name!r} is not set up correctly: ask the owner of this hub", True)
             return
         try:
             client.info()                 # the network call is made without the lock: one slow service holds up no other
         except VersionMismatch as e:
-            self._set(s, e.message, e.message, True)
+            self._set(s, token, e.message, e.message, True)
         except SourceError as e:          # Unreachable too: asked again later; the service's `version` code is a mismatch
             mismatch = getattr(e, "code", "") == "version"
-            self._set(s, e.message, f"source {s.name!r} speaks another interface version, this hub speaks {rda.INTERFACE_VERSION}" if mismatch
+            self._set(s, token, e.message, f"source {s.name!r} speaks another interface version, this hub speaks {rda.INTERFACE_VERSION}" if mismatch
                       else f"source {s.name!r} cannot be reached just now", mismatch)
         else:
-            self._set(s, "", "", False, client)
+            self._set(s, token, "", "", False, client)
 
-    def _set(self, s: Source, error: str, shown: str, sticky: bool, client=None) -> None:
+    def _set(self, s: Source, token, error: str, shown: str, sticky: bool, client=None) -> None:
         with self._lock:
-            s.probing = False
-            if s.sticky:                  # a refusal is never lifted by a probe that was out meanwhile
+            if s.probing is not token or s.sticky:                  # a refusal is never lifted by a probe that was out meanwhile
                 return
             s.error, s.shown, s.sticky, s.client = error, shown, sticky, client

@@ -140,16 +140,17 @@ class RemoteSource:
         try:
             try:
                 conn.connect()
-                conn.sock.settimeout(max(0.05, deadline - time.monotonic()))
+                sock = conn.sock                  # `getresponse` lets go of `conn.sock` on a `Connection: close` answer
+                sock.settimeout(max(0.05, deadline - time.monotonic()))
                 conn.request("POST", f"{base}/{verb}", raw, {"Authorization": f"Bearer {self._bearer}",
                                                               "Content-Type": "application/json",
                                                               "Content-Length": str(len(raw)),
                                                               "Accept": "application/json"})
-                conn.sock.settimeout(max(0.05, deadline - time.monotonic()))
+                sock.settimeout(max(0.05, deadline - time.monotonic()))
                 res = conn.getresponse()
                 chunks, size = [], 0
-                while True:
-                    conn.sock.settimeout(max(0.05, deadline - time.monotonic()))
+                while not res.isclosed():          # a `Connection: close` answer closes its socket with its last byte
+                    sock.settimeout(max(0.05, deadline - time.monotonic()))
                     piece = res.read1(65536)
                     if not piece:
                         break

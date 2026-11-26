@@ -343,6 +343,15 @@ def stand(request, handler):
     return s
 
 
+def test_a_service_that_closes_its_connection_after_each_answer_is_served(request):
+    """`http.client` lets go of the socket once it has read a `Connection: close` answer: the client must not touch it again."""
+    s = Stand(lambda verb, body, h: (200, {"interface": rda.INTERFACE_VERSION, "name": "x", "publish": False}), close=True)
+    request.addfinalizer(s.stop)
+    src = remote.RemoteSource("shop", s.url, "b" * 20)
+    assert src.info()["interface"] == rda.INTERFACE_VERSION
+    assert src.info()["interface"] == rda.INTERFACE_VERSION
+
+
 def test_another_interface_version_is_a_mismatch_that_names_both(request):
     s = stand(request, lambda verb, body, h: (200, {"interface": 2, "name": "x", "publish": False}))
     with pytest.raises(remote.VersionMismatch) as e:

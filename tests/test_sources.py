@@ -305,3 +305,30 @@ def test_a_probe_that_raises_what_nobody_expected_does_not_leave_the_source_prob
     with pytest.raises(AttributeError):
         srcs.ensure("shop")
     assert len(calls) == 2 and not srcs.get("shop").probing
+
+
+def test_no_second_probe_starts_while_one_is_out_and_the_old_probe_ends_what_it_began(tmp_path):
+    import threading
+    from sheafmd.hub.sources import RETRY_AFTER, Sources
+    f = secret(tmp_path)
+    gate, started, calls, now = threading.Event(), threading.Event(), [], [100.0]
+
+    class Slow:
+        def __init__(self, name, url, bearer):
+            pass
+
+        def info(self):
+            calls.append(1)
+            started.set()
+            gate.wait(5)
+
+    srcs = Sources([config.SourceDecl("shop", "unix:///run/s.sock", f)], make=Slow, clock=lambda: now[0])
+    t = threading.Thread(target=srcs.ensure, args=("shop",))
+    t.start()
+    assert started.wait(5)
+    now[0] += RETRY_AFTER + 1                          # the retry interval passes while the first probe is still out
+    assert not srcs.ensure("shop").served and len(calls) == 1
+    gate.set()
+    t.join(5)
+    assert srcs.get("shop").served and srcs.get("shop").probing is None
+    assert srcs.ensure("shop").served and len(calls) == 1

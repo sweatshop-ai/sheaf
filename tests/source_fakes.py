@@ -66,7 +66,7 @@ class Stand:
     """A service of a test's own, in this process, on a Unix socket: `handler(verb, body, headers)` gives `(status, payload)`,
     or None to hold the connection and answer nothing."""
 
-    def __init__(self, handler):
+    def __init__(self, handler, close=False):
         self.run = short_dir()
         self.sock = str(self.run / "f.sock")
         self.url = f"unix://{self.sock}"
@@ -92,6 +92,9 @@ class Stand:
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(raw)))
+                if close:
+                    self.send_header("Connection", "close")      # the answer after which the client's socket is let go
+                    self.close_connection = True
                 self.end_headers()
                 self.wfile.write(raw)
 

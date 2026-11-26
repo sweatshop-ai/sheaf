@@ -104,9 +104,9 @@ class _UnixConnection(http.client.HTTPConnection):
         self.sock = s
 
 
-def _bounded_connect(address, end: float, total_end: float):
-    """A socket connected to `address` (host, port), or `TimeoutError`/`OSError`: the name lookup and every address tried
-    are inside one budget that ends at `end` (the connect limit), never past `total_end` (the request's deadline). A name that
+def _bounded_connect(address, end: float, total_end: float, wrap=None):
+    """A socket connected to `address` (host, port), and made secure by `wrap` where there is one, or `TimeoutError`/`OSError`: the
+    name lookup, every address tried and the TLS handshake are inside one budget that ends at `end` (the connect limit), never past `total_end` (the request's deadline). A name that
     does not resolve cannot be interrupted, so the lookup runs in a thread of its own that the caller stops waiting for."""
     host, port = address
     end = min(end, total_end)
@@ -123,6 +123,9 @@ def _bounded_connect(address, end: float, total_end: float):
                 s.settimeout(left)
                 try:
                     s.connect(where)
+                    if wrap is not None:                 # the TLS handshake is part of connecting
+                        s.settimeout(max(0.05, end - time.monotonic()))
+                        s = wrap(s)
                 except OSError as e:
                     s.close()
                     last = e
@@ -147,8 +150,30 @@ def _bounded_connect(address, end: float, total_end: float):
     if "sock" not in outcome:
         raise outcome["error"]
     s = outcome["sock"]
-    s.settimeout(max(0.05, total_end - time.monotonic()))
+    s.settimeout(max(0.05, total_end - time.monotonic()))     # secured and connected: what is left of the deadline is the request's
     return s
+
+
+class _BoundedHttp(http.client.HTTPConnection):
+    def __init__(self, host, port, end, deadline):
+        super().__init__(host, port, timeout=max(0.05, end - time.monotonic()))
+        self._end, self._deadline = end, deadline
+
+    def connect(self):
+        self.sock = _bounded_connect((self.host, self.port), self._end, self._deadline)
+        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+
+
+class _BoundedHttps(http.client.HTTPSConnection):
+    def __init__(self, host, port, end, deadline, context):
+        super().__init__(host, port, timeout=max(0.05, end - time.monotonic()), context=context)
+        self._end, self._deadline = end, deadline
+
+    def connect(self):
+        name = self._tunnel_host or self.host
+        self.sock = _bounded_connect((self.host, self.port), self._end, self._deadline,
+                                     wrap=lambda raw: self._context.wrap_socket(raw, server_hostname=name))
+        self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
 
 
 class RemoteSource:
@@ -174,15 +199,12 @@ class RemoteSource:
         p = self._parts
         if p.scheme == "unix":
             return _UnixConnection(p.path, min(self._connect, self._timeout))
-        if p.scheme == "https":
-            conn = http.client.HTTPSConnection(p.hostname, p.port, timeout=self._connect, context=self._tls)
-        else:
-            conn = http.client.HTTPConnection(p.hostname, p.port, timeout=self._connect)
         started = time.monotonic()
         deadline = started + self._timeout if deadline is None else deadline
-        conn._create_connection = lambda address, timeout=None, source_address=None: _bounded_connect(
-            address, started + self._connect, deadline)       # the lookup and each attempt share the connect limit, all of it the request's
-        return conn
+        end = started + self._connect              # the connect limit covers the lookup, each attempt and the handshake; the deadline is the request's
+        if p.scheme == "https":
+            return _BoundedHttps(p.hostname, p.port, end, deadline, self._tls)
+        return _BoundedHttp(p.hostname, p.port, end, deadline)
 
     def call(self, verb: str, body: dict | None = None) -> tuple[int, dict]:
         """`(status, answer)` of one request. Raises `Unreachable` for a service that does not answer in time or at all,
@@ -232,11 +254,31 @@ class RemoteSource:
             data = json.loads(b"".join(chunks).decode("utf-8"))
         except (ValueError, UnicodeDecodeError):
             data = None
+        data = self._scrub(data)
         if res.status >= 500 and not (isinstance(data, dict) and "error" in data):
             raise Unreachable(f"source {self.name!r} answered HTTP {res.status}")
         if not isinstance(data, dict):
             raise SourceError("protocol", f"source {self.name!r} answered what is not a JSON object (HTTP {res.status})")
         return res.status, data
+
+    def _scrub(self, data):
+        """THE choke point of what a service says: every string of its answer passes `redact` here, before it is raised, refused or
+        returned, so no field can carry the bearer or an Authorization line on. The one exception is a document's own text
+        (`tree.text`), which is the member's and never the service's words."""
+        if isinstance(data, str):
+            return redact(data, self._bearer)
+        if isinstance(data, list):
+            return [self._scrub(x) for x in data]
+        if not isinstance(data, dict):
+            return data
+        out = {k: self._scrub(v) for k, v in data.items() if k != "tree"}
+        if "tree" in data:
+            tree = data["tree"]
+            if isinstance(tree, dict) and isinstance(tree.get("text"), str):
+                out["tree"] = {**{k: self._scrub(v) for k, v in tree.items() if k != "text"}, "text": tree["text"]}
+            else:
+                out["tree"] = self._scrub(tree)
+        return out
 
     def ask(self, verb: str, body: dict | None = None) -> dict:
         """The answer of `verb`, or an error raised: `Unreachable` for `unavailable` and a 5xx, `SourceError` with the
@@ -252,7 +294,7 @@ class RemoteSource:
         code = err.get("code") if isinstance(err, dict) else None
         message = err.get("message") if isinstance(err, dict) else None
         code = code if code in CODES else "protocol"
-        message = redact(message, self._bearer) if isinstance(message, str) and message else code      # the service's words are never trusted not to echo
+        message = message if isinstance(message, str) and message else code
         if code == "unavailable" or status >= 500:
             raise Unreachable(f"source {self.name!r} is unavailable: {message}", status)
         raise SourceError(code, f"source {self.name!r}: {message}", status)

@@ -624,3 +624,132 @@ def test_a_service_that_fails_to_start_says_why_in_the_failure_of_the_fixture(tm
     with pytest.raises(AssertionError) as e:
         ReferenceService(folder, tmp_path / "secrets", authors='[authors]\n"Ada" = "no address"\n')
     assert "must be written" in str(e.value) and "closed file" not in str(e.value)
+
+
+# ── round 10: nothing to roll back (the commit is made first, off the real index; the file is replaced last), no link at any step ───
+
+def _write_body(svc, rel, text, note="n"):
+    return {"document": rel, "author": "Ada", "note": note, "base": svc.read(rel)["base"], "tree": {"text": text}}
+
+
+def _no_leftovers(folder):
+    assert [p.name for p in folder.iterdir() if "sheaf-tmp" in p.name] == []
+
+
+def test_a_git_step_that_times_out_leaves_disk_index_and_head_as_they_were(tmp_path, monkeypatch):
+    svc, folder, git = _git_service(tmp_path)
+    git("add", "-A")
+    head, before = git("rev-parse", "HEAD"), (folder / "b.md").read_bytes()
+    real = svc._git
+
+    def slow(*args, **kw):
+        if "commit-tree" in args:
+            raise subprocess.TimeoutExpired("git", 30)
+        return real(*args, **kw)
+    monkeypatch.setattr(svc, "_git", slow)
+    out = svc.write(_write_body(svc, "b.md", "bee two\n"))
+    assert out["outcome"] == "refused"
+    assert git("rev-parse", "HEAD") == head and (folder / "b.md").read_bytes() == before and git("status", "--porcelain") == ""
+    _no_leftovers(folder)
+
+
+def test_staged_edits_of_the_document_are_kept_when_the_write_commits_and_when_it_fails(tmp_path):
+    svc, folder, git = _git_service(tmp_path)
+    (folder / "b.md").write_text("bee, staged by someone\n")
+    git("add", "b.md")
+    (folder / "b.md").write_text("bee\n")                             # the file is as the member saw it; the index holds another text
+    _signing_fails(git)
+    assert svc.write(_write_body(svc, "b.md", "bee two\n"))["outcome"] == "refused"
+    assert git("show", ":b.md") == "bee, staged by someone\n" and (folder / "b.md").read_text() == "bee\n"
+    git("config", "commit.gpgsign", "false")
+    assert svc.write(_write_body(svc, "b.md", "bee two\n"))["outcome"] == "written"
+    assert git("show", "HEAD:b.md") == "bee two\n" and (folder / "b.md").read_text() == "bee two\n"
+    assert git("show", ":b.md") == "bee, staged by someone\n"        # the real index was never written by the service
+
+
+def test_a_clean_write_leaves_the_index_and_the_tree_clean_and_the_other_files_of_head_in_the_commit(tmp_path):
+    svc, folder, git = _git_service(tmp_path)
+    assert svc.write(_write_body(svc, "b.md", "bee two\n"))["outcome"] == "written"
+    assert git("status", "--porcelain") == "" and git("show", "--name-only", "--format=", "HEAD").split() == ["b.md"]
+    assert git("ls-tree", "--name-only", "HEAD").split() == ["*.md", "b.md"]
+    _no_leftovers(folder)
+
+
+def test_a_local_edit_saved_while_git_runs_is_a_conflict_and_is_never_erased(tmp_path, monkeypatch):
+    svc, folder, git = _git_service(tmp_path)
+    head = git("rev-parse", "HEAD")
+    real = svc._git
+
+    def edit_meanwhile(*args, **kw):
+        if "commit-tree" in args:
+            (folder / "b.md").write_text("bee, edited by hand meanwhile\n")
+        return real(*args, **kw)
+    monkeypatch.setattr(svc, "_git", edit_meanwhile)
+    out = svc.write(_write_body(svc, "b.md", "bee two\n"))
+    assert out["outcome"] == "conflict"
+    assert (folder / "b.md").read_text() == "bee, edited by hand meanwhile\n" and git("rev-parse", "HEAD") == head
+    _no_leftovers(folder)
+
+
+def test_a_stale_base_is_a_conflict_in_a_repository_too(tmp_path):
+    svc, folder, git = _git_service(tmp_path)
+    body = _write_body(svc, "b.md", "bee two\n")
+    (folder / "b.md").write_text("changed under the member\n")
+    assert svc.write(body)["outcome"] == "conflict" and (folder / "b.md").read_text() == "changed under the member\n"
+
+
+def test_a_write_keeps_the_mode_of_the_file(tmp_path):
+    svc, folder, git = _git_service(tmp_path)
+    (folder / "b.md").chmod(0o640)
+    svc.write(_write_body(svc, "b.md", "bee two\n"))
+    assert (folder / "b.md").stat().st_mode & 0o777 == 0o640
+
+
+def _swap_when_opened(monkeypatch, name, make_link):
+    """The first `os.open` of `name` below a folder finds a link there: the check, if there was one, was made a moment before."""
+    from sheafmd import sourceservice
+    real, done = os.open, []
+
+    def opener(path, flags, mode=0o777, *, dir_fd=None):
+        if not done and dir_fd is not None and path == name:
+            done.append(1)
+            make_link()
+        return real(path, flags, mode, dir_fd=dir_fd)
+    monkeypatch.setattr(sourceservice.os, "open", opener)
+    return done
+
+
+def test_a_file_that_becomes_a_link_between_the_check_and_the_open_is_not_followed(tmp_path, monkeypatch):
+    svc, folder = _svc_plain(tmp_path)
+    body = {"document": "real.md", "author": "Ada", "note": "n", "base": rds.md_hash("real\n"), "tree": {"text": "changed\n"}}
+
+    def link():
+        (folder / "real.md").unlink()
+        (folder / "real.md").symlink_to(folder / ".hidden.md")
+    done = _swap_when_opened(monkeypatch, "real.md", link)
+    with pytest.raises(sourceservice_fault()) as e:
+        svc.write(body)
+    assert done and e.value.code == "not_found" and (folder / ".hidden.md").read_text() == "hidden\n"
+
+
+def test_a_folder_that_becomes_a_link_between_the_check_and_the_open_is_not_followed(tmp_path, monkeypatch):
+    svc, folder = _svc_plain(tmp_path)
+    (folder / "other").mkdir()
+    (folder / "other" / "deep.md").write_text("other deep\n")
+
+    def link():
+        import shutil
+        shutil.rmtree(folder / "sub")
+        (folder / "sub").symlink_to(folder / "other")
+    done = _swap_when_opened(monkeypatch, "sub", link)
+    with pytest.raises(sourceservice_fault()) as e:
+        svc.read("sub/deep.md")
+    assert done and e.value.code == "not_found"
+
+
+def test_a_hard_link_is_not_a_document(tmp_path):
+    svc, folder = _svc_plain(tmp_path)
+    os.link(folder / "notes.txt", folder / "twin.md")
+    with pytest.raises(sourceservice_fault()) as e:
+        svc.read("twin.md")
+    assert e.value.code == "not_found"

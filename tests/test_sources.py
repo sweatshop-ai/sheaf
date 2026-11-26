@@ -616,3 +616,66 @@ def test_no_text_the_adapter_raises_or_refuses_with_holds_the_bearer_the_service
         with pytest.raises(remote.SourceError) as e:
             call()
         assert bearer not in str(e.value) and bearer not in e.value.message
+
+
+# ── round 10: the connect limit covers the TLS handshake; one choke point for the words of a service ────────────
+
+def test_a_service_that_accepts_the_connection_and_stalls_the_tls_handshake_is_cut_at_the_connect_limit(request):
+    import socket as sk
+    import threading
+    import time
+    from sheafmd import remote
+    srv = sk.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(4)
+    held, stop = [], threading.Event()
+
+    def take():
+        while not stop.is_set():
+            try:
+                held.append(srv.accept()[0])        # accepted, then silent: no ServerHello
+            except OSError:
+                return
+    threading.Thread(target=take, daemon=True).start()
+    request.addfinalizer(lambda: (stop.set(), srv.close(), [c.close() for c in held]))
+    src = remote.RemoteSource("shop", f"https://127.0.0.1:{srv.getsockname()[1]}/", "b" * 20, connect_timeout=0.5, timeout=30.0)
+    started = time.monotonic()
+    with pytest.raises(remote.Unreachable):
+        src.ask("info", {})
+    assert time.monotonic() - started < 2
+
+
+def test_a_200_refused_that_echoes_the_bearer_reaches_no_result_unredacted(request):
+    from sheafmd import remote
+    bearer = "SECRETBEARERVALUE123456"
+    said = f"no: Authorization: Bearer {bearer} / {bearer}"
+
+    def echo(verb, body, headers):
+        return 200, {"outcome": "refused", "reason": said, "block": said, "base": "b"}
+    stand = Stand(echo)
+    request.addfinalizer(stand.stop)
+    out = remote.RemoteSource("shop", stand.url, bearer).adapter("d.md").write(rda.Tree("x\n"), "b", author="Ada", note="")
+    assert out["outcome"] == "refused" and bearer not in json.dumps(out)
+
+
+def test_a_conflict_a_listing_and_an_info_of_a_service_pass_the_one_redaction_and_a_documents_text_does_not(request):
+    from sheafmd import remote
+    bearer = "SECRETBEARERVALUE123456"
+    doc = "# Notes\n\nSend Authorization: Bearer xyz-token-example in the header.\n"
+
+    def answer(verb, body, headers):
+        if verb == "write":
+            return 200, {"outcome": "conflict", "base": "b", "blocks": [f"echo {bearer}"]}
+        if verb == "documents":
+            return 200, {"documents": [{"name": f"{bearer}.md"}], "next": None}
+        if verb == "read":
+            return 200, {"tree": {"text": doc}, "base": "b"}
+        return 200, {"interface": rda.INTERFACE_VERSION, "name": f"shop {bearer}", "publish": False}
+    stand = Stand(answer)
+    request.addfinalizer(stand.stop)
+    src = remote.RemoteSource("shop", stand.url, bearer)
+    assert bearer not in json.dumps(src.adapter("d.md").write(rda.Tree("x\n"), "b", author="Ada", note=""))
+    assert all(bearer not in n for n in src.documents())
+    src.info()
+    assert bearer not in src.display
+    assert src.adapter("d.md").read()[0].text == doc            # the words of a document are the member's, whatever they say

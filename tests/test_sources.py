@@ -1,4 +1,5 @@
 """`[sources.<name>]` and the hub that serves a source as a root (ADR 0006, block editor v1 ticket 21)."""
+import dataclasses
 import json
 import os
 from pathlib import Path
@@ -129,6 +130,8 @@ def hub_with(tmp_path, request, decls):
     home.mkdir()
     (home / "config.toml").write_text("\n".join(decls), encoding="utf-8")
     site = Site(tmp_path, "client", 27431, "https://t.example.com", {UID: ("Dora", "dora@example.com", False)})
+    members = site.hub.proxy.members
+    members[UID] = dataclasses.replace(members[UID], sources=("shop", "odd"))    # a source is a member's only when named
     return site
 
 
@@ -212,3 +215,45 @@ def test_a_source_name_a_folder_root_holds_is_unserved_and_the_folder_stays(tmp_
         folder.mkdir()
         with pytest.raises(Exception):
             site.hub.roots._add(folder, False, name="shop")
+
+
+def test_a_member_whose_sources_do_not_name_a_source_cannot_read_it(tmp_path, request, service):
+    hub_secret = secret(tmp_path, text=service.bearer + "\n", name="hubbearer")
+    site = hub_with(tmp_path, request, [source_text("shop", service.url, hub_secret)])
+    members = site.hub.proxy.members
+    members[UID] = dataclasses.replace(members[UID], sources=())
+    assert get(site, "/shop/home.md").status == 404
+    assert get(site, "/shop/").status == 404
+
+
+def test_a_member_is_told_nothing_of_a_path_when_the_secrets_file_is_wrong(tmp_path, request, service):
+    bad = secret(tmp_path, text=service.bearer + "\n", name="hubbearer", mode=0o644)
+    site = hub_with(tmp_path, request, [source_text("shop", service.url, bad)])
+    page = get(site, "/shop/home.md")
+    assert page.status == 503 and str(bad) not in page.body.decode() and "hubbearer" not in page.body.decode()
+
+
+def test_a_version_code_of_the_service_is_a_mismatch_until_restart(tmp_path, request, service):
+    odd = Stand(lambda verb, body, h: (409, {"error": {"code": "version", "message": "other"}}))
+    request.addfinalizer(odd.stop)
+    other = secret(tmp_path, name="other")
+    site = hub_with(tmp_path, request, [source_text("odd", odd.url, other)])
+    assert get(site, "/odd/x.md").status == 503
+    get(site, "/odd/x.md")
+    assert [v for v, _, _ in odd.seen] == ["info"]
+
+
+def test_a_source_named_like_a_members_folder_root_leaves_the_folder_served(tmp_path, request, service):
+    hub_secret = secret(tmp_path, text=service.bearer + "\n", name="hubbearer")
+    site = hub_with(tmp_path, request, [source_text("dora", service.url, hub_secret)])
+    members = site.hub.proxy.members
+    members[UID] = dataclasses.replace(members[UID], sources=("dora",))
+    with site.inside():
+        keep, site.hub.roots.reserved = site.hub.roots.reserved, tuple      # a folder root that was there before the source was declared
+        try:
+            site.hub.roots._add(site.roots["dora"], False, name="dora")
+        finally:
+            site.hub.roots.reserved = keep
+        assert site.hub.roots.held("dora") is not None
+    page = get(site, "/dora/")
+    assert page.status != 503 and b"is not served" not in page.body

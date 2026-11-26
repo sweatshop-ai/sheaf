@@ -959,7 +959,7 @@ class Handler:
         if req.path == "/":
             return _html(200, self.hub.index.page(nonce, member=req.member), nonce)
         address = address_of_url(req.path)
-        if address is not None and req.member is not None and self.hub.sources.get(Address.parse(address).root) is not None:
+        if address is not None and req.member is not None and self._is_source(Address.parse(address).root):
             return self._source_page(req, Address.parse(address), nonce)
         if address is None:
             # `/<root>` with no slash after it names the root's page, where the browser is sent.
@@ -967,7 +967,7 @@ class Handler:
             name = root_of_url(req.path + "/" if bare else req.path)
             if name is None:
                 raise Refuse(404, "no such page")
-            if req.member is not None and self.hub.sources.get(name) is not None:
+            if req.member is not None and self._is_source(name):
                 if bare:
                     return Response(301, {"Location": req.path + "/"})
                 return self._source_page(req, Address(name, ""), nonce)
@@ -996,12 +996,18 @@ class Handler:
             self.hub.catch_up(e)
             return _html(200, self.hub.page(e, nonce, member=req.member, mount=req.mount), nonce)
 
+    def _is_source(self, name: str) -> bool:
+        """Whether `name` is a source root and not a folder root's: a folder root that holds the name keeps it."""
+        return self.hub.sources.get(name) is not None and self.hub.roots.held(name) is None
+
     def _source_page(self, req: Req, at: Address, nonce: str) -> Response:
         """A page of a source root (ADR 0006): read from its Source service and rendered with the Theme the source names. The page
         is read-only here. A source that is unserved says why and touches no other root; the words never hold the bearer."""
+        if req.member is None or at.root not in req.member.sources:
+            raise Refuse(404, "no such root")          # a source is a member's only when their `sources` names it, like their `roots`
         source = self.hub.sources.ensure(at.root)
         if source is None or not source.served:
-            res = _html(503, _sign_in_page(f"The source {escape(at.root)} is not served", escape(source.error if source else "no such source")))
+            res = _html(503, _sign_in_page(f"The source {escape(at.root)} is not served", escape(source.shown if source else "no such source")))
             res.error = "source unserved"
             return res
         client = source.client

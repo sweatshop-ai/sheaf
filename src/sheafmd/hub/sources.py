@@ -16,7 +16,7 @@ import threading
 import time
 
 from .. import config
-from ..remote import RemoteSource, SourceError, VersionMismatch
+from ..remote import RemoteSource, SourceError, Unreachable, VersionMismatch
 
 RETRY_AFTER = 5.0       # seconds before an unreachable service is asked again
 
@@ -27,6 +27,7 @@ class Source:
         self.decl = decl
         self.client: RemoteSource | None = None
         self.error = ""                 # why it is unserved; "" when it is served
+        self.shown = ""                 # what a member is told of it: never a path or an OS error
         self.sticky = False             # unserved until the hub restarts (a version mismatch, a declaration that is wrong)
         self.checked = 0.0
 
@@ -49,7 +50,7 @@ class Sources:
             self._by[decl.name] = Source(decl.name, decl)
         for name, why in (problems or {}).items():
             s = self._by.setdefault(name, Source(name, None))
-            s.error, s.sticky = why, True
+            s.error, s.shown, s.sticky = why, why, True
 
     @classmethod
     def load(cls, *, serves, warn=None) -> "Sources":
@@ -70,7 +71,7 @@ class Sources:
         s = self._by.get(name)
         if s is not None:
             with self._lock:
-                s.error, s.sticky, s.client = why, True, None
+                s.error, s.shown, s.sticky, s.client = why, why, True, None
 
     def ensure(self, name: str) -> Source | None:
         """The source `name`, its service asked its `info` first when it never was, or could not be reached the last time and a
@@ -80,8 +81,8 @@ class Sources:
             return s
         if not self.serves():
             with self._lock:
-                s.error = (f"source {name!r} is declared here, but a source is served by the hub of the tiroir that owns it, "
-                           "never by a laptop's hub")
+                s.error = s.shown = (f"source {name!r} is declared here, but a source is served by the hub of the tiroir that owns it, "
+                                     "never by a laptop's hub")
             return s
         if not s.sticky and (s.checked == 0.0 or self._clock() - s.checked >= RETRY_AFTER):
             self._check(s)
@@ -92,17 +93,22 @@ class Sources:
             if s.sticky or s.decl is None:
                 return
             s.checked = self._clock()
-            try:
-                bearer = config.read_bearer(s.decl)
-                client = self._make(s.name, s.decl.url, bearer)
-            except (config.ConfigError, ValueError) as e:
-                s.error, s.sticky, s.client = str(e), True, None
-                return
-            try:
-                client.info()
-            except VersionMismatch as e:
-                s.error, s.sticky, s.client = e.message, True, None
-            except SourceError as e:          # Unreachable too: asked again later
-                s.error, s.client = e.message, None
-            else:
-                s.error, s.client = "", client
+            decl = s.decl
+        try:
+            client = self._make(s.name, decl.url, config.read_bearer(decl))
+        except (config.ConfigError, ValueError) as e:
+            self._set(s, str(e), f"source {s.name!r} is not set up correctly: ask the owner of this hub", True)
+            return
+        try:
+            client.info()                 # the network call is made without the lock: one slow service holds up no other
+        except VersionMismatch as e:
+            self._set(s, e.message, e.message, True)
+        except SourceError as e:          # Unreachable too: asked again later; the service's `version` code is a mismatch
+            self._set(s, e.message, f"source {s.name!r} cannot be reached just now" if isinstance(e, Unreachable) else e.message,
+                      getattr(e, "code", "") == "version")
+        else:
+            self._set(s, "", "", False, client)
+
+    def _set(self, s: Source, error: str, shown: str, sticky: bool, client=None) -> None:
+        with self._lock:
+            s.error, s.shown, s.sticky, s.client = error, shown, sticky, client

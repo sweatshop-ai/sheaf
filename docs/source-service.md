@@ -61,3 +61,9 @@ A write made through an agent token carries `via <token name>` at the end of its
 A source takes `url`, `secrets` and `theme`, and no other key. The secrets file holds the bearer alone, on one line, belongs to the
 hub's account and has no group or other permission. A page of the source is `/<name>/<document>`; it opens read-only in the
 rectoverso with the Theme the source names (a built-in name or an absolute folder: the source has no folder to resolve a relative one against). Only a tiroir's hub serves a source.
+
+## Who may read a source
+
+A source is a member's only when the member's table names it: `sources = ["shop"]` in `[proxy.members."<id>"]`, next to `roots`.
+A member whose table does not name it is answered "no such root", as for a folder that is not theirs. A folder root that holds the
+name of a declared source keeps it, and the source stays unserved.

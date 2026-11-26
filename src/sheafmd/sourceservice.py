@@ -52,7 +52,13 @@ class Fault(Exception):
 
 def read_bearer(path) -> str:
     """The bearer in the file `path`: one line of printable characters, 16 to 512 of them."""
-    text = Path(path).read_text(encoding="utf-8").strip()
+    try:
+        st = os.stat(path)
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.geteuid() or st.st_mode & 0o077:
+            raise SystemExit(f"{path}: must be a regular file of this account and readable by it alone (chmod 600)")
+        text = Path(path).read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError) as e:
+        raise SystemExit(f"{path}: cannot be read ({type(e).__name__})")
     if not _TOKEN.fullmatch(text):
         raise SystemExit(f"{path}: must hold one line, the hub's bearer (16 to 512 printable characters)")
     return text

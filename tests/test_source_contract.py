@@ -929,14 +929,15 @@ def test_a_failed_reset_after_a_failed_commit_makes_the_service_unavailable_and_
         if args[:1] == ("reset",):
             return subprocess.CompletedProcess(args, 1, "", "no")
         return real(*args, **kw)
+    first, retry = _write_body(svc, "b.md", "bee two\n"), _write_body(svc, "b.md", "bee three\n")   # both built while the service is whole
     monkeypatch.setattr(svc, "_git", reset_fails)
     with pytest.raises(sourceservice_fault()) as e:
-        svc.write(_write_body(svc, "b.md", "bee two\n"))
+        svc.write(first)
     assert e.value.code == "unavailable" and (folder / "b.md").read_text() == "bee\n"
     monkeypatch.setattr(svc, "_git", real)
     with pytest.raises(sourceservice_fault()) as again:
-        svc.write(_write_body(svc, "b.md", "bee three\n"))
-    assert again.value.code == "unavailable"
+        svc.write(retry)                                               # it is write() that answers, not the setup
+    assert again.value.code == "unavailable" and (folder / "b.md").read_text() == "bee\n"
 
 
 def test_staged_changes_outside_the_folder_are_seen_whatever_diff_relative_says(tmp_path):
@@ -999,3 +1000,42 @@ def test_a_refused_start_and_close_release_the_root_descriptor(tmp_path):
     svc.close()
     with pytest.raises(OSError):
         os.fstat(svc._root)
+
+
+def test_the_service_refuses_to_start_when_git_cannot_read_a_folder_that_has_a_dot_git(tmp_path):
+    from sheafmd import sourceservice
+    folder = tmp_path / "broken"
+    (folder / ".git").mkdir(parents=True)                                # a .git that is not a repository: rev-parse exits nonzero
+    (folder / "a.md").write_text("a\n")
+    with pytest.raises(SystemExit) as e:
+        sourceservice.Service(folder, "b" * 20, {})
+    assert "Failure" in str(e.value) or "repository" in str(e.value)
+
+
+def test_the_service_refuses_to_start_when_git_status_exits_with_an_error(tmp_path, monkeypatch):
+    from sheafmd import sourceservice
+    svc, folder, git = _git_service(tmp_path)
+    svc.close()
+    real = sourceservice.Service._git
+
+    def failing(self, *args, **kw):
+        if args[:1] == ("status",):
+            return subprocess.CompletedProcess(args, 128, "", "fatal")
+        return real(self, *args, **kw)
+    monkeypatch.setattr(sourceservice.Service, "_git", failing)
+    with pytest.raises(SystemExit):
+        sourceservice.Service(folder, "b" * 20, {})
+
+
+def test_the_service_refuses_to_start_with_a_git_ignored_markdown_file_in_the_folder(tmp_path):
+    from sheafmd import sourceservice
+    svc, folder, git = _git_service(tmp_path)
+    svc.close()
+    (folder / ".gitignore").write_text("ignored.md\n")
+    git("add", ".gitignore")
+    git("-c", "user.name=t", "-c", "user.email=t@example.org", "commit", "-q", "-m", "ignore")
+    sourceservice.Service(folder, "b" * 20, {}).close()                 # quiet: starts
+    (folder / "ignored.md").write_text("replacement\n")
+    with pytest.raises(SystemExit) as e:
+        sourceservice.Service(folder, "b" * 20, {})
+    assert "Failure" in str(e.value)

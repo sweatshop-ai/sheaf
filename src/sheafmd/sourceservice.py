@@ -111,7 +111,7 @@ class Service:
         self._writing = threading.Lock()      # one write at a time, from the file's check to the end of its commit
         self._head_before = ""
         self._broken = False                  # set when a failed write could not be cleaned up: the service takes no write until restarted
-        busy = (self._busy() or self._unclean()) if self.git else None
+        busy = (self._busy() or self._unclean()) if self.git else self._unreadable()
         if busy:
             self.close()
             raise SystemExit(f"{self.top}: {busy}; the service does not start until the repository is quiet (repair by hand: see Failure in docs/source-service.md)")
@@ -346,6 +346,13 @@ class Service:
         except (OSError, subprocess.SubprocessError):
             return False
 
+    def _unreadable(self) -> str | None:
+        """A folder with a `.git` that git cannot read (not owned by this account, damaged) is not a plain folder: writes would be
+        acknowledged without a commit. The service does not start."""
+        if os.path.lexists(os.path.join(self.top, ".git")):
+            return "git cannot read the repository"
+        return None
+
     def _busy(self) -> str | None:
         """Why the repository takes no write now, or None: a merge, rebase, cherry-pick or revert in progress, or staged changes
         that a commit of one file must not be mixed with. Where git cannot say, it is busy."""
@@ -370,8 +377,11 @@ class Service:
             gdir = self._git("rev-parse", "--absolute-git-dir").stdout.strip()
             if os.path.lexists(os.path.join(gdir, "index.lock")):
                 return "an index.lock exists"
-            if self._git("status", "--porcelain", "--untracked-files=all", "--", ".").stdout.strip():
-                return "the folder has unstaged or untracked changes"
+            got = self._git("status", "--porcelain", "--untracked-files=all", "--ignored", "--", ".")
+            if got.returncode != 0:
+                return "git status failed"
+            if got.stdout.strip():
+                return "the folder has unstaged, untracked or ignored files that are not committed"
         except (OSError, subprocess.SubprocessError):
             return "the repository cannot be read"
         return None

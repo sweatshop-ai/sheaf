@@ -75,8 +75,8 @@ running beside it, and the root not replaced while it runs. It is a reference im
 not hardened for a shared working copy. It enforces what it can: the root is opened once at start and every path is opened from
 that descriptor without following links; one lock covers a write from the look at the file to the end of the commit; it refuses to
 start, and answers each write `unavailable`, while a merge, rebase, cherry-pick or revert is in progress or the index holds staged
-changes. A write replaces the file by atomic rename and commits it with Git's own filters and ignore rules; if the commit fails the
-previous bytes are put back and the write is `refused`.
+changes. A write replaces the file by atomic rename and commits it with Git's own filters and ignore rules; if `git add` fails the
+previous bytes are put back and the write is `refused`; if `git commit` fails the service stops (see Failure).
 
 The hub trusts a configured service with its own documents: names, cursors and document text are passed on unchanged, and only the
 service's words (an error message, a refusal's `reason`) are redacted of the bearer.
@@ -86,17 +86,15 @@ service's words (an error message, a refusal's `reason`) are redacted of the bea
 The reference service stops rather than guess. If a Git step, or the rollback after one, fails or times out after the file was
 replaced, the write is answered `unavailable` (never `written`, never `refused`), and every later read, write and listing is
 answered `unavailable` until the service is restarted. The log says where things stand: HEAD, the status of the path, the path.
-A Git step that ends with an exit status and a clean rollback is an ordinary `refused`: the document is as it was.
-
 A git step that fails before `git commit` has begun (the `git add`), with a clean rollback, is an ordinary `refused`. A `git commit` that
 exits with an error, times out or cannot be run is fail-stop, and nothing is rolled back.
 
 A stopped service does not start again while the repository is not quiet: it refuses to start with an index lock, staged changes,
-unstaged or untracked changes in its folder, or a merge, rebase, cherry-pick or revert in progress. The refusal names this section.
+unstaged, untracked or git-ignored files in its folder, a `.git` that git cannot read or a `git status` that fails, or a merge, rebase, cherry-pick or revert in progress. The refusal names this section.
 Repair by hand, then restart. The log line gives HEAD before the write and HEAD now.
 
-1. Inspect first: `git status`, `git diff` and `git log` in the folder, and compare HEAD now with HEAD before.
+1. Inspect first: `git status`, `git log`, and all three of `git diff` (working file against the index), `git diff --cached` (index against HEAD) and `git diff HEAD` (working file against HEAD) in the folder, and compare HEAD now with HEAD before. Plain `git diff` alone can be empty while the index holds the edit.
 2. If the edit landed in a commit and is wanted, leave it. If it landed and is not wanted, `git revert` that commit.
-3. If the edit is only in the working file or the index and is not wanted: `git restore --staged -- <path>` then `git restore -- <path>`, after reading `git diff` so that no other edit of yours is lost.
+3. Before any restore, copy the file aside (`cp <path> <path>.mine`, outside the folder if the folder is served). If the edit is only in the working file or the index and is not wanted: `git restore --staged -- <path>` then `git restore -- <path>`, and merge back from the copy whatever of your own work was in it.
 4. If it is wanted and not committed: commit it by hand.
 5. Remove a stale `.git/index.lock` only when no Git process runs.

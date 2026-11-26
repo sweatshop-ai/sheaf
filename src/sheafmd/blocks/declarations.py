@@ -62,9 +62,10 @@ DESCRIPTIONS = {
     "callout": ("A highlighted note; `tone` sets its colour, `align` its text and `pad` its padding.",
                 '::: {.callout tone="info"}\nA note for the reader.\n:::'),
 }
-PLAIN_ATTRS = {"heading": (("level", ("1", "2", "3", "4", "5", "6"), "1"),),
+# As `blocks` reports them (tree.py): a heading's level is a number, a list's `ordered` a boolean; `lang` is free text.
+PLAIN_ATTRS = {"heading": (("level", (1, 2, 3, 4, 5, 6), 1),),
                "code": (("lang", (), ""),),
-               "list": (("ordered", ("true", "false"), "false"),)}
+               "list": (("ordered", (True, False), False),)}
 
 
 def insertable() -> list:
@@ -86,10 +87,10 @@ def containers() -> dict:
     """Which types each container may hold: the document, each declared type by its Container rule, and the
     plain containers (a quote, a list item), which hold plain blocks only. Types that are not insertable yet
     (the layout divs) are left out."""
-    ok_ = set(insertable())
+    names = set(insertable())
     out = {"document": insertable()}
     for t in DECLARED.values():
-        out[t.name] = [k for k in t.children if k in ok_]
+        out[t.name] = [k for k in t.children if k in names]
     out["quote"] = list(PLAIN)
     out["item"] = list(PLAIN)
     return out

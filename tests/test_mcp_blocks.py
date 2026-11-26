@@ -111,9 +111,8 @@ def test_both_tools_are_read_only_and_open_to_a_token_that_cannot_write(browser,
     token = Tokens().add("codex")
     assert ok(browser, "blocks", doc=DOC, token=token)["base"] == md_hash(TEXT)
     assert ok(browser, "block_types", doc=DOC, token=token)["types"]
-    tools = {t["name"]: t for t in mcp.TOOLS.items() and [{"name": n, **t} for n, t in mcp.TOOLS.items()]}
     for n in ("blocks", "block_types"):
-        assert tools[n]["annotations"] == {"readOnlyHint": True}
+        assert mcp.TOOLS[n]["annotations"] == {"readOnlyHint": True}
         assert n not in mcp.PAGE_TOOLS and n not in mcp.WRITE_TOOLS and n not in mcp.SESSION_WRITES
     assert page.read_text(encoding="utf-8") == TEXT                # nothing was written
 
@@ -150,3 +149,26 @@ def test_every_example_block_types_gives_is_accepted_by_the_document_service(bro
         added = read_tree(p.read_text(encoding="utf-8")).blocks[-1]
         assert added.type == t["type"], (t["type"], added.type)
         assert "\n" not in t["description"] and t["description"]
+
+
+def test_the_key_and_a_write_token_see_the_same_tree_as_a_read_only_token(browser, page):
+    want = ok(browser, "blocks", doc=DOC)
+    assert ok(browser, "blocks", doc=DOC, token=Tokens().add("writer", write=True)) == want
+    assert ok(browser, "blocks", doc=DOC, token=Tokens().add("reader")) == want
+
+
+def test_a_rich_block_that_breaks_its_declaration_is_a_stub_with_only_move_and_remove(browser, plan):
+    plan.write_text('Before.\n\n::: {.callout tone="purple"}\nBad tone.\n:::\n', encoding="utf-8")
+    stub = ok(browser, "blocks", doc=DOC)["blocks"][1]
+    assert stub["type"] == "stub" and stub["attrs"]["type"] == "callout"
+    assert stub["markdown"] == '::: {.callout tone="purple"}\nBad tone.\n:::'
+    assert stub["capabilities"] == ["move", "remove"]
+
+
+def test_the_attributes_block_types_declares_are_the_ones_blocks_reports(browser, plan):
+    plan.write_text("## Head\n\n1. one\n\n```py\nx\n```\n", encoding="utf-8")
+    rows = {b["type"]: b for b in ok(browser, "blocks", doc=DOC)["blocks"]}
+    declared = {t["type"]: {a["name"]: a for a in t["attributes"]} for t in ok(browser, "block_types", doc=DOC)["types"]}
+    assert rows["heading"]["attrs"]["level"] in declared["heading"]["level"]["values"]
+    assert rows["list"]["attrs"]["ordered"] in declared["list"]["ordered"]["values"]
+    assert set(declared["code"]) == {"lang"} and "lang" in rows["code"]["attrs"]

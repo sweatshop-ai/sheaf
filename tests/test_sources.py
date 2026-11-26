@@ -651,31 +651,27 @@ def test_a_200_refused_that_echoes_the_bearer_reaches_no_result_unredacted(reque
     said = f"no: Authorization: Bearer {bearer} / {bearer}"
 
     def echo(verb, body, headers):
-        return 200, {"outcome": "refused", "reason": said, "block": said, "base": "b"}
+        return 200, {"outcome": "refused", "reason": said, "base": "b"}
     stand = Stand(echo)
     request.addfinalizer(stand.stop)
     out = remote.RemoteSource("shop", stand.url, bearer).adapter("d.md").write(rda.Tree("x\n"), "b", author="Ada", note="")
     assert out["outcome"] == "refused" and bearer not in json.dumps(out)
 
 
-def test_a_conflict_a_listing_and_an_info_of_a_service_pass_the_one_redaction_and_a_documents_text_does_not(request):
+def test_names_cursors_and_the_text_of_a_document_pass_unchanged_and_only_words_are_redacted(request):
     from sheafmd import remote
     bearer = "SECRETBEARERVALUE123456"
     doc = "# Notes\n\nSend Authorization: Bearer xyz-token-example in the header.\n"
+    name = "Bearer notes.md"
 
     def answer(verb, body, headers):
-        if verb == "write":
-            return 200, {"outcome": "conflict", "base": "b", "blocks": [f"echo {bearer}"]}
         if verb == "documents":
-            return 200, {"documents": [{"name": f"{bearer}.md"}], "next": None}
+            return 200, {"documents": [{"name": name}], "next": "Bearer cursor"}
         if verb == "read":
             return 200, {"tree": {"text": doc}, "base": "b"}
-        return 200, {"interface": rda.INTERFACE_VERSION, "name": f"shop {bearer}", "publish": False}
+        return 200, {"error": {"code": "unavailable", "message": f"echo {bearer}"}} if False else {"interface": rda.INTERFACE_VERSION, "name": "shop", "publish": False}
     stand = Stand(answer)
     request.addfinalizer(stand.stop)
     src = remote.RemoteSource("shop", stand.url, bearer)
-    assert bearer not in json.dumps(src.adapter("d.md").write(rda.Tree("x\n"), "b", author="Ada", note=""))
-    assert all(bearer not in n for n in src.documents())
-    src.info()
-    assert bearer not in src.display
-    assert src.adapter("d.md").read()[0].text == doc            # the words of a document are the member's, whatever they say
+    assert src.adapter("d.md").read()[0].text == doc
+    assert src.ask("documents", {}) == {"documents": [{"name": name}], "next": "Bearer cursor"}

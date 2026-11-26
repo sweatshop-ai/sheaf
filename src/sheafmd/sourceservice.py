@@ -18,6 +18,13 @@ remote adapter against. What it holds:
 A write goes through the Markdown-file adapter, so its outcomes and its base (the hash of the text) are the file adapter's own.
 Where the folder is inside a git work tree, a write that changed the file is committed with the mapped author; the note is the
 commit message. The service listens on a Unix socket or on a loopback port, in plain HTTP: TLS, where there is any, is in front of it.
+
+What it assumes, and enforces where it can: the service owns its folder and its repository. It is a single writer: no concurrent
+local edits and no Git operation running beside it, and the root is not replaced while it runs. It is a reference implementation
+and the contract suite's partner, not hardened for a shared working copy. The root is opened once at start and every path is opened
+from that descriptor, never following a link; one lock covers a write from the look at the file to the end of the commit; the
+service refuses to start, and refuses each write with `unavailable`, while a merge, rebase, cherry-pick or revert is in progress
+or the index holds staged changes.
 """
 import argparse
 import base64
@@ -26,11 +33,12 @@ import hmac
 import json
 import os
 import re
+import secrets
+import socket
 import socketserver
 import stat
 import subprocess
 import sys
-import tempfile
 import threading
 import tomllib
 from http.server import BaseHTTPRequestHandler
@@ -44,14 +52,6 @@ from .remote import PAGE_MAX, status_of
 BODY_MAX = 16 * 1024 * 1024
 _ADDRESS = re.compile(r"\s*([^<>\r\n]+?)\s*<([^<>\s@]+@[^<>\s]+)>\s*")
 _TOKEN = re.compile(r"[\x21-\x7e]{16,512}")
-
-
-class GitFailed(Exception):
-    """A git step that ended with an error."""
-
-
-class Conflicted(Exception):
-    """The file is no longer the text that was judged."""
 
 
 class Fault(Exception):
@@ -103,10 +103,14 @@ def clean_document(name) -> str:
 class Service:
     def __init__(self, folder, bearer: str, authors: dict):
         self.top = Path(folder).resolve()
+        self._root = os.open(self.top, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)    # held for the life of the service
         self._bearer = bearer.encode("utf-8")
         self.authors = authors
         self.git = self._inside_git()
         self._writing = threading.Lock()      # one write at a time, from the file's check to the end of its commit
+        busy = self._busy() if self.git else None
+        if busy:
+            raise SystemExit(f"{self.top}: {busy}; the service does not start until the repository is quiet")
 
     def authorised(self, header: str | None) -> bool:
         if not header or not header.startswith("Bearer "):
@@ -154,7 +158,7 @@ class Service:
         out of the folder. The parent descriptor is the caller's to close. `not_found` for what is not a plain file of the folder."""
         gone = Fault("not_found", f"no document {rel}")
         *folders, name = rel.split("/")
-        fd = os.open(self.top, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        fd = os.dup(self._root)
         try:
             for part in folders:
                 nxt = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
@@ -203,136 +207,126 @@ class Service:
             raise Fault("bad_request", "write needs tree.text, base and a note, all text")
         if not text.strip():
             return rda.refused("a document is not written empty")      # the one rule of this service: a source's own are its owner's
-        with self._writing:       # one write at a time, from the look at the file to the end of the replace
-            old, mode = self._text_of(rel)
+        with self._writing:       # the file and the commit are one step: a second write cannot come between them
+            busy = self._busy() if self.git else None
+            if busy:
+                raise Fault("unavailable", f"{busy}: the folder takes no write until it is over")
+            before, mode = self._bytes_of(rel)
+            try:
+                old = before.decode("utf-8")
+            except UnicodeDecodeError:
+                raise Fault("not_found", f"no document {rel}") from None
             if rds.md_hash(old) != base:
                 return rda.conflict(rds.md_hash(old))
             if text == old:
-                return rda.written(base)                     # the text the member was shown is the text now: nothing to commit or replace
-            sent = None
+                return rda.written(base)               # the text the member was shown is the text now: nothing to commit
+            done = False
             try:
-                sent = self._commit(rel, text, mode, who, note)            # first, off the real index: a failure leaves nothing to undo
-            except (OSError, subprocess.SubprocessError, GitFailed) as e:
-                print(f"source service: the history of {rel} could not be written ({type(e).__name__})", file=sys.stderr, flush=True)
+                try:
+                    self._put(rel, text.encode("utf-8"), mode)
+                except (OSError, Fault):
+                    return rda.refused("the document could not be written: it is as it was")
+                done = self.commit(rel, who, note)
+            finally:
+                if not done:
+                    self._undo(rel, before, mode)
+            if not done:
                 return rda.refused("the change could not be recorded in the folder's history: the document is as it was")
-            try:
-                self._replace(rel, old, text, mode)                        # last: only while the file is still the text that was judged
-            except Conflicted:
-                self._take_back(sent)
-                return rda.conflict(rds.md_hash(self._text_of(rel)[0]))
-            except (OSError, Fault):
-                self._take_back(sent)
-                return rda.refused("the document could not be written: it is as it was")
-            self._follow(sent, rel)
         return rda.written(rds.md_hash(text))
 
-    def _replace(self, rel: str, old: str, new: str, mode: int) -> None:
-        """The file `rel` replaced by `new` whole: a sibling made beside it, then renamed over it, only while the file still holds
-        `old`. Nothing is followed: the folder is held by its descriptor from the first look to the rename."""
+    def _put(self, rel: str, data: bytes, mode: int) -> None:
+        """The file `rel` replaced by `data` whole: a sibling made with O_EXCL through the folder's descriptor, written and
+        synced from its own descriptor, then renamed over the file. A failed sync of the folder after the rename is not a failure:
+        the file is replaced."""
         fd, parent, name = self._open(rel, os.O_RDONLY)
         os.close(fd)
-        tmp = f".{name}.sheaf-tmp"
+        tmp = f".{name}.{secrets.token_hex(6)}.sheaf-tmp"
         try:
-            try:
-                os.unlink(tmp, dir_fd=parent)
-            except FileNotFoundError:
-                pass
             out = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600, dir_fd=parent)
             with os.fdopen(out, "wb") as f:
-                f.write(new.encode("utf-8"))
+                f.write(data)
                 f.flush()
                 os.fchmod(f.fileno(), mode)
                 os.fsync(f.fileno())
-            if self._bytes_of(rel)[0] != old.encode("utf-8"):
-                raise Conflicted
             os.rename(tmp, name, src_dir_fd=parent, dst_dir_fd=parent)
             tmp = None
-            os.fsync(parent)
+            try:
+                os.fsync(parent)
+            except OSError:
+                pass
         finally:
-            if tmp is not None:
-                try:
+            try:
+                if tmp is not None:
                     os.unlink(tmp, dir_fd=parent)
-                except OSError:
-                    pass
-            os.close(parent)
+            except OSError:
+                pass
+            finally:
+                os.close(parent)
+
+    def _undo(self, rel: str, before: bytes, mode: int) -> None:
+        """What a failed write leaves put back: nothing staged for `rel`, and its previous bytes, each step on its own so that one
+        failing does not skip the other."""
+        try:
+            if self.git:
+                self._git("reset", "-q", "--", rel)
+        except (OSError, subprocess.SubprocessError):
+            print(f"source service: the index entry of {rel} could not be reset", file=sys.stderr, flush=True)
+        finally:
+            try:
+                self._put(rel, before, mode)
+            except (OSError, Fault):
+                print(f"source service: {rel} could not be put back after a failed commit", file=sys.stderr, flush=True)
 
     # ── git ─────────────────────────────────────────────────────────────────
-    def _git(self, *args, env=None, data: bytes | None = None):
-        return subprocess.run(["git", "-C", str(self.top), *args], capture_output=True, input=data, timeout=30,
+    def _git(self, *args, env=None):
+        return subprocess.run(["git", "-C", str(self.top), *args], capture_output=True, text=True, timeout=30,
                               env={**os.environ, **(env or {}), "GIT_LITERAL_PATHSPECS": "1"})   # a name is a file, never a glob or a magic pathspec
-
-    def _out(self, *args, env=None, data: bytes | None = None) -> str:
-        got = self._git(*args, env=env, data=data)
-        if got.returncode != 0:
-            raise GitFailed(args[0])
-        return got.stdout.decode("utf-8", "replace").strip()
 
     def _inside_git(self) -> bool:
         try:
-            return self._out("rev-parse", "--is-inside-work-tree") == "true"
-        except (OSError, subprocess.SubprocessError, GitFailed):
+            return self._git("rev-parse", "--is-inside-work-tree").stdout.strip() == "true"
+        except (OSError, subprocess.SubprocessError):
             return False
 
-    def _commit(self, rel: str, text: str, mode: int, who: tuple, note: str):
-        """The commit of `text` as the file `rel`, made without the work tree or the real index: the blob is written, a tree is built
-        in a temporary index seeded from HEAD, the commit is made with the mapped author, and HEAD moves to it only if it is still
-        where it was (compare and swap). `(new, old)` ids, or None where there is no history. A failure at any step has changed
-        no file, no index and no reference."""
+    def _busy(self) -> str | None:
+        """Why the repository takes no write now, or None: a merge, rebase, cherry-pick or revert in progress, or staged changes
+        that a commit of one file must not be mixed with. Where git cannot say, it is busy."""
+        try:
+            gdir = self._git("rev-parse", "--absolute-git-dir")
+            if gdir.returncode != 0:
+                return "the repository cannot be read"
+            for marker in ("MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge", "rebase-apply"):
+                if os.path.lexists(os.path.join(gdir.stdout.strip(), marker)):
+                    return "a merge, rebase, cherry-pick or revert is in progress"
+            if self._git("diff", "--cached", "--quiet").returncode != 0:
+                return "the index holds staged changes"
+        except (OSError, subprocess.SubprocessError):
+            return "the repository cannot be read"
+        return None
+
+    def commit(self, rel: str, who: tuple, note: str) -> bool:
+        """The change to `rel`, committed as the mapped author, with git's own filters and ignore rules: True when it is in the
+        history (or there is no history, or nothing differed), False when a git step failed (said on stderr; the caller puts the
+        file back)."""
         if not self.git:
-            return None
+            return True
         name, email = who
         env = {"GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email, "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email}
-        old = self._git("rev-parse", "-q", "--verify", "HEAD^{commit}")
-        old_id = old.stdout.decode().strip() if old.returncode == 0 else None
-        path = self._out("rev-parse", "--show-prefix") + rel          # the name in the repository, which may hold more than the folder
-        blob = self._out("hash-object", "-w", "--no-filters", "--stdin", data=text.encode("utf-8"))
-        with tempfile.TemporaryDirectory(prefix="sheaf-idx-") as scratch:
-            idx = {"GIT_INDEX_FILE": os.path.join(scratch, "index")}
-            if old_id:
-                self._out("read-tree", old_id, env=idx)
-            kind = "100755" if mode & 0o111 else "100644"
-            self._out("update-index", "--add", "--cacheinfo", f"{kind},{blob},{path}", env=idx)
-            tree = self._out("write-tree", env=idx)
-        cmd = ["commit-tree", tree, "-m", note.strip() or f"Edit {rel}"]
-        if old_id:
-            cmd[2:2] = ["-p", old_id]
-        if self._git("config", "--type=bool", "commit.gpgsign").stdout.strip() == b"true":
-            cmd.append("-S")                                             # commit-tree does not read the setting itself
-        new = self._out(*cmd, env=env)
-        self._out("update-ref", "-m", f"commit: {note.strip().splitlines()[0] if note.strip() else 'edit ' + rel}",
-                  "HEAD", new, old_id or "0" * len(new))
-        return new, old_id
-
-    def _take_back(self, sent) -> None:
-        """HEAD put back where it was, only if it is still at the commit just made: for a write whose last step failed."""
-        if sent is None:
-            return
-        new, old = sent
         try:
-            if old:
-                self._out("update-ref", "-m", "sheaf: take back", "HEAD", old, new)
-            else:
-                self._out("update-ref", "-m", "sheaf: take back", "-d", "HEAD", new)
-        except (OSError, subprocess.SubprocessError, GitFailed):
-            print("source service: the commit of a failed write could not be taken back", file=sys.stderr, flush=True)
-
-    def _follow(self, sent, rel: str) -> None:
-        """After the commit and the file agree: the real index entry of `rel` moves to the new text only where it held what HEAD
-        held before, so a staged edit of someone is never replaced. A failure here changes nothing that was written."""
-        if sent is None:
-            return
-        new, old = sent
-        try:
-            path = self._out("rev-parse", "--show-prefix") + rel
-            tracked = self._out("ls-tree", old, "--", path).split() if old else []
-            staged = self._out("ls-files", "-s", "--", path).split()
-            was = (tracked[0], tracked[2]) if tracked else None
-            now = (staged[0], staged[1]) if staged else None
-            if was == now:                       # the index holds what HEAD held: it follows HEAD; any other text in it is someone's
-                blob = self._out("rev-parse", f"{new}:{path}")
-                self._out("update-index", "--add", "--cacheinfo", f"{(was or ('100644',))[0]},{blob},{path}")
-        except (OSError, subprocess.SubprocessError, GitFailed):
-            print(f"source service: the index entry of {rel} could not be brought up to date", file=sys.stderr, flush=True)
+            added = self._git("add", "--", rel)
+            if added.returncode != 0:
+                print(f"source service: git add of {rel} failed ({added.returncode})", file=sys.stderr, flush=True)
+                return False
+            got = self._git("-c", "core.hooksPath=/dev/null", "commit", "--no-verify", "--quiet", "--only",
+                            f"--author={name} <{email}>", "-m", note.strip() or f"Edit {rel}", "--", rel, env=env)
+            if got.returncode == 0:
+                return True
+            if got.returncode == 1 and self._git("diff", "--cached", "--quiet", "--", rel).returncode == 0:
+                return True                     # 1 with nothing staged: the text was the same
+            print(f"source service: git commit of {rel} failed ({got.returncode})", file=sys.stderr, flush=True)
+        except (OSError, subprocess.SubprocessError) as e:
+            print(f"source service: git commit of {rel} failed ({type(e).__name__})", file=sys.stderr, flush=True)
+        return False
 
 
 def make_handler(service: Service):
@@ -342,16 +336,18 @@ def make_handler(service: Service):
         def log_message(self, *args):
             pass
 
-        def _send(self, status: int, payload: dict):
+        def _send(self, status: int, payload: dict, close: bool = False):
             raw = json.dumps(payload).encode("utf-8")
             self.send_response(status)
+            if close:
+                self.send_header("Connection", "close")
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(raw)))
             self.end_headers()
             self.wfile.write(raw)
 
-        def _error(self, code: str, message: str):
-            self._send(status_of(code), {"error": {"code": code, "message": message}})
+        def _error(self, code: str, message: str, close: bool = False):
+            self._send(status_of(code), {"error": {"code": code, "message": message}}, close)
 
         def do_POST(self):
             try:
@@ -359,12 +355,20 @@ def make_handler(service: Service):
             except ValueError:
                 length = -1
             if not service.authorised(self.headers.get("Authorization")):
-                # nothing is done for a caller without the bearer: a small body is read and dropped (a close with it unread resets the
-                # connection and the caller never sees the answer), a large one is left, and the connection is closed
-                if 0 < length <= 65536:
-                    self.rfile.read(length)
+                # nothing is done for a caller without the bearer, and its body is not read for the answer: it is told with
+                # `Connection: close`, our side is shut for writing so the answer is delivered whole, and what the caller still
+                # sends is drained for a moment, up to a small size, so that closing does not reset the connection
                 self.close_connection = True
-                return self._error("unauthorized", "a request carries the hub's bearer")
+                self._error("unauthorized", "a request carries the hub's bearer", close=True)
+                try:
+                    self.connection.shutdown(socket.SHUT_WR)
+                    self.connection.settimeout(0.5)
+                    left = 65536
+                    while left > 0 and (chunk := self.connection.recv(min(left, 8192))):
+                        left -= len(chunk)
+                except OSError:
+                    pass
+                return
             if not 0 <= length <= BODY_MAX:
                 self.close_connection = True
                 return self._error("bad_request", "the body is missing or too large")

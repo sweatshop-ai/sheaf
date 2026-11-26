@@ -8,7 +8,7 @@ a service of another source.
 
 - JSON over HTTPS, or over a Unix socket (`unix:///absolute/path.sock`). Plain `http://` is accepted for a loopback address only.
 - Every call is `POST /<call>` with `Authorization: Bearer <the hub's bearer>` and a JSON object as the body.
-- A request without the bearer, or with another, is answered `unauthorized` before its body is read.
+- A request without the bearer, or with another, is answered `unauthorized` with `Connection: close`, and its body is not used.
 - The hub holds the one bearer, in a file only its account can read. It holds no key to the site: the service does.
 - Timeouts on the hub's side: 5 s to connect, 30 s for a request.
 
@@ -67,3 +67,16 @@ rectoverso with the Theme the source names (a built-in name or an absolute folde
 A source is a member's only when the member's table names it: `sources = ["shop"]` in `[proxy.members."<id>"]`, next to `roots`.
 A member whose table does not name it is answered "no such root", as for a folder that is not theirs. A folder root that holds the
 name of a declared source keeps it, and the source stays unserved.
+
+## What the reference service assumes
+
+The reference service owns its folder and its repository: a single writer, with no concurrent local edits and no Git operation
+running beside it, and the root not replaced while it runs. It is a reference implementation and the contract suite's partner,
+not hardened for a shared working copy. It enforces what it can: the root is opened once at start and every path is opened from
+that descriptor without following links; one lock covers a write from the look at the file to the end of the commit; it refuses to
+start, and answers each write `unavailable`, while a merge, rebase, cherry-pick or revert is in progress or the index holds staged
+changes. A write replaces the file by atomic rename and commits it with Git's own filters and ignore rules; if the commit fails the
+previous bytes are put back and the write is `refused`.
+
+The hub trusts a configured service with its own documents: names, cursors and document text are passed on unchanged, and only the
+service's words (an error message, a refusal's `reason`) are redacted of the bearer.

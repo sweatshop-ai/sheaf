@@ -5,7 +5,9 @@ The tests under "the contract" take the `kind` fixture and know nothing of which
 (its authors, its bearer, its pages, its errors) is below them."""
 import json
 import os
+import stat
 import subprocess
+from pathlib import Path
 
 import pytest
 from source_fakes import ReferenceService, Stand
@@ -643,7 +645,7 @@ def test_a_git_step_that_times_out_leaves_disk_index_and_head_as_they_were(tmp_p
     real = svc._git
 
     def slow(*args, **kw):
-        if "commit-tree" in args:
+        if "commit" in args:
             raise subprocess.TimeoutExpired("git", 30)
         return real(*args, **kw)
     monkeypatch.setattr(svc, "_git", slow)
@@ -653,41 +655,60 @@ def test_a_git_step_that_times_out_leaves_disk_index_and_head_as_they_were(tmp_p
     _no_leftovers(folder)
 
 
-def test_staged_edits_of_the_document_are_kept_when_the_write_commits_and_when_it_fails(tmp_path):
+def test_a_write_is_unavailable_while_the_index_holds_staged_changes_and_nothing_is_touched(tmp_path):
     svc, folder, git = _git_service(tmp_path)
-    (folder / "b.md").write_text("bee, staged by someone\n")
-    git("add", "b.md")
-    (folder / "b.md").write_text("bee\n")                             # the file is as the member saw it; the index holds another text
+    (folder / "other.md").write_text("other\n")
+    git("add", "other.md")
+    with pytest.raises(sourceservice_fault()) as e:
+        svc.write(_write_body(svc, "b.md", "bee two\n"))
+    assert e.value.code == "unavailable" and (folder / "b.md").read_text() == "bee\n" and git("diff", "--cached", "--name-only").strip() == "other.md"
+
+
+@pytest.mark.parametrize("marker", ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD", "rebase-merge"])
+def test_a_write_is_unavailable_while_a_merge_rebase_or_cherry_pick_is_in_progress(tmp_path, marker):
+    svc, folder, git = _git_service(tmp_path)
+    gd = Path(git("rev-parse", "--absolute-git-dir").strip())
+    (gd / marker).mkdir() if marker == "rebase-merge" else (gd / marker).write_text(git("rev-parse", "HEAD").strip() + "\n")
+    with pytest.raises(sourceservice_fault()) as e:
+        svc.write(_write_body(svc, "b.md", "bee two\n"))
+    assert e.value.code == "unavailable" and (folder / "b.md").read_text() == "bee\n"
+
+
+def test_the_service_refuses_to_start_while_the_repository_is_busy(tmp_path):
+    svc, folder, git = _git_service(tmp_path)
+    (folder / "other.md").write_text("other\n")
+    git("add", "other.md")
+    from sheafmd import sourceservice
+    with pytest.raises(SystemExit):
+        sourceservice.Service(folder, "b" * 20, {})
+
+
+def test_a_failed_commit_puts_the_bytes_back_even_when_the_cleanup_step_raises(tmp_path, monkeypatch):
+    svc, folder, git = _git_service(tmp_path)
     _signing_fails(git)
+    real = svc._git
+
+    def broken_reset(*args, **kw):
+        if args[:1] == ("reset",):
+            raise OSError("reset failed")
+        return real(*args, **kw)
+    monkeypatch.setattr(svc, "_git", broken_reset)
     assert svc.write(_write_body(svc, "b.md", "bee two\n"))["outcome"] == "refused"
-    assert git("show", ":b.md") == "bee, staged by someone\n" and (folder / "b.md").read_text() == "bee\n"
-    git("config", "commit.gpgsign", "false")
+    assert (folder / "b.md").read_text() == "bee\n"
+
+
+def test_a_failed_sync_of_the_folder_after_a_commit_still_counts_as_written(tmp_path, monkeypatch):
+    svc, folder, git = _git_service(tmp_path)
+    real = os.fsync
+    monkeypatch.setattr(os, "fsync", lambda fd: (_ for _ in ()).throw(OSError("sync")) if stat.S_ISDIR(os.fstat(fd).st_mode) else real(fd))
     assert svc.write(_write_body(svc, "b.md", "bee two\n"))["outcome"] == "written"
-    assert git("show", "HEAD:b.md") == "bee two\n" and (folder / "b.md").read_text() == "bee two\n"
-    assert git("show", ":b.md") == "bee, staged by someone\n"        # the real index was never written by the service
+    assert git("show", "HEAD:b.md") == "bee two\n"
 
 
 def test_a_clean_write_leaves_the_index_and_the_tree_clean_and_the_other_files_of_head_in_the_commit(tmp_path):
     svc, folder, git = _git_service(tmp_path)
     assert svc.write(_write_body(svc, "b.md", "bee two\n"))["outcome"] == "written"
     assert git("status", "--porcelain") == "" and git("show", "--name-only", "--format=", "HEAD").split() == ["b.md"]
-    assert git("ls-tree", "--name-only", "HEAD").split() == ["*.md", "b.md"]
-    _no_leftovers(folder)
-
-
-def test_a_local_edit_saved_while_git_runs_is_a_conflict_and_is_never_erased(tmp_path, monkeypatch):
-    svc, folder, git = _git_service(tmp_path)
-    head = git("rev-parse", "HEAD")
-    real = svc._git
-
-    def edit_meanwhile(*args, **kw):
-        if "commit-tree" in args:
-            (folder / "b.md").write_text("bee, edited by hand meanwhile\n")
-        return real(*args, **kw)
-    monkeypatch.setattr(svc, "_git", edit_meanwhile)
-    out = svc.write(_write_body(svc, "b.md", "bee two\n"))
-    assert out["outcome"] == "conflict"
-    assert (folder / "b.md").read_text() == "bee, edited by hand meanwhile\n" and git("rev-parse", "HEAD") == head
     _no_leftovers(folder)
 
 
@@ -753,3 +774,14 @@ def test_a_hard_link_is_not_a_document(tmp_path):
     with pytest.raises(sourceservice_fault()) as e:
         svc.read("twin.md")
     assert e.value.code == "not_found"
+
+
+def test_the_root_is_held_by_descriptor_from_the_start_so_a_link_put_in_its_place_is_not_followed(tmp_path):
+    svc, folder = _svc_plain(tmp_path)
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    (elsewhere / "real.md").write_text("elsewhere\n")
+    moved = tmp_path / "moved"
+    folder.rename(moved)
+    folder.symlink_to(elsewhere)
+    assert svc.read("real.md")["tree"]["text"] == "real\n"

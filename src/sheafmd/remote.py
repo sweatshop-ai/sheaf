@@ -177,7 +177,8 @@ class _BoundedHttps(http.client.HTTPSConnection):
 
 
 class RemoteSource:
-    """One Source service, as the hub sees it. `bearer` is the hub's bearer for it: held here, sent in a header, and never in a
+    """One Source service, as the hub sees it. The configured service is trusted with its own documents: names, cursors and a
+    document's text pass unchanged, and only the service's words (an error message, a refusal's reason) are redacted. `bearer` is the hub's bearer for it: held here, sent in a header, and never in a
     message, a log or a repr."""
 
     def __init__(self, name: str, url: str, bearer: str, *, connect_timeout: float = CONNECT_TIMEOUT,
@@ -262,22 +263,16 @@ class RemoteSource:
         return res.status, data
 
     def _scrub(self, data):
-        """THE choke point of what a service says: every string of its answer passes `redact` here, before it is raised, refused or
-        returned, so no field can carry the bearer or an Authorization line on. The one exception is a document's own text
-        (`tree.text`), which is the member's and never the service's words."""
-        if isinstance(data, str):
-            return redact(data, self._bearer)
-        if isinstance(data, list):
-            return [self._scrub(x) for x in data]
+        """THE choke point of what a service says in words: its free-text fields, `error.message` and `reason`, pass `redact`
+        here, before they are raised, refused or returned. Names, cursors, keys and a document's text pass unchanged: the
+        configured service is trusted with its own documents, and rewriting them would break links and cursors."""
         if not isinstance(data, dict):
             return data
-        out = {k: self._scrub(v) for k, v in data.items() if k != "tree"}
-        if "tree" in data:
-            tree = data["tree"]
-            if isinstance(tree, dict) and isinstance(tree.get("text"), str):
-                out["tree"] = {**{k: self._scrub(v) for k, v in tree.items() if k != "text"}, "text": tree["text"]}
-            else:
-                out["tree"] = self._scrub(tree)
+        out = dict(data)
+        if isinstance(out.get("reason"), str):
+            out["reason"] = redact(out["reason"], self._bearer)
+        if isinstance(out.get("error"), dict) and isinstance(out["error"].get("message"), str):
+            out["error"] = {**out["error"], "message": redact(out["error"]["message"], self._bearer)}
         return out
 
     def ask(self, verb: str, body: dict | None = None) -> dict:

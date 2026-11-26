@@ -1,6 +1,6 @@
 # Handoff: Codex NO-GO groups K and M, tickets 202 and 203 (2026-11-26)
 
-**Status:** 202 (#684) reviewed GO and merged once its CI on 13e71738 is green, recorded in the ticket. 203 (#687) is open: Codex round 13 gave NO-GO on four serious findings. It goes to a fresh session.
+**Status:** 202 done: #684 merged as bba4c6c1 (CI run 45758742430, Codex GO round 7). 203 (#687) is open: Codex round 13 gave NO-GO on four serious findings. It goes to a fresh session.
 
 ## Ticket 202, group K, PR #684 (from the review of #655)
 

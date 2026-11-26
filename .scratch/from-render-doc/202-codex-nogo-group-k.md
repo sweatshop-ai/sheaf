@@ -2,7 +2,7 @@
 
 **Claimed by:** Boris
 
-**Status:** in progress
+**Status:** done. Merged in #684 as bba4c6c1 (CI run 45758742430 green on 13e71738; Codex GO round 7).
 
 **Blocked by:** none
 
@@ -12,5 +12,5 @@
 
 ## Serious
 
-- [ ] **A** (from #655, `hub/readthrough.py` `agency_config`): the meta block and mount config of a page read through keep the client's own `proxy` and `member`. The page script namespaces unsent comment and edit drafts in this origin's local storage by them (`DRAFTS_OF` in `page.js`), so a client tiroir that sends `proxy: false` or one fixed `member` makes two agency members in one browser profile share, overwrite or delete each other's drafts. Fix: this hub sets both, `proxy: true` and the signed-in agency member's id.
-- [ ] **B** (from #655, `connect.py` `peer_credential_name`): each byte of a non-ASCII host character is written as three characters, so a valid IDN host can give a name past the 255-byte limit of a file name (50 × `é` in one label: 311 characters), and `sheaf peer use --store file` cannot keep that peer's token. Fix: a name that would pass the limit is cut and ends in a hash of the whole origin, under a marker no shorter name can carry.
+- [x] **A** (fixed in #684, bba4c6c1; tests in `tests/test_read_through_fixes.py`) (from #655, `hub/readthrough.py` `agency_config`): the meta block and mount config of a page read through keep the client's own `proxy` and `member`. The page script namespaces unsent comment and edit drafts in this origin's local storage by them (`DRAFTS_OF` in `page.js`), so a client tiroir that sends `proxy: false` or one fixed `member` makes two agency members in one browser profile share, overwrite or delete each other's drafts. Fix: this hub sets both, `proxy: true` and the signed-in agency member's id.
+- [x] **B** (fixed in #684, bba4c6c1; tests in `tests/test_peer_channel.py`) (from #655, `connect.py` `peer_credential_name`): each byte of a non-ASCII host character is written as three characters, so a valid IDN host can give a name past the 255-byte limit of a file name (50 × `é` in one label: 311 characters), and `sheaf peer use --store file` cannot keep that peer's token. Fix: a name that would pass the limit is cut and ends in a hash of the whole origin, under a marker no shorter name can carry.

@@ -248,6 +248,23 @@ def test_a_join_whose_connection_was_opened_again_meanwhile_leaves_the_fresh_one
     fresh[0].close()
 
 
+def test_a_join_whose_connection_closes_after_it_was_found_listed_takes_the_key_from_no_other(world, docs, monkeypatch):
+    """Ticket 206, review: the connection closes once the join found it listed, before the join itself. Its join takes
+    nothing, so the tab's stream on another connection of the same browser must stay."""
+    other = shared(world, sid="n" * 24)
+    assert join(world, "t1:1", docs[0], sid="n" * 24).status == 200
+    closing = shared(world)
+
+    def close_then_answer(key):                               # called after the look at the list, before the join
+        closing.close()
+        return False
+
+    monkeypatch.setattr(closing, "bars", close_then_answer)
+    assert join(world, "t1:1", docs[0]).status == 200
+    assert other.keys() == ["t1:1"] and world.hub.tabs(docs[0]) == 1
+    other.close()
+
+
 @pytest.mark.parametrize("key", [None, 7, ["a"], ""])
 def test_a_leave_with_no_stream_of_ours_is_refused_whatever_its_key(world, key):
     assert world.post("/_/live/leave", {"stream": "nope", "key": key}).status == 404

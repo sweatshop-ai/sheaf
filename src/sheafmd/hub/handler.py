@@ -1103,7 +1103,8 @@ class Handler:
                 listed = self._shared.get(stream._sid) is stream and not stream.closed
                 others = [s for s in self._shared.values() if s is not stream and s.owner == stream.owner]
             if listed and not stream.bars(key):
-                stream.join(key, sub)
+                if not stream.join(key, sub):    # closed since it was found listed: it took nothing, so no other leaves
+                    return _ok()
                 for other in others:
                     other.leave(key)
                     if other.seq < stream.seq:

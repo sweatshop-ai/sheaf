@@ -619,6 +619,23 @@ def _code_flags(src: str, comments: bool = False) -> bytearray:
     return flags
 
 
+def _tiles_in_divs(src: str, blocks) -> set:
+    """The indices of the page's tiles that lie inside a fenced div. The page's edit mode tiles the text without
+    divs (the server's edit reads the same tiling), so a callout's lines are tiles of their own there; the div is a
+    block of the block tree and is not edited as a paragraph, so none of its tiles is offered for editing."""
+    spans, pos = [], 0
+    for b in split_md_blocks(src, divs=True):
+        if b.kind == "div":
+            spans.append((pos, pos + len(b.text)))
+        pos += len(b.text)
+    out, pos = set(), 0
+    for i, b in enumerate(blocks):
+        if any(pos < e and pos + len(b.text) > s for s, e in spans):
+            out.add(i)
+        pos += len(b.text)
+    return out
+
+
 def _first_joined_markup(src: str, runs: list[tuple[int, int]]) -> int | None:
     """The index of the first stretch the strip takes out from between two halves of markup that
     it joins: the words of the page are not the question here, the joining is.
@@ -1156,10 +1173,11 @@ def build(md: Path, *, theme: Theme, share: bool = True, title: str | None = Non
     editor = ""
     if not share:
         parsed = rdc.parse(src)
+        in_div = _tiles_in_divs(src, blocks) if blocks else set()
         meta = {
             "name": md.name,
             "hash": src_mod.md_hash(src),
-            "editable": [i for i, b in enumerate(blocks) if b.editable] if blocks else [],
+            "editable": [i for i, b in enumerate(blocks) if b.editable and i not in in_div] if blocks else [],
             "commentable": [i for i, b in enumerate(blocks) if b.kind in COMMENTABLE]
                            if blocks else [],
             "edit": blocks is not None,

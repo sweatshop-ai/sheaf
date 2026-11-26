@@ -85,3 +85,10 @@ def test_the_base_block_css_is_light_only_and_the_plain_theme_carries_its_own_da
     assert "prefers-color-scheme" not in declarations.css()       # a Theme with a light page must not get dark boxes
     plain = load_theme("plain").css
     assert "--sheaf-callout-info-bg" in plain and "prefers-color-scheme:dark" in plain
+
+
+def test_no_tile_of_a_callout_is_offered_for_editing_as_a_paragraph(tmp_path):
+    import json
+    out = render(tmp_path, "Before.\n\n::: {#c1 .callout}\nOne.\n\nTwo.\n:::\n\nAfter.\n", share=False)
+    meta = json.loads(re.search(r'<script id="rd-edit-meta" type="application/json">(.*?)</script>', out, re.S).group(1))
+    assert meta["edit"] is True and meta["editable"] == [0, 3]       # "Before." and "After.", not the callout's tiles

@@ -1502,6 +1502,7 @@ class Handler:
         return _ok(**e.live.blocks())
 
     def _editor_asset(self, req: Req) -> Response:
+        _shape(self.hub.block_editor, "the block editor is off")
         asset = self.hub.editor_asset
         named = req.query.get("v") == asset.tag
         return Response(200, {"Content-Type": "text/javascript; charset=utf-8", "X-Content-Type-Options": "nosniff",

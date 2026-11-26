@@ -4642,7 +4642,7 @@ var create = function (ROOT, CFG, opts) {
   // and is ignored, another writer's is told as ever.
   function heard(d) {
     if (ownWrites) { held.push(d); return; }
-    if (d.hash === hash || (bke && beMine[d.hash])) return;   // beMine: an earlier save of this editor, whose event came after a later one
+    if (d.hash === hash || (typeof beMine !== 'undefined' && beMine[d.hash])) return;   // beMine: an earlier save of this editor, whose event came after a later one
     // Only comments moved: take them in place, even with unsaved edits on
     // screen, since the saved blocks keep their comments on the server side. Only
     // when this page holds the version the hub compared with (d.base): a page that

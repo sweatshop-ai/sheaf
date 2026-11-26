@@ -1,6 +1,6 @@
 """The block editor on the page (ticket 07, ADR 0003, SPEC 10.3): TipTap on the plain blocks, the Markdown it writes, and the autosave.
 
-Run in CI and on t-compute, never on the laptop."""
+Run in CI, never on the laptop."""
 import pytest
 
 from pagehelp import key, until, rewrite

@@ -118,10 +118,12 @@ def _source(div: dict, api) -> str:
     """The Markdown of a div held inside a quote or a list, written back by pandoc: children hold no bytes of their own."""
     doc = {"pandoc-api-version": api, "meta": {}, "blocks": [div]}
     got = _pandoc.run(["-f", "json", "-t", FORMAT, "--wrap=preserve"], json.dumps(doc))
-    return got.stdout.rstrip("\n") if got.returncode == 0 else ""
+    if got.returncode != 0:
+        raise Unreadable(got.stderr.strip() or "pandoc did not write a div back")
+    return got.stdout.rstrip("\n")
 
 
-def _children(blocks: list, api=None) -> list:
+def _children(blocks: list, api) -> list:
     """(type, attrs, ast, its own children, stored id, caps, content) for the blocks held by a quote, a list or a div,
     from the AST. A div that is no declared type is a locked Stub with its type name and its source."""
     out = []

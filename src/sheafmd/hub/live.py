@@ -373,14 +373,18 @@ class LiveDocument:
             # A root forgotten while the save waited has no page to render for, and its file is not found again: the
             # edit is written and answered (its tabs heard `gone`), never failed by a look-up after it (ticket 26 D).
             if report["changed"] and not self._detached:
-                self._rerender()
-                # One event for the whole write: the watcher compares the hash just taken and
-                # will say nothing more of it. Measured from the text the tabs hold, or, when
-                # someone wrote between our write and the render (the watcher will not see
-                # that either), from the text we wrote: the tab that saved holds that one.
-                raced = self._hash != rds.md_hash(new_text)
-                start = new_text if raced else before
-                self._announce(self._snapshot(self._text), start, **({"rid": rid} if rid is not None else {}))
+                try:
+                    self._rerender()
+                    # One event for the whole write: the watcher compares the hash just taken and
+                    # will say nothing more of it. Measured from the text the tabs hold, or, when
+                    # someone wrote between our write and the render (the watcher will not see
+                    # that either), from the text we wrote: the tab that saved holds that one.
+                    raced = self._hash != rds.md_hash(new_text)
+                    start = new_text if raced else before
+                    self._announce(self._snapshot(self._text), start, **({"rid": rid} if rid is not None else {}))
+                except NotFound:
+                    if not self._detached:      # a root forgotten after the check above: its detach came first
+                        raise
             answer = {"hash": rds.md_hash(new_text), "changed": report["changed"],
                       "skipped": report["skipped"], "remap": report["remap"],
                       "merged": bool(report.get("merged")),

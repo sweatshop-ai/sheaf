@@ -93,14 +93,20 @@ class DocumentService:
     def write(self, change, session: str = "", *, author: str = "", note: str = "", move=None, **hooks) -> dict:
         """The write `change(text, opened)` makes through the adapter, under its lock, recorded as this session's.
         A `Conflict` the change raises is the outcome `conflict`. Returns the outcome; `hooks` are the adapter's own."""
-        here, name = self.adapter.pinned()
-        if not self.adapter.accepts(name):
-            return rda.refused(f"{name} is not a .md file")
+        name = "the file"
+        landed = []                 # set once the file is written: a policy error of a hook after that is not a refusal
+        after = hooks.pop("between", None)
+        hooks["between"] = lambda: (landed.append(1), after() if after is not None else None)
         try:
+            here, name = self.adapter.pinned()
+            if not self.adapter.accepts(name):
+                return rda.refused(f"{name} is not a .md file")
             outcome, old, new = here.apply(change, author=author, note=note, move=move, **hooks)
         except rda.Refused as r:
             return rda.refused(r.reason, r.block)
         except rda.POLICY as e:
+            if landed:
+                raise
             return rda.policy_refusal(name, e)
         if outcome["outcome"] == "written":
             self._record(old, new, session)

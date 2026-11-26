@@ -118,10 +118,11 @@ class MarkdownFileAdapter:
         return MarkdownFileAdapter(here), here.name
 
     def write(self, tree, base, author: str = "", note: str = "", move=None) -> dict:
-        here, name = self.pinned()
-        if not self.accepts(name):
-            return refused(f"{name} is not a .md file")
+        name = "the file"
         try:
+            here, name = self.pinned()
+            if not self.accepts(name):
+                return refused(f"{name} is not a .md file")
             out, _, _ = here.apply(lambda t, opened: tree.text, expected=base, move=move, author=author, note=note)
         except POLICY as e:
             return policy_refusal(name, e)

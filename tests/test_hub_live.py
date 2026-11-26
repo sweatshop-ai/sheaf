@@ -1178,6 +1178,30 @@ def test_a_torn_read_that_a_refresh_gives_up_is_not_kept_as_a_version(made):
     assert rds.md_hash(torn) not in doc._versions
 
 
+@pytest.mark.parametrize("look", ["refresh", "rebuild"])
+def test_a_torn_read_whose_second_render_fails_serves_the_page_the_tabs_hold(made, look):
+    """Ticket 204 C (from #662): the render of a torn read has replaced the page the hub serves. When the render again from
+    the text the tabs hold fails, the page served before the torn one is put back: it is of the text the document holds."""
+    doc, md, rendered, events, _ = made()
+    page = {"html": f"page of {DOC}"}
+    doc.served = lambda: (lambda kept=page["html"]: page.update(html=kept))
+    torn, whole = "# Title\n\nFirst par", DOC.replace("First paragraph.", "First, reworded.")
+    md.write_text(torn, encoding="utf-8")
+    calls = []
+
+    def render(text):
+        calls.append(text)
+        if len(calls) > 1:
+            raise RuntimeError("the render failed")
+        page["html"] = f"page of {text}"
+        md.write_text(whole, encoding="utf-8")      # the write that made the read a torn one
+    doc._render = render
+    with pytest.raises(RuntimeError):
+        getattr(doc, look)()
+    assert calls == [torn, DOC] and events == []
+    assert doc.current() == (rds.md_hash(DOC), DOC) and page["html"] == f"page of {DOC}"
+
+
 def test_a_refresh_whose_second_look_at_the_file_cannot_decide_it_keeps_what_the_tabs_hold(made):
     from sheafmd.hub import place
     doc, md, rendered, events, _ = made()

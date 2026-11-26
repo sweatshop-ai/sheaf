@@ -96,6 +96,8 @@ class LiveDocument:
         self.session_to = lambda: ""
         self.agent_tells = lambda: []
         self.tells_lock = contextlib.nullcontext()      # the lock of the Tells' file: held while `telling` is read and published (`_publish_telling`)
+        # A callable that answers another, which puts back the page served now: a torn read's render replaced it (ticket 204 C).
+        self.served = lambda: (lambda: None)
         # The question the told session put to its person in its own chat, while it waits for
         # them there ("" when it is not waiting).
         self._question = ""
@@ -579,6 +581,13 @@ class LiveDocument:
         if store is not None and self._address is not None:
             store.forget_texts(self._address, (), writer=self)
 
+    def close(self):
+        """Its page left its address (deleted into the trash, 8.6) and its tabs are told `gone` next, the last event of their
+        stream (8.8): from now on a refresh or rebuild tells nothing. Under the lock, so a render under way tells its `changed`
+        first. Its versions stay, unlike `forget`'s: they come back with the page."""
+        with self._held():
+            self._forgotten = True
+
     def forget(self):
         """Its root was forgotten (SPEC 8.2): drop its versions on disk, and keep the texts it hands out in
         memory only from now on. Under the lock, so the text of a write still under way is on disk by
@@ -746,10 +755,15 @@ class LiveDocument:
         torn file: the text the tabs hold is kept and rendered again, and False says so; the watcher sees the file move and
         comes back. A file that cannot be stat-ed is not known to have held still."""
         kept = (self._text, self._hash, self._branch)
+        put_back = self.served()            # the page served now, of the text the tabs hold
         self._rerender(remember=False)      # a read that may be torn is no version: kept once the file has not moved under it
         if seen is None or self._stamp() != seen:
             self._text, self._hash, self._branch = kept
-            branch = self._render(self._text)         # the page the hub serves is the one the tabs hold, not the torn one
+            try:
+                branch = self._render(self._text)     # the page the hub serves is the one the tabs hold, not the torn one
+            except BaseException:
+                put_back()      # never the torn page, served with the text and hash kept (ticket 204 C)
+                raise
             self._branch = branch if isinstance(branch, str) else None
             return False
         self._remember(self._text)

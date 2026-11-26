@@ -169,6 +169,12 @@ def test_a_door_create_whose_state_folder_refuses_the_generated_mark_is_refused_
     assert not (work / SHARED).exists()
 
 
+def taken_aside(path: Path) -> list[str]:
+    """The hidden siblings sheaf names `.<name>.sheaf-…` beside `path` (none when its folder is gone)."""
+    folder = path.parent
+    return [p.name for p in folder.iterdir() if p.name.startswith(f".{path.name}.sheaf-")] if folder.is_dir() else []
+
+
 def test_a_door_create_taken_back_leaves_a_file_that_replaced_the_one_it_made(team, work, browser, tokens, monkeypatch):
     """Ticket 195 E (from #616): a create refused after its file was made takes back that file, and no other: one that
     replaced it at the name meanwhile (an editor's save, a sync) stays."""
@@ -198,6 +204,81 @@ def test_a_door_create_taken_back_leaves_a_file_that_replaced_the_one_it_made(te
         "a file left behind by a take-back is said in the diagnostics log"
 
 
+def test_a_door_create_taken_back_leaves_a_file_an_editor_saved_in_place(team, work, browser, tokens, monkeypatch):
+    """Ticket 204 A (from #662): an editor that saves in place keeps the inode of the file the create made. The take-back
+    deletes only the file as the create wrote it: the editor's text stays, and the file left is said."""
+    from sheafmd import mcp
+    address = f"work/{SHARED}"
+    browser.hub.docs.change(address, lambda e: {**e, "generated": {"by": "x", "id": None, "at": "t", "key": True}})
+    real_create, change, made = mcp.create_file, browser.hub.docs.change, []
+
+    def create_then_saved_in_place(top, rel, text, judge=None):
+        ident = real_create(top, rel, text, judge)
+        with open(work / rel, "r+", encoding="utf-8") as f:       # truncate and write: the same inode
+            f.truncate(0)
+            f.write("# The editor's text\n")
+        made.append(rel)
+        return ident
+
+    def no_clear_after_the_file(a, settle):
+        if made:
+            raise OSError(28, "No space left on device")
+        return change(a, settle)
+    monkeypatch.setattr(mcp, "create_file", create_then_saved_in_place)
+    monkeypatch.setattr(browser.hub.docs, "change", no_clear_after_the_file)
+    is_error, got = call(browser, "create", token=tokens["alice"], doc=address, text=OPEN)
+    assert is_error and "not made" in got, got
+    assert (work / SHARED).read_text(encoding="utf-8") == "# The editor's text\n"
+    assert not taken_aside(work / SHARED)
+    assert any(r.get("kind") == "take-back-left-file" and r.get("doc") == address for r in diagnostics.read())
+
+
+def test_a_door_create_taken_back_leaves_a_file_put_at_the_name_after_its_look(team, work, browser, tokens, monkeypatch):
+    """Ticket 204 A: a file that replaces the one the create made as the take-back first touches the name (a look, or the
+    step that takes it away) stays. The look and the delete are one step: the file is taken from the name first, and only
+    the one made is deleted."""
+    from sheafmd import mcp
+    address = f"work/{SHARED}"
+    browser.hub.docs.change(address, lambda e: {**e, "generated": {"by": "x", "id": None, "at": "t", "key": True}})
+    change, target, replaced = browser.hub.docs.change, str(work / SHARED), []
+
+    def replace_once():
+        if not replaced:
+            replaced.append(1)
+            other = work / ".other.md"
+            other.write_text("# Someone else's\n", encoding="utf-8")
+            os.replace(other, target)
+
+    def after_a_look(real):
+        def look(path, *args, **kwargs):
+            got = real(path, *args, **kwargs)
+            if str(path) == target:
+                replace_once()
+            return got
+        return look
+
+    def before_a_rename(real):
+        def rename(src, dst, *args, **kwargs):
+            if str(src) == target:
+                replace_once()
+            return real(src, dst, *args, **kwargs)
+        return rename
+
+    def no_clear_after_the_file(a, settle):
+        if (work / SHARED).exists():
+            monkeypatch.setattr(mcp.os, "lstat", after_a_look(os.lstat))
+            monkeypatch.setattr(mcp.os, "rename", before_a_rename(os.rename))
+            raise OSError(28, "No space left on device")
+        return change(a, settle)
+    monkeypatch.setattr(browser.hub.docs, "change", no_clear_after_the_file)
+    is_error, got = call(browser, "create", token=tokens["alice"], doc=address, text=OPEN)
+    monkeypatch.undo()
+    assert is_error and "not made" in got, got
+    assert replaced, "the file was replaced while the take-back ran"
+    assert (work / SHARED).read_text(encoding="utf-8") == "# Someone else's\n"
+    assert not taken_aside(work / SHARED)
+
+
 def test_a_door_create_taken_back_deletes_the_file_it_made(team, work, browser, tokens, monkeypatch):
     """Ticket 195 E: the same take-back, with the file as the create made it, deletes it."""
     address = f"work/{SHARED}"
@@ -212,6 +293,7 @@ def test_a_door_create_taken_back_deletes_the_file_it_made(team, work, browser, 
     is_error, got = call(browser, "create", token=tokens["alice"], doc=address, text=OPEN)
     assert is_error and "not made" in got, got
     assert not (work / SHARED).exists()
+    assert not taken_aside(work / SHARED)
 
 
 def test_a_door_create_at_home_whose_generated_mark_cannot_be_written_makes_no_folder_there(team, work, browser,

@@ -612,6 +612,7 @@ class Hub:
             e.live.session_to = lambda: self.session_name(address)
             e.live.agent_tells = lambda: self.waiting_tells.waits(address, None, sweep=False)   # the hub person's (9.8)
             e.live.tells_lock = self.waiting_tells._lock
+            e.live.served = lambda: (lambda html=e.html: setattr(e, "html", html))
             e.live.refresh(force=True)           # the first render: e.html
             self.entries[address] = e
             return e
@@ -1109,7 +1110,12 @@ class Hub:
         with self._lock:
             e = self.entries.pop(address, None)
         if e is not None:
-            e.bus.publish("gone", {"doc": address})
+            # Outside the hub's lock, as `_forget_entries`: a render that took the entry before it went tells its `changed`
+            # first, and none after `gone` (ticket 204 B).
+            try:
+                e.live.close()
+            finally:
+                e.bus.publish("gone", {"doc": address})
 
     def forget_root(self, name: str):
         """`sheaf roots forget`: take the root out, and its documents' entries with it (their

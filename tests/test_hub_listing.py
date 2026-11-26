@@ -622,6 +622,48 @@ def test_a_document_stream_open_when_its_root_is_forgotten_is_told_the_document_
     assert other.drain() == []
 
 
+def test_a_page_deleted_while_a_render_of_it_runs_tells_its_tabs_gone_last(browser, tmp_path):
+    """Ticket 204 B (from #662): a page deleted into the trash (`forget_document`) tells its tabs `gone`, the last event of
+    their stream (SPEC 8.8). A refresh that had taken the entry before the delete and runs after it tells them nothing, and
+    the page's versions stay, to come back with it."""
+    hub = browser.hub
+    file = md(tmp_path / "x" / "notes" / "a.md", PLAN)
+    hub.render(file, {}, None)
+    e = hub.entries["notes/a.md"]               # taken by a render before the delete
+    tab = browser.get("/_/live?doc=notes/a.md").stream
+    assert [n for n, _ in tab.drain()] == ["hello"]
+    hub.forget_document("notes/a.md")
+    file.write_text(PLAN + "\nWritten as the page went.\n", encoding="utf-8")
+    assert e.live.refresh() is None and e.live.rebuild() is None
+    assert tab.drain() == [("gone", {"doc": "notes/a.md"})]
+    assert hub.versions.get("notes/a.md", md_hash(PLAN)) is not None
+
+
+def test_a_torn_read_whose_second_render_fails_leaves_the_hub_serving_the_page_it_served(browser, tmp_path, monkeypatch):
+    """Ticket 204 C, through the hub: the page a torn read's render built is never the one served once the render again
+    from the text the tabs hold has failed."""
+    hub = browser.hub
+    file = md(tmp_path / "x" / "notes" / "a.md", PLAN)
+    hub.render(file, {}, None)
+    e = hub.entries["notes/a.md"]
+    before = e.html
+    file.write_text("# Plan\n\nHalf a", encoding="utf-8")
+    real, calls = hub._build, []
+
+    def torn_then_failing(entry, text, **kw):
+        calls.append(text)
+        if len(calls) > 1:
+            raise RuntimeError("the render failed")
+        got = real(entry, text, **kw)
+        file.write_text(PLAN + "\nThe whole new text.\n", encoding="utf-8")
+        return got
+    monkeypatch.setattr(hub, "_build", torn_then_failing)
+    with pytest.raises(RuntimeError):
+        e.live.refresh()
+    assert calls == ["# Plan\n\nHalf a", PLAN]
+    assert e.html == before and e.live.current() == (md_hash(PLAN), PLAN)
+
+
 def test_a_document_stream_that_opens_as_its_root_is_forgotten_is_told_the_document_is_gone(
         browser, tmp_path, monkeypatch):
     """The route finds the entry before it subscribes: a forget in between drops the entry and tells

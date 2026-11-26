@@ -1372,16 +1372,8 @@ class Door:
         """Undo a create refused once `_make` is under way: the file where it was written, the folders `_make` made at its
         home, the mark it set. The list's row that `assignees` dropped stays dropped: it was of a file no longer there,
         which is what the address holds again."""
-        if written:
-            # The file it made, known by its inode (ticket 195 E): one that replaced it at the name since (an editor's save,
-            # a sync) stays. What comes between this look and the unlink is not covered; the name's lock keeps the hub's
-            # own writers out of it.
-            with contextlib.suppress(OSError):
-                st = os.lstat(made.top / made.rel)
-                if made.ident is not None and (st.st_dev, st.st_ino) == made.ident:
-                    os.unlink(made.top / made.rel)
-                else:       # replaced, or a filesystem whose inode numbers do not hold (some FUSE mounts): left, and said
-                    diagnostics.record("mcp", "take-back-left-file", address)
+        if written and not _take_back_file(made):
+            diagnostics.record("mcp", "take-back-left-file", address)
         self.hub.writes.told(address)
         if made.folders:
             with place.folders_lock(made.top, made.name):
@@ -1612,6 +1604,56 @@ def _missing_folders(top: Path, rel: str) -> list:
         if not os.path.lexists(at):
             out.append(at)
     return out
+
+
+def _take_back_file(made: "_Made") -> bool:
+    """Delete the file `create_file` made for `made`, and no other (tickets 195 E, 204 A). Whatever is at the name is first
+    taken from it in one step, a rename to a hidden sibling, so a file put there between a look and a delete is never the one
+    deleted. Only the file made, with the text written, is deleted: its inode (a file that replaced it is another) and its
+    bytes (an editor that saves in place keeps the inode). Anything else goes back to its name, never over a file that came
+    there meanwhile, which leaves it in the hidden sibling. True when the file made is gone, or was never there; False when
+    a file was left (at its name or beside it), and the caller says so."""
+    path = made.top / made.rel
+    aside = path.with_name(f".{path.name}.sheaf-gone-{secrets.token_hex(6)}")
+    try:
+        os.rename(path, aside)
+    except FileNotFoundError:
+        return True
+    except OSError:
+        return False
+    if made.ident is not None and _is_made(aside, made):
+        with contextlib.suppress(OSError):
+            os.unlink(aside)
+            return True
+        return False
+    try:
+        os.link(aside, path, follow_symlinks=False)     # never over a file that came to the name meanwhile
+    except FileExistsError:
+        return False
+    except OSError:
+        # A folder, or a filesystem without hard links: renamed back when the name is still free; a file that comes in that
+        # moment is replaced by it, which the hard link above keeps from every ordinary file.
+        with contextlib.suppress(OSError):
+            if not os.path.lexists(path):
+                os.rename(aside, path)
+        return False
+    with contextlib.suppress(OSError):
+        os.unlink(aside)
+    return False
+
+
+def _is_made(path: Path, made: "_Made") -> bool:
+    """Whether `path` is the file `create_file` made for `made`, as it wrote it: that inode, those bytes."""
+    want = made.text.encode("utf-8")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        return False
+    with os.fdopen(fd, "rb") as f:
+        st = os.fstat(f.fileno())
+        if (st.st_dev, st.st_ino) != made.ident or st.st_size != len(want):
+            return False
+        return f.read(len(want) + 1) == want
 
 
 @dataclass

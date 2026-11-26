@@ -31,8 +31,8 @@ A second pass over the result makes sure that what came out is a fixed point.
 
 MOUNT MODE (`sanitize(..., mount=True)`, #116 step 2). The rectoverso page used to run in a frame under a CSP of its own;
 mounted in the front's document it has none, so this module also closes what that CSP closed. Beyond the above:
-audio, video, picture and their sources are removed, an <img> is kept only for a relative path or data:image/(png|jpeg|gif|webp)
-(any other address is a tracking pixel; the alt text stays), svg <use>, <image>, <foreignObject>, animation and links, and all
+audio, video, picture and their sources are removed, an <img> is kept only for a relative path, data:image/(png|jpeg|gif|webp)
+or the base64 data:image/svg+xml of a local SVG file (any other address is a tracking pixel; the alt text stays), svg <use>, <image>, <foreignObject>, animation and links, and all
 MathML, are removed, a link keeps http, https, mailto and relative addresses with rel="noopener noreferrer" and no target,
 a style attribute keeps only the declarations of an allow-list with a strict value grammar, and the names the page itself
 uses (rd- classes and ids, data-rd-*, a name attribute) are removed. The browser rebuilds the tree again from an allow-list
@@ -70,6 +70,9 @@ URL_ATTRS = frozenset({"href", "src", "action", "poster", "background", "xlink:h
 DROPPED_ATTRS = frozenset({"srcdoc", "formaction", "srcset", "ping", "contenteditable"})
 SAFE_SCHEMES = frozenset({"http", "https", "mailto", "file"})
 _SAFE_DATA = re.compile(r"^data:image/(?:png|jpeg|gif|webp)[;,]", re.I)
+# A mounted page also keeps the one SVG form sheaf writes itself, an <img> of a local .svg file: base64, nothing after it. The
+# image loader runs no script in it and loads nothing from it, and the diagram viewer opens it. Any other SVG data URL goes.
+_MOUNT_SVG_DATA = re.compile(r"^data:image/svg\+xml;base64,[A-Za-z0-9+/]*={0,2}$", re.I)
 _SCHEME = re.compile(r"^([^/?#]*):")
 _STRIP_CONTROL = re.compile(r"[\x00-\x20\x7f]+")
 MAX_PASSES = 3
@@ -152,7 +155,7 @@ class _Tag(Tag):
     _decomposed = False
 
 
-def _url_ok(tag, attr: str, value: str) -> bool:
+def _url_ok(tag, attr: str, value: str, mount: bool = False) -> bool:
     # A browser ignores tab, newline and carriage return anywhere in a URL and trims
     # leading and trailing control characters and spaces, so "java\nscript:" is
     # "javascript:". Test the URL the way the browser will read it.
@@ -164,7 +167,7 @@ def _url_ok(tag, attr: str, value: str) -> bool:
     if scheme in SAFE_SCHEMES:
         return True
     return (scheme == "data" and tag.name == "img" and attr == "src"
-            and bool(_SAFE_DATA.match(v)))
+            and bool(_SAFE_DATA.match(v) or (mount and _MOUNT_SVG_DATA.match(v))))
 
 
 def _flatten_deep(soup, log: list[str]) -> None:
@@ -282,7 +285,7 @@ def _mount_img_ok(value: str) -> bool:
     v = _STRIP_CONTROL.sub("", value)
     if "\\" in v or v.startswith("//"):
         return False
-    return not _SCHEME.match(v) or bool(_SAFE_DATA.match(v))
+    return not _SCHEME.match(v) or bool(_SAFE_DATA.match(v) or _MOUNT_SVG_DATA.match(v))
 
 
 def _mount_link_ok(value: str) -> bool:
@@ -442,7 +445,7 @@ def _pass(fragment: str, comments: bool, log: list[str], mount: bool = False) ->
                 value = tag[attr]
                 if isinstance(value, list):
                     value = " ".join(value)
-                if not _url_ok(tag, a, str(value)):
+                if not _url_ok(tag, a, str(value), mount):
                     log.append(f"  - {attr} removed from <{name}>: not an allowed address")
                     del tag[attr]
         if mount:

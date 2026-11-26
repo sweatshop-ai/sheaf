@@ -323,7 +323,7 @@ def svg_chart(spec):
     bleg = ""
     if any(b.get("label") for b in drawn):
         bleg = ('<div class="bandleg">' + "".join(
-            f'<span><i style="background:{band_color(b.get("color","grey"))}"></i>'
+            f'<span><i style="background-color:{band_color(b.get("color","grey"))}"></i>'
             f'{html.escape(str(b["label"]))}</span>'
             for b in drawn if b.get("label")) + "</div>")
     return f'<div class="chart">{"".join(p)}{bleg}{capf}</div>'

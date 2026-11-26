@@ -395,6 +395,31 @@ var create = function (ROOT, CFG, opts) {
       return n.nodeType === 1 ? (n.hasAttribute('data-rd-ui') ? '' : n.outerHTML) : (n.nodeType === 3 ? n.nodeValue : '');
     }).join('')).trim();
   }
+  // A diagram or an SVG image that is no link has a tab stop and the role of a button, so the keyboard can open the viewer.
+  // Written before the blocks' first reading (below), so a block's pristine text carries the marks and a mark is no edit.
+  function markViewable() {
+    // Only where the viewer's handlers are installed: a page that stops short of them (below) is a plain copy of the file.
+    if (!((!CFG.readonly && (location.protocol === 'http:' || location.protocol === 'https:')) || COMMENTS.length || (CFG.malformed || []).length)) return;
+    Array.prototype.forEach.call(main.querySelectorAll('.mermaid-svg svg, .chart svg, img'), function (n) {
+      // A diagram with a link in it that can be tabbed to has that link to tab to; a link taken out of the order (tabindex -1) leaves
+      // the diagram its own stop. The diagram's own tabindex, when it has one, is the author's and stays.
+      if (!zoomTarget(n) || inLink(n) || n.querySelector('a[href]:not([tabindex="-1"]), a[*|href]:not([tabindex="-1"])')) return;
+      if (!n.hasAttribute('tabindex')) n.setAttribute('tabindex', '0');
+      n.setAttribute('role', 'button');
+      if (!n.hasAttribute('aria-label')) {          // a name the diagram already has stays
+        n.setAttribute('aria-label', ((n.getAttribute('alt') || '').trim() || 'Diagram') + ' (opens in a viewer)');
+      }
+    });
+  }
+  // The link the node sits in, an HTML <a href> or an SVG one (`xlink:href`, or `href` in SVG 2), below main; null if none.
+  function inLink(n) {
+    for (; n && n !== main && n.nodeType === 1; n = n.parentNode) {
+      if (String(n.localName).toLowerCase() === 'a' &&
+          (n.hasAttribute('href') || n.hasAttribute('xlink:href') || n.hasAttributeNS('http://www.w3.org/1999/xlink', 'href'))) return n;
+    }
+    return null;
+  }
+  markViewable();
   blocks.forEach(function (b) { b.pristine = ser(b); });
 
   var canSave = !CFG.readonly && (location.protocol === 'http:' || location.protocol === 'https:');
@@ -790,10 +815,11 @@ var create = function (ROOT, CFG, opts) {
 
   // ---- diagram viewer (SPEC 6.9) ------------------------------------------------
   // A click on a diagram (a mermaid fence or a chart: an inline <svg>) or on an SVG image opens it in a viewer of the whole
-  // window: wheel and pinch zoom about the pointer, drag to pan, a double click, a double tap or the Fit button to start
-  // again, Esc, the close button or a click outside to leave. It adds nothing to the document: the diagram's own markup is
-  // untouched (cursor: zoom-in is page.css's, by selector), so entering edit mode and saving are not changed by it, and the
-  // viewer lives in BODY, outside main.
+  // window (of the whole pane, on a mounted page: every measure below is the viewer's own box, never the window's): wheel and
+  // pinch zoom about the pointer, drag to pan, a double click, a double tap or the Fit button to start again, Esc, the close
+  // button or a click outside to leave. Enter or Space on a focused diagram opens it too: markViewable() gives a diagram that
+  // is no link a tab stop and a button role before the blocks are read, so the marks are in every block's first reading and
+  // entering edit mode and saving are not changed by them. The viewer lives in BODY, outside main.
   var zoomView = null;
   function zoomTarget(t) {
     if (!t || !t.closest) return null;
@@ -816,7 +842,11 @@ var create = function (ROOT, CFG, opts) {
     var z = zoomView;
     zoomView = null;
     z.el.remove();
-    if (z.back && z.back.isConnected && z.back !== document.body) { try { z.back.focus({ preventScroll: true }); } catch (e) {} }
+    if (z.ro) z.ro.disconnect();
+    var b = z.back;
+    if (b && b.isConnected && b !== document.body && b !== document.documentElement) {
+      try { b.focus({ preventScroll: true }); } catch (e) {}
+    }
   }
   function openZoom(src) {
     if (zoomView) return;
@@ -840,9 +870,21 @@ var create = function (ROOT, CFG, opts) {
     } else {
       copy = src.cloneNode(true);
       copy.removeAttribute('style');
+      copy.removeAttribute('tabindex');                       // the viewer's copy is no button, nor a tab stop of the page
+      if (copy.getAttribute('role') === 'button') copy.removeAttribute('role');
+      var named = copy.getAttribute('aria-label') || '';
+      if (/ \(opens in a viewer\)$/.test(named)) copy.removeAttribute('aria-label');   // the generated label goes, an author's stays
+      else if (named) copy.setAttribute('role', 'img');       // and a diagram with a name is an image of that name
     }
     stage.style.background = zoomGround(src);
     stage.appendChild(copy);
+    // A chart's legend is HTML beside the <svg>, not in it: it stays under the enlarged chart, at its own size.
+    var legend = null, chartBox = src.closest && src.closest('.chart'), leg = chartBox && chartBox.querySelector('.bandleg');
+    if (leg) {
+      legend = document.createElement('div');
+      legend.className = 'rd-zoom-legend';
+      legend.appendChild(leg.cloneNode(true));
+    }
     var bar = document.createElement('div');
     bar.className = 'rd-zoom-bar';
     function button(cls, text, label) {
@@ -858,23 +900,28 @@ var create = function (ROOT, CFG, opts) {
     var bIn = button('rd-zoom-in', '+', 'Zoom in'), bOut = button('rd-zoom-out', '−', 'Zoom out'),
         bReset = button('rd-zoom-reset', 'Fit', 'Fit to the window'), bClose = button('rd-zoom-close', '×', 'Close');
     el.appendChild(stage);
+    if (legend) el.appendChild(legend);
     el.appendChild(bar);
 
-    var MIN = 0.5, MAX = 40, fit = 1, sw = 0, sh = 0, k = 1, x = 0, y = 0;
+    var MIN = 0.5, MAX = 40, fit = 1, sw = 0, sh = 0, k = 1, x = 0, y = 0, fitX = 0, fitY = 0;
     function place() {
       stage.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + k + ')';
       stage.setAttribute('data-k', k.toFixed(4));
     }
+    // The viewer's own box: the window on a page of its own, the pane on a mounted one (the host contains its fixed parts).
+    function box() { return el.getBoundingClientRect(); }
+    function loc(cx, cy) { var r = box(); return { x: cx - r.left, y: cy - r.top }; }
+    function usableH() { return Math.max(0, box().height - (legend ? legend.offsetHeight + 20 : 0)); }   // the legend's own band is not the diagram's
     function reset() {
-      var vw = window.innerWidth, vh = window.innerHeight;
-      fit = Math.min(vw * 0.94 / w, (vh - 24) * 0.94 / h);
+      var r = box(), vw = r.width, vh = usableH();
+      fit = Math.max(0.01, Math.min(vw * 0.94 / w, Math.min(vh, Math.max(vh - 24, 40)) * 0.94 / h));   // never taller than what the legend leaves
       sw = w * fit; sh = h * fit;
       stage.style.width = sw + 'px';
       stage.style.height = sh + 'px';
-      k = 1; x = (vw - sw) / 2; y = (vh - sh) / 2;
+      k = 1; x = fitX = (vw - sw) / 2; y = fitY = Math.max(0, (vh - sh) / 2);
       place();
     }
-    function mid() { return { x: window.innerWidth / 2, y: window.innerHeight / 2 }; }
+    function mid() { return { x: box().width / 2, y: usableH() / 2 }; }
     function zoomAt(cx, cy, f) {
       var k2 = Math.max(MIN, Math.min(MAX, k * f));
       f = k2 / k;
@@ -883,16 +930,18 @@ var create = function (ROOT, CFG, opts) {
       k = k2;
       place();
     }
-    var z = zoomView = { el: el, back: document.activeElement };
+    var z = zoomView = { el: el, back: ROOT.activeElement || document.activeElement };
     BODY.appendChild(el);
     reset();
     el.focus({ preventScroll: true });
 
     // Wheel (and a trackpad's pinch, which arrives as a wheel with ctrlKey): about the pointer.
     el.addEventListener('wheel', function (e) {
+      if (legend && legend.contains(e.target) && legend.scrollHeight > legend.clientHeight) return;   // the legend scrolls its own rows
       e.preventDefault();
       var d = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
-      zoomAt(e.clientX, e.clientY, Math.exp(-d * (e.ctrlKey ? 0.01 : 0.0015)));
+      var at = loc(e.clientX, e.clientY);
+      zoomAt(at.x, at.y, Math.exp(-d * (e.ctrlKey ? 0.01 : 0.0015)));
     }, { passive: false });
 
     // Pointers: one drags, two pinch (zoom about their midpoint, and the midpoint pans). A press that moved is no tap, so
@@ -905,22 +954,26 @@ var create = function (ROOT, CFG, opts) {
       return null;
     }
     el.addEventListener('pointerdown', function (e) {
-      if (e.target.closest('.rd-zoom-bar') || (e.pointerType === 'mouse' && e.button !== 0)) return;
-      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      if (e.target.closest('.rd-zoom-bar') || e.target.closest('.rd-zoom-legend') || (e.pointerType === 'mouse' && e.button !== 0)) return;
+      var at = loc(e.clientX, e.clientY);
+      ptrs.set(e.pointerId, at);
       try { el.setPointerCapture(e.pointerId); } catch (err) {}
-      if (ptrs.size === 1) tap = { x: e.clientX, y: e.clientY, t: Date.now(), off: !stage.contains(e.target), moved: false };
+      if (ptrs.size === 1) tap = { x: at.x, y: at.y, t: Date.now(), off: !stage.contains(e.target), moved: false };
       else if (tap) tap.moved = true;
       base = gesture();
       el.classList.add('rd-panning');
     });
     el.addEventListener('pointermove', function (e) {
       if (!ptrs.has(e.pointerId)) return;
-      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      var at = loc(e.clientX, e.clientY);
+      ptrs.set(e.pointerId, at);
       var g = gesture();
-      if (tap && !tap.moved && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > 6) tap.moved = true;
+      if (tap && !tap.moved && Math.hypot(at.x - tap.x, at.y - tap.y) > 6) tap.moved = true;
       if (!g || !base || g.n !== base.n) { base = g; return; }
       if (tap && !tap.moved) return;
-      if (g.n === 2 && base.d > 0) zoomAt(g.mx, g.my, g.d / base.d);
+      // About the point that was between the fingers, then the pair's own movement: scaling about the new midpoint as well
+      // would count that movement twice.
+      if (g.n === 2 && base.d > 0) zoomAt(base.mx, base.my, g.d / base.d);
       x += g.mx - base.mx; y += g.my - base.my;
       place();
       base = g;
@@ -960,7 +1013,9 @@ var create = function (ROOT, CFG, opts) {
       } else return false;
       return true;
     };
-    z.resize = function () { if (k === 1) reset(); };   // a zoom or pan the person made stays when the phone's bars move the window
+    z.resize = function () { if (k === 1 && x === fitX && y === fitY) reset(); };
+    // A pane that changes size while the window does not (a side bar opening) fits the diagram again, as a window does.
+    if (typeof ResizeObserver === 'function') { z.ro = new ResizeObserver(function () { z.resize(); }); z.ro.observe(el); }   // a zoom or pan the person made stays when the phone's bars move the window
   }
   // Capture phase, before edit mode's own Escape and arrow keys, and only while the viewer is open.
   listen(PAGE_EV, 'keydown', function (e) {
@@ -969,15 +1024,23 @@ var create = function (ROOT, CFG, opts) {
     if (zoomView.keys(e)) { e.preventDefault(); e.stopPropagation(); }
   }, true);
   listen(window, 'resize', function () { if (zoomView) zoomView.resize(); });
+  BODY.classList.add('rd-zoomable');                                           // the stylesheet shows the zoom cursor only where this is installed
   listen(main, 'click', function (e) {
     if (e.button || zoomView) return;
     var src = zoomTarget(e.target);
     if (!src) return;
-    var link = e.target.closest('a[href]');
-    if (link && main.contains(link)) return;                                   // a link inside the diagram goes where it goes
+    if (inLink(e.target)) return;                                              // a link inside the diagram goes where it goes
     var s = getSel();
     if (s && !s.isCollapsed && String(s)) return;                              // the click that ends a selection of the diagram's words is no open
     openZoom(src);
+  });
+  listen(main, 'keydown', function (e) {
+    if (zoomView || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    var t = e.target;
+    if (!t || t.nodeType !== 1 || t.getAttribute('role') !== 'button' || zoomTarget(t) !== t || inLink(t)) return;
+    e.preventDefault();
+    openZoom(t);
   });
 
   function dirty() {

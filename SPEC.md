@@ -468,13 +468,14 @@ Any Markdown editor shows a quote with a first line `[!COPY]`, so the marking is
 
 ### 6.9 The diagram viewer
 
-A click or tap on a diagram (a `mermaid` fence or a `chart` fence, both inline `<svg>`) or on an SVG image opens it in a viewer of the whole window, so that a large diagram can be read. The viewer is the page's own (`#rd-zoom`, in the page's root, outside `<main>`) and the diagram's markup is not changed: the pointer shows `zoom-in` by selector, so comments and a save are unaffected. In Edit mode a click on a diagram opens the viewer too (a diagram is not editable text), and Esc closes the viewer before it leaves Edit mode.
+A click or tap on a diagram (a `mermaid` fence or a `chart` fence, both inline `<svg>`) or on an SVG image opens it in a viewer of the whole window, so that a large diagram can be read. The viewer is the page's own (`#rd-zoom`, in the page's root, outside `<main>`) and the diagram is not changed but for a tab stop, the role of a button and a label on a diagram that is no link (set before the blocks are first read, so they are no edit and a save is unaffected); the pointer shows `zoom-in` by selector. On a mounted page "the window" is the pane: the viewer measures its own box, for Fit, the buttons and the pointer. In Edit mode a click on a diagram opens the viewer too (a diagram is not editable text), and Esc closes the viewer before it leaves Edit mode.
 
-- **Zoom.** The wheel zooms about the pointer, a trackpad's pinch too (it arrives as a wheel with Ctrl), two fingers pinch about their midpoint and pan with it. The scale runs from 0.5 to 40 times the fitted size; `+` `-` `0` and the arrow keys do the same from the keyboard, and the `+`, `-` and Fit buttons from a screen.
+- **Zoom.** The wheel zooms about the pointer, a trackpad's pinch too (it arrives as a wheel with Ctrl), two fingers pinch about their midpoint and pan with it. The scale runs from 0.5 to 40 times the fitted size; `+` `-` `0` and the arrow keys do the same from the keyboard, and the `+`, `-` and Fit buttons from a screen. A pinch scales about the point that was between the fingers and then pans by the pair's movement, so that point stays between them.
+- **Open.** A click or a tap, or Enter or Space on the focused diagram (a diagram inside a link is reached by the link). Esc gives the focus back to the diagram. A chart's legend (the HTML under the `<svg>`) is shown under the enlarged chart at its own size.
 - **Pan.** One pointer drags. A press that moved is not a tap.
 - **Fit.** A double click, a double tap, the Fit button or `0` fit the diagram to the window again.
 - **Close.** Esc (before edit mode's own keys), the close button, or a tap outside the diagram. A tap on the diagram does not close it.
-- **Not taken.** A click that ends a selection of the diagram's words, a click on a link inside the diagram, and any click while the viewer is open open nothing.
+- **Not taken.** A click that ends a selection of the diagram's words, a click on a link inside the diagram (`href` or `xlink:href`), and any click while the viewer is open open nothing.
 - **Colour.** The diagram sits on the colour it has on the page, found by walking up from it, so it reads in the light and the dark theme; the surround is dim in both.
 - **Share copy and PDF.** None: the share copy carries no script (6.1), so it has no viewer; the viewer is hidden in print.
 

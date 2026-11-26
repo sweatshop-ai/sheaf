@@ -683,6 +683,10 @@ def test_names_cursors_and_the_text_of_a_document_pass_unchanged_and_only_words_
     {"outcome": "conflict", "base": "b", "blocks": "x"},
     {"outcome": "conflict", "base": "b", "blocks": ["x"]},
     {"outcome": "conflict", "base": "b", "blocks": [{"id": 5}]},
+    {"outcome": "conflict", "base": "b", "blocks": {}},
+    {"outcome": "conflict", "base": "b", "blocks": None},
+    {"outcome": "refused", "reason": "no", "block": False},
+    {"outcome": "refused", "reason": "no", "block": None},
 ])
 def test_a_conflict_or_refusal_of_the_wrong_shape_is_a_bad_request_of_the_adapter(request, answer):
     from sheafmd import remote

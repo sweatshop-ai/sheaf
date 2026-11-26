@@ -80,3 +80,17 @@ previous bytes are put back and the write is `refused`.
 
 The hub trusts a configured service with its own documents: names, cursors and document text are passed on unchanged, and only the
 service's words (an error message, a refusal's `reason`) are redacted of the bearer.
+
+## Failure
+
+The reference service stops rather than guess. If a Git step, or the rollback after one, fails or times out after the file was
+replaced, the write is answered `unavailable` (never `written`, never `refused`), and every later read, write and listing is
+answered `unavailable` until the service is restarted. The log says where things stand: HEAD, the status of the path, the path.
+A Git step that ends with an exit status and a clean rollback is an ordinary `refused`: the document is as it was.
+
+A stopped service does not start again while the repository is not quiet. Repair by hand, then restart:
+
+1. Run `git status` in the folder and read what the log named.
+2. If the edit is not wanted: `git reset -- <path>`, then `git checkout -- <path>` (and `git reset --hard <HEAD in the log>` only if a commit that should not be there landed).
+3. If the edit is wanted: commit it by hand.
+4. Remove a stale `.git/index.lock` only when no Git process runs.

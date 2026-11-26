@@ -384,12 +384,12 @@ class RemoteAdapter:
         if kind == "written" and isinstance(got.get("base"), str):
             return rda.written(got["base"])
         if kind == "conflict" and isinstance(got.get("base"), str):
-            blocks = got.get("blocks") or []
+            blocks = got.get("blocks", [])
             if not isinstance(blocks, list) or not all(_block_shape(b) for b in blocks):
                 raise SourceError("bad_request", f"source {self.source.name!r} answered a conflict with blocks of the wrong shape")
             return rda.conflict(got["base"], blocks)
         if kind == "refused" and isinstance(got.get("reason"), str):
-            block = got.get("block") or ""
+            block = got.get("block", "")
             if not isinstance(block, str):
                 raise SourceError("bad_request", f"source {self.source.name!r} answered a refusal with a block of the wrong shape")
             return rda.refused(got["reason"], block)

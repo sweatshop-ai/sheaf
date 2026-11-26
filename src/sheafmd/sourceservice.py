@@ -113,7 +113,7 @@ class Service:
         busy = self._busy() if self.git else None
         if busy:
             self.close()
-            raise SystemExit(f"{self.top}: {busy}; the service does not start until the repository is quiet")
+            raise SystemExit(f"{self.top}: {busy}; the service does not start until the repository is quiet (repair by hand: see Failure in docs/source-service.md)")
 
     def authorised(self, header: str | None) -> bool:
         if not header or not header.startswith("Bearer "):
@@ -122,6 +122,8 @@ class Service:
         return hmac.compare_digest(header[len("Bearer "):].strip().encode("utf-8", "replace"), self._bearer)
 
     def handle(self, verb: str, body: dict) -> dict:
+        if self._broken and verb in ("read", "write", "documents"):
+            raise Fault("unavailable", "an earlier write failed in git and the service stopped: see Failure in docs/source-service.md")
         if verb == "info":
             return {"interface": rda.INTERFACE_VERSION, "name": self.top.name, "publish": False}
         if verb == "documents":
@@ -177,7 +179,7 @@ class Service:
 
     def _bytes_of(self, rel: str) -> tuple[bytes, int]:
         """The bytes of the file `rel` and its mode: a regular file with one name, reached through no link."""
-        fd, parent, _ = self._open(rel, os.O_RDONLY)
+        fd, parent, _ = self._open(rel, os.O_RDONLY | os.O_NONBLOCK)      # a FIFO is opened, not waited for, and then refused
         try:
             st = os.fstat(fd)
             if not stat.S_ISREG(st.st_mode) or st.st_nlink > 1:
@@ -237,27 +239,44 @@ class Service:
                 return rda.conflict(rds.md_hash(old))
             if text == old:
                 return rda.written(base)               # the text the member was shown is the text now: nothing to commit
-            done, clean = False, True
+            outcome = "untouched"
             try:
                 try:
                     self._put(rel, text.encode("utf-8"), mode)
                 except (OSError, Fault):
                     return rda.refused("the document could not be written: it is as it was")
-                done = self.commit(rel, who, note)
+                outcome = "unknown"                    # the file has been replaced: from here a failure is not guessed at
+                got = self.commit(rel, who, note)
+                outcome = "ok" if got is True else "failed" if got is False else "unknown"
             finally:
-                if not done:
-                    clean = self._undo(rel, before, mode)
-            if not clean:
-                raise Fault("unavailable", "the write failed and could not be cleaned up: the service takes no write until it is restarted")
-            if not done:
+                if outcome == "failed" and not self._undo(rel, before, mode):
+                    outcome = "unknown"
+                if outcome == "unknown":
+                    self._stop(rel)
+            if outcome == "unknown":
+                raise Fault("unavailable", "git failed in the middle of a write and the service stopped: see Failure in docs/source-service.md")
+            if outcome == "failed":
                 return rda.refused("the change could not be recorded in the folder's history: the document is as it was")
         return rda.written(rds.md_hash(text))
+
+    def _stop(self, rel: str) -> None:
+        """Fail-stop: no guess is made about a git step that failed or timed out after the file was replaced. The service
+        answers `unavailable` to every read, write and listing until it is restarted, and says where things stand."""
+        self._broken = True
+        state = {}
+        for key, args in (("HEAD", ("rev-parse", "-q", "--verify", "HEAD")), ("status", ("status", "--porcelain", "--", rel))):
+            try:
+                state[key] = self._git(*args).stdout.strip() or "-"
+            except (OSError, subprocess.SubprocessError):
+                state[key] = "unknown"
+        print(f"source service: STOPPED after a failed write of {rel}: HEAD {state['HEAD']}; status {state['status']!r}; "
+              f"repair by hand, see Failure in docs/source-service.md", file=sys.stderr, flush=True)
 
     def _put(self, rel: str, data: bytes, mode: int) -> None:
         """The file `rel` replaced by `data` whole: a sibling made with O_EXCL through the folder's descriptor, written and
         synced from its own descriptor, then renamed over the file. A failed sync of the folder after the rename is not a failure:
         the file is replaced."""
-        fd, parent, name = self._open(rel, os.O_RDONLY)
+        fd, parent, name = self._open(rel, os.O_RDONLY | os.O_NONBLOCK)
         os.close(fd)
         tmp = None
         try:
@@ -292,8 +311,8 @@ class Service:
                 os.close(parent)
 
     def _undo(self, rel: str, before: bytes, mode: int) -> bool:
-        """What a failed write leaves put back: nothing staged for `rel`, and its previous bytes, each step on its own so that one
-        failing does not skip the other. False when a step failed: the service is then unavailable until it is restarted."""
+        """What a git step that failed (and said so) leaves put back: nothing staged for `rel`, and its previous bytes, each step on
+        its own so that one failing does not skip the other. False when a step failed."""
         clean = True
         try:
             if self.git:
@@ -309,8 +328,6 @@ class Service:
             except (OSError, Fault):
                 clean = False
                 print(f"source service: {rel} could not be put back after a failed commit", file=sys.stderr, flush=True)
-        if not clean:
-            self._broken = True
         return clean
 
     # ── git ─────────────────────────────────────────────────────────────────
@@ -341,15 +358,14 @@ class Service:
             return "the repository cannot be read"
         return None
 
-    def commit(self, rel: str, who: tuple, note: str) -> bool:
-        """The change to `rel`, committed as the mapped author, with git's own filters and ignore rules: True when it is in the
-        history (or there is no history, or nothing differed), False when a git step failed (said on stderr; the caller puts the
-        file back)."""
+    def commit(self, rel: str, who: tuple, note: str):
+        """The change to `rel`, committed as the mapped author, with git's own filters and ignore rules. True: it is in the history
+        (or there is no history, or nothing differed). False: git said it could not (an exit status), so nothing landed. None: git
+        timed out or could not be run, so nothing is known."""
         if not self.git:
             return True
         name, email = who
         env = {"GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email, "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email}
-        head = self._git("rev-parse", "-q", "--verify", "HEAD").stdout.strip()
         try:
             added = self._git("add", "--", rel)
             if added.returncode != 0:
@@ -362,25 +378,10 @@ class Service:
             if got.returncode == 1 and self._git("diff", "--cached", "--quiet", "--", rel).returncode == 0:
                 return True                     # 1 with nothing staged: the text was the same
             print(f"source service: git commit of {rel} failed ({got.returncode})", file=sys.stderr, flush=True)
-        except subprocess.TimeoutExpired:
-            if self._landed(rel, head):
-                return True                      # the commit went in before the time ran out
-            print(f"source service: git commit of {rel} timed out", file=sys.stderr, flush=True)
-        except (OSError, subprocess.SubprocessError) as e:
-            print(f"source service: git commit of {rel} failed ({type(e).__name__})", file=sys.stderr, flush=True)
-        return False
-
-    def _landed(self, rel: str, head: str) -> bool:
-        """After a git timeout: HEAD moved, and what it holds for `rel` is the file as written."""
-        try:
-            now = self._git("rev-parse", "-q", "--verify", "HEAD").stdout.strip()
-            if not now or now == head:
-                return False
-            listed = self._git("ls-tree", "HEAD", "--", rel).stdout.split()
-            mine = self._git("hash-object", "--", rel).stdout.strip()
-            return len(listed) >= 3 and listed[2] == mine
-        except (OSError, subprocess.SubprocessError):
             return False
+        except (OSError, subprocess.SubprocessError) as e:
+            print(f"source service: git commit of {rel} did not finish ({type(e).__name__})", file=sys.stderr, flush=True)
+            return None
 
 
 def make_handler(service: Service):

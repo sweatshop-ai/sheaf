@@ -21,6 +21,7 @@ import json
 import os
 import re
 import secrets
+import signal
 import stat as stat_mod
 import sys
 import time
@@ -1674,6 +1675,8 @@ def _delete_if_made(aside: Path, made: "_Made") -> bool | None:
             return False
         if alone is None:
             return None
+        if not _lease_held(fd):     # another opened it by its name meanwhile (a sync client, an indexer): kept
+            return False
         try:
             os.unlink(aside)
         except OSError:
@@ -1681,20 +1684,34 @@ def _delete_if_made(aside: Path, made: "_Made") -> bool | None:
         return True
 
 
-_F_SETLEASE = getattr(fcntl, "F_SETLEASE", None) if fcntl is not None else None     # Linux only
+_F_SETLEASE = getattr(fcntl, "F_SETLEASE", None)     # Linux only
+_F_SETSIG = getattr(fcntl, "F_SETSIG", 10)
 
 
 def _held_by_none_else(fd: int) -> bool | None:
     """Take a write lease on `fd`: True when it is held, and no other descriptor or mapping holds the file; False when
     another does; None when the system cannot say (no leases: macOS, a filesystem or a setting without them). The lease
-    goes with the descriptor's close."""
+    goes with the descriptor's close.
+
+    A process that opens the file meanwhile breaks the lease, and the kernel signals this one: SIGIO unless told
+    otherwise, whose default ends the process, and which a thread of the hub cannot handle (only the main thread sets a
+    handler). It is told SIGURG instead, whose default is to be ignored (ticket 212 B); `_lease_held` reads the break."""
     if _F_SETLEASE is None:
         return None
     try:
+        fcntl.fcntl(fd, _F_SETSIG, signal.SIGURG)
         fcntl.fcntl(fd, _F_SETLEASE, fcntl.F_WRLCK)
     except OSError as e:
         return False if e.errno in (errno.EAGAIN, errno.EBUSY) else None
     return True
+
+
+def _lease_held(fd: int) -> bool:
+    """Whether the write lease on `fd` is still whole: False once another process opened the file, which breaks it."""
+    try:
+        return fcntl.fcntl(fd, fcntl.F_GETLEASE) == fcntl.F_WRLCK
+    except OSError:
+        return False
 
 
 def _put_back(aside: Path, path: Path) -> str:
@@ -1718,10 +1735,13 @@ def _put_back(aside: Path, path: Path) -> str:
     return path.name
 
 
+_AT_FDCWD, _RENAME_NOREPLACE, _RENAME_EXCL = -100, 1, 0x4
+
+
 def _rename_noreplace(src: Path, dst: Path):
     """Rename `src` to `dst` in one step that replaces nothing: FileExistsError when anything is at `dst`.
     NotImplementedError where the system has no such step (then nothing was renamed)."""
-    libc = _libc()
+    libc = beneath._LIBC
     if libc is None:
         raise NotImplementedError("no rename that replaces nothing")
     s, d = os.fsencode(src), os.fsencode(dst)
@@ -1738,14 +1758,6 @@ def _rename_noreplace(src: Path, dst: Path):
         raise OSError(err, os.strerror(err), str(src), None, str(dst))
 
 
-_AT_FDCWD, _RENAME_NOREPLACE, _RENAME_EXCL = -100, 1, 0x4
-
-
-def _libc():
-    try:
-        return ctypes.CDLL(None, use_errno=True)
-    except OSError:
-        return None
 
 
 @dataclass

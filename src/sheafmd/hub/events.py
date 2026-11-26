@@ -48,26 +48,24 @@ class Subscription:
         self._q: queue.Queue = queue.Queue()
         self._accept = accept
         self.closed = False
-        self.ended = False       # it was handed one of `ENDS`, the last event of its stream (8.8): it takes nothing more
-        self._put_lock = threading.Lock()
+        self.ended = False       # it was sent one of `ENDS`, the last event of its stream (8.8): it gives nothing more
         self.on_put = None       # called after every event queued: a `Shared` wakes its writer with it
 
     def put(self, name: str, data):
-        """Queue an event, unless the stream ended. The look and the queueing are one step under the stream's own lock: a
-        publisher that held the document's entry from before its last event (`_tell_grants`, a waiting Tell) and publishes
-        after it reaches the stream no more, whatever thread handed out which event first (ticket 212 A)."""
-        with self._put_lock:
-            if self.closed or self.ended:
-                return
-            self.ended = name in ENDS
+        if not (self.closed or self.ended):
             self._q.put((name, data))
-        on_put = self.on_put     # read once: a leave on another thread can clear it between a check and a call
-        if on_put is not None:
-            on_put()
+            on_put = self.on_put     # read once: a leave on another thread can clear it between a check and a call
+            if on_put is not None:
+                on_put()
 
     def get(self, timeout: float | None = 0):
         """The next (name, data) this stream is sent, or None when none arrived within `timeout`
-        seconds. An event `accept` refuses is skipped, and the wait goes on to the next."""
+        seconds. An event `accept` refuses is skipped, and the wait goes on to the next. Once it has given one of `ENDS`,
+        it gives nothing more, whatever was queued behind it: a publisher that held the document's entry from before its
+        `gone` (`_tell_grants`, a waiting Tell) reaches no tab after it (ticket 212 A). The end is the event the stream
+        is sent, as `accept` answers it, never the one published: a member's stream refuses `signed-out`, and goes on."""
+        if self.ended:
+            return None
         deadline = time.monotonic() + timeout if timeout else None
         while True:
             try:
@@ -82,7 +80,8 @@ class Subscription:
                 if data is None:
                     continue
                 if isinstance(data, Renamed):
-                    return data.name, data.data
+                    name, data = data.name, data.data
+            self.ended = name in ENDS
             return name, data
 
     def drain(self) -> list:
@@ -146,7 +145,7 @@ class Shared:
     What it is sent goes out as the event `m`, `{"k": key, "e": name, "d": data}`: `open` when it
     is joined (or `refused` with the status a stream of its own was answered with), then its own
     events. Its last event (`ENDS`) drops it from here; the connection stays open, for the others."""
-    ENDS = ENDS
+    ENDS = ENDS                      # the name page/live.js points to
 
     def __init__(self, owner=None):
         self.owner = owner               # the member id the stream was opened by: no other may join it
@@ -211,7 +210,7 @@ class Shared:
             if got is None:
                 continue
             name, data = got
-            if name in self.ENDS:
+            if name in ENDS:
                 with self._lock:
                     if self._subs.get(key) is sub:
                         del self._subs[key]

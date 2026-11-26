@@ -351,7 +351,27 @@ def test_a_door_create_taken_back_keeps_aside_and_names_a_file_it_cannot_put_bac
     assert any(r.get("kind") == "take-back-left-file" and r.get("file") == kept for r in diagnostics.read())
 
 
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="a write lease is Linux's: elsewhere the file made is kept aside")
+def _leases(folder) -> bool:
+    """Whether this system grants a write lease on a file in `folder` (Linux, with a filesystem and a setting that have
+    them): where it does not, a take-back keeps the file it made aside (ticket 212 B)."""
+    import fcntl
+    probe = Path(folder) / ".lease-probe"
+    probe.write_text("", encoding="utf-8")
+    fd = os.open(probe, os.O_RDONLY)
+    try:
+        fcntl.fcntl(fd, fcntl.F_SETLEASE, fcntl.F_WRLCK)
+        return True
+    except (OSError, AttributeError):
+        return False
+    finally:
+        os.close(fd)
+        probe.unlink()
+
+
+LEASES = sys.platform.startswith("linux") and _leases(os.environ.get("TMPDIR", "/tmp"))
+
+
+@pytest.mark.skipif(not LEASES, reason="no write lease here (macOS, a filesystem without them): the file made is kept aside")
 def test_a_door_create_taken_back_deletes_the_file_it_made(team, work, browser, tokens, monkeypatch):
     """Ticket 195 E: the same take-back, with the file as the create made it, deletes it."""
     address = f"work/{SHARED}"
@@ -369,7 +389,7 @@ def test_a_door_create_taken_back_deletes_the_file_it_made(team, work, browser, 
     assert not taken_aside(work / SHARED)
 
 
-@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="a write lease is Linux's: elsewhere the file made is kept aside")
+@pytest.mark.skipif(not LEASES, reason="no write lease here (macOS, a filesystem without them): the file made is kept aside")
 def test_a_door_create_taken_back_never_deletes_a_file_an_editor_holds_open(team, work, browser, tokens, monkeypatch):
     """Ticket 212 B (from #688): an editor that holds the file open can write through its descriptor after the take-back's
     last look, right before its delete, and on a filesystem with coarse times a write of the same size moves nothing the
@@ -435,6 +455,40 @@ def test_a_door_create_taken_back_keeps_aside_the_file_it_made_when_no_other_hol
     [kept] = taken_aside(work / SHARED)
     assert (work / SHARED).with_name(kept).read_text(encoding="utf-8") == written[-1]
     assert any(r.get("kind") == "take-back-left-file" and r.get("file") == kept for r in diagnostics.read())
+
+
+LEASE_BROKEN_DURING_THE_LOOK = r"""
+import os, subprocess, sys, time, types
+from sheafmd import mcp
+aside = sys.argv[1]
+with open(aside, "w", encoding="utf-8") as f:
+    f.write("# Made\n")
+st = os.stat(aside)
+made = types.SimpleNamespace(text="# Made\n", ident=(st.st_dev, st.st_ino))
+real_fstat, looks = os.fstat, []
+
+def opened_by_another_during_the_look(fd, *args, **kwargs):
+    looks.append(1)
+    if len(looks) == 2:         # under the lease: another process opens the sibling by its name, and breaks the lease
+        subprocess.Popen([sys.executable, "-c", f"open({aside!r}).read()"])
+        time.sleep(1)
+    return real_fstat(fd, *args, **kwargs)
+mcp.os.fstat = opened_by_another_during_the_look
+print(mcp._delete_if_made(mcp.Path(aside), made), len(looks))
+"""
+
+
+@pytest.mark.skipif(not LEASES, reason="no write lease here")
+def test_a_take_back_whose_lease_another_opens_lives_and_deletes_nothing(tmp_path):
+    """Ticket 212 B, round 1: a process that opens the hidden sibling while the take-back holds its lease (a sync client, an
+    indexer) breaks the lease, and the kernel signals the hub. That signal (SIGIO by default) ended the process: it is now
+    one whose default is to be ignored, and a broken lease deletes nothing, the file goes back to its name."""
+    aside = tmp_path / ".a.md.sheaf-gone-0"
+    got = subprocess.run([sys.executable, "-c", LEASE_BROKEN_DURING_THE_LOOK, str(aside)], capture_output=True, text=True,
+                         timeout=60, env={**os.environ, "PYTHONPATH": str(Path(__file__).parents[1] / "src")})
+    assert got.returncode == 0, (got.returncode, got.stderr)
+    assert got.stdout.split() == ["False", "2"], got.stdout
+    assert aside.read_text(encoding="utf-8") == "# Made\n"
 
 
 def test_a_folder_taken_back_is_never_renamed_over_an_empty_folder_that_came_to_its_name(tmp_path, monkeypatch):

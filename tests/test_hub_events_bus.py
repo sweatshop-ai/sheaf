@@ -79,3 +79,27 @@ def test_an_event_handed_out_before_the_last_one_is_not_queued_after_it():
     sub.put = gone_first
     bus.publish("grants", {})
     assert sub.drain() == [("gone", {"doc": "a.md"})]
+
+
+def test_an_end_event_a_stream_refuses_does_not_end_it():
+    """Ticket 212 A, round 1: a member's stream refuses `signed-out` (a key rotation does not touch a member) and a `gone`
+    of a page it may not open. The stream ends on the end event it is sent, never on one it refuses: what comes after
+    still reaches it."""
+    bus = events.Bus()
+    sub = bus.subscribe(accept=lambda name, data: None if name in ("signed-out", "gone") else data)
+    bus.publish("signed-out", {})
+    bus.publish("gone", {"doc": "a.md"})
+    bus.publish("changed", {"n": 1})
+    assert sub.drain() == [("changed", {"n": 1})]
+    assert not sub.ended
+
+
+def test_an_end_event_a_stream_is_sent_in_place_of_another_ends_it():
+    """Ticket 212 A: `accept` sends `gone` in place of `grants` (8.12): that `gone` is the stream's last event."""
+    bus = events.Bus()
+    sub = bus.subscribe(accept=lambda name, data: events.Renamed("gone", {"doc": "a.md"}) if name == "grants" else data)
+    bus.publish("grants", {})
+    bus.publish("changed", {"n": 1})
+    assert sub.drain() == [("gone", {"doc": "a.md"})]
+    bus.publish("changed", {"n": 2})
+    assert sub.drain() == []

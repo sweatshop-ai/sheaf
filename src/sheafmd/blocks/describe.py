@@ -3,7 +3,7 @@
 Per block: `id` (the id the Document service gives, so an edit can name it), `type`, `attrs`, `capabilities`
 (`edit`, `move`, `remove`: a locked block and a Stub have only the last two), `markdown` and `children`.
 A top-level block's Markdown is its own bytes in the file. A child of a quote, a list or a Rich block holds no
-bytes of its own (`tree.py`), so its Markdown is written from its AST by the pinned pandoc.
+bytes of its own (`tree.py`), so its Markdown is written from its AST by the pinned pandoc (as commonmark_x, so a column or a button keeps its Markdown form).
 A Stub is listed by `type: "stub"`, with its type name in `attrs.type`, and its raw source as `markdown`.
 """
 import functools
@@ -33,7 +33,7 @@ def _written(ast: str) -> str:
     if blocks and blocks[0].get("t") == "Item":
         blocks = blocks[0]["c"]
     doc = {"pandoc-api-version": _api_version(), "meta": {}, "blocks": blocks}
-    got = _pandoc.run(["-f", "json", "-t", "gfm", "--wrap=none"], json.dumps(doc))
+    got = _pandoc.run(["-f", "json", "-t", "commonmark_x", "--wrap=none"], json.dumps(doc))
     return got.stdout.strip("\n") if got.returncode == 0 else ""
 
 

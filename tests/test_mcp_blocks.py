@@ -234,3 +234,11 @@ def test_the_attributes_block_types_declares_are_the_ones_blocks_reports(browser
 def test_an_empty_ids_list_asks_for_no_block(browser, page):
     got = ok(browser, "blocks", doc=DOC, ids=[])
     assert got["blocks"] == [] and got["base"] == md_hash(TEXT)
+
+
+def test_a_nested_blocks_markdown_keeps_a_column_and_a_button(browser, plan):
+    plan.write_text('::: {.columns}\n::: {.column size="50"}\nLeft [[Go](https://example.org/)]{.button size="m"} here.\n:::\n:::\n',
+                    encoding="utf-8")
+    col = ok(browser, "blocks", doc=DOC)["blocks"][0]["children"][0]
+    assert col["type"] == "column" and col["markdown"].startswith('::: {.column size="50"}') and "<div" not in col["markdown"]
+    assert '{.button size="m"}' in col["children"][0]["markdown"] and "<span" not in col["children"][0]["markdown"]

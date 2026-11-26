@@ -788,6 +788,198 @@ var create = function (ROOT, CFG, opts) {
   copyButtons();
   listen(main, 'input', copyButtons);   // Backspace over the button takes it out of the quote
 
+  // ---- diagram viewer (SPEC 6.9) ------------------------------------------------
+  // A click on a diagram (a mermaid fence or a chart: an inline <svg>) or on an SVG image opens it in a viewer of the whole
+  // window: wheel and pinch zoom about the pointer, drag to pan, a double click, a double tap or the Fit button to start
+  // again, Esc, the close button or a click outside to leave. It adds nothing to the document: the diagram's own markup is
+  // untouched (cursor: zoom-in is page.css's, by selector), so entering edit mode and saving are not changed by it, and the
+  // viewer lives in BODY, outside main.
+  var zoomView = null;
+  function zoomTarget(t) {
+    if (!t || !t.closest) return null;
+    var img = t.closest('img');
+    if (img && main.contains(img) && /^data:image\/svg\+xml/i.test(img.getAttribute('src') || '')) return img;
+    var svg = t.closest('.mermaid-svg svg, .chart svg');
+    return svg && main.contains(svg) ? svg : null;
+  }
+  // The colour the diagram sits on in the page, so that it reads in a light and in a dark theme alike.
+  function zoomGround(el) {
+    for (var n = el; n && n.nodeType === 1; n = n.parentElement) {
+      var c = getComputedStyle(n).backgroundColor;
+      if (c && c !== 'transparent' && !/,\s*0\)$/.test(c)) return c;
+    }
+    var m = /(\d+)[, ]+(\d+)[, ]+(\d+)/.exec(getComputedStyle(main).color);
+    return m && (+m[1] + +m[2] + +m[3]) / 3 > 140 ? '#1a1a1a' : '#fff';
+  }
+  function closeZoom() {
+    if (!zoomView) return;
+    var z = zoomView;
+    zoomView = null;
+    z.el.remove();
+    if (z.back && z.back.isConnected && z.back !== document.body) { try { z.back.focus({ preventScroll: true }); } catch (e) {} }
+  }
+  function openZoom(src) {
+    if (zoomView) return;
+    var r = src.getBoundingClientRect();
+    var w = r.width, h = r.height;
+    if (!(w > 0 && h > 0)) return;
+    var el = document.createElement('div');
+    el.id = 'rd-zoom';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    el.setAttribute('aria-label', 'Diagram viewer. Scroll or pinch to zoom, drag to move, Escape to close.');
+    el.tabIndex = -1;
+    var stage = document.createElement('div');
+    stage.className = 'rd-zoom-stage';
+    var copy;
+    if (src.tagName.toLowerCase() === 'img') {
+      copy = document.createElement('img');
+      copy.src = src.getAttribute('src');
+      copy.alt = src.getAttribute('alt') || '';
+      copy.draggable = false;
+    } else {
+      copy = src.cloneNode(true);
+      copy.removeAttribute('style');
+    }
+    stage.style.background = zoomGround(src);
+    stage.appendChild(copy);
+    var bar = document.createElement('div');
+    bar.className = 'rd-zoom-bar';
+    function button(cls, text, label) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = cls;
+      b.textContent = text;
+      b.setAttribute('aria-label', label);
+      b.title = label;
+      bar.appendChild(b);
+      return b;
+    }
+    var bIn = button('rd-zoom-in', '+', 'Zoom in'), bOut = button('rd-zoom-out', '−', 'Zoom out'),
+        bReset = button('rd-zoom-reset', 'Fit', 'Fit to the window'), bClose = button('rd-zoom-close', '×', 'Close');
+    el.appendChild(stage);
+    el.appendChild(bar);
+
+    var MIN = 0.5, MAX = 40, fit = 1, sw = 0, sh = 0, k = 1, x = 0, y = 0;
+    function place() {
+      stage.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + k + ')';
+      stage.setAttribute('data-k', k.toFixed(4));
+    }
+    function reset() {
+      var vw = window.innerWidth, vh = window.innerHeight;
+      fit = Math.min(vw * 0.94 / w, (vh - 24) * 0.94 / h);
+      sw = w * fit; sh = h * fit;
+      stage.style.width = sw + 'px';
+      stage.style.height = sh + 'px';
+      k = 1; x = (vw - sw) / 2; y = (vh - sh) / 2;
+      place();
+    }
+    function mid() { return { x: window.innerWidth / 2, y: window.innerHeight / 2 }; }
+    function zoomAt(cx, cy, f) {
+      var k2 = Math.max(MIN, Math.min(MAX, k * f));
+      f = k2 / k;
+      x = cx - (cx - x) * f;
+      y = cy - (cy - y) * f;
+      k = k2;
+      place();
+    }
+    var z = zoomView = { el: el, back: document.activeElement };
+    BODY.appendChild(el);
+    reset();
+    el.focus({ preventScroll: true });
+
+    // Wheel (and a trackpad's pinch, which arrives as a wheel with ctrlKey): about the pointer.
+    el.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      var d = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
+      zoomAt(e.clientX, e.clientY, Math.exp(-d * (e.ctrlKey ? 0.01 : 0.0015)));
+    }, { passive: false });
+
+    // Pointers: one drags, two pinch (zoom about their midpoint, and the midpoint pans). A press that moved is no tap, so
+    // a drag never closes the viewer; a tap off the diagram does, two taps close together on it fit it again.
+    var ptrs = new Map(), base = null, tap = null, last = null;
+    function gesture() {
+      var p = Array.from(ptrs.values());
+      if (p.length === 1) return { n: 1, mx: p[0].x, my: p[0].y, d: 0 };
+      if (p.length >= 2) return { n: 2, mx: (p[0].x + p[1].x) / 2, my: (p[0].y + p[1].y) / 2, d: Math.hypot(p[0].x - p[1].x, p[0].y - p[1].y) };
+      return null;
+    }
+    el.addEventListener('pointerdown', function (e) {
+      if (e.target.closest('.rd-zoom-bar') || (e.pointerType === 'mouse' && e.button !== 0)) return;
+      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      try { el.setPointerCapture(e.pointerId); } catch (err) {}
+      if (ptrs.size === 1) tap = { x: e.clientX, y: e.clientY, t: Date.now(), off: !stage.contains(e.target), moved: false };
+      else if (tap) tap.moved = true;
+      base = gesture();
+      el.classList.add('rd-panning');
+    });
+    el.addEventListener('pointermove', function (e) {
+      if (!ptrs.has(e.pointerId)) return;
+      ptrs.set(e.pointerId, { x: e.clientX, y: e.clientY });
+      var g = gesture();
+      if (tap && !tap.moved && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) > 6) tap.moved = true;
+      if (!g || !base || g.n !== base.n) { base = g; return; }
+      if (tap && !tap.moved) return;
+      if (g.n === 2 && base.d > 0) zoomAt(g.mx, g.my, g.d / base.d);
+      x += g.mx - base.mx; y += g.my - base.my;
+      place();
+      base = g;
+    });
+    function up(e) {
+      if (!ptrs.delete(e.pointerId)) return;
+      base = gesture();
+      if (ptrs.size) return;
+      el.classList.remove('rd-panning');
+      var t = tap;
+      tap = null;
+      if (e.type === 'pointercancel' || !t || t.moved || Date.now() - t.t > 500) { last = null; return; }
+      if (t.off) { closeZoom(); return; }
+      if (last && t.t - last.t < 400 && Math.hypot(t.x - last.x, t.y - last.y) < 30) { last = null; reset(); return; }
+      last = t;
+    }
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+
+    bIn.addEventListener('click', function () { zoomAt(mid().x, mid().y, 1.5); });
+    bOut.addEventListener('click', function () { zoomAt(mid().x, mid().y, 1 / 1.5); });
+    bReset.addEventListener('click', reset);
+    bClose.addEventListener('click', closeZoom);
+    z.keys = function (e) {
+      var cx = mid().x, cy = mid().y, step = 60;
+      if (e.key === 'Escape') closeZoom();
+      else if (e.key === '+' || e.key === '=') zoomAt(cx, cy, 1.4);
+      else if (e.key === '-' || e.key === '_') zoomAt(cx, cy, 1 / 1.4);
+      else if (e.key === '0') reset();
+      else if (e.key === 'ArrowLeft') { x += step; place(); }
+      else if (e.key === 'ArrowRight') { x -= step; place(); }
+      else if (e.key === 'ArrowUp') { y += step; place(); }
+      else if (e.key === 'ArrowDown') { y -= step; place(); }
+      else if (e.key === 'Tab') {
+        var f = Array.prototype.slice.call(bar.querySelectorAll('button')), at = f.indexOf(e.composedPath()[0]);
+        f[(at + (e.shiftKey ? f.length - 1 : 1)) % f.length].focus();
+      } else return false;
+      return true;
+    };
+    z.resize = function () { if (k === 1) reset(); };   // a zoom or pan the person made stays when the phone's bars move the window
+  }
+  // Capture phase, before edit mode's own Escape and arrow keys, and only while the viewer is open.
+  listen(PAGE_EV, 'keydown', function (e) {
+    if (!zoomView || e.defaultPrevented) return;
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (zoomView.keys(e)) { e.preventDefault(); e.stopPropagation(); }
+  }, true);
+  listen(window, 'resize', function () { if (zoomView) zoomView.resize(); });
+  listen(main, 'click', function (e) {
+    if (e.button || zoomView) return;
+    var src = zoomTarget(e.target);
+    if (!src) return;
+    var link = e.target.closest('a[href]');
+    if (link && main.contains(link)) return;                                   // a link inside the diagram goes where it goes
+    var s = getSel();
+    if (s && !s.isCollapsed && String(s)) return;                              // the click that ends a selection of the diagram's words is no open
+    openZoom(src);
+  });
+
   function dirty() {
     return blocks.filter(function (b) {
       return editable.has(b.i) && ser(b) !== b.pristine;
@@ -4956,6 +5148,7 @@ var create = function (ROOT, CFG, opts) {
     if (unmounted) return;
     unmounted = true;
     stopDictation(true);
+    closeZoom();
     unlistens.forEach(function (f) { f(); });
     unlistens = [];
     intervals.forEach(function (t) { window.clearInterval(t); });

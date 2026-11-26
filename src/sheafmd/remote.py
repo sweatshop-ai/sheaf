@@ -104,6 +104,53 @@ class _UnixConnection(http.client.HTTPConnection):
         self.sock = s
 
 
+def _bounded_connect(address, end: float, total_end: float):
+    """A socket connected to `address` (host, port), or `TimeoutError`/`OSError`: the name lookup and every address tried
+    are inside one budget that ends at `end` (the connect limit), never past `total_end` (the request's deadline). A name that
+    does not resolve cannot be interrupted, so the lookup runs in a thread of its own that the caller stops waiting for."""
+    host, port = address
+    end = min(end, total_end)
+    outcome, done, cancelled = {}, threading.Event(), threading.Event()
+
+    def work():
+        try:
+            last = None
+            for family, kind, proto, _name, where in socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM):
+                left = end - time.monotonic()
+                if left <= 0 or cancelled.is_set():
+                    break
+                s = socket.socket(family, kind, proto)
+                s.settimeout(left)
+                try:
+                    s.connect(where)
+                except OSError as e:
+                    s.close()
+                    last = e
+                    continue
+                if cancelled.is_set():
+                    s.close()
+                    return
+                outcome["sock"] = s
+                return
+            outcome["error"] = last or TimeoutError("timed out")
+        except BaseException as e:          # the thread has no one to raise to
+            outcome["error"] = e
+        finally:
+            done.set()
+
+    threading.Thread(target=work, daemon=True).start()
+    if not done.wait(max(0.0, end - time.monotonic())):
+        cancelled.set()
+        if "sock" in outcome:               # connected in the instant the wait ran out
+            outcome["sock"].close()
+        raise TimeoutError("timed out")
+    if "sock" not in outcome:
+        raise outcome["error"]
+    s = outcome["sock"]
+    s.settimeout(max(0.05, total_end - time.monotonic()))
+    return s
+
+
 class RemoteSource:
     """One Source service, as the hub sees it. `bearer` is the hub's bearer for it: held here, sent in a header, and never in a
     message, a log or a repr."""
@@ -123,13 +170,19 @@ class RemoteSource:
         return f"RemoteSource({self.name!r}, {self.url!r})"
 
     # ── transport ───────────────────────────────────────────────────────────
-    def _connection(self):
+    def _connection(self, deadline: float | None = None):
         p = self._parts
         if p.scheme == "unix":
-            return _UnixConnection(p.path, self._connect)
+            return _UnixConnection(p.path, min(self._connect, self._timeout))
         if p.scheme == "https":
-            return http.client.HTTPSConnection(p.hostname, p.port, timeout=self._connect, context=self._tls)
-        return http.client.HTTPConnection(p.hostname, p.port, timeout=self._connect)
+            conn = http.client.HTTPSConnection(p.hostname, p.port, timeout=self._connect, context=self._tls)
+        else:
+            conn = http.client.HTTPConnection(p.hostname, p.port, timeout=self._connect)
+        started = time.monotonic()
+        deadline = started + self._timeout if deadline is None else deadline
+        conn._create_connection = lambda address, timeout=None, source_address=None: _bounded_connect(
+            address, started + self._connect, deadline)       # the lookup and each attempt share the connect limit, all of it the request's
+        return conn
 
     def call(self, verb: str, body: dict | None = None) -> tuple[int, dict]:
         """`(status, answer)` of one request. Raises `Unreachable` for a service that does not answer in time or at all,
@@ -137,7 +190,7 @@ class RemoteSource:
         deadline = time.monotonic() + self._timeout
         raw = json.dumps(body or {}).encode("utf-8")
         base = self._parts.path.rstrip("/") if self._parts.scheme != "unix" else ""
-        conn = self._connection()
+        conn = self._connection(deadline)
         expired, late = threading.Event(), None
         try:
             try:
@@ -199,7 +252,7 @@ class RemoteSource:
         code = err.get("code") if isinstance(err, dict) else None
         message = err.get("message") if isinstance(err, dict) else None
         code = code if code in CODES else "protocol"
-        message = message if isinstance(message, str) and message else code
+        message = redact(message, self._bearer) if isinstance(message, str) and message else code      # the service's words are never trusted not to echo
         if code == "unavailable" or status >= 500:
             raise Unreachable(f"source {self.name!r} is unavailable: {message}", status)
         raise SourceError(code, f"source {self.name!r}: {message}", status)

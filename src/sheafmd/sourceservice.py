@@ -142,7 +142,25 @@ class Service:
     def adapter(self, rel: str):
         return rda.MarkdownFileAdapter(beneath=lambda: (self.top, rel))
 
+    def plain(self, rel: str) -> str:
+        """`rel` once it is known to be a file of the folder itself: no part of it is a link, so the name asked is the file read,
+        written and committed. A link, wherever it leads, is `not_found`: the folder lists none, and none is served."""
+        at = self.top
+        for part in rel.split("/"):
+            at = at / part
+            try:
+                if stat.S_ISLNK(os.lstat(at).st_mode):
+                    raise Fault("not_found", f"no document {rel}")
+            except OSError:
+                raise Fault("not_found", f"no document {rel}") from None
+        real = os.path.realpath(at)
+        inside = os.path.relpath(real, os.path.realpath(self.top)).replace(os.sep, "/")
+        if inside != rel:                       # a name that does not resolve to itself (a link up the path the walk missed)
+            raise Fault("not_found", f"no document {rel}")
+        return inside
+
     def read(self, rel: str) -> dict:
+        rel = self.plain(rel)
         try:
             tree, base = self.adapter(rel).read()
         except (OSError, UnicodeDecodeError):
@@ -161,13 +179,24 @@ class Service:
         if not text.strip():
             return rda.refused("a document is not written empty")      # the one rule of this service: a source's own are its owner's
         with self._writing:       # the file and the commit are one step: a second write cannot come between them
+            rel = self.plain(rel)
             try:
+                before = self.adapter(rel).read()[0].text
                 out = self.adapter(rel).write(rda.Tree(text), base, author=author, note=note)
             except (OSError, UnicodeDecodeError):
                 raise Fault("not_found", f"no document {rel}") from None
             if out["outcome"] == "written" and out["base"] != base:      # the text the member was shown is the text now: nothing to commit
-                self.commit(rel, who, note)
+                if not self.commit(rel, who, note):
+                    self.restore(rel, before)
+                    return rda.refused("the change could not be recorded in the folder's history: the document is as it was")
         return out
+
+    def restore(self, rel: str, before: str) -> None:
+        """The file as it was before a write whose commit failed, so a retry of the same text writes and commits again."""
+        try:
+            rds.update_beneath(self.top, rel, lambda text, opened: before)
+        except (OSError, UnicodeDecodeError):
+            print(f"source service: {rel} could not be put back after a failed commit", file=sys.stderr, flush=True)
 
     # ── git ─────────────────────────────────────────────────────────────────
     def _git(self, *args, env=None):
@@ -180,21 +209,32 @@ class Service:
         except (OSError, subprocess.SubprocessError):
             return False
 
-    def commit(self, rel: str, who: tuple, note: str) -> None:
-        """The change to `rel`, committed as the mapped author. A failure is said on stderr and never fails the write: the text is
-        on disk and the base the hub is given is of it."""
+    def commit(self, rel: str, who: tuple, note: str) -> bool:
+        """The change to `rel`, committed as the mapped author: True when it is in the history (or there is no history, or the text
+        was the same), False when a git step failed. The failure is said on stderr and the caller puts the file back."""
         if not self.git:
-            return
+            return True
         name, email = who
         env = {"GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email, "GIT_AUTHOR_NAME": name, "GIT_AUTHOR_EMAIL": email}
         try:
-            self._git("add", "--", rel)
+            added = self._git("add", "--", rel)
+            if added.returncode != 0:
+                print(f"source service: git add of {rel} failed ({added.returncode})", file=sys.stderr, flush=True)
+                return False
             got = self._git("-c", "core.hooksPath=/dev/null", "commit", "--no-verify", "--quiet", "--only",
                             f"--author={name} <{email}>", "-m", note.strip() or f"Edit {rel}", "--", rel, env=env)
-            if got.returncode not in (0, 1):                 # 1: nothing to commit, the text was the same
-                print(f"source service: git commit of {rel} failed ({got.returncode})", file=sys.stderr, flush=True)
+            if got.returncode == 0:
+                return True
+            if got.returncode == 1 and not self._staged(rel):      # 1 with nothing staged: the text was the same
+                return True
+            print(f"source service: git commit of {rel} failed ({got.returncode})", file=sys.stderr, flush=True)
         except (OSError, subprocess.SubprocessError) as e:
             print(f"source service: git commit of {rel} failed ({type(e).__name__})", file=sys.stderr, flush=True)
+        self._git("reset", "-q", "--", rel)         # what `add` staged goes with the text put back
+        return False
+
+    def _staged(self, rel: str) -> bool:
+        return self._git("diff", "--cached", "--quiet", "--", rel).returncode != 0
 
 
 def make_handler(service: Service):

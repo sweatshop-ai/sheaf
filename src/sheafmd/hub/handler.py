@@ -1002,7 +1002,7 @@ class Handler:
         return (req.member is not None and name in req.member.sources
                 and self.hub.sources.get(name) is not None and self.hub.roots.held(name) is None)
 
-    def _source_page(self, req: Req, at: Address, nonce: str) -> Response:
+    def _source_page(self, req: Req, at: Address, nonce: str, as_mount: bool = False) -> Response:
         """A page of a source root (ADR 0006): read from its Source service and rendered with the Theme the source names. The page
         is read-only here. A source that is unserved says why and touches no other root; the words never hold the bearer."""
         if req.member is None or at.root not in req.member.sources:
@@ -1035,7 +1035,13 @@ class Handler:
         top.mkdir(parents=True, exist_ok=True)
         page = render_file(top / at.rel, theme=source.theme, src=tree.text, root=top, script_nonce=nonce,
                            image_ok=lambda _p: False,      # a source has no folder: no local image is embedded
-                            share=False, mount=req.mount)
+                           extra_meta={"readonly": True, "why_readonly": "This page belongs to a source this hub only reads: it cannot be saved here."},
+                           share=False, mount=True if as_mount else req.mount)
+        if as_mount:                      # the front's loader asks for the same page as data, as it does for a folder root's
+            got = json.loads(page)
+            got["version"] = self.hub.version
+            got.update(self.hub.mount_fields())
+            return _json(200, got, {"X-Content-Type-Options": "nosniff"})
         return _html(200, page, nonce)
 
     def _asleep(self, req: Req, address: str) -> Response | None:
@@ -1317,6 +1323,8 @@ class Handler:
         _shape(isinstance(doc, str) and doc.endswith(".md"), "doc must be the address of a rectoverso")
         if readthrough.is_clients(doc):
             return self._relay(req, doc, "mount")
+        if self._is_source(req, Address.parse(doc).root):
+            return self._source_page(req, Address.parse(doc), auth.new_nonce(), as_mount=True)
         with self._reading(doc):
             e = self._entry(req, doc)
             self.hub.catch_up(e)

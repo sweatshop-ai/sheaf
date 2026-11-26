@@ -41,8 +41,12 @@ class ReferenceService:
             env={**os.environ, "SHEAF_PORT": os.environ.get("SHEAF_PORT", "1")}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         line = self.proc.stdout.readline()
         if line.strip() != "listening":
+            if self.proc.poll() is None:
+                self.proc.kill()
+            self.proc.wait()
+            said = self.proc.stderr.read()          # read before `stop` closes the pipe
             self.stop()
-            raise AssertionError(f"the reference service did not start: {self.proc.stderr.read()}")
+            raise AssertionError(f"the reference service did not start: {said}")
 
     def stop(self):
         if self.proc.poll() is None:

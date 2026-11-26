@@ -530,3 +530,97 @@ def test_a_write_that_changes_nothing_commits_nothing(tmp_path):
     base = svc.read("b.md")["base"]
     out = svc.write({"document": "b.md", "author": "Ada", "note": "n", "base": base, "tree": {"text": "bee, uncommitted\n"}})
     assert out["outcome"] == "written" and git("rev-list", "--count", "HEAD") == before
+
+
+# ── round 9: a failed git step, a link inside the folder, the fixture's start-up failure ───────────────────────
+
+def _signing_fails(git):
+    """The repository is set to sign each commit with a program that fails: every commit is refused."""
+    git("config", "commit.gpgsign", "true")
+    git("config", "gpg.program", "false")
+
+
+def test_a_git_step_that_fails_restores_the_file_and_refuses_and_a_retry_then_commits(tmp_path):
+    svc, folder, git = _git_service(tmp_path)
+    _signing_fails(git)
+    before = (folder / "b.md").read_bytes()
+    head = git("rev-parse", "HEAD")
+    base = svc.read("b.md")["base"]
+    body = {"document": "b.md", "author": "Ada", "note": "n", "base": base, "tree": {"text": "bee two\n"}}
+    out = svc.write(body)
+    assert out["outcome"] == "refused" and "written" not in json.dumps(out)
+    assert (folder / "b.md").read_bytes() == before and git("rev-parse", "HEAD") == head
+    assert git("status", "--porcelain") == ""                           # nothing is left staged either
+    git("config", "commit.gpgsign", "false")
+    out = svc.write(body)                                               # the same text, the same base
+    assert out["outcome"] == "written" and git("rev-parse", "HEAD") != head
+    assert git("show", "--name-only", "--format=", "HEAD").split() == ["b.md"]
+    assert (folder / "b.md").read_text() == "bee two\n"
+
+
+def test_a_git_step_that_fails_is_a_refusal_over_the_wire_too(tmp_path, request):
+    kind = RemoteKind(tmp_path, request)
+    make_repo(kind.folder)
+    git(kind.folder, "config", "commit.gpgsign", "true")
+    git(kind.folder, "config", "gpg.program", "false")
+    kind.service.stop()
+    kind.service = ReferenceService(kind.folder, tmp_path / "secrets")
+    request.addfinalizer(kind.service.stop)
+    a = remote.RemoteSource("site", kind.service.url, kind.service.bearer).adapter("d.md")
+    _, base = a.read()
+    assert a.write(rda.Tree("Para one.\n"), base, author="Grace", note="x")["outcome"] == "refused"
+    assert (kind.folder / "d.md").read_text() == DOC
+
+
+def _svc_plain(tmp_path):
+    from sheafmd import sourceservice
+    folder = tmp_path / "plain"
+    (folder / "sub").mkdir(parents=True)
+    (folder / "real.md").write_text("real\n")
+    (folder / "sub" / "deep.md").write_text("deep\n")
+    (folder / ".hidden.md").write_text("hidden\n")
+    (folder / "notes.txt").write_text("not markdown\n")
+    return sourceservice.Service(folder, "b" * 20, {"Ada": ("Ada Writer", "ada@example.org")}), folder
+
+
+@pytest.mark.parametrize("link,target", [("link.md", "real.md"), ("hid.md", ".hidden.md"), ("txt.md", "notes.txt"), ("viasub/deep.md", None)])
+def test_a_link_inside_the_folder_is_neither_read_nor_written(tmp_path, link, target):
+    svc, folder = _svc_plain(tmp_path)
+    if target is None:
+        (folder / "viasub").symlink_to(folder / "sub")
+        target = "sub/deep.md"
+    else:
+        (folder / link).symlink_to(folder / target)
+    before = (folder / target).read_bytes()
+    with pytest.raises(sourceservice_fault()) as e:
+        svc.read(link)
+    assert e.value.code == "not_found"
+    base = rds.md_hash(before.decode())
+    with pytest.raises(sourceservice_fault()) as e:
+        svc.write({"document": link, "author": "Ada", "note": "n", "base": base, "tree": {"text": "changed\n"}})
+    assert e.value.code in ("not_found", "bad_request")
+    assert (folder / target).read_bytes() == before
+
+
+def sourceservice_fault():
+    from sheafmd import sourceservice
+    return sourceservice.Fault
+
+
+def test_a_write_to_a_plain_file_still_commits_that_same_path(tmp_path):
+    svc, folder, git = _git_service(tmp_path)
+    (folder / "sub").mkdir()
+    (folder / "sub" / "c.md").write_text("see\n")
+    git("add", "."), git("commit", "-q", "-m", "sub")
+    base = svc.read("sub/c.md")["base"]
+    assert svc.write({"document": "sub/c.md", "author": "Ada", "note": "n", "base": base, "tree": {"text": "see two\n"}})["outcome"] == "written"
+    assert git("show", "--name-only", "--format=", "HEAD").split() == ["sub/c.md"]
+
+
+def test_a_service_that_fails_to_start_says_why_in_the_failure_of_the_fixture(tmp_path):
+    (tmp_path / "secrets").mkdir()
+    folder = tmp_path / "docs"
+    folder.mkdir()
+    with pytest.raises(AssertionError) as e:
+        ReferenceService(folder, tmp_path / "secrets", authors='[authors]\n"Ada" = "no address"\n')
+    assert "must be written" in str(e.value) and "closed file" not in str(e.value)

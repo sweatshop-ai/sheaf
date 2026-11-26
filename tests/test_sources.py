@@ -522,3 +522,97 @@ def test_an_empty_cursor_is_sent_and_a_version_that_is_not_an_int_is_a_mismatch(
     assert list(src.documents()) == ["a.md", "b.md"]
     with pytest.raises(remote.VersionMismatch):
         src.info()
+
+
+# ── round 9: read-only pages, the mount route, one deadline from the name to the answer, no bearer in any text ─────
+
+def _page_meta(body: bytes) -> dict:
+    import re
+    return json.loads(re.search(rb'<script id="rd-edit-meta" type="application/json"[^>]*>(.*?)</script>', body, re.S).group(1))
+
+
+def test_a_source_page_is_read_only_for_the_browser(tmp_path, request, service):
+    site = hub_with(tmp_path, request, [source_text("shop", service.url, secret(tmp_path, text=service.bearer + "\n", name="hubbearer"))])
+    page = get(site, "/shop/home.md")
+    assert page.status == 200
+    meta = _page_meta(page.body)
+    assert meta.get("readonly") is True and meta.get("why_readonly")
+
+
+def test_the_mount_route_serves_a_source_page_as_the_page_route_does(tmp_path, request, service):
+    site = hub_with(tmp_path, request, [source_text("shop", service.url, secret(tmp_path, text=service.bearer + "\n", name="hubbearer"))])
+    got = get(site, "/_/mount?doc=shop/home.md")
+    assert got.status == 200
+    data = json.loads(got.body)
+    assert "Hello from the source." in data["html"]
+    assert data["config"]["readonly"] is True and data["config"]["why_readonly"]
+    assert get(site, "/_/mount?doc=shop/none.md").status == 404
+    assert get(site, "/_/mount?doc=other/home.md").status == 404
+
+
+def test_a_member_without_the_source_gets_no_mount_of_it(tmp_path, request, service):
+    site = hub_with(tmp_path, request, [source_text("shop", service.url, secret(tmp_path, text=service.bearer + "\n", name="hubbearer"))])
+    members = site.hub.proxy.members
+    members[UID] = dataclasses.replace(members[UID], sources=())
+    assert get(site, "/_/mount?doc=shop/home.md").status == 404
+
+
+def _hangs_in(monkeypatch, where, seconds):
+    import socket as sk
+    import time
+    if where == "dns":
+        monkeypatch.setattr(sk, "getaddrinfo", lambda *a, **k: time.sleep(seconds) or [])
+    else:
+        monkeypatch.setattr(sk, "getaddrinfo", lambda host, port, *a, **k: [(sk.AF_INET, sk.SOCK_STREAM, 6, "", ("127.0.0.1", port))] * 8)
+
+        def slow_connect(self, address):
+            time.sleep(min(self.gettimeout() or seconds, 0.4))
+            raise TimeoutError("timed out")
+        monkeypatch.setattr(sk.socket, "connect", slow_connect)
+
+
+@pytest.mark.parametrize("where", ["dns", "attempts"])
+def test_the_name_lookup_and_every_connect_attempt_are_inside_the_one_deadline(monkeypatch, where):
+    import time
+    from sheafmd import remote
+    _hangs_in(monkeypatch, where, 4)
+    src = remote.RemoteSource("shop", "https://shop.example.net:8080/", "b" * 20, connect_timeout=0.5, timeout=1.0)
+    started = time.monotonic()
+    with pytest.raises(remote.Unreachable):
+        src.ask("info", {})
+    assert time.monotonic() - started < 1.5
+
+
+def test_the_connect_limit_holds_for_a_name_that_never_resolves(monkeypatch):
+    import time
+    from sheafmd import remote
+    _hangs_in(monkeypatch, "dns", 4)
+    src = remote.RemoteSource("shop", "https://shop.example.net:8080/", "b" * 20, connect_timeout=0.4, timeout=30.0)
+    started = time.monotonic()
+    with pytest.raises(remote.Unreachable):
+        src.ask("info", {})
+    assert time.monotonic() - started < 1.2
+
+
+def test_no_text_the_adapter_raises_or_refuses_with_holds_the_bearer_the_service_echoes(request):
+    from sheafmd import remote
+    bearer = "SECRETBEARERVALUE123456"
+
+    def echo(verb, body, headers):
+        said = f"seen {headers.get('Authorization')} and {bearer} and Authorization: Bearer {bearer}"
+        if verb == "write":
+            return 403, {"error": {"code": "unknown_author", "message": said}}
+        if verb == "read":
+            return 404, {"error": {"code": "not_found", "message": said}}
+        if verb == "documents":
+            return 503, {"error": {"code": "unavailable", "message": said}}
+        return 400, {"error": {"code": "bad_request", "message": said}}
+    stand = Stand(echo)
+    request.addfinalizer(stand.stop)
+    src = remote.RemoteSource("shop", stand.url, bearer)
+    out = src.adapter("d.md").write(rda.Tree("x\n"), "b", author="Mallory", note="")
+    assert out["outcome"] == "refused" and bearer not in json.dumps(out)
+    for call in (lambda: src.adapter("d.md").read(), lambda: list(src.documents()), lambda: src.ask("nothing", {}), lambda: src.info()):
+        with pytest.raises(remote.SourceError) as e:
+            call()
+        assert bearer not in str(e.value) and bearer not in e.value.message

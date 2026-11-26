@@ -15,6 +15,7 @@ on anything another of its calls holds.
 import contextlib
 import threading
 import time
+from pathlib import Path
 
 from .. import adapter as rda
 from .. import comments as rdc
@@ -333,8 +334,10 @@ class LiveDocument:
             before = self._text
             got = {}
 
-            def change(text):
-                token = rde.DOC.set(self._file())       # for the edit alone: the seam and the Versions record run after it, as before
+            def change(text, op):
+                # The file as this save opened it, never found again: a root forgotten while the save waited for the lock
+                # leaves nothing to look up (ticket 26 D). For the edit alone: the seam and the Versions record run after it.
+                token = rde.DOC.set(Path(op.top) / op.rel if op is not None else self._file())
                 try:
                     return decide(text)
                 finally:
@@ -363,9 +366,11 @@ class LiveDocument:
                 return guard(text, new, got["report"]["toggled"]) if guard is not None else new
             # The version check happens inside change(), under the file lock: the CLI and an
             # Tell job write this file from other processes.
-            _, new_text = self._update(lambda t, op: change(t), move=move, remember=True)
+            _, new_text = self._update(change, move=move, remember=True)
             report = got["report"]
-            if report["changed"]:
+            # A root forgotten while the save waited has no page to render for, and its file is not found again: the
+            # edit is written and answered (its tabs heard `gone`), never failed by a look-up after it (ticket 26 D).
+            if report["changed"] and not self._detached:
                 self._rerender()
                 # One event for the whole write: the watcher compares the hash just taken and
                 # will say nothing more of it. Measured from the text the tabs hold, or, when

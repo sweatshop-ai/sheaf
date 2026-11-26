@@ -27,9 +27,17 @@ from pathlib import Path
 from typing import NamedTuple
 
 from . import source as rds
+from .beneath import Escapes, Linked
 
 INTERFACE_VERSION = 1
 SUFFIX = ".md"
+
+
+def _as_read(text: str) -> str:
+    """The text as a read of a path gives it back: `read_text` turns a CRLF or a lone CR into LF, so the base of what was
+    written is the hash of that, the one the next read and the stale check compute. A file opened beneath its root is read
+    byte for byte and needs none of this."""
+    return text.replace("\r\n", "\n").replace("\r", "\n")
 
 
 class Refused(Exception):
@@ -98,13 +106,17 @@ class MarkdownFileAdapter:
         if self._beneath is not None:
             where = self._beneath()
             return MarkdownFileAdapter(beneath=lambda: where), where[1]
-        return self, self._file().name
+        here = self._file()
+        return MarkdownFileAdapter(here), here.name
 
     def write(self, tree, base, author: str = "", note: str = "", move=None) -> dict:
         here, name = self.pinned()
         if not self.accepts(name):
             return refused(f"{name} is not a .md file")
-        out, _, _ = here.apply(lambda t, opened: tree.text, expected=base, move=move, author=author, note=note)
+        try:
+            out, _, _ = here.apply(lambda t, opened: tree.text, expected=base, move=move, author=author, note=note)
+        except (Escapes, Linked) as e:      # the source's own policy: a file that is not served, read as one that is not there
+            return refused(f"{name} is not a file this source serves ({type(e).__name__.lower()})")
         return out
 
     def apply(self, change: Callable, *, expected: str | None = None, move=None, author: str = "", note: str = "",
@@ -130,7 +142,7 @@ class MarkdownFileAdapter:
             between()
         if kept is not None:
             kept(new)
-        return written(rds.md_hash(new)), old, new
+        return written(rds.md_hash(new if self._beneath is not None else _as_read(new))), old, new
 
     @staticmethod
     def creating(top, rel: str, text: str, judge=None, by=None):

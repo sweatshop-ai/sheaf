@@ -2263,7 +2263,7 @@ def test_pin_times_taken_out_of_git_stay_out_when_this_hub_never_wrote_the_store
 def test_a_sheaf_folder_that_is_a_link_has_no_gitignore_written_or_removed_through_it(tmp_path, target):
     """Ticket 203 C (fallback review of #687, round 9), SPEC 7.4: `.sheaf` is never a link. A pulled repo whose `.sheaf`
     links out of the root, or to a folder of the root, has no `.gitignore` written or removed through it by a write's
-    commit or a sweep."""
+    commit or a sweep, and no pin time behind it is committed."""
     from sheafmd.hub import commits, state
     from sheafmd.hub.roots import Root
     repo = tmp_path / "repo"
@@ -2285,6 +2285,47 @@ def test_a_sheaf_folder_that_is_a_link_has_no_gitignore_written_or_removed_throu
     hub._sweep(root, commits._repo(repo))
     assert (there / "versions" / ".gitignore").read_text(encoding="utf-8") == "build/\n"
     assert (there / "versions" / "deep" / ".gitignore").read_text(encoding="utf-8") == "*.log\n"
+    assert "plan.md" in git(repo, "show", "--name-only", "--format=", "HEAD")
+
+
+@pytest.mark.parametrize("via", ["write", "sweep"])
+def test_a_store_of_another_account_is_kept_out_of_the_commit_since_its_gitignore_cannot_be_set(tmp_path, monkeypatch,
+                                                                                                via):
+    """Ticket 203 C (fallback review of #687, round 10): in a clone shared with a group, `.sheaf` may be another
+    member's folder. The hub cannot see that its `.gitignore` keeps pin times out, so the store is not staged: the
+    write's document is committed alone, and no pin time reaches git."""
+    from sheafmd.hub import commits, state
+    from sheafmd.hub.roots import Root
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    (repo / ".sheaf.toml").write_text('commit = true\nversions = "root"\n', encoding="utf-8")
+    (repo / "plan.md").write_text("# plan\n", encoding="utf-8")
+    pins = repo / state.INSIDE / state.doc_key("plan.md") / "pins"
+    pins.mkdir(parents=True)
+    (pins / ("a" * 16 + ".md")).write_text("# plan\n", encoding="utf-8")
+    (pins / ("a" * 16 + state.PINNED_AT)).write_text("1", encoding="utf-8")
+    git(repo, "add", "plan.md", ".sheaf.toml")
+    git(repo, "-c", "user.name=a", "-c", "user.email=a@example.com", "commit", "-q", "-m", "first")
+    mine, lstat = os.getuid(), os.lstat
+    foreign = {repo / ".sheaf"}
+
+    def lstat_of(p, *a, **k):
+        st = lstat(p, *a, **k)
+        if Path(p) in foreign:
+            return os.stat_result((st.st_mode, st.st_ino, st.st_dev, st.st_nlink, mine + 1, *tuple(st)[5:]))
+        return st
+    monkeypatch.setattr(state.os, "lstat", lstat_of)
+    hub = commits.Commits(lambda kind, doc, **detail: None, roots=lambda: [])
+    root = Root("r", repo, True)
+    if via == "write":
+        (repo / "plan.md").write_text("# plan, edited\n", encoding="utf-8")
+        hub.saved(root, "plan.md", commits.Author("Bea", "bea@example.com"), "edit")
+        assert git(repo, "show", "--name-only", "--format=", "HEAD").split() == ["plan.md"]
+    else:
+        hub._sweep(root, commits._repo(repo))
+    assert not [p for p in git(repo, "ls-files").split() if p.endswith(state.PINNED_AT)]
+    assert not [p for p in git(repo, "ls-tree", "-r", "--name-only", "HEAD").split() if p.endswith(state.PINNED_AT)]
 
 
 @pytest.mark.parametrize("step", ["commit-tree", "update-index"])

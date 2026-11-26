@@ -200,3 +200,19 @@ def test_bytes_that_are_not_utf8_read_as_a_tree_and_write_back_byte_for_byte():
     tree = read_tree(text)
     assert [b.type for b in tree.blocks] == ["paragraph", "paragraph", "callout"]
     assert write_back(tree, tree).encode("utf-8", "surrogateescape") == raw
+
+
+def test_a_refusal_in_the_hub_save_is_an_edit_error_not_a_crash(tmp_path, monkeypatch):
+    import sheafmd.edit as rde
+    import sheafmd.hub.live as rdl
+    import sheafmd.source as rds
+    md = tmp_path / "d.md"
+    md.write_text("Intro.\n\nOther.\n", encoding="utf-8")
+    doc = rdl.LiveDocument(md, render=lambda *_: None, publish=lambda *_: None, by="Ada")
+
+    def refuse(*a, **k):
+        raise rda.Refused("the callout has an attribute it does not declare: onclick", "c1")
+    monkeypatch.setattr(doc._service, "settle", refuse)
+    with pytest.raises(rde.EditError, match="onclick"):
+        doc.save(rds.md_hash("Intro.\n\nOther.\n"), [{"i": 1, "html": "<p>Changed.</p>"}])
+    assert md.read_text(encoding="utf-8") == "Intro.\n\nOther.\n"

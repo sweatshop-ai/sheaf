@@ -368,7 +368,7 @@ LONG_HOSTS = ["https://" + "é" * 50 + ".example", "https://" + "é" * 50 + ".ex
               "https://" + ".".join(["a" * 63, "b" * 63, "c" * 63, "d" * 60]) + "e:65535"]
 
 
-def test_a_credential_name_fits_a_file_name_for_every_valid_host_and_stays_one_per_origin():
+def test_a_credential_name_fits_a_file_name_for_a_long_or_non_ascii_host_and_stays_one_per_origin():
     # Ticket 202 B (Codex on #655): three characters per byte of a non-ASCII host passed the 255-byte limit of a file name.
     names = [connect.peer_credential_name(o) for o in LONG_HOSTS]
     assert all(len(n.encode()) <= 255 and re.fullmatch(r"[A-Za-z0-9._-]+", n) for n in names)

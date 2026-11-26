@@ -80,7 +80,8 @@ def system_store():
 _WARNED: set[str] = set()      # the credential files already warned about, by name
 
 
-_NAME_MAX = 255 - len(".new")   # a file name has 255 bytes on Linux and macOS, and the file store writes NAME.new first
+_TEMP = ".new"                # the file store writes NAME.new, then moves it to NAME
+_NAME_MAX = 255 - len(_TEMP)  # a file name has 255 bytes on Linux and macOS, the temp name among them
 
 
 def peer_credential_name(url: str) -> str:
@@ -157,7 +158,7 @@ def use_peer_file(url: str, token: str, folder: Path) -> Path:
     _check_peer_token(token)
     folder = Path(folder)
     target = folder / peer_credential_name(origin)
-    tmp = folder / (target.name + ".new")
+    tmp = folder / (target.name + _TEMP)
     made = False                     # the temp is ours to remove only once we made it: a leftover link is left as it was
     try:
         folder.mkdir(mode=0o700, parents=True, exist_ok=True)

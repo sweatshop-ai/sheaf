@@ -206,3 +206,20 @@ def test_a_stale_base_the_service_has_never_seen_is_still_a_conflict(tmp_path):
     save(svc, "One, a.\n\nTwo.\n", base0, session="page-1")
     out = save(svc, "One.\n\nTwo, b.\n", "0" * 16, session="page-2")
     assert out["outcome"] == "conflict" and out["base"] == rds.md_hash(disk(p))
+
+
+def test_a_clash_with_a_block_the_file_removed_still_carries_that_block_as_a_row(tmp_path):
+    p, svc, tree, base0 = stale(tmp_path, f"One.\n\n{LONG}\n\nTwo.\n")
+    save(svc, "One.\n\nTwo.\n", base0, session="page-1")                              # the file removed it
+    out = save(svc, f"One.\n\n{LONG.replace('lazy', 'sleepy')}\n\nTwo.\n", base0, session="page-2")
+    assert out["outcome"] == "conflict"
+    assert [(r["id"], r.get("gone")) for r in out["blocks"]] == [(tree.blocks[1].id, True)]
+
+
+def test_a_held_id_matches_a_block_moved_out_of_a_quote_and_rewritten_completely(tmp_path):
+    p, svc = make(tmp_path, "> Inner words here.\n\nTail.\n")
+    tree, base = svc.read()
+    inner = tree.blocks[0].children[0]
+    out = save(svc, "Wholly different text now.\n\nTail.\n", base, held=[inner.id, tree.blocks[1].id])
+    got = {c["kind"]: c["id"] for c in out["changes"]}
+    assert got["edit"] == got["move"] == inner.id and "insert" not in got

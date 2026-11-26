@@ -98,8 +98,8 @@ class DocumentService:
     def settle(self, current: str, markdown: str, held_ids, base: str, session: str, base_text: str | None = None,
                info: dict | None = None) -> str:
         """The text to write for a page's `markdown` over the `current` text of the file. Raises `Conflict`
-        for a base that is stale by anyone else's writing and whose changes clash with the page's (ADR 0007), with
-        the rows of the clashing blocks. `info`, if given, receives the page's block changes as `changes`."""
+        for a base that is stale by anyone else's writing and either unknown to the service or unreadable, or whose
+        changes clash with the page's (ADR 0007), the latter with the rows of the clashing blocks. `info`, if given, receives the page's block changes as `changes`."""
         here = rds.md_hash(current)
         if base_text is not None:
             self._remember(base_text, base)
@@ -113,9 +113,7 @@ class DocumentService:
                     raise rda.Conflict(here)
                 got = rebase(self.tree(old), self.tree(current), page, held_ids)
                 if isinstance(got, Clash):
-                    rows = [{"id": b.id, "type": b.type, "content": b.content}
-                            for b in self.tree(current).blocks if b.id in got.ids]
-                    raise rda.Conflict(here, rows)
+                    raise rda.Conflict(here, got.rows)
                 return got
             if markdown == current:
                 return current

@@ -20,7 +20,16 @@ from .tree import Tree
 
 @dataclass(frozen=True)
 class Clash:
-    ids: tuple          # ids in the current version of the blocks the two sides clash on
+    rows: tuple         # {id, type, content} of each block the two sides clash on, as the file has it now
+                        # (a block the file removed: as the base had it, with "gone": True)
+
+
+def _row(b, gone=False) -> dict:
+    return {"id": b.id, "type": b.type, "content": b.content, **({"gone": True} if gone else {})}
+
+
+def _edited(a, b) -> bool:
+    return a.key != b.key
 
 
 def rebase(base: Tree, current: Tree, page: Tree, held_ids=None):
@@ -33,15 +42,17 @@ def rebase(base: Tree, current: Tree, page: Tree, held_ids=None):
     clash = []
     for b, blk in enumerate(base.blocks):
         j, i = page_of.get(b), cur_of.get(b)
-        page_edit = j is not None and page.blocks[j].key != blk.key
-        file_edit = i is not None and current.blocks[i].key != blk.key
+        page_edit = j is not None and _edited(page.blocks[j], blk)
+        file_edit = i is not None and _edited(current.blocks[i], blk)
         page_gone, file_gone = j is None, i is None
         if page_edit and file_edit and page.blocks[j].key != current.blocks[i].key:
-            clash.append(i)
-        elif (page_gone and file_edit) or (file_gone and page_edit):
-            clash.append(i if i is not None else None)
+            clash.append(_row(current.blocks[i]))
+        elif page_gone and file_edit:
+            clash.append(_row(current.blocks[i]))
+        elif file_gone and page_edit:
+            clash.append(_row(blk, gone=True))
     if clash:
-        return Clash(tuple(current.blocks[i].id for i in clash if i is not None))
+        return Clash(tuple(clash))
 
     items = []                       # ("c", i) a block of the current version, ("p", j) one of the page's
     for i, c in enumerate(current.blocks):
@@ -54,8 +65,8 @@ def rebase(base: Tree, current: Tree, page: Tree, held_ids=None):
             continue                 # the page removed it (the file did not edit it, or it is no clash)
         if b in page_moved:
             continue                 # re-placed below
-        file_edit = c.key != base.blocks[b].key
-        items.append(("c", i) if file_edit or page.blocks[j].key == base.blocks[b].key else ("p", j))
+        file_edit = _edited(c, base.blocks[b])
+        items.append(("c", i) if file_edit or not _edited(page.blocks[j], base.blocks[b]) else ("p", j))
     where = {}
     for it in items:
         if it[0] == "p":
@@ -70,8 +81,8 @@ def rebase(base: Tree, current: Tree, page: Tree, held_ids=None):
             continue
         if b is not None and cur_of.get(b) is not None:       # a block the page moved: its edit or the file's
             i = cur_of[b]
-            file_edit = current.blocks[i].key != base.blocks[b].key
-            item = ("c", i) if file_edit or page.blocks[j].key == base.blocks[b].key else ("p", j)
+            file_edit = _edited(current.blocks[i], base.blocks[b])
+            item = ("c", i) if file_edit or not _edited(page.blocks[j], base.blocks[b]) else ("p", j)
         elif b is not None:
             continue                                          # moved by the page, gone from the file: no clash, gone
         else:

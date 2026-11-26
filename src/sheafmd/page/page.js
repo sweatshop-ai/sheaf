@@ -1221,7 +1221,7 @@ var create = function (ROOT, CFG, opts) {
     BODY.classList.toggle('rd-editing', on);
     var tg = modes.querySelector('button'); if (tg) tg.setAttribute('data-m', on ? 'save' : 'edit');
     if (on) { await beOpen(); } else if (bke) {
-      if (!(await beSave(true))) { editing = true; BODY.classList.add('rd-editing'); if (tg) tg.setAttribute('data-m', 'save'); return; }
+      if (!stale && !(await beSave(true))) { editing = true; BODY.classList.add('rd-editing'); if (tg) tg.setAttribute('data-m', 'save'); return; }
       beClose();
       reloadWhenFree(popId);          // the page shows the text the editor wrote
     }

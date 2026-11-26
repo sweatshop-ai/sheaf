@@ -95,6 +95,11 @@ class _Making:
         self.lock = threading.Lock()
 
 
+class LetGo(roots_mod.NotFound):
+    """The entry a render was for was let go (its root forgotten or replaced) before its page could be installed: nothing was
+    installed, and its tabs hear `gone`. A NotFound, so a reader that treats a missing file treats this so."""
+
+
 @dataclass
 class Entry:
     address: str
@@ -703,7 +708,7 @@ class Hub:
         e.live.tells_lock = self.waiting_tells._lock
         e.live.keep_page = lambda: self._keep_page(e)
         e.live.generation = lambda: e.generation
-        e.live.install = lambda text, gen: self._install(e, gen, text)
+        e.live.install = lambda text, gen: self._install(e, gen, text)    # raises LetGo
         return e
 
     @staticmethod
@@ -718,40 +723,56 @@ class Hub:
 
     def _rendered(self, e: Entry, text: str) -> str | None:
         """Render `text` for `e`; answers the branch the page was rendered on (a clone's page), which the live document keeps
-        with the hash. The render runs under the pages' lock, which a switch of the clone takes, so HEAD is the text's."""
-        repo = self.clone_of(e.address)
-        branch = self._repos.head_of(repo) if repo else None
-        e.html = self._build(e, text, branch=branch)
-        e.rebuild_failure = None         # every rebuild that works passes here: the next failure is news
-        return branch
+        with the hash. The render runs under the pages' lock, which a switch of the clone takes, so HEAD is the text's.
+        Pinned to the entry as it stands now: see `_install`."""
+        return self._install(e, e.generation, text)
 
     @staticmethod
     def _regenerate(e: Entry, by: int):
         with e.swap:
             e.generation += by
 
-    def _install(self, e: Entry, gen: int, text: str):
-        """(True, the branch) when `text` was rendered for `e` and is now the page the hub serves, (False, None) when `e` was
-        let go since `gen` was read: the render is dropped, whatever folder holds the name now (ticket 26 D). The page is
-        swapped under the entry's `swap` lock, which the let-go raises the generation under (a leaf: the hub's lock comes before the document's, which the save holds), so no page of a replacement root is served."""
-        repo = self.clone_of(e.address)
-        branch = self._repos.head_of(repo) if repo else None
-        html, log, scope = self._compose(e, text, branch=branch)
+    def _install(self, e: Entry, gen: int, text: str) -> str | None:
+        """The one place a page is installed on an entry (the save's render, a refresh, a rebuild, a GET's catch-up, the
+        watcher's): `text` is rendered for the pinned entry `e` and becomes the page the hub serves only while `e` was not
+        let go since `gen` was read, compared under its `swap` lock, which the let-go raises the generation under (a leaf: the
+        hub's lock comes before the document's). Answers the branch the page was rendered on. An entry let go raises `LetGo`
+        and nothing is installed, whatever folder holds the name now; so does any error of the render once the entry is let
+        go, since the root it resolves is then another's (ticket 26 D)."""
+        def moved() -> bool:
+            with e.swap:
+                return e.generation != gen or e.live._detached
+        if moved():
+            raise LetGo(e.address)
+        try:
+            repo = self.clone_of(e.address)
+            branch = self._repos.head_of(repo) if repo else None
+            kept = {}
+            html = self._build(e, text, branch=branch, keep=kept)
+        except Exception:
+            if moved():
+                raise LetGo(e.address) from None
+            raise
         with e.swap:
             if e.generation != gen or e.live._detached:
-                return False, None
+                raise LetGo(e.address)
             e.html = html
             e.rebuild_failure = None
-            e.log, e.first, e.images_scope = log, False, scope
-        return True, branch
+            e.log, e.first, e.images_scope = kept.get("log", e.log), False, kept.get("scope", e.images_scope)
+        return branch
 
     def _settings(self, address: str) -> dict:
         s = self.docs.get(address)
         return {k: s.get(k) for k in SETTING_KEYS}
 
-    def _build(self, e: Entry, text: str, *, mount: bool = False, count: bool = True, branch: str | None = None) -> str:
+    def _build(self, e: Entry, text: str, *, mount: bool = False, count: bool = True, branch: str | None = None,
+               keep: dict | None = None) -> str:
+        """The page of `text` for `e`. With `keep`, the render log and the image rule come back in it and nothing is set on
+        `e` (`_install` sets them with the page, once the entry is known to be still held)."""
         html, log, scope = self._compose(e, text, mount=mount, count=count, branch=branch)
-        if count:
+        if keep is not None:
+            keep.update(log=log, scope=scope)
+        elif count:
             e.log, e.first = log, False
             e.images_scope = scope          # once the build worked
         return html
@@ -2140,7 +2161,9 @@ class Hub:
         """A rebuild that fails is tried again every tick and on every request while the file
         stays broken; the log hears of it once, so the retry cannot push older rows out of
         the capped file. The same failure is the same only while no rebuild has worked in
-        between (`_rendered` clears it) and the file is the same."""
+        between (`_rendered` clears it) and the file is the same. An entry let go is no failure: its tabs hear `gone`."""
+        if isinstance(ex, LetGo):
+            return
         try:
             st = e.stat()
             key = (st.st_mtime_ns, st.st_size)

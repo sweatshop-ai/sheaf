@@ -1,6 +1,7 @@
 """The Markdown-file adapter's writes are correct (block editor v1, ticket 26): a path is found once, the base it returns
 is the one its own next read computes, a source policy refusal is an outcome, and a save that waits for the file lock
 looks nothing up again."""
+import os
 import threading
 
 import pytest
@@ -11,6 +12,7 @@ from sheafmd import adapter as rda
 from sheafmd import beneath
 from sheafmd import source as rds
 from sheafmd.blocks import split_md_blocks
+from sheafmd.hub.place import NotFound
 
 DOC = "Para one.\n\nPara two.\n"
 
@@ -240,14 +242,36 @@ def test_a_save_without_an_entry_names_in_its_diagnostics_the_file_it_wrote(tmp_
     assert "Edited words." in a.read_text(encoding="utf-8") and "Edited words." not in b.read_text(encoding="utf-8")
 
 
-@pytest.mark.parametrize("replacement", [b"# Other\n\nReplacement words.\n", b"\xff\xfe not utf-8 Replacement", None],
-                         ids=["a document", "invalid utf-8", "no document"])
+REPLACEMENTS = {
+    "a document": {"start.md": b"# Other\n\nReplacement words.\n"},
+    "invalid utf-8": {"start.md": b"\xff\xfe not utf-8 Replacement"},
+    "another document only": {"other.md": b"# Other\n\nReplacement words.\n"},
+    "a malformed config": {"start.md": b"# Other\n\nReplacement words.\n", ".sheaf.toml": b"= = not toml ["},
+}
+
+
+def retake_the_name(hub, tmp_path, files):
+    """Let the root `work` go, and let another folder with `files` take the name; (the forget's finish, the new folder)."""
+    finish = hub.let_go_root("work")[1]
+    other = tmp_path / "again" / "work"
+    other.mkdir(parents=True)
+    for name, data in files.items():
+        (other / name).write_bytes(data)
+    try:
+        assert hub.roots.for_document(next(other / n for n in files if n.endswith(".md"))).name == "work"
+    except Exception:       # a root whose config is malformed may refuse to mount: the name is then free, which is the case too
+        pass
+    return finish, other
+
+
+@pytest.mark.parametrize("replacement", REPLACEMENTS)
 @pytest.mark.parametrize("window", ["before the render", "between the render and the swap"])
 def test_a_root_forgotten_and_its_name_taken_between_the_write_and_the_page_swap_tells_the_tabs_nothing_of_the_new_root(
         world, work, tmp_path, replacement, window):
     """2: the page a save installs is the text it wrote, rendered against the entry it pinned, and swapped in only while that
-    entry's root was not let go. Forget the root and let another folder take the name in the window: the save is `written`
-    and answered, the tabs hear `gone`, and nothing of the new root is installed or served meanwhile."""
+    entry's root was not let go; any error of the render once it was is a let go too. Forget the root and let another folder
+    take the name in the window: the save is `written` and answered, the tabs hear `gone`, and nothing of the new root is
+    installed or served meanwhile."""
     hub = world.hub
     e = hub.entry("work/start.md")
     f = work / "start.md"
@@ -259,25 +283,19 @@ def test_a_root_forgotten_and_its_name_taken_between_the_write_and_the_page_swap
     finishes, served = [], []
 
     def take_the_name():
-        finishes.append(hub.let_go_root("work")[1])
-        other = tmp_path / "again" / "work"
-        other.mkdir(parents=True)
-        if replacement is not None:
-            (other / "start.md").write_bytes(replacement)
-        if replacement is not None:
-            assert hub.roots.for_document(other / "start.md").name == "work"
+        finishes.append(retake_the_name(hub, tmp_path, REPLACEMENTS[replacement])[0])
     if window == "before the render":
         real = e.live.install
         e.live.install = lambda t, g: (take_the_name(), real(t, g))[1]
     else:
-        real = hub._compose
+        real = hub._build
 
         def compose(*a, **k):
             out = real(*a, **k)
             take_the_name()
             served.append(e.html)               # a GET in the window reads this
             return out
-        hub._compose = compose
+        hub._build = compose
     out = e.live.save(rds.md_hash(text), [{"i": i, "html": "<p>Edited words.</p>"}])
     assert out["changed"] and "Edited words." in f.read_text(encoding="utf-8")
     assert e.html == old_page and "Replacement" not in e.html and all(h == old_page for h in served)
@@ -285,6 +303,58 @@ def test_a_root_forgotten_and_its_name_taken_between_the_write_and_the_page_swap
     events = sub.drain()
     assert "Replacement" not in repr(events) and "Replacement" not in e.live._text
     assert [n for n, _ in events][-1:] == ["gone"], events
+
+
+@pytest.mark.parametrize("replacement", REPLACEMENTS)
+def test_a_get_for_the_old_root_after_its_forget_installs_and_serves_nothing_of_the_new_root(
+        world, work, tmp_path, replacement):
+    """2: a request already authorized for the old root catches the entry up while the forget is still finishing: the entry
+    is let go, so the refresh, the rebuild and the catch-up install nothing, whatever folder holds the name now."""
+    hub = world.hub
+    e = hub.entry("work/start.md")
+    old_page = e.html
+    finish, other = retake_the_name(hub, tmp_path, REPLACEMENTS[replacement])
+    for md in other.glob("*.md"):                  # the file moved, so a catch-up has something to take in
+        md.write_bytes(md.read_bytes() + b"\nMore Replacement.\n")
+    for call in (e.live.refresh, e.live.rebuild, lambda: e.live.refresh(force=True), lambda: hub.catch_up(e)):
+        try:
+            call()
+        except (OSError, NotFound):                # let go, or a file the new folder does not hold: a failure, never a page
+            pass
+        assert e.html == old_page and "Replacement" not in hub.page(e, "n")
+    assert e.live._text.find("Replacement") < 0
+    finish()
+
+
+def test_a_write_that_lands_after_a_save_is_read_back_once_through_the_same_install(world, work):
+    """3: the disk's hash is not the text the save wrote, so the latest text is rendered and published once; the watcher's
+    (mtime, size) key plays no part."""
+    hub = world.hub
+    e = hub.entry("work/start.md")
+    f = work / "start.md"
+    text = f.read_text(encoding="utf-8")
+    i = next(n for n, b in enumerate(split_md_blocks(text)) if b.content.startswith("First paragraph"))
+    sub = e.bus.subscribe()
+    sub.drain()
+    real = e.live.install
+    calls = []
+
+    def install(t, g):
+        calls.append(t)
+        out = real(t, g)
+        if len(calls) == 1:                        # an outside write after the save's own, the same size and mtime kept
+            st = f.stat()
+            f.write_text(f.read_text(encoding="utf-8").replace("Edited words.", "Outside words."), encoding="utf-8")
+            os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
+        return out
+    e.live.install = install
+    e.live._render = lambda t: (calls.append(t), hub._rendered(e, t))[1]
+    e.live.save(rds.md_hash(text), [{"i": i, "html": "<p>Edited words.</p>"}])
+    on_disk = f.read_text(encoding="utf-8")
+    assert "Outside words." in on_disk
+    assert e.live.current()[1] == on_disk and "Outside words." in e.html
+    assert len(calls) == 2 and "Edited words." in calls[0] and "Outside words." in calls[1]
+    assert [n for n, _ in sub.drain()] == ["changed"]
 
 
 @pytest.mark.parametrize("hook", ["between", "kept"])

@@ -247,9 +247,18 @@ class LiveDocument:
             return None
         return st.st_mtime_ns, st.st_size
 
-    def _rerender(self, remember: bool = True):
-        text = self._read()
-        branch = self._render(text)
+    def _rerender(self, remember: bool = True, written: str | None = None):
+        """Render the page from the file and keep what was read. `written`: the text a write of this document has just made."""
+        try:
+            text = self._read()
+            branch = self._render(text)
+        except Exception:
+            # A write of this document (`written`: its text) whose root was let go meanwhile: the page is not rendered, since
+            # the name may be another folder's now; the document holds the text it wrote, and its tabs hear `gone` (26 D).
+            if written is None or not self._detached:
+                raise
+            self._text, self._hash = written, rds.md_hash(written)
+            return
         self._text, self._hash = text, rds.md_hash(text)
         self._branch = branch if isinstance(branch, str) else None
         if remember:
@@ -257,23 +266,23 @@ class LiveDocument:
 
     def _install_page(self, text: str, gen, before: str, rid=None) -> bool:
         """The page of a save that wrote `text`, and the one `changed` event for it. A document of a root renders the text the
-        save wrote, never one read back, against the entry the save pinned (`gen`), and keeps it only while that entry was not
-        let go: False says it was, nothing is installed and its tabs hear `gone` (ticket 26 D). A document with no entry has no
-        root to lose, and reads the file back, as before."""
+        save wrote against the entry the save pinned (`gen`), through the hub's one install, which refuses an entry let go
+        (it raises, nothing is installed, and its tabs hear `gone`, ticket 26 D). A write that landed on the file after ours
+        (the disk's hash is not the text's) is then read back and rendered once, through the same install, so the latest text
+        is published once and no catch-up depends on the watcher's (mtime, size). A document with no entry has no root to
+        lose and reads the file back, as before."""
         if self.install is None:
             self._rerender()
-            # Measured from the text the tabs hold, or, when someone wrote between our write and the render (the watcher will
-            # not see that either), from the text we wrote: the tab that saved holds that one.
-            raced = self._hash != rds.md_hash(text)
-            start = text if raced else before
         else:
-            kept, branch = self.install(text, gen)
-            if not kept:
-                return False
+            branch = self.install(text, gen)
             self._text, self._hash = text, rds.md_hash(text)
             self._branch = branch if isinstance(branch, str) else None
             self._remember(text)
-            start = before
+            if rds.md_hash(self._read()) != self._hash:
+                self._rerender()
+        # Measured from the text the tabs hold, or, when someone wrote between our write and the render (the watcher will not
+        # see that either), from the text we wrote: the tab that saved holds that one.
+        start = text if self._hash != rds.md_hash(text) else before
         # One event for the whole write: the watcher compares the hash just taken and will say nothing more of it.
         self._announce(self._snapshot(self._text), start, **({"rid": rid} if rid is not None else {}))
         return True
@@ -321,6 +330,8 @@ class LiveDocument:
         with self._hold(), self._held():
             if self._forgotten:
                 return None
+            if self._detached:
+                return RETRY
             # Read as a refresh reads (ticket 195 C): a read that a write moved under is not what the tabs are told of. The
             # page is rendered again from the text they hold, with the new settings, and the write is the next refresh's.
             settled = self._rerender_settled(self._stamp())
@@ -514,7 +525,7 @@ class LiveDocument:
             old, new = self._update(change)
             made["wrote"] = new != old
             self._after_write()
-            self._rerender()
+            self._rerender(written=new)
             if wait:
                 # Before the snapshot, so a reply already in the text ends the wait now:
                 # nothing would look at this text again to end it later.
@@ -583,7 +594,7 @@ class LiveDocument:
             before = self._text
             _, new_text = self._update(lambda t, op: change(t), remember=True)
             if new_text != before:
-                self._rerender()
+                self._rerender(written=new_text)
                 self._announce(self._snapshot(self._text), before)
             return rds.md_hash(new_text)
 
@@ -788,6 +799,8 @@ class LiveDocument:
         with self._hold(), self._held():
             if self._forgotten:         # its tabs heard `gone` (ticket 195 A)
                 return None
+            if self._detached:          # its root is being let go: the name may be another folder's, whose file is none to read (26 D)
+                return RETRY
             if force:
                 self._rerender()
                 return self._snapshot(self._text)

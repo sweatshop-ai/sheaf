@@ -186,10 +186,14 @@ def _build(kids, ids: _Ids) -> tuple:
 
 
 def _div_ids(x, out: set) -> set:
-    """Every id written on a div anywhere in the AST `x`."""
+    """The id of every div in the AST `x` that is a block of the tree: not what an unknown div (a Stub) holds."""
     if isinstance(x, dict):
-        if x.get("t") == "Div" and x["c"][0][0]:
-            out.add(x["c"][0][0])
+        if x.get("t") == "Div":
+            if x["c"][0][0]:
+                out.add(x["c"][0][0])
+            classes = x["c"][0][1]
+            if not (classes and classes[0] in decl.DECLARED):
+                return out
         for v in x.values():
             _div_ids(v, out)
     elif isinstance(x, list):
@@ -267,6 +271,35 @@ def _nested_fault(content: list):
     return None
 
 
+def _stub_of(ast_blocks: list, t: str):
+    """(declared or unknown type, why it is a Stub) for a tile that is no valid Rich block, else None."""
+    first = ast_blocks[0] if ast_blocks else None
+    if first and first["t"] == "Div":
+        rtype, why = _div_fault(first)
+        return (rtype, why) if why else None
+    if first and first["t"] in ("BlockQuote", "BulletList", "OrderedList"):
+        found = _rich_found(ast_blocks[:1])
+        if found:
+            return found, f"a {found} may not sit inside a {t}"
+    return None
+
+
+def _reserved(tiles: list, seg: dict) -> set:
+    """The ids written in the file on divs that are blocks of the tree: a Stub's own, never what it holds."""
+    out = set()
+    for i, tile in enumerate(tiles):
+        if tile.kind in ("blank", "frontmatter"):
+            continue
+        ast_blocks = seg.get(i, [])
+        first = ast_blocks[0] if ast_blocks else None
+        if _stub_of(ast_blocks, _type_and_attrs(ast_blocks, tile.kind)[0]):
+            if first["t"] == "Div" and first["c"][0][0]:
+                out.add(first["c"][0][0])
+        else:
+            _div_ids(ast_blocks, out)
+    return out
+
+
 def read_tree(text: str) -> Tree:
     """The block tree of `text`. Raises `Unreadable` for a text pandoc does not read."""
     inst, tiles = instrument(text, divs=True)
@@ -286,7 +319,7 @@ def read_tree(text: str) -> Tree:
         if set(seg) != set(live):
             raise Unreadable("a block of the text is not a top-level block for pandoc")
     ids, blocks, lead = _Ids(), [], ""
-    ids.reserved = _div_ids(list(seg.values()), set())
+    ids.reserved = _reserved(tiles, seg)
     for i, tile in enumerate(tiles):
         if tile.kind == "blank":
             lead = tile.gap
@@ -298,18 +331,10 @@ def read_tree(text: str) -> Tree:
         else:
             ast_blocks = seg.get(i, [])
             t, attrs = _type_and_attrs(ast_blocks, tile.kind)
-            stub = None            # (declared or unknown type, why it is a Stub), for a block that is no valid Rich block
+            stub = _stub_of(ast_blocks, t)
             first = ast_blocks[0] if ast_blocks else None
-            if first and first["t"] == "Div":
-                rtype, why = _div_fault(first)
-                if why:
-                    stub = (rtype, why)
-                else:
-                    attrs = _attrs(first["c"][0][2])
-            elif first and first["t"] in ("BlockQuote", "BulletList", "OrderedList"):
-                found = _rich_found(ast_blocks[:1])
-                if found:
-                    stub = (found, f"a {found} may not sit inside a {t}")
+            if not stub and first and first["t"] == "Div":
+                attrs = _attrs(first["c"][0][2])
             if stub:
                 sid = first["c"][0][0] if first["t"] == "Div" else ""
                 bid = ids.take(sid, "stub", tile.content)

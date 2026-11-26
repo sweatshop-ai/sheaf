@@ -149,3 +149,11 @@ def test_a_declared_div_inside_an_unknown_div_locks_only_that_div():
     assert quote.type == "quote" and quote.caps == ALL
     assert [c.type for c in quote.children] == ["paragraph", "stub", "paragraph"]
     assert quote.children[1].caps == LOCKED
+
+
+def test_an_id_hidden_inside_a_stub_does_not_move_a_paragraph_id():
+    para = read_tree("Hello.\n").blocks[0].id
+    tree = read_tree(f"Hello.\n\n::: {{.mystery}}\n::: {{#{para} .callout}}\nhi\n:::\n:::\n")
+    assert tree.blocks[0].id == para
+    nested = read_tree(f"Hello.\n\n> ::: {{.mystery}}\n> ::: {{#{para} .callout}}\n> hi\n> :::\n> :::\n")
+    assert nested.blocks[0].id == para

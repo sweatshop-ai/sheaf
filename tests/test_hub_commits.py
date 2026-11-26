@@ -1829,17 +1829,21 @@ def test_a_reset_between_the_pull_and_the_push_is_not_forced_over_the_remote(gua
 NEW = "rectoversos/acme/blog/2026-10-30-plan.md"
 
 
-def poll_until_pulled(box, rectoversos, tries=5):
-    """The poll, run again while one of its gits ran out of time (`GIT_SECONDS`) on a loaded machine, as the hub's next
-    poll a minute later would; any other outcome is the poll's own. The poll's rows are said once a cause, so that memory
-    is cleared before each try."""
-    for _ in range(tries):
-        before = len(rows("push-failed"))
-        box.hub.commits._told.clear()
-        poll_now(box, rectoversos)
-        if not any("timed out" in (r.get("error") or "") for r in rows("push-failed")[before:]):
-            return
-    raise AssertionError(f"every one of {tries} polls had a git run out of time")
+def roomy_git(monkeypatch, seconds=600):
+    """Every git of the hub given `seconds` instead of `GIT_SECONDS` and `PUSH_SECONDS`, and the poll the same to settle
+    (ticket 208): on a loaded machine a git that runs out of time ends a pull, and one in the rename look (`_renames`)
+    drops the Forward without a row. A limit, never a timing: nothing here reads the clock to time a computation."""
+    from sheafmd.hub import commits
+    monkeypatch.setattr(commits, "GIT_SECONDS", seconds)
+    monkeypatch.setattr(commits, "PUSH_SECONDS", seconds)
+    monkeypatch.setitem(commits._git.__kwdefaults__, "seconds", seconds)   # bound when `_git` was defined
+
+    def poll(box, rectoversos):
+        root = next(r for r in box.hub.roots.all() if r.path == rectoversos)
+        box.hub.commits._push_later(git(rectoversos, "rev-parse", "--absolute-git-dir").strip(), root, root.name,
+                                    wrote=False)
+        assert box.hub.commits.settle(timeout=seconds * 2)
+    return poll
 
 
 def renamed_on_github(tmp_path, remote, old: str, new: str):
@@ -1851,9 +1855,11 @@ def renamed_on_github(tmp_path, remote, old: str, new: str):
     git(away, "push", "-q", "origin", "HEAD:main")
 
 
-def test_a_rename_that_arrives_on_a_pull_writes_a_forward_and_carries_the_versions(box, rectoversos, remote, tmp_path, lock_order):
+def test_a_rename_that_arrives_on_a_pull_writes_a_forward_and_carries_the_versions(box, rectoversos, remote, tmp_path, lock_order,
+                                                                                    monkeypatch):
     """Ticket 17: a repo page moves only by git; when a pull shows the rename, the hub writes a Forward from the old
     address to the new one, and the versions kept under the old address are the new page's."""
+    poll = roomy_git(monkeypatch)
     edit(box, rectoversos)
     pushed(box, remote)
     root = box.hub.roots.get("rectoversos")
@@ -1861,7 +1867,7 @@ def test_a_rename_that_arrives_on_a_pull_writes_a_forward_and_carries_the_versio
     kept = md_hash((rectoversos / "acme" / "blog" / "2026-10-28-plan.md").read_text(encoding="utf-8"))
     assert versions.get(DOC, kept) is not None
     renamed_on_github(tmp_path, remote, "acme/blog/2026-10-28-plan.md", "acme/blog/2026-10-30-plan.md")
-    poll_until_pulled(box, rectoversos)         # ticket 208: one poll's git can run out of time under load
+    poll(box, rectoversos)                      # ticket 208: no git runs out of time under load
     assert (rectoversos / "acme" / "blog" / "2026-10-30-plan.md").exists()
     assert box.hub.forwards.follow(DOC) == NEW
     assert versions.get(NEW, kept) is not None and versions.get(DOC, kept) is None

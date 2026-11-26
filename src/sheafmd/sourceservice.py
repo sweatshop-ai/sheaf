@@ -109,8 +109,9 @@ class Service:
         self.authors = authors
         self.git = self._inside_git()
         self._writing = threading.Lock()      # one write at a time, from the file's check to the end of its commit
+        self._head_before = ""
         self._broken = False                  # set when a failed write could not be cleaned up: the service takes no write until restarted
-        busy = self._busy() if self.git else None
+        busy = (self._busy() or self._unclean()) if self.git else None
         if busy:
             self.close()
             raise SystemExit(f"{self.top}: {busy}; the service does not start until the repository is quiet (repair by hand: see Failure in docs/source-service.md)")
@@ -210,6 +211,8 @@ class Service:
 
     def read(self, rel: str) -> dict:
         with self._writing:            # a write in progress is not shown: its text is tentative until git has taken it
+            if self._broken:
+                raise Fault("unavailable", "an earlier write failed in git and the service stopped: see Failure in docs/source-service.md")
             text, _ = self._text_of(rel)
         return {"tree": {"text": text}, "base": rds.md_hash(text)}
 
@@ -239,6 +242,7 @@ class Service:
                 return rda.conflict(rds.md_hash(old))
             if text == old:
                 return rda.written(base)               # the text the member was shown is the text now: nothing to commit
+            self._head_before = self._git("rev-parse", "-q", "--verify", "HEAD").stdout.strip() if self.git else ""
             outcome = "untouched"
             try:
                 try:
@@ -269,7 +273,8 @@ class Service:
                 state[key] = self._git(*args).stdout.strip() or "-"
             except (OSError, subprocess.SubprocessError):
                 state[key] = "unknown"
-        print(f"source service: STOPPED after a failed write of {rel}: HEAD {state['HEAD']}; status {state['status']!r}; "
+        print(f"source service: STOPPED after a failed write of {rel}: HEAD before {self._head_before or '-'}, now {state['HEAD']}; "
+              f"status {state['status']!r}; "
               f"repair by hand, see Failure in docs/source-service.md", file=sys.stderr, flush=True)
 
     def _put(self, rel: str, data: bytes, mode: int) -> None:
@@ -358,10 +363,23 @@ class Service:
             return "the repository cannot be read"
         return None
 
+    def _unclean(self) -> str | None:
+        """Why the service does not start, beyond `_busy`: an index lock, or changes in the folder that are not committed. The
+        service is the folder's only owner; what a stopped one left behind is for its owner to repair."""
+        try:
+            gdir = self._git("rev-parse", "--absolute-git-dir").stdout.strip()
+            if os.path.lexists(os.path.join(gdir, "index.lock")):
+                return "an index.lock exists"
+            if self._git("status", "--porcelain", "--untracked-files=all", "--", ".").stdout.strip():
+                return "the folder has unstaged or untracked changes"
+        except (OSError, subprocess.SubprocessError):
+            return "the repository cannot be read"
+        return None
+
     def commit(self, rel: str, who: tuple, note: str):
         """The change to `rel`, committed as the mapped author, with git's own filters and ignore rules. True: it is in the history
-        (or there is no history, or nothing differed). False: git said it could not (an exit status), so nothing landed. None: git
-        timed out or could not be run, so nothing is known."""
+        (or there is no history, or nothing differed). False: `git add` said it could not, before any commit began. None: `git
+        commit` itself failed, timed out or could not be run, so nothing is known."""
         if not self.git:
             return True
         name, email = who
@@ -378,7 +396,7 @@ class Service:
             if got.returncode == 1 and self._git("diff", "--cached", "--quiet", "--", rel).returncode == 0:
                 return True                     # 1 with nothing staged: the text was the same
             print(f"source service: git commit of {rel} failed ({got.returncode})", file=sys.stderr, flush=True)
-            return False
+            return None                         # `git commit` itself failed: what it left is not guessed at
         except (OSError, subprocess.SubprocessError) as e:
             print(f"source service: git commit of {rel} did not finish ({type(e).__name__})", file=sys.stderr, flush=True)
             return None

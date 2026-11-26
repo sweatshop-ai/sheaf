@@ -542,25 +542,25 @@ def _signing_fails(git):
     git("config", "gpg.program", "false")
 
 
-def test_a_git_step_that_fails_restores_the_file_and_refuses_and_a_retry_then_commits(tmp_path):
+def test_a_failure_before_git_commit_starts_restores_the_file_and_refuses_and_a_retry_then_commits(tmp_path, monkeypatch):
     svc, folder, git = _git_service(tmp_path)
-    _signing_fails(git)
     before = (folder / "b.md").read_bytes()
     head = git("rev-parse", "HEAD")
     base = svc.read("b.md")["base"]
     body = {"document": "b.md", "author": "Ada", "note": "n", "base": base, "tree": {"text": "bee two\n"}}
+    real = svc._git
+    monkeypatch.setattr(svc, "_git", lambda *a, **k: subprocess.CompletedProcess(a, 1, "", "no") if a[:1] == ("add",) else real(*a, **k))
     out = svc.write(body)
     assert out["outcome"] == "refused" and "written" not in json.dumps(out)
     assert (folder / "b.md").read_bytes() == before and git("rev-parse", "HEAD") == head
     assert git("status", "--porcelain") == ""                           # nothing is left staged either
-    git("config", "commit.gpgsign", "false")
+    monkeypatch.setattr(svc, "_git", real)
     out = svc.write(body)                                               # the same text, the same base
     assert out["outcome"] == "written" and git("rev-parse", "HEAD") != head
     assert git("show", "--name-only", "--format=", "HEAD").split() == ["b.md"]
     assert (folder / "b.md").read_text() == "bee two\n"
 
-
-def test_a_git_step_that_fails_is_a_refusal_over_the_wire_too(tmp_path, request):
+def test_a_git_commit_that_fails_is_unavailable_over_the_wire_and_stops_the_service(tmp_path, request):
     kind = RemoteKind(tmp_path, request)
     make_repo(kind.folder)
     git(kind.folder, "config", "commit.gpgsign", "true")
@@ -568,10 +568,15 @@ def test_a_git_step_that_fails_is_a_refusal_over_the_wire_too(tmp_path, request)
     kind.service.stop()
     kind.service = ReferenceService(kind.folder, tmp_path / "secrets")
     request.addfinalizer(kind.service.stop)
-    a = remote.RemoteSource("site", kind.service.url, kind.service.bearer).adapter("d.md")
+    src = remote.RemoteSource("site", kind.service.url, kind.service.bearer)
+    a = src.adapter("d.md")
     _, base = a.read()
-    assert a.write(rda.Tree("Para one.\n"), base, author="Grace", note="x")["outcome"] == "refused"
-    assert (kind.folder / "d.md").read_text() == DOC
+    with pytest.raises(remote.Unreachable) as e:                        # the adapter's word for `unavailable`
+        a.write(rda.Tree("Para one.\n"), base, author="Grace", note="x")
+    assert e.value.status == 503
+    with pytest.raises(remote.Unreachable) as again:
+        a.read()
+    assert again.value.status == 503
 
 
 def _svc_plain(tmp_path):
@@ -647,12 +652,13 @@ def test_a_git_timeout_stops_the_service_with_unavailable_and_it_says_where_thin
             raise subprocess.TimeoutExpired("git", 30)
         return real(*args, **kw)
     monkeypatch.setattr(svc, "_git", slow)
+    again = _write_body(svc, "b.md", "x\n")
     with pytest.raises(sourceservice_fault()) as e:
         svc.write(_write_body(svc, "b.md", "bee two\n"))
     assert e.value.code == "unavailable"
     said = capsys.readouterr().err
     assert "HEAD" in said and "b.md" in said
-    for verb, body in (("read", {"document": "b.md"}), ("documents", {}), ("write", _write_body(svc, "b.md", "x\n"))):
+    for verb, body in (("read", {"document": "b.md"}), ("documents", {}), ("write", again)):
         with pytest.raises(sourceservice_fault()) as again:
             svc.handle(verb, body)
         assert again.value.code == "unavailable"
@@ -686,12 +692,13 @@ def test_the_service_refuses_to_start_while_the_repository_is_busy(tmp_path):
         sourceservice.Service(folder, "b" * 20, {})
 
 
-def test_a_failed_commit_puts_the_bytes_back_even_when_the_cleanup_step_raises(tmp_path, monkeypatch):
+def test_a_failed_add_puts_the_bytes_back_even_when_the_cleanup_step_raises(tmp_path, monkeypatch):
     svc, folder, git = _git_service(tmp_path)
-    _signing_fails(git)
     real = svc._git
 
     def broken_reset(*args, **kw):
+        if args[:1] == ("add",):
+            return subprocess.CompletedProcess(args, 1, "", "no")
         if args[:1] == ("reset",):
             raise OSError("reset failed")
         return real(*args, **kw)
@@ -803,7 +810,7 @@ def test_a_document_with_a_very_long_name_is_written(tmp_path):
     _no_leftovers(folder)
 
 
-def test_a_read_during_a_write_waits_and_never_sees_a_text_that_git_then_refuses(tmp_path, monkeypatch):
+def test_a_read_that_waited_for_a_write_that_stopped_the_service_gets_unavailable_never_the_tentative_text(tmp_path, monkeypatch):
     import threading
     svc, folder, git = _git_service(tmp_path)
     _signing_fails(git)
@@ -811,16 +818,56 @@ def test_a_read_during_a_write_waits_and_never_sees_a_text_that_git_then_refuses
 
     def reading_meanwhile(*args, **kw):
         if "commit" in args and "t" not in seen:
-            seen["t"] = t = threading.Thread(target=lambda: seen.update(got=svc.read("b.md")["tree"]["text"]))
+            def ask():
+                try:
+                    seen["got"] = svc.handle("read", {"document": "b.md"})
+                except sourceservice_fault() as e:
+                    seen["code"] = e.code
+            seen["t"] = t = threading.Thread(target=ask)
             t.start()
             t.join(0.4)
             seen["blocked"] = t.is_alive()
         return real(*args, **kw)
     monkeypatch.setattr(svc, "_git", reading_meanwhile)
-    assert svc.write(_write_body(svc, "b.md", "bee two\n"))["outcome"] == "refused"
+    with pytest.raises(sourceservice_fault()) as e:
+        svc.write(_write_body(svc, "b.md", "bee two\n"))
+    assert e.value.code == "unavailable"
     seen["t"].join(5)
-    assert seen["blocked"] and seen["got"] == "bee\n"
+    assert seen["blocked"] and seen.get("code") == "unavailable" and "got" not in seen
 
+
+def test_a_git_commit_that_exits_with_an_error_is_fail_stop_with_no_rollback_and_a_log_of_head_before(tmp_path, capsys):
+    svc, folder, git = _git_service(tmp_path)
+    _signing_fails(git)
+    head = git("rev-parse", "HEAD").strip()
+    with pytest.raises(sourceservice_fault()) as e:
+        svc.write(_write_body(svc, "b.md", "bee two\n"))
+    assert e.value.code == "unavailable" and (folder / "b.md").read_text() == "bee two\n"     # nothing is guessed, nothing put back
+    said = capsys.readouterr().err
+    assert f"HEAD before {head}" in said and "b.md" in said
+    with pytest.raises(sourceservice_fault()):
+        svc.handle("documents", {})
+
+
+def test_the_service_refuses_to_start_with_an_index_lock_or_unstaged_or_untracked_changes_and_names_the_repair(tmp_path):
+    from sheafmd import sourceservice
+    svc, folder, git = _git_service(tmp_path)
+    lock = Path(git("rev-parse", "--absolute-git-dir").strip()) / "index.lock"
+    for make, undo in ((lambda: lock.write_text(""), lock.unlink),
+                       (lambda: (folder / "b.md").write_text("edited\n"), lambda: git("checkout", "--", "b.md")),
+                       (lambda: (folder / "new.md").write_text("new\n"), lambda: (folder / "new.md").unlink())):
+        make()
+        with pytest.raises(SystemExit) as e:
+            sourceservice.Service(folder, "b" * 20, {})
+        assert "Failure" in str(e.value)
+        undo()
+    sourceservice.Service(folder, "b" * 20, {}).close()                 # quiet again: it starts
+
+
+def test_the_repair_in_the_docs_inspects_first_and_never_resets_hard():
+    text = (Path(__file__).resolve().parent.parent / "docs" / "source-service.md").read_text()
+    failure = text[text.index("## Failure"):]
+    assert "git diff" in failure and "git log" in failure and "reset --hard" not in failure
 
 def test_a_git_timeout_after_the_commit_moved_head_is_not_guessed_at_it_is_unavailable(tmp_path, monkeypatch):
     svc, folder, git = _git_service(tmp_path)
@@ -874,10 +921,11 @@ def test_a_replacement_that_fails_before_the_rename_is_a_clean_refusal_and_leave
 
 def test_a_failed_reset_after_a_failed_commit_makes_the_service_unavailable_and_is_never_a_clean_refusal(tmp_path, monkeypatch):
     svc, folder, git = _git_service(tmp_path)
-    _signing_fails(git)
     real = svc._git
 
     def reset_fails(*args, **kw):
+        if args[:1] == ("add",):
+            return subprocess.CompletedProcess(args, 1, "", "no")
         if args[:1] == ("reset",):
             return subprocess.CompletedProcess(args, 1, "", "no")
         return real(*args, **kw)
@@ -885,7 +933,6 @@ def test_a_failed_reset_after_a_failed_commit_makes_the_service_unavailable_and_
     with pytest.raises(sourceservice_fault()) as e:
         svc.write(_write_body(svc, "b.md", "bee two\n"))
     assert e.value.code == "unavailable" and (folder / "b.md").read_text() == "bee\n"
-    git("config", "commit.gpgsign", "false")
     monkeypatch.setattr(svc, "_git", real)
     with pytest.raises(sourceservice_fault()) as again:
         svc.write(_write_body(svc, "b.md", "bee three\n"))

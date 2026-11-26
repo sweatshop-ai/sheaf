@@ -88,9 +88,15 @@ replaced, the write is answered `unavailable` (never `written`, never `refused`)
 answered `unavailable` until the service is restarted. The log says where things stand: HEAD, the status of the path, the path.
 A Git step that ends with an exit status and a clean rollback is an ordinary `refused`: the document is as it was.
 
-A stopped service does not start again while the repository is not quiet. Repair by hand, then restart:
+A git step that fails before `git commit` has begun (the `git add`), with a clean rollback, is an ordinary `refused`. A `git commit` that
+exits with an error, times out or cannot be run is fail-stop, and nothing is rolled back.
 
-1. Run `git status` in the folder and read what the log named.
-2. If the edit is not wanted: `git reset -- <path>`, then `git checkout -- <path>` (and `git reset --hard <HEAD in the log>` only if a commit that should not be there landed).
-3. If the edit is wanted: commit it by hand.
-4. Remove a stale `.git/index.lock` only when no Git process runs.
+A stopped service does not start again while the repository is not quiet: it refuses to start with an index lock, staged changes,
+unstaged or untracked changes in its folder, or a merge, rebase, cherry-pick or revert in progress. The refusal names this section.
+Repair by hand, then restart. The log line gives HEAD before the write and HEAD now.
+
+1. Inspect first: `git status`, `git diff` and `git log` in the folder, and compare HEAD now with HEAD before.
+2. If the edit landed in a commit and is wanted, leave it. If it landed and is not wanted, `git revert` that commit.
+3. If the edit is only in the working file or the index and is not wanted: `git restore --staged -- <path>` then `git restore -- <path>`, after reading `git diff` so that no other edit of yours is lost.
+4. If it is wanted and not committed: commit it by hand.
+5. Remove a stale `.git/index.lock` only when no Git process runs.

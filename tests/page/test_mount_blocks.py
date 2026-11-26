@@ -1,6 +1,6 @@
 """A declared Rich block through `page/mount.js` in real browsers (block editor v1, ticket 04): the same CASES as the server
 sanitiser (tests/test_block_sanitize.py). Both let through exactly the declared `data-<attr>` with an allowed value on
-`div.<type>`, its id (prefixed `u-` by mount.js) and its type as the only class. A page test: CI and t-compute only."""
+`div.<type>`, its id (prefixed `u-` by mount.js) and its type as the only class. A page test: it runs in CI only."""
 import pytest
 
 from test_block_sanitize import CASES

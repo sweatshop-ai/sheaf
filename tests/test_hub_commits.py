@@ -2183,3 +2183,35 @@ def test_a_pin_time_git_already_holds_is_taken_out_of_it_with_the_next_commit_of
     assert not [p for p in git(repo, "ls-files").split() if p.endswith(".at")]
     assert at.is_file()
     assert "plan.md" in git(repo, "show", "--name-only", "--format=", "HEAD")
+
+
+def test_a_sweep_with_only_pin_times_changed_takes_every_one_git_holds_out_of_it_and_owes_the_push(tmp_path):
+    """Ticket 203 C (Codex on #687, round 2): the sweep's only change a tracked pin time, and another one git holds that
+    did not change, in another document's folder: both leave git in the hub's commit, the index stays without them,
+    and the commit is owed a push like any of the sweep's."""
+    from sheafmd.hub import commits, state
+    from sheafmd.hub.roots import Root
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    git(repo, "init", "-q")
+    (repo / ".sheaf.toml").write_text('commit = true\npush = true\nversions = "root"\n', encoding="utf-8")
+    v = state.Versions(repo, "r")
+    times = []
+    for name in ("plan.md", "notes.md"):
+        (repo / name).write_text(f"# {name}\n", encoding="utf-8")
+        h = v.pin(f"r/{name}", f"# {name}\n")
+        times.append(next(repo.rglob(f"pins/{h}.at")))
+    git(repo, "add", "-A")
+    git(repo, "add", "-f", *[str(t.relative_to(repo)) for t in times])          # what the old bug let in
+    git(repo, "-c", "user.name=a", "-c", "user.email=a@example.com", "commit", "-q", "-m", "first")
+    times[0].write_text(str(time.time_ns()))                                   # a new time, and nothing else
+    made = []
+    hub = commits.Commits(lambda kind, doc, **detail: made.append((kind, doc, detail)), roots=lambda: [])
+    root = Root("r", repo, True)
+    hub._sweep(root, commits._repo(repo))
+    assert not [r for r in made if "failed" in r[0]], made
+    assert not [p for p in git(repo, "ls-files").split() if p.endswith(state.PINNED_AT)]
+    assert not [p for p in git(repo, "ls-tree", "-r", "--name-only", "HEAD").split() if p.endswith(state.PINNED_AT)]
+    assert "versions: pin times out of git" in git(repo, "log", "--format=%s")
+    assert all(t.is_file() for t in times)
+    assert hub._owed

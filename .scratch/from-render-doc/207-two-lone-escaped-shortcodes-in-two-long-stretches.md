@@ -1,8 +1,8 @@
 # 207: two lone escaped shortcodes in two long changed stretches keep only one escape
 
-**Claimed by:** Kenji (filed only, no fix in this ticket)
+**Claimed by:** Kenji
 
-**Status:** open
+**Status:** in progress
 
 **Blocked by:** none
 

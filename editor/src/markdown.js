@@ -336,7 +336,7 @@ export function blockMarkdown(node) {
     case 'bulletList': case 'orderedList': return listMarkdown(node);
     case 'table': {
       const rows = (node.content || []).map((r) => (r.content || []).map((c) =>
-        inlineMarkdown(((c.content || [])[0] || {}).content || []).replace(/\|/g, '\\|').replace(/\n/g, ' ')));
+        inlineMarkdown(((c.content || [])[0] || {}).content || []).replace(/(?<!\\)\|/g, '\\|').replace(/\n/g, ' ')));
       const line = (r) => '| ' + r.join(' | ') + ' |';
       return [line(rows[0]), line(rows[0].map(() => '---')), ...rows.slice(1).map(line)].join('\n');
     }

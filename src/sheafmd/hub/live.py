@@ -21,7 +21,7 @@ from .. import comments as rdc
 from .. import edit as rde
 from .. import source as rds
 from ..blocks import Unreadable
-from ..document import DocumentService
+from ..document import COMMENT_SESSION, DocumentService
 from .place import NotFound
 from .state import PINS_MAX_AGE
 
@@ -532,6 +532,8 @@ class LiveDocument:
 
             old, new = self._update(change)
             made["wrote"] = new != old
+            if new != old:
+                self._service.record(old, new, COMMENT_SESSION)
             self._after_write()
             self._rerender()
             if wait:

@@ -135,3 +135,34 @@ def test_a_malformed_markdown_save_is_refused_with_a_4xx(on, browser, doc, body)
     r = browser.post("/_/save", {"doc": DOC, "hash": md_hash(TEXT), **body})
     assert 400 <= r.status < 500
     assert doc.read_text(encoding="utf-8") == TEXT
+
+
+def test_a_comment_written_while_the_page_edits_is_not_a_conflict_and_survives_the_save(on, browser, doc):
+    import sheafmd.comments as rdc
+    j = browser.get(f"/_/blocks?doc={DOC}").json()
+    ids = [b["id"] for b in j["blocks"]]
+    blk, s, e = rdc.find_quote(TEXT, "Two.")
+    c = browser.post("/_/comment", {"doc": DOC, "op": "add", "hash": j["hash"], "block": blk, "start": s, "end": e,
+                                    "quote": "Two.", "body": "Why?"}).json()
+    assert c.get("hash") and c["hash"] != j["hash"]
+    r = save(browser, TEXT.replace("One.", "One, edited."), j["hash"], ids).json()
+    assert r["conflict"] is False
+    now = doc.read_text(encoding="utf-8")
+    assert "One, edited." in now and "Why?" in now
+
+
+
+
+def test_a_page_that_saved_before_a_comment_and_saves_again_after_it_is_not_a_conflict(on, browser, doc):
+    import sheafmd.comments as rdc
+    j = browser.get(f"/_/blocks?doc={DOC}").json()
+    ids = [b["id"] for b in j["blocks"]]
+    a = TEXT.replace("One.", "One, a.")
+    first = save(browser, a, j["hash"], ids).json()
+    blk, s, e = rdc.find_quote(doc.read_text(encoding="utf-8"), "Two.")
+    browser.post("/_/comment", {"doc": DOC, "op": "add", "hash": first["hash"], "block": blk, "start": s, "end": e,
+                                "quote": "Two.", "body": "Why?"})
+    r = save(browser, a.replace("One, a.", "One, b."), j["hash"], ids).json()
+    assert r["conflict"] is False
+    now = doc.read_text(encoding="utf-8")
+    assert "One, b." in now and "Why?" in now

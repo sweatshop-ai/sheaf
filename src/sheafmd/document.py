@@ -34,6 +34,7 @@ from .blocks import LOCKED, Clash, Unreadable, derive, read_tree, rebase, write_
 from .blocks import declarations as decl
 from .blocks.write import match
 
+COMMENT_SESSION = "\x00comment"   # the session a comment write is recorded under: the page's own saves, then comments, are not a write from outside (SPEC 7.3)
 RECORDS = 512       # the writes whose session is remembered: the page's chain is a few saves long
 TEXTS = 64          # the texts kept by hash, for a stale base to be rebased from
 TREES = 4           # the trees kept, by text hash: a save reads the file's and the page's, the next reads the one just written
@@ -121,6 +122,11 @@ class DocumentService:
             # the page's edit is checked against the text it was made from: the base when the service holds it
             self._refuse(page, self.tree(old if old is not None else current), held_ids)
             if base and base != here and not self._own(base, here, session):
+                # What the page itself saved on the way is not a change it must merge again: when only comments
+                # follow its own saves, the three-way merge starts from its last save.
+                mine = self._own_tail(base, here, session)
+                if mine != base:
+                    old = self._text_of(mine)
                 if old is None:
                     raise rda.Conflict(here)
                 got = rebase(self.tree(old), self.tree(current), page, held_ids)
@@ -193,6 +199,24 @@ class DocumentService:
                 if h == here:
                     return True
         return False
+
+    def _own_tail(self, base: str, here: str, session: str) -> str:
+        """The hash `base` becomes by the writes of `session` alone, when nothing but comment writes (`COMMENT_SESSION`)
+        lies between it and `here`; `base` itself when anything else does."""
+        if not session:
+            return base
+        with self._lock:
+            h, mine = base, base
+            for _ in range(len(self._next) + 1):
+                step = self._next.get(h)
+                if step is None or step[1] not in (session, COMMENT_SESSION):
+                    return base
+                h = step[0]
+                if step[1] == session:
+                    mine = h
+                if h == here:
+                    return mine
+        return base
 
     def _ids(self, text: str) -> list:
         try:

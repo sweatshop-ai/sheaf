@@ -32,10 +32,11 @@ def _edited(a, b) -> bool:
     return a.key != b.key
 
 
-def rebase(base: Tree, current: Tree, page: Tree, held_ids=None):
-    """The text to write, or a `Clash`."""
+def rebase(base: Tree, current: Tree, page: Tree, held_ids=None, file_held=None):
+    """The text to write, or a `Clash`. `file_held`: for each block of `current`, the id of the block of `base` it
+    descends from where the service knows it (the identity a save that rewrote a block established)."""
     pg = pair(base.blocks, page.blocks, held_ids)          # page block j -> base block
-    fl = pair(base.blocks, current.blocks)                 # current block i -> base block
+    fl = pair(base.blocks, current.blocks, file_held)               # current block i -> base block
     page_of = {b: j for j, b in enumerate(pg) if b is not None}
     cur_of = {b: i for i, b in enumerate(fl) if b is not None}
     page_moved = {pg[j] for j in moved(pg)}

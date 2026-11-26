@@ -91,7 +91,7 @@ def test_each_request_line_gets_one_answer_line_with_its_id(to_hub):
     code, got, raw, _ = run_stdio(to_hub, lines(rpc("ping", id=1), rpc("ping", id="b"),
                                                 rpc("tools/list", id=3)))
     assert code == 0 and [g["id"] for g in got] == [1, "b", 3]
-    assert got[0]["result"] == {} and len(got[2]["result"]["tools"]) == 10
+    assert got[0]["result"] == {} and len(got[2]["result"]["tools"]) == 12
     assert raw.count(b"\n") == 3 and raw.endswith(b"\n")
 
 
@@ -990,7 +990,7 @@ def test_the_command_starts_the_hub_and_answers_the_whole_conversation(work):
     assert [g["id"] for g in got] == [1, 2, 3, 4, 5, 6, 7, 8]
     assert got[0]["result"]["serverInfo"]["name"] == "sheaf"
     assert {t["name"] for t in got[1]["result"]["tools"]} == {"documents", "threads", "reply", "resolve",
-                                                             "read", "create", "update", "tells", "move", "render_report"}
+                                                             "read", "create", "update", "tells", "move", "render_report", "blocks", "block_types"}
     assert all(g["result"]["isError"] is False for g in got[2:])
 
     def said(i):

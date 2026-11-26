@@ -48,6 +48,52 @@ CALLOUT = BlockType(
 
 DECLARED = {t.name: t for t in (CALLOUT,)}
 
+# What an agent is told about each insertable Block type: one line, and one example the Document service accepts.
+# The plain types have no declaration of their own (they are plain Markdown), so their attributes are listed here.
+DESCRIPTIONS = {
+    "paragraph": ("A paragraph of text.", "A short paragraph of text."),
+    "heading": ("A heading; `level` is the number of # signs.", "## A heading"),
+    "list": ("A bulleted or numbered list.", "- first item\n- second item"),
+    "quote": ("A quotation; it holds plain blocks only.", "> A quoted line."),
+    "table": ("A table in pipe form.", "| a | b |\n|---|---|\n| 1 | 2 |"),
+    "code": ("A fenced code block; `lang` names the language. It is locked: moved or removed, never edited in place.",
+             "```python\nprint(1)\n```"),
+    "rule": ("A horizontal rule.", "---"),
+    "callout": ("A highlighted note; `tone` sets its colour, `align` its text and `pad` its padding.",
+                '::: {.callout tone="info"}\nA note for the reader.\n:::'),
+}
+PLAIN_ATTRS = {"heading": (("level", ("1", "2", "3", "4", "5", "6"), "1"),),
+               "code": (("lang", (), ""),),
+               "list": (("ordered", ("true", "false"), "false"),)}
+
+
+def insertable() -> list:
+    """The names of every insertable Block type: the plain ones, then the declared Rich ones."""
+    return list(PLAIN) + list(DECLARED)
+
+
+def describe(name: str) -> dict:
+    """What `block_types` says of one type: its attributes with allowed values and default, a line, an example."""
+    if name in DECLARED:
+        attrs = [{"name": a.name, "values": list(a.values), "default": a.default} for a in DECLARED[name].attrs]
+    else:
+        attrs = [{"name": n, "values": list(v), "default": d} for n, v, d in PLAIN_ATTRS.get(name, ())]
+    line, example = DESCRIPTIONS[name]
+    return {"type": name, "attributes": attrs, "description": line, "example": example}
+
+
+def containers() -> dict:
+    """Which types each container may hold: the document, each declared type by its Container rule, and the
+    plain containers (a quote, a list item), which hold plain blocks only. Types that are not insertable yet
+    (the layout divs) are left out."""
+    ok_ = set(insertable())
+    out = {"document": insertable()}
+    for t in DECLARED.values():
+        out[t.name] = [k for k in t.children if k in ok_]
+    out["quote"] = list(PLAIN)
+    out["item"] = list(PLAIN)
+    return out
+
 # The Theme properties: documented, stable through 1.x (ADR 0008). A Theme's `theme.css` may override any.
 TONES = {"info": ("#1f5fd6", "#eef3fd"),
          "success": ("#1e7e46", "#edf8f1"),

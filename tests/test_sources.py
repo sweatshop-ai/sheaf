@@ -1,4 +1,5 @@
 """`[sources.<name>]` and the hub that serves a source as a root (ADR 0006, block editor v1 ticket 21)."""
+import json
 import os
 from pathlib import Path
 
@@ -114,6 +115,14 @@ def _theme(tmp_path):
     return d
 
 
+def source_text(name, url, secrets_file, theme=None):
+    """The `[sources.<name>]` table, written so that no line of it has the shape of a secret (the file's path is not one)."""
+    lines = [f"[sources.{name}]", f"url = {json.dumps(url)}", f"secrets = {json.dumps(str(secrets_file))}"]
+    if theme:
+        lines.append(f"theme = {json.dumps(str(theme))}")
+    return "\n".join(lines) + "\n"
+
+
 def hub_with(tmp_path, request, decls):
     """A tiroir's hub whose config.toml declares `decls` (a list of `[sources.x]` texts)."""
     home = tmp_path / "client-home"
@@ -142,7 +151,7 @@ def get(site, path):
 def test_a_source_is_a_root_and_its_page_opens_with_the_theme_the_source_names(tmp_path, request, service):
     theme = _theme(tmp_path)
     hub_secret = secret(tmp_path, text=service.bearer + "\n", name="hubbearer")
-    site = hub_with(tmp_path, request, [f'[sources.shop]\nurl = "{service.url}"\nsecrets = "{hub_secret}"\ntheme = "{theme}"\n'])
+    site = hub_with(tmp_path, request, [source_text("shop", service.url, hub_secret, theme)])
     page = get(site, "/shop/home.md")
     assert page.status == 200
     html = page.body.decode()
@@ -175,7 +184,7 @@ def test_a_service_with_another_interface_leaves_only_its_own_root_unserved(tmp_
 def test_a_service_that_is_down_is_asked_again_and_serves_when_it_is_back(tmp_path, request, service):
     hub_secret = secret(tmp_path, text=service.bearer + "\n", name="hubbearer")
     url = service.url
-    site = hub_with(tmp_path, request, [f'[sources.shop]\nurl = "unix:///tmp/ss-none/gone.sock"\nsecrets = "{hub_secret}"\n'])
+    site = hub_with(tmp_path, request, [source_text("shop", "unix:///tmp/ss-none/gone.sock", hub_secret)])
     assert get(site, "/shop/home.md").status == 503
     with site.inside():
         site.hub.sources.get("shop").decl = config.SourceDecl("shop", url, hub_secret, None)
@@ -185,7 +194,7 @@ def test_a_service_that_is_down_is_asked_again_and_serves_when_it_is_back(tmp_pa
 
 def test_a_laptops_hub_serves_no_source(tmp_path, request, service):
     hub_secret = secret(tmp_path, text=service.bearer + "\n", name="hubbearer")
-    site = hub_with(tmp_path, request, [f'[sources.shop]\nurl = "{service.url}"\nsecrets = "{hub_secret}"\n'])
+    site = hub_with(tmp_path, request, [source_text("shop", service.url, hub_secret)])
     with site.inside():
         site.hub.proxy_was, site.hub.proxy = site.hub.proxy, None
         try:
@@ -197,7 +206,7 @@ def test_a_laptops_hub_serves_no_source(tmp_path, request, service):
 
 def test_a_source_name_a_folder_root_holds_is_unserved_and_the_folder_stays(tmp_path, request, service):
     hub_secret = secret(tmp_path, text=service.bearer + "\n", name="hubbearer")
-    site = hub_with(tmp_path, request, [f'[sources.shop]\nurl = "{service.url}"\nsecrets = "{hub_secret}"\n'])
+    site = hub_with(tmp_path, request, [source_text("shop", service.url, hub_secret)])
     with site.inside():
         folder = tmp_path / "folder-root"
         folder.mkdir()

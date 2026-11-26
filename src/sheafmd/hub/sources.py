@@ -54,7 +54,7 @@ class Sources:
     @classmethod
     def load(cls, *, serves, warn=None) -> "Sources":
         try:
-            declared, problems = config.load_sources(warn)
+            declared, problems = config.load_sources(warn or (lambda _line: None))    # the user config warns of its own unknown keys once
         except config.ConfigError:
             declared, problems = [], {}       # the config file as a whole is the user config's to report
         return cls(declared, problems, serves=serves)

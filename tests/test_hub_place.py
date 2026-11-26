@@ -279,26 +279,27 @@ def test_a_door_create_taken_back_leaves_a_file_put_at_the_name_after_its_look(t
     assert not taken_aside(work / SHARED)
 
 
-def test_a_door_create_taken_back_puts_back_what_an_open_descriptor_wrote_as_it_was_deleted(
-        team, work, browser, tokens, monkeypatch):
-    """Ticket 204 A: an editor that held the file open writes through its descriptor between the take-back's look and its
-    delete. The rename kept no such writer out: the bytes it wrote are put back at the name, and said."""
+def test_a_door_create_taken_back_keeps_what_an_open_descriptor_wrote_during_its_look(team, work, browser, tokens, monkeypatch):
+    """Ticket 204 A: an editor that held the file open writes through its descriptor while the take-back looks at it. The
+    rename kept no such writer out: the file is looked at again before the delete, kept, and put back at its name."""
     from sheafmd import mcp
     address = f"work/{SHARED}"
     browser.hub.docs.change(address, lambda e: {**e, "generated": {"by": "x", "id": None, "at": "t", "key": True}})
-    change, real_unlink, held = browser.hub.docs.change, os.unlink, []
+    change, real_fstat, held, looks = browser.hub.docs.change, os.fstat, [], []
 
-    def written_through_a_descriptor(path, *args, **kwargs):
-        if ".sheaf-gone-" in str(path) and not held:
-            held.append(open(path, "r+", encoding="utf-8"))     # opened before the take-back, in the editor's hands
-            held[0].truncate(0)
-            held[0].write("# Written as it went\n")
-            held[0].flush()
-        return real_unlink(path, *args, **kwargs)
+    def written_during_the_look(fd, *args, **kwargs):
+        if held and real_fstat(fd).st_ino == held[1]:
+            looks.append(1)
+            if len(looks) == 2:         # after its first look and its read, before its last look
+                held[0].truncate(0)
+                held[0].write("# Written as it went\n")
+                held[0].flush()
+        return real_fstat(fd, *args, **kwargs)
 
     def no_clear_after_the_file(a, settle):
         if (work / SHARED).exists():
-            monkeypatch.setattr(mcp.os, "unlink", written_through_a_descriptor)
+            held.extend([open(work / SHARED, "r+", encoding="utf-8"), (work / SHARED).stat().st_ino])
+            monkeypatch.setattr(mcp.os, "fstat", written_during_the_look)
             raise OSError(28, "No space left on device")
         return change(a, settle)
     monkeypatch.setattr(browser.hub.docs, "change", no_clear_after_the_file)
@@ -306,6 +307,7 @@ def test_a_door_create_taken_back_puts_back_what_an_open_descriptor_wrote_as_it_
     monkeypatch.undo()
     held[0].close()
     assert is_error and "not made" in got, got
+    assert len(looks) == 2, "the write came between the take-back's read and its last look"
     assert (work / SHARED).read_text(encoding="utf-8") == "# Written as it went\n"
     assert not taken_aside(work / SHARED)
     assert any(r.get("kind") == "take-back-left-file" and r.get("file") == NAME for r in diagnostics.read())

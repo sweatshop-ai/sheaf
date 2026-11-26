@@ -1622,24 +1622,21 @@ def _take_back_file(made: "_Made") -> str | None:
         return None
     except OSError:
         return path.name
-    got = _delete_if_made(aside, made) if made.ident is not None else False
-    if got is True:
+    if made.ident is not None and _delete_if_made(aside, made):
         return None
-    if got is False:
-        return _put_back(aside, path)
-    return _write_back(got, path)     # written through a descriptor while it was deleted: its bytes go back
+    return _put_back(aside, path)
 
 
 def _hidden_sibling(path: Path) -> Path:
     return path.with_name(f".{path.name}.sheaf-gone-{secrets.token_hex(6)}")
 
 
-def _delete_if_made(aside: Path, made: "_Made") -> bool | bytes:
+def _delete_if_made(aside: Path, made: "_Made") -> bool:
     """Delete `aside` when it is the file made for `made`, as it was written: that inode, those bytes. True when deleted;
     False when it is another (left where it is), a FIFO or a folder among them, opened without waiting. The rename shut out
-    every writer that opens the name, not one that holds a descriptor already: a write of such a one between the look and
-    the delete is seen after it, on the descriptor kept open (its mtime or size moved), and the bytes the file holds then are
-    answered for the caller to put back. A write in the same tick of the clock, at the same size, is not seen."""
+    every writer that opens the name, not one that holds a descriptor already: its write during the look moves the file's
+    mtime or size, which are looked at again right before the delete, so the file is kept and nothing has to be written back
+    (a full disk is often why the create is taken back). A write between that last look and the delete is not seen."""
     want = made.text.encode("utf-8")
     try:
         fd = os.open(aside, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -1650,15 +1647,14 @@ def _delete_if_made(aside: Path, made: "_Made") -> bool | bytes:
         if (not stat_mod.S_ISREG(st.st_mode) or (st.st_dev, st.st_ino) != made.ident or st.st_size != len(want)
                 or f.read(len(want) + 1) != want):
             return False
+        again = os.fstat(fd)
+        if (again.st_mtime_ns, again.st_size) != (st.st_mtime_ns, st.st_size):
+            return False
         try:
             os.unlink(aside)
         except OSError:
             return False
-        after = os.fstat(fd)
-        if (after.st_mtime_ns, after.st_size) == (st.st_mtime_ns, st.st_size):      # not its ctime: the delete moves that
-            return True
-        f.seek(0)
-        return f.read()
+        return True
 
 
 def _put_back(aside: Path, path: Path) -> str:
@@ -1677,24 +1673,6 @@ def _put_back(aside: Path, path: Path) -> str:
         return aside.name
     with contextlib.suppress(OSError):
         os.unlink(aside)
-    return path.name
-
-
-def _write_back(data: bytes, path: Path) -> str:
-    """Write `data` at `path` as a new file, never over one; answers the name it is left under."""
-    tmp = _hidden_sibling(path)
-    try:
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o666)
-        with os.fdopen(fd, "wb") as f:
-            f.write(data)
-    except OSError:
-        return f"{path.name} (its bytes could not be written back)"
-    try:
-        os.link(tmp, path)
-    except (OSError, NotImplementedError):
-        return tmp.name
-    with contextlib.suppress(OSError):
-        os.unlink(tmp)
     return path.name
 
 

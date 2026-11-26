@@ -26,13 +26,12 @@ from ..source import STAMP_FORMAT
 from . import peer, proxy, repos as repos_mod, sender, service, state, the_list, transcribe
 from .client import STOPPING
 from .core import Hub
-from .events import KEEPALIVE, KEEPALIVE_SECONDS, PREAMBLE, frame
+from .events import ENDS as ENDS_STREAM, KEEPALIVE, KEEPALIVE_SECONDS, PREAMBLE, frame
 from .handler import MAX_BODY, Handler, Refuse
 from .sock import TellSocket
 
 TICK_SECONDS = 1.0
 WAIT_SLICE = 0.25
-ENDS_STREAM = ("hub-stopping", "signed-out", "gone")   # the last event a tab gets on this stream
 EXIT_UPGRADE = 75                     # sysexits EX_TEMPFAIL: the service manager starts the new code
 EXIT_STOPPED = service.EXIT_STOPPED   # `sheaf stop` of a hub whose unit says it leaves that down (#79)
 IDLE_SECONDS = 60.0              # a connection that is silent for this long, between requests or inside a head, is closed

@@ -12,6 +12,8 @@ changes whenever an asset does. The entries name pull requests of sweatshop-ai/s
 
 ### Fixed
 
+- A tab of a page that was deleted hears nothing after `gone`: a grants change or a Tell that had taken the page from before the delete no longer sends an event after it (#700).
+- A door create that is taken back never deletes the file it made while an editor holds it open (a write through the editor's descriptor was lost); where the system cannot tell (macOS), the file is kept in a hidden sibling. A folder put back replaces no empty folder that came to its name (#700).
 - Two shortcodes written as text (`\:smile:`), each in its own long changed stretch of about 1 000 words with unchanged words between the stretches, keep both escapes, instead of showing as their emoji: each stretch is now compared on its own (#691).
 - A tab that joins its browser's shared stream while that stream is opened again keeps its place on the fresh stream: the join begun on the old one no longer takes the tab off the fresh one, which left the tab counted nowhere and getting no events (#690).
 - Raw HTML with a `data-` attribute right after a `/` (`<div/data-x>`) is compared as the open tag it is, instead of as one that closes itself (`<div/>`), so a block nobody touched is not rewritten (#689).

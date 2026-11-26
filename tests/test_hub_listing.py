@@ -639,6 +639,19 @@ def test_a_page_deleted_while_a_render_of_it_runs_tells_its_tabs_gone_last(brows
     assert hub.versions.get("notes/a.md", md_hash(PLAN)) is not None
 
 
+def test_a_page_deleted_tells_its_tabs_nothing_after_gone_through_an_entry_held_from_before(browser, tmp_path):
+    """Ticket 212 A (from #688): `_tell_grants`, a waiting Tell and a session's Tell publish on an entry they took from
+    `hub.entries` before the page was deleted. What they publish after `gone` reaches no tab: `gone` is the last event."""
+    hub = browser.hub
+    hub.render(md(tmp_path / "x" / "notes" / "a.md", PLAN), {}, None)
+    e = hub.entries["notes/a.md"]               # taken by `_tell_grants` before the delete
+    tab = browser.get("/_/live?doc=notes/a.md").stream
+    assert [n for n, _ in tab.drain()] == ["hello"]
+    hub.forget_document("notes/a.md")
+    e.bus.publish("grants", {})
+    assert tab.drain() == [("gone", {"doc": "notes/a.md"})]
+
+
 def test_a_torn_read_whose_second_render_fails_leaves_the_hub_serving_the_page_it_served(browser, tmp_path, monkeypatch):
     """Ticket 204 C, through the hub: the page a torn read's render built is never the one served once the render again
     from the text the tabs hold has failed."""

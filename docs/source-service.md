@@ -98,5 +98,10 @@ keeping any operator edits in both the working file and the index. Then remove t
 
 At startup the service refuses only in these cases: the git directory cannot be resolved; the marker exists; an index lock exists; a merge,
 rebase, cherry-pick, revert or sequencer operation is in progress; changes are staged; `git status` exits with an error; or a `.git` exists
-that Git cannot read. Ignored, untracked and unstaged files do not affect a start. The listing skips a directory that holds its own `.git`
-(a nested checkout or a submodule). The refusal names this section.
+that Git cannot read. Ignored, untracked and unstaged files do not affect a start.
+
+One rule decides which paths the service lists, reads and writes: valid UTF-8 without surrogates, no control character, no dot
+component, a `.md` name, and no folder above it that holds its own `.git` (a nested checkout or a submodule). Anything else is not
+listed, `not_found` on read and `bad_request` on write. A text or note that cannot be encoded is a `bad_request` before any marker is
+made. The marker's file and the git directory are both synced before the document is replaced. The git directory path must hold no
+control character, or the start is refused. The refusal names this section.

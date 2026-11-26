@@ -711,7 +711,8 @@ def test_a_failed_add_puts_the_bytes_back_even_when_the_cleanup_step_raises(tmp_
 def test_a_failed_sync_of_the_folder_after_a_commit_still_counts_as_written(tmp_path, monkeypatch):
     svc, folder, git = _git_service(tmp_path)
     real = os.fsync
-    monkeypatch.setattr(os, "fsync", lambda fd: (_ for _ in ()).throw(OSError("sync")) if stat.S_ISDIR(os.fstat(fd).st_mode) else real(fd))
+    gino = os.stat(_gdir(git)).st_ino             # the folder's own sync fails; the git dir's, which guards the marker, is a different matter
+    monkeypatch.setattr(os, "fsync", lambda fd: (_ for _ in ()).throw(OSError("sync")) if stat.S_ISDIR(os.fstat(fd).st_mode) and os.fstat(fd).st_ino != gino else real(fd))
     assert svc.write(_write_body(svc, "b.md", "bee two\n"))["outcome"] == "written"
     assert git("show", "HEAD:b.md") == "bee two\n"
 
@@ -1180,7 +1181,7 @@ def test_the_git_dir_is_resolved_once_checked_and_a_failed_lookup_refuses_the_st
     svc.close()
     real = sourceservice.Service._git
     monkeypatch.setattr(sourceservice.Service, "_git",
-                        lambda self, *a, **k: subprocess.CompletedProcess(a, 128, "", "fatal") if "--absolute-git-dir" in a else real(self, *a, **k))
+                        lambda self, *a, **k: subprocess.CompletedProcess(a, 128, b"", b"fatal") if "--absolute-git-dir" in a else real(self, *a, **k))
     with pytest.raises(SystemExit):
         sourceservice.Service(folder, "b" * 20, {})
 
@@ -1231,3 +1232,85 @@ def test_the_listing_skips_nested_checkouts_and_submodules(tmp_path):
     names = sorted(svc.names())
     assert "plain/p.md" in names and "b.md" in names
     assert not [n for n in names if n.startswith(("nested/", "sub/"))]
+
+
+def test_acceptable_is_one_rule_for_listing_read_and_write(tmp_path):
+    svc, folder, git = _git_service(tmp_path)
+    (folder / "nested" / ".git").mkdir(parents=True)
+    (folder / "nested" / "deep").mkdir()
+    (folder / "nested" / "deep" / "d.md").write_text("d\n")
+    (folder / "ok").mkdir()
+    (folder / "ok" / "o.md").write_text("o\n")
+    good = ["b.md", "ok/o.md"]
+    bad = ["a\rb.md", "a\nb.md", "a\x7fb.md", "a\x01b.md", "x\ud800.md", "nested/deep/d.md", "a/./b.md", "b.txt", ".h.md", "a//b.md"]
+    assert all(svc.acceptable(n) for n in good)
+    assert not any(svc.acceptable(n) for n in bad)
+    for n in ("a\rb.md", "x\ud800.md", "nested/deep/d.md"):
+        with pytest.raises(sourceservice_fault()) as e:
+            svc.read(n)
+        assert e.value.code == "not_found"
+        with pytest.raises(sourceservice_fault()) as e:
+            svc.write({"document": n, "author": "Ada", "note": "n", "base": "x", "tree": {"text": "t\n"}})
+        assert e.value.code == "bad_request"
+    assert set(svc.names()) >= set(good) and "nested/deep/d.md" not in set(svc.names())
+
+
+def test_the_listing_leaves_out_a_control_character_name_and_a_page_cursor_survives(tmp_path):
+    svc, folder, git = _git_service(tmp_path)
+    with open(os.path.join(os.fsencode(folder), b"bad\xff.md"), "w") as f:
+        f.write("odd\n")
+    (folder / "cr\r.md").write_text("c\n")
+    assert sorted(svc.names()) == ["*.md", "b.md"]
+
+
+def test_an_unpaired_surrogate_in_the_text_or_the_note_is_bad_request_and_leaves_no_marker(tmp_path):
+    svc, folder, git = _git_service(tmp_path)
+    marker = _gdir(git) / "sheaf-source-stopped"
+    for text, note in (("bee \ud800\n", "n"), ("bee two\n", "n\ud800")):
+        with pytest.raises(sourceservice_fault()) as e:
+            svc.write(_write_body(svc, "b.md", text, note))
+        assert e.value.code == "bad_request"
+        assert not marker.exists() and (folder / "b.md").read_text() == "bee\n"
+    svc.close()
+    from sheafmd import sourceservice
+    sourceservice.Service(folder, "b" * 20, {}).close()
+
+
+def test_a_marker_that_fails_after_it_is_created_is_unlinked_and_the_write_refused(tmp_path, monkeypatch):
+    svc, folder, git = _git_service(tmp_path)
+    marker = _gdir(git) / "sheaf-source-stopped"
+
+    def failing(fd):
+        raise OSError("disk")
+    monkeypatch.setattr(os, "fsync", failing)
+    out = svc.write(_write_body(svc, "b.md", "bee two\n"))
+    monkeypatch.undo()
+    assert out["outcome"] == "refused" and not marker.exists() and (folder / "b.md").read_text() == "bee\n"
+
+
+def test_the_marker_syncs_the_git_dir_as_well_as_its_file(tmp_path, monkeypatch):
+    svc, folder, git = _git_service(tmp_path)
+    synced, real = [], os.fsync
+    monkeypatch.setattr(os, "fsync", lambda fd: (synced.append(os.fstat(fd).st_ino), real(fd))[1])
+    marker, realgit = _gdir(git) / "sheaf-source-stopped", svc._git
+    seen = {}
+
+    def watching(*a, **k):
+        if "commit" in a:
+            seen["n"] = list(synced)
+        return realgit(*a, **k)
+    monkeypatch.setattr(svc, "_git", watching)
+    svc.write(_write_body(svc, "b.md", "bee two\n"))
+    kinds = [(m) for m in seen["n"]]
+    assert os.stat(_gdir(git)).st_ino in kinds and len(kinds) >= 2
+
+
+def test_a_git_dir_with_a_control_character_in_it_refuses_the_start(tmp_path):
+    from sheafmd import sourceservice
+    gdir = tmp_path / "g\rx"
+    folder = tmp_path / "w"
+    folder.mkdir()
+    env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@example.org", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@example.org"}
+    subprocess.run(["git", "init", "-q", f"--separate-git-dir={gdir}", str(folder)], check=True, env=env)
+    with pytest.raises(SystemExit):
+        sourceservice.Service(folder, "b" * 20, {})

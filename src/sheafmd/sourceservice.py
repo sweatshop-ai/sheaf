@@ -147,6 +147,22 @@ class Service:
         parts = rel.split("/")
         return rel.endswith(".md") and not any(p.startswith(".") or not p for p in parts)
 
+    def acceptable(self, rel) -> bool:
+        """The one rule for a path below the folder, for the listing, read, write and the cursor: strict UTF-8 without surrogates, no
+        control character, no empty or dot component, a `.md` name, and no ancestor folder that holds a `.git` of its own."""
+        if not isinstance(rel, str):
+            return False
+        try:
+            rel.encode("utf-8")
+        except UnicodeEncodeError:
+            return False
+        if any(ord(c) < 32 or ord(c) == 127 for c in rel) or not self.served(rel):
+            return False
+        parts = rel.split("/")
+        if any(p in (".", "..") for p in parts):
+            return False
+        return not any(os.path.lexists(os.path.join(self.top, *parts[:i], ".git")) for i in range(1, len(parts)))
+
     def names(self):
         for dirpath, dirs, files in os.walk(self.top, followlinks=False):
             dirs[:] = sorted(d for d in dirs if not d.startswith(".") and not os.path.islink(os.path.join(dirpath, d)))
@@ -156,7 +172,7 @@ class Service:
                 continue
             for f in files:
                 full = os.path.join(dirpath, f)
-                if self.served((here / f).as_posix()) and not os.path.islink(full) and stat.S_ISREG(os.lstat(full).st_mode):
+                if self.acceptable((here / f).as_posix()) and not os.path.islink(full) and stat.S_ISREG(os.lstat(full).st_mode):
                     yield (here / f).as_posix()
 
     def documents(self, cursor) -> dict:
@@ -224,6 +240,8 @@ class Service:
         self.close()
 
     def read(self, rel: str) -> dict:
+        if not self.acceptable(rel):
+            raise Fault("not_found", f"no document {rel!r}")
         with self._writing:            # a write in progress is not shown: its text is tentative until git has taken it
             if self._broken:
                 raise Fault("unavailable", "an earlier write failed in git and the service stopped: see Failure in docs/source-service.md")
@@ -232,6 +250,8 @@ class Service:
 
     def write(self, body: dict) -> dict:
         rel = clean_document(body.get("document"))
+        if not self.acceptable(rel):
+            raise Fault("bad_request", "document must name a .md file below the folder")
         author, note, base, tree = body.get("author"), body.get("note", ""), body.get("base"), body.get("tree")
         who = self.authors.get(author) if isinstance(author, str) else None
         if who is None:
@@ -239,6 +259,11 @@ class Service:
         text = tree.get("text") if isinstance(tree, dict) else None
         if not isinstance(text, str) or not isinstance(base, str) or not isinstance(note, str) or "\0" in note:
             raise Fault("bad_request", "write needs tree.text, base and a note, all text")
+        try:                                    # before anything else: a text or note that cannot be encoded is no request this service can write
+            data = text.encode("utf-8")
+            note.encode("utf-8")
+        except UnicodeEncodeError:
+            raise Fault("bad_request", "text and note must be valid Unicode text") from None
         if not text.strip():
             return rda.refused("a document is not written empty")      # the one rule of this service: a source's own are its owner's
         with self._writing:       # the file and the commit are one step: a second write cannot come between them
@@ -262,7 +287,7 @@ class Service:
             outcome = "untouched"
             try:
                 try:
-                    self._put(rel, text.encode("utf-8"), mode)
+                    self._put(rel, data, mode)
                 except (OSError, Fault):
                     if self.git:
                         self._unmark()
@@ -283,18 +308,30 @@ class Service:
                 return rda.refused("the change could not be recorded in the folder's history: the document is as it was")
         return rda.written(rds.md_hash(text))
 
-    def _mark(self, line: str) -> bool:
-        """Append a line to the marker in the git dir and sync it: the intent of a write before the file is touched, and what a
-        stop adds. False when it cannot be written."""
+    def _mark(self, line: str, fresh: bool = True) -> bool:
+        """Append a line to the marker in the git dir, sync the file and the git dir: the intent of a write before the file is
+        touched, and what a stop adds. On any failure False, and a marker this call made is unlinked."""
+        path = os.path.join(self.gdir, self.MARKER)
+        existed = os.path.lexists(path)
         try:
-            fd = os.open(os.path.join(self.gdir, self.MARKER), os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
             try:
                 os.write(fd, f"{time.strftime('%Y-%m-%dT%H:%M:%S%z')} {line}\n".encode("utf-8", "surrogateescape"))
                 os.fsync(fd)
             finally:
                 os.close(fd)
+            dfd = os.open(self.gdir, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+            try:
+                os.fsync(dfd)
+            finally:
+                os.close(dfd)
             return True
         except OSError:
+            if fresh and not existed:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
             return False
 
     def _unmark(self) -> None:
@@ -317,7 +354,7 @@ class Service:
         line = (f"STOPPED after a failed write of {rel}: HEAD before {self._head_before or '-'}, HEAD now {state['HEAD']}; "
                 f"status {state['status']!r}")
         print(f"source service: {line}; repair by hand, see Failure in docs/source-service.md", file=sys.stderr, flush=True)
-        if not self._mark(line):
+        if not self._mark(line, fresh=False):
             print("source service: the stop marker could not be written", file=sys.stderr, flush=True)
 
     def _put(self, rel: str, data: bytes, mode: int) -> None:
@@ -379,8 +416,8 @@ class Service:
         return clean
 
     # ── git ─────────────────────────────────────────────────────────────────
-    def _git(self, *args, env=None):
-        return subprocess.run(["git", "-C", str(self.top), *args], capture_output=True, text=True, errors="surrogateescape", timeout=30,
+    def _git(self, *args, env=None, raw=False):
+        return subprocess.run(["git", "-C", str(self.top), *args], capture_output=True, timeout=30, **({} if raw else {"text": True, "errors": "surrogateescape"}),
                               env={**os.environ, **(env or {}), "GIT_LITERAL_PATHSPECS": "1"})   # a name is a file, never a glob or a magic pathspec
 
     def _inside_git(self) -> bool:
@@ -400,11 +437,12 @@ class Service:
         """The git dir, resolved once: the exit code checked, only the trailing newline removed, an existing directory. Everything
         that reads or writes the git dir (the markers, the lock check) uses this path."""
         try:
-            got = self._git("rev-parse", "--absolute-git-dir")
+            got = self._git("rev-parse", "--absolute-git-dir", raw=True)       # bytes: no newline translation
         except (OSError, subprocess.SubprocessError):
             return "the git directory cannot be resolved"
-        path = got.stdout[:-1] if got.stdout.endswith("\n") else got.stdout
-        if got.returncode != 0 or not path or not os.path.isabs(path) or not os.path.isdir(path):
+        out = got.stdout[:-1] if got.stdout.endswith(b"\n") else got.stdout
+        path = os.fsdecode(out)
+        if got.returncode != 0 or not path or any(ord(c) < 32 or ord(c) == 127 for c in path) or not os.path.isabs(path) or not os.path.isdir(path):
             return "the git directory cannot be resolved"
         self.gdir = path
         return None

@@ -6,6 +6,10 @@ changes whenever an asset does. The entries name pull requests of sweatshop-ai/s
 
 ## Unreleased
 
+### Added
+
+- The block tree of plain Markdown (`sheafmd.blocks`, which replaces the flat `blocks.py`: `blocks.flat` keeps the old names) and the Document service (`sheafmd.document`): `read()` gives the tree and the base, `save()` writes a whole Markdown text so that every block with an equal pandoc AST keeps the file's bytes, and a page's earlier saves on an old base are not a conflict for the page itself. A page save now writes through it, with no change for a save that rewrote nothing but its own blocks (block editor v1, ticket 02).
+
 ### Fixed
 
 - Two shortcodes written as text (`\:smile:`), each in its own long changed stretch of about 1 000 words with unchanged words between the stretches, keep both escapes, instead of showing as their emoji: each stretch is now compared on its own (#691).

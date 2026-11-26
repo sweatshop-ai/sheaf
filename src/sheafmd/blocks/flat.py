@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-sheafmd.blocks — the markdown block model behind editing on the page.
+sheafmd.blocks.flat — the flat index model behind editing on the page.
 
 Why this exists
 ---------------
@@ -50,7 +50,7 @@ LOCKED_KINDS = {"fence", "frontmatter", "html", "indented_code"}
 COMMENTABLE_KINDS = {"para", "heading", "list", "quote", "table"}
 
 
-class Block:
+class Tile:
     __slots__ = ("kind", "content", "gap", "start")
 
     def __init__(self, kind, content, gap, start):
@@ -82,7 +82,7 @@ class Block:
 
     def __repr__(self):
         head = self.content.split("\n")[0][:40]
-        return f"<Block {self.kind} @{self.start} {head!r}>"
+        return f"<Tile {self.kind} @{self.start} {head!r}>"
 
 
 # A line that opens an item or a quote, as CommonMark reads it: the space after a marker is a space or a tab, not the
@@ -225,7 +225,7 @@ def split_md_blocks(text):
         j = end
         while j < n and not lines[j].strip():
             j += 1
-        blocks.append(Block(kind, "".join(raw[start:end]), "".join(raw[end:j]), start))
+        blocks.append(Tile(kind, "".join(raw[start:end]), "".join(raw[end:j]), start))
         return j
 
     # leading blank lines belong to no block; keep them as an inert one
@@ -233,7 +233,7 @@ def split_md_blocks(text):
         j = i
         while j < n and not lines[j].strip():
             j += 1
-        blocks.append(Block("blank", "", "".join(raw[i:j]), i))
+        blocks.append(Tile("blank", "", "".join(raw[i:j]), i))
         i = j
 
     # YAML front matter, only at the very top

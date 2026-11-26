@@ -40,7 +40,7 @@ class Refused(Exception):
         self.reason, self.block = reason, block
 
 
-class _Conflict(Exception):
+class Conflict(Exception):
     def __init__(self, base: str):
         super().__init__(base)
         self.base = base
@@ -92,14 +92,16 @@ class MarkdownFileAdapter:
             text = self._file().read_text(encoding="utf-8")
         return Tree(text), rds.md_hash(text)
 
-    def write(self, tree, base, author: str = "", note: str = "", move=None) -> dict:
-        here = self
+    def pinned(self):
+        """`(adapter, name)`: this adapter with the file it names asked once, and that file's name. The name judged
+        is then the file written, even where the file is found afresh at each use."""
         if self._beneath is not None:
-            where = self._beneath()          # asked once: the name judged is the file written
-            here = MarkdownFileAdapter(beneath=lambda: where)
-            name = where[1]
-        else:
-            name = self._file().name
+            where = self._beneath()
+            return MarkdownFileAdapter(beneath=lambda: where), where[1]
+        return self, self._file().name
+
+    def write(self, tree, base, author: str = "", note: str = "", move=None) -> dict:
+        here, name = self.pinned()
         if not self.accepts(name):
             return refused(f"{name} is not a .md file")
         out, _, _ = here.apply(lambda t, opened: tree.text, expected=base, move=move, author=author, note=note)
@@ -114,7 +116,7 @@ class MarkdownFileAdapter:
         then `kept(new)`, the Versions store's record of the text written, in that order."""
         def judged(text, opened):
             if expected is not None and rds.md_hash(text) != expected:
-                raise _Conflict(rds.md_hash(text))
+                raise Conflict(rds.md_hash(text))
             return change(text, opened)
         try:
             if self._beneath is not None:
@@ -122,7 +124,7 @@ class MarkdownFileAdapter:
                 old, new = (by or rds.update_beneath)(top, rel, judged, move=move)
             else:
                 old, new = (by or rds.update_file)(self._file(), lambda t: judged(t, None), move=move)
-        except _Conflict as c:
+        except Conflict as c:
             return conflict(c.base), None, None
         if between is not None:
             between()

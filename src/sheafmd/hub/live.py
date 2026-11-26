@@ -20,6 +20,7 @@ from .. import adapter as rda
 from .. import comments as rdc
 from .. import edit as rde
 from .. import source as rds
+from ..document import DocumentService
 from .place import NotFound
 from .state import PINS_MAX_AGE
 
@@ -66,6 +67,7 @@ class LiveDocument:
         self._entry = entry          # when given, its file is opened beneath its root, judged, for every read and write (9.11)
         self._adapter = (rda.MarkdownFileAdapter(beneath=entry.where) if entry is not None
                          else rda.MarkdownFileAdapter(self._file))
+        self._service = DocumentService(self._adapter)
         self._hold = hold or contextlib.nullcontext
         self._render, self._publish = render, publish
         self._by, self._clock = by, clock
@@ -349,6 +351,9 @@ class LiveDocument:
                     new, got["report"] = rde.apply_edits(text, edits)
                 if not got["report"]["changed"]:
                     return text
+                # The text the edits made over `text`, written as the Document service writes it: a block that is
+                # the file's own block (an equal AST) keeps the file's bytes. `new` was made on `text`, so its base is `text`'s.
+                new = self._service.settle(text, new, None, rds.md_hash(text), rid or "")
                 return guard(text, new, got["report"]["toggled"]) if guard is not None else new
             # The version check happens inside change(), under the file lock: the CLI and an
             # Tell job write this file from other processes.

@@ -39,7 +39,8 @@ from urllib.parse import quote
 
 from .. import beneath, config, paths
 from ..source import md_hash
-from ..blocks import _split_lines, split_md_blocks
+from ..blocks import split_md_blocks
+from ..blocks.flat import _split_lines
 from ..edit import _render_source, box_number, task_marks, ticked_html
 from .. import comments as rdc
 from . import commits, place, projects, state

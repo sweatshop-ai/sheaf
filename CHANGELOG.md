@@ -8,11 +8,13 @@ changes whenever an asset does. The entries name pull requests of sweatshop-ai/s
 
 ### Fixed
 
+- Two shortcodes written as text (`\:smile:`), each in its own long changed stretch of about 1 000 words with unchanged words between the stretches, keep both escapes, instead of showing as their emoji: each stretch is now compared on its own (#691).
 - A tab that joins its browser's shared stream while that stream is opened again keeps its place on the fresh stream: the join begun on the old one no longer takes the tab off the fresh one, which left the tab counted nowhere and getting no events (#690).
 - Raw HTML with a `data-` attribute right after a `/` (`<div/data-x>`) is compared as the open tag it is, instead of as one that closes itself (`<div/>`), so a block nobody touched is not rewritten (#689).
 - Two shortcodes written as text (`\:smile: \:smile:`) in a long changed stretch keep both escapes, instead of one of them showing as its emoji (#689).
 - A paragraph with hard breaks of its own (`Alpha\` `\` `Beta`) stays one paragraph when both lines beside the breaks are edited in one save, as long as a word of them is left; two new breaks typed before or after them still make two paragraphs, as do two new breaks with none of those words beside them (#685).
 - An empty link target (`<a id="x"></a>`) left at the start of a heading split with Enter goes on with the heading, in its order, instead of being deleted with the empty marks the browser leaves (#685).
+- `sheaf FILE.md` on a page in a git repo no longer calls `render_report` on a door whose `tools/list` does not name it: it prints one line, `does not take render reports yet`, and renders on the laptop hub, instead of printing `the render report ... was refused: Unknown tool`. A list that cannot be read, or not to its end, changes nothing.
 - `sheaf open` gets its answer on a slow page: a render the hub has not finished within 120 seconds goes on and publishes its page, and the command says that the next `sheaf open` serves it, instead of failing. Each pandoc run keeps its own 120 seconds, and a wait for the document's lock no longer counts against them.
 - `sheaf FILE.md` calls a tiroir's tools under the names the server lists in `tools/list` (`sheaf_create` on a door that prefixes them, `create` on a laptop hub), instead of always sending the bare name, which a door refused with 403. A 403 now shows the door's own words instead of the sentence about a revoked token (a revoked token still answers 401).
 - A conflict copy (`FILE.tiroir.md`) is never overwritten: a second conflict leaves the next free name, `FILE.tiroir-2.md`, `-3`, and the same text reuses the copy already there; `pull` does the same.
@@ -28,6 +30,7 @@ Everything merged since 1.2.1 (#472), up to #534. Version 1.2.1 was never tagged
 
 ### Added
 
+- A Tell that waits for a laptop session says, on the page, what the Sheaf plugin does and how to install it (the README link and the two commands), so a Tell that waits because the plugin was never installed says why.
 - A diagram (mermaid or chart) or an SVG image opens in a full-window viewer on a click or tap: wheel and pinch zoom about the pointer, drag to pan, double click or Fit to reset, Esc, the close button or a click outside to close. It works in Comment and Edit mode, on a phone, and in both themes (SPEC 6.9).
 - A page a job generates can be marked as generated, read-only for text edits: the mark is set, shown and guarded by the door (#486, #503, #534, ticket 156). The hub refuses a save, a tick or a share on such a page with a sentence that names who generated it; comments, replies and resolve stay open.
 - The comment box moves by its band, with a mouse or a finger (#501, ticket 174).

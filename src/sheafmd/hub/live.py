@@ -38,6 +38,11 @@ BY_ID = f"{UNKNOWN}, so this comment may not be the one on the page"
 
 # What `LiveDocument.refresh` returns when it could not decide what the file holds (a write in flight, a file it could not
 # stat): it kept what the tabs hold and published nothing, and the caller must look at the file again, even unchanged.
+class LetGo(NotFound):
+    """The entry a render was for was let go (its root forgotten or replaced) before its page could be installed: nothing was
+    installed, and its tabs hear `gone`. A NotFound, so a reader that treats a missing file treats this so."""
+
+
 RETRY = object()
 
 
@@ -799,11 +804,13 @@ class LiveDocument:
         with self._hold(), self._held():
             if self._forgotten:         # its tabs heard `gone` (ticket 195 A)
                 return None
-            if self._detached:          # its root is being let go: the name may be another folder's, whose file is none to read (26 D)
-                return RETRY
-            if force:
+            if force:       # the first render of an entry, or a forced one: of an entry let go, nothing is read (26 D)
+                if self._detached:
+                    raise LetGo(self._address)
                 self._rerender()
                 return self._snapshot(self._text)
+            if self._detached:          # its root is being let go: the name may be another folder's, whose file is none to read (26 D)
+                return RETRY
             seen = self._stamp()
             if rds.md_hash(self._read()) == self._hash:
                 # The text the tabs hold, read from a file that held still: nothing moved. One that moved during the read, or

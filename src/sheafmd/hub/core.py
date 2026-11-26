@@ -56,7 +56,7 @@ from .events import Bus
 from .index import Index
 from .jobs import Jobs
 from .writelog import WriteLog
-from .live import RETRY, LiveDocument
+from .live import RETRY, LetGo, LiveDocument
 
 # What a render may set (SPEC 8.3). Every other key of docs.json is the hub's own.
 SETTING_KEYS = ("title", "toc", "max_image_width", "by", "for", "theme", "credit")
@@ -93,11 +93,6 @@ class _Making:
         self.detached = False
         self.settled = False
         self.lock = threading.Lock()
-
-
-class LetGo(roots_mod.NotFound):
-    """The entry a render was for was let go (its root forgotten or replaced) before its page could be installed: nothing was
-    installed, and its tabs hear `gone`. A NotFound, so a reader that treats a missing file treats this so."""
 
 
 @dataclass

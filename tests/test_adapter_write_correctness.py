@@ -257,15 +257,12 @@ def retake_the_name(hub, tmp_path, files):
     other.mkdir(parents=True)
     for name, data in files.items():
         (other / name).write_bytes(data)
-    try:
-        assert hub.roots.for_document(next(other / n for n in files if n.endswith(".md"))).name == "work"
-    except Exception:       # a root whose config is malformed may refuse to mount: the name is then free, which is the case too
-        pass
+    assert hub.roots.for_document(next(other / n for n in files if n.endswith(".md"))).name == "work"   # the name is held again
     return finish, other
 
 
 @pytest.mark.parametrize("replacement", REPLACEMENTS)
-@pytest.mark.parametrize("window", ["before the render", "between the render and the swap"])
+@pytest.mark.parametrize("window", ["before the render", "between the render and the swap", "a render that raises"])
 def test_a_root_forgotten_and_its_name_taken_between_the_write_and_the_page_swap_tells_the_tabs_nothing_of_the_new_root(
         world, work, tmp_path, replacement, window):
     """2: the page a save installs is the text it wrote, rendered against the entry it pinned, and swapped in only while that
@@ -287,6 +284,11 @@ def test_a_root_forgotten_and_its_name_taken_between_the_write_and_the_page_swap
     if window == "before the render":
         real = e.live.install
         e.live.install = lambda t, g: (take_the_name(), real(t, g))[1]
+    elif window == "a render that raises":
+        def compose(*a, **k):
+            take_the_name()
+            raise RuntimeError("the replacement root's render failed")    # what its config or files make of the render
+        hub._build = compose
     else:
         real = hub._build
 
@@ -344,16 +346,16 @@ def test_a_write_that_lands_after_a_save_is_read_back_once_through_the_same_inst
         out = real(t, g)
         if len(calls) == 1:                        # an outside write after the save's own, the same size and mtime kept
             st = f.stat()
-            f.write_text(f.read_text(encoding="utf-8").replace("Edited words.", "Outside words."), encoding="utf-8")
+            f.write_text(f.read_text(encoding="utf-8").replace("Edited words.", "Edxted words."), encoding="utf-8")
             os.utime(f, ns=(st.st_atime_ns, st.st_mtime_ns))
         return out
     e.live.install = install
     e.live._render = lambda t: (calls.append(t), hub._rendered(e, t))[1]
     e.live.save(rds.md_hash(text), [{"i": i, "html": "<p>Edited words.</p>"}])
     on_disk = f.read_text(encoding="utf-8")
-    assert "Outside words." in on_disk
-    assert e.live.current()[1] == on_disk and "Outside words." in e.html
-    assert len(calls) == 2 and "Edited words." in calls[0] and "Outside words." in calls[1]
+    assert "Edxted words." in on_disk
+    assert e.live.current()[1] == on_disk and "Edxted words." in e.html
+    assert len(calls) == 2 and "Edited words." in calls[0] and "Edxted words." in calls[1]
     assert [n for n, _ in sub.drain()] == ["changed"]
 
 
@@ -368,3 +370,23 @@ def test_a_hook_passed_as_none_is_not_called_and_the_write_is_recorded(tmp_path,
     out = svc.write(lambda t, op: "Changed.\n", "s1", **{hook: None})
     assert out["outcome"] == "written" and md.read_text(encoding="utf-8") == "Changed.\n"
     assert svc._own(rds.md_hash(DOC), rds.md_hash("Changed.\n"), "s1")
+
+
+def test_a_forget_that_fails_during_a_first_render_leaves_no_unrendered_entry(world, monkeypatch):
+    """The first render of an entry runs while its root is let go and taken back (a forget that failed): the render is
+    refused, the entry is not kept with an empty page, and the next open renders it."""
+    hub = world.hub
+    real = hub._new_entry
+
+    def new_entry(*a, **k):
+        e = real(*a, **k)
+        e.live.detach()                     # the let-go's first half, its generation raised
+        hub._regenerate(e, 1)
+        return e
+    monkeypatch.setattr(hub, "_new_entry", new_entry)
+    with pytest.raises(NotFound):
+        hub.entry("work/start.md")
+    assert "work/start.md" not in hub.entries
+    monkeypatch.setattr(hub, "_new_entry", real)
+    e = hub.entry("work/start.md")
+    assert e.html and "First paragraph" in e.html

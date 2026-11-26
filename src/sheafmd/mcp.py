@@ -1679,7 +1679,10 @@ def _delete_if_made(aside: Path, made: "_Made") -> bool | None:
         # its mode goes to none first, which refuses such an open before it reaches the lease, and the look at the lease
         # comes after, for an open that began before. Not kept out: root, whom no mode stops, and an open already past
         # its permission check, in the kernel, as the mode changed.
+        # A second name to the file (a hard link) would keep the mode none takes: such a file is not deleted, it goes back.
         try:
+            if os.fstat(fd).st_nlink != 1:
+                return False
             os.fchmod(fd, 0)
         except OSError:
             return False

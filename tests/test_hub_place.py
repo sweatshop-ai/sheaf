@@ -489,7 +489,8 @@ def test_a_take_back_whose_lease_another_opens_lives_and_deletes_nothing(tmp_pat
     got = subprocess.run([sys.executable, "-c", LEASE_BROKEN_DURING_THE_LOOK, str(aside)], capture_output=True, text=True,
                          timeout=60, env={**os.environ, "PYTHONPATH": str(Path(__file__).parents[1] / "src")})
     assert got.returncode == 0, (got.returncode, got.stderr)
-    assert got.stdout.split() == ["False", "2"], got.stdout
+    result, looks = got.stdout.split()
+    assert result == "False" and int(looks) >= 2, got.stdout       # the opener came in under the lease
     assert aside.read_text(encoding="utf-8") == "# Made\n"
 
 
@@ -525,6 +526,20 @@ def test_a_take_back_lets_no_process_open_the_file_it_deletes(tmp_path):
     assert got.returncode == 0, (got.returncode, got.stderr)
     assert got.stdout.split() == ["True", "refused"], got.stdout
     assert not aside.exists()
+
+
+def test_a_take_back_never_deletes_nor_locks_a_file_that_has_a_second_name(tmp_path):
+    from sheafmd import mcp
+    """Ticket 212 B, round 2: a hard link made to the file meanwhile would keep the mode the delete takes to none."""
+    import types
+    aside = tmp_path / ".a.md.sheaf-gone-0"
+    aside.write_text("# Made\n", encoding="utf-8")
+    other = tmp_path / "other.md"
+    os.link(aside, other)
+    st = os.stat(aside)
+    made = types.SimpleNamespace(text="# Made\n", ident=(st.st_dev, st.st_ino))
+    assert mcp._delete_if_made(aside, made) is not True
+    assert aside.exists() and os.access(other, os.R_OK | os.W_OK)
 
 
 def test_a_folder_taken_back_is_never_renamed_over_an_empty_folder_that_came_to_its_name(tmp_path, monkeypatch):

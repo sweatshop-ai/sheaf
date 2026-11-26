@@ -1370,11 +1370,11 @@ class Handler:
         return json.dumps(got)
 
     @staticmethod
-    def _agency_mount(body: str, doc: str) -> str:
+    def _agency_mount(body: str, doc: str, member: str) -> str:
         """A client page's mount answer with its config's say on what the page acts on taken by this hub (`readthrough.agency_config`)."""
         got = json.loads(body)              # `_own_build` already refused a mount body that is no object
         if isinstance(got.get("config"), dict):
-            got["config"] = readthrough.agency_config(got["config"], doc)
+            got["config"] = readthrough.agency_config(got["config"], doc, member)
         return json.dumps(got)
 
     def _relayed(self, req: Req, client: str, op: str, ask, doc: str | None = None) -> Response:
@@ -1398,9 +1398,9 @@ class Handler:
         if op == "doc" and status == 200:     # what an older client tiroir still says of its agents is not shown here (9.9)
             body = self._read_only_doc(body)
         if env.get("type") == "html":          # what the page acts on is this hub's to say, whatever status the client chose (9.9)
-            body = readthrough.agency_meta(body, doc)
+            body = readthrough.agency_meta(body, doc, req.member_id)
         elif op == "mount" and status == 200 and doc is not None:
-            body = self._agency_mount(body, doc)
+            body = self._agency_mount(body, doc, req.member_id)
         if status == 200 and doc is not None and self.hub.team is not None:
             body = self._with_team(op, body, doc, req.member.name)
         if env.get("type") == "html":

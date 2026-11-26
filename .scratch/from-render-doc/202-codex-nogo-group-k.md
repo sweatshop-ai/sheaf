@@ -1,4 +1,4 @@
-# 201: Codex NO-GO findings on merged PR #655 (group K)
+# 202: Codex NO-GO findings on merged PR #655 (group K)
 
 **Claimed by:** Boris
 
@@ -6,7 +6,7 @@
 
 **Blocked by:** none
 
-**From:** the Codex re-check of #655 (ticket 190 fix), round 07, NO-GO. Both findings checked against main 8a909c1b: both still hold. Boxes are lettered A and B within this ticket ("201 A").
+**From:** the Codex re-check of #655 (ticket 190 fix), round 07, NO-GO. Both findings checked against main 8a909c1b: both still hold. Boxes are lettered A and B within this ticket ("202 A").
 
 **Where:** `src/sheafmd/hub/readthrough.py` (`agency_config`, `agency_meta`), `src/sheafmd/hub/handler.py` (`_relayed`, `_agency_mount`), `src/sheafmd/connect.py` (`peer_credential_name`).
 

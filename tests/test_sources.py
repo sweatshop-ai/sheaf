@@ -282,3 +282,25 @@ def test_a_probe_that_is_out_never_lifts_a_refusal_made_meanwhile(tmp_path):
     gate.set()
     t.join(5)
     assert not srcs.get("shop").served and srcs.get("shop").error
+
+
+def test_a_probe_that_raises_what_nobody_expected_does_not_leave_the_source_probing(tmp_path):
+    from sheafmd.hub.sources import RETRY_AFTER, Sources
+    f = secret(tmp_path)
+    now, calls = [100.0], []
+
+    class Odd:
+        def __init__(self, name, url, bearer):
+            pass
+
+        def info(self):
+            calls.append(1)
+            raise AttributeError("a closed connection")
+
+    srcs = Sources([config.SourceDecl("shop", "unix:///run/s.sock", f)], make=Odd, clock=lambda: now[0])
+    with pytest.raises(AttributeError):
+        srcs.ensure("shop")
+    now[0] += RETRY_AFTER + 1
+    with pytest.raises(AttributeError):
+        srcs.ensure("shop")
+    assert len(calls) == 2 and not srcs.get("shop").probing

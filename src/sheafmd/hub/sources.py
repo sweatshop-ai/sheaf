@@ -98,6 +98,13 @@ class Sources:
             s.checked = self._clock()
             decl = s.decl
         try:
+            self._probe(s, decl)
+        finally:
+            with self._lock:
+                s.probing = False         # whatever was raised: a source is never left probing for good
+
+    def _probe(self, s: Source, decl) -> None:
+        try:
             client = self._make(s.name, decl.url, config.read_bearer(decl))
         except (config.ConfigError, ValueError) as e:
             self._set(s, str(e), f"source {s.name!r} is not set up correctly: ask the owner of this hub", True)

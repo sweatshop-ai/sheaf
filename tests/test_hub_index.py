@@ -817,3 +817,51 @@ def test_a_page_moved_away_and_back_during_its_held_first_render_keeps_its_versi
     go.set()
     a.join(10)
     assert any("came back" in t for t in store.texts("work/held.md")), store.texts("work/held.md")
+
+
+def _render_ends_in(monkeypatch, step, go, maker):
+    """`step` of a move (a function of `core.loose_mod`, the last store a move carries) lets the held first render end,
+    and waits for its maker: pandoc finishes after the versions were carried, before the move lets go of the entry."""
+    was = getattr(core.loose_mod, step)
+
+    def then_the_render_ends(*a, **kw):
+        got = was(*a, **kw)
+        go.set()
+        maker.join(10)
+        return got
+    monkeypatch.setattr(core.loose_mod, step, then_the_render_ends)
+
+
+def test_a_first_render_that_ends_while_its_page_moves_leaves_no_version_at_the_old_address(world, work, put, held_pandoc,
+                                                                                            monkeypatch):
+    """200 (Codex, round 7 of #679): the entry being made is let go of before the move carries the versions, so a first
+    render that ends meanwhile stores nothing under the address the page left."""
+    go, begun, _ = held_pandoc
+    (work / ".sheaf.toml").write_text('versions = "root"\n', encoding="utf-8")     # kept in the root, never forgotten
+    put("held.md", PLAN + f"\n{HELD_MARK}\n")
+    world.hub.roots.for_document(work / "held.md")
+    store = world.hub._versions_of(world.hub.roots.get("work"))
+    a, _ = _in_thread(world.hub.entry, "work/held.md")
+    assert begun.wait(10)
+    _render_ends_in(monkeypatch, "marks_moved", go, a)
+    os.replace(work / "held.md", work / "away.md")        # a move renames the file before the hub carries the rest
+    world.hub.moved_page("work/held.md", "work/away.md", "test")
+    assert not any(HELD_MARK in t for t in store.texts("work/held.md")), store.texts("work/held.md")
+
+
+def test_a_first_render_that_ends_while_its_page_lands_elsewhere_leaves_no_version_at_the_old_address(world, work, put,
+                                                                                                     held_pandoc, monkeypatch):
+    """200 (Codex, round 7 of #679): as for a move in the hub, for a page that lands on another tiroir: the entry being
+    made is let go of before its versions are forgotten."""
+    go, begun, _ = held_pandoc
+    (work / ".sheaf.toml").write_text('versions = "root"\n', encoding="utf-8")     # kept in the root, never forgotten
+    put("held.md", PLAN + f"\n{HELD_MARK}\n")
+    world.hub.roots.for_document(work / "held.md")
+    store = world.hub._versions_of(world.hub.roots.get("work"))
+    a, _ = _in_thread(world.hub.entry, "work/held.md")
+    assert begun.wait(10)
+    _render_ends_in(monkeypatch, "marks_gone", go, a)
+    finish = world.hub.moved_remote("work/held.md", "https://other.example", "work/held.md", "test", "0" * 64)
+    os.unlink(work / "held.md")                           # as the move does, before its `finish`
+    finish()
+    assert not any(HELD_MARK in t for t in store.texts("work/held.md")), store.texts("work/held.md")

@@ -1313,6 +1313,8 @@ class Hub:
                  lambda: self.session_tells.rename(old, new), lambda: self.writes.rename(old, new),
                  lambda: (self._versions_of(root) or self.versions).rename(old, new),
                  lambda: loose_mod.marks_moved(root.path, rel_old, rel_new)]
+        with self._lock:        # before the versions are carried: a first render that ends meanwhile stores none at `old`
+            self._drop_making(old, forget=True)
         for step in steps:
             try:
                 step()
@@ -1365,6 +1367,12 @@ class Hub:
                  lambda: forget(self.member_opened), lambda: forget(self.shared_ids),
                  lambda: (self._versions_of(root) or self.versions).forget(old, inside=True),
                  lambda: loose_mod.marks_gone(root.path, at.rel)]
+        # Before the versions are forgotten, an entry still being made is detached, so a first render that ends meanwhile
+        # stores nothing at `old`. Without the hub's lock, which comes before the file's the caller holds: `detach` takes
+        # none and does it once, and `finish` marks the entry dropped under the hub's lock (200).
+        making = self._making.get(old)
+        if making is not None:
+            making.entry.live.detach()
         for step in steps:
             try:
                 step()

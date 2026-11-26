@@ -35,7 +35,8 @@ from ..agents.base import Target
 from ..config import ConfigError
 from ..edit import EditError
 from ..mcp import Caller, Door
-from ..render import RenderError
+from ..render import RenderError, render_file
+from .. import paths, remote
 from ..source import StaleError, md_hash
 from . import archive as archive_mod
 from . import auth, boxwait, channel, codes, events, incoming, laptops, loose, moves, outgoing, peer, place, proxy, readthrough, sheaf_view, targets, team as team_mod, the_list, transcribe, visibility, work
@@ -958,12 +959,18 @@ class Handler:
         if req.path == "/":
             return _html(200, self.hub.index.page(nonce, member=req.member), nonce)
         address = address_of_url(req.path)
+        if address is not None and req.member is not None and self.hub.sources.get(Address.parse(address).root) is not None:
+            return self._source_page(req, Address.parse(address), nonce)
         if address is None:
             # `/<root>` with no slash after it names the root's page, where the browser is sent.
             bare = req.path.count("/") == 1
             name = root_of_url(req.path + "/" if bare else req.path)
             if name is None:
                 raise Refuse(404, "no such page")
+            if req.member is not None and self.hub.sources.get(name) is not None:
+                if bare:
+                    return Response(301, {"Location": req.path + "/"})
+                return self._source_page(req, Address(name, ""), nonce)
             root = self.hub.roots.get(name)
             if root is None or (req.member is not None and not self.hub.owns(req.member, root)):
                 raise Refuse(404, "no such root")
@@ -988,6 +995,37 @@ class Handler:
             e = self._entry(req, address)
             self.hub.catch_up(e)
             return _html(200, self.hub.page(e, nonce, member=req.member, mount=req.mount), nonce)
+
+    def _source_page(self, req: Req, at: Address, nonce: str) -> Response:
+        """A page of a source root (ADR 0006): read from its Source service and rendered with the Theme the source names. The page
+        is read-only here. A source that is unserved says why and touches no other root; the words never hold the bearer."""
+        source = self.hub.sources.ensure(at.root)
+        if source is None or not source.served:
+            res = _html(503, _sign_in_page(f"The source {escape(at.root)} is not served", escape(source.error if source else "no such source")))
+            res.error = "source unserved"
+            return res
+        client = source.client
+        try:
+            if not at.rel:
+                links = "".join(f'<li><a href="/{quote(at.root)}/{quote(n)}">{escape(n)}</a></li>' for n in client.documents())
+                title = escape(client.display or at.root)
+                return _html(200, "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\"><title>" + title
+                             + "</title><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head><body><h1>"
+                             + title + "</h1><ul>" + links + "</ul></body></html>", nonce)
+            if not at.rel.endswith(".md"):
+                raise Refuse(404, "no such page")
+            tree, _base = client.adapter(at.rel).read()
+        except remote.SourceError as e:
+            if e.code in ("not_found", "bad_request"):
+                raise Refuse(404, "no such page") from None
+            res = _html(503, _sign_in_page(f"The source {escape(at.root)} is not reachable", escape(e.message)))
+            res.error = "source unreachable"
+            return res
+        top = paths.state_dir() / "sources" / at.root
+        top.mkdir(parents=True, exist_ok=True)
+        page = render_file(top / at.rel, theme=source.theme, src=tree.text, root=top, script_nonce=nonce,
+                           image_ok=lambda _p: False, mount=req.mount)
+        return _html(200, page, nonce)
 
     def _asleep(self, req: Req, address: str) -> Response | None:
         """A page of a clone that sleeps has no file (SPEC 13): the clone wakes for the page's owner, who is then served the

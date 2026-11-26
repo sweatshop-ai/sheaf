@@ -40,6 +40,7 @@ from . import projects
 from . import proxy as proxy_mod
 from . import readthrough
 from . import roots as roots_mod
+from . import sources as sources_mod
 from . import team as team_mod
 from . import sheaf_view
 from . import state
@@ -172,6 +173,12 @@ class Hub:
         self.person = person if person is not None else config.user_name()   # the start hands over the one it read
         self.roots = roots_mod.Roots()
         self.roots.placer = lambda root, rel: place.physical(self, root, rel)
+        # The sources of `[sources.<name>]`, each a root served through its Source service (ADR 0006): only a tiroir's hub serves them.
+        self.sources = sources_mod.Sources.load(serves=lambda: self.proxy is not None)
+        self.roots.reserved = self.sources.names
+        for name in self.sources.names():
+            if self.roots.held(name) is not None:
+                self.sources.refuse(name, f"source {name!r}: a folder root already has this name")
         self.versions = state.Versions()
         self.writes = WriteLog()                 # one line per write to a page, whatever the path (the Write log)
         self.commits = Commits(self.record, self._writers_out, self.roots.all,

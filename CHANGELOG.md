@@ -8,6 +8,7 @@ changes whenever an asset does. The entries name pull requests of sweatshop-ai/s
 
 ### Added
 
+- The reference Source service (`python -m sheafmd.sourceservice`), the remote adapter that is its client (`sheafmd.remote`) and `[sources.<name>]` in `config.toml`: a source is served as a root through its service, its pages open read-only with the Theme it names, a service of another interface version leaves only its own root unserved, and the hub holds the one bearer in a file only its account reads, never a key to the site. The protocol is in `docs/source-service.md` (block editor v1, ticket 21).
 - The block tree of plain Markdown (`sheafmd.blocks`, which replaces the flat `blocks.py`: `blocks.flat` keeps the old names) and the Document service (`sheafmd.document`): `read()` gives the tree and the base, `save()` writes a whole Markdown text so that every block with an equal pandoc AST keeps the file's bytes, and a page's earlier saves on an old base are not a conflict for the page itself. A page save now writes through it, with no change for a save that rewrote nothing but its own blocks (block editor v1, ticket 02).
 
 ### Fixed

@@ -867,7 +867,9 @@ def test_the_service_refuses_to_start_with_an_index_lock_or_unstaged_or_untracke
 def test_the_repair_in_the_docs_inspects_first_and_never_resets_hard():
     text = (Path(__file__).resolve().parent.parent / "docs" / "source-service.md").read_text()
     failure = text[text.index("## Failure"):]
-    assert "git diff" in failure and "git log" in failure and "reset --hard" not in failure
+    for command in ("git restore", "git reset", "git checkout", "git revert", "git diff", "git stash", "cp "):
+        assert command not in failure                                   # the section says what the service did, and prescribes no command
+    assert "HEAD before" in failure and "index" in failure and "git status" in failure
 
 def test_a_git_timeout_after_the_commit_moved_head_is_not_guessed_at_it_is_unavailable(tmp_path, monkeypatch):
     svc, folder, git = _git_service(tmp_path)
@@ -1039,3 +1041,27 @@ def test_the_service_refuses_to_start_with_a_git_ignored_markdown_file_in_the_fo
     with pytest.raises(SystemExit) as e:
         sourceservice.Service(folder, "b" * 20, {})
     assert "Failure" in str(e.value)
+
+
+def test_ignored_files_that_are_not_markdown_do_not_stop_the_service_starting(tmp_path):
+    from sheafmd import sourceservice
+    svc, folder, git = _git_service(tmp_path)
+    svc.close()
+    (folder / ".gitignore").write_text(".venv/\nbuild/\n*.pyc\n")
+    git("add", ".gitignore")
+    git("-c", "user.name=t", "-c", "user.email=t@example.org", "commit", "-q", "-m", "ignore")
+    (folder / ".venv" / "lib").mkdir(parents=True)
+    (folder / ".venv" / "lib" / "x.py").write_text("x\n")
+    (folder / "build").mkdir()
+    (folder / "build" / "out.html").write_text("out\n")
+    (folder / "z.pyc").write_bytes(b"\0")
+    sourceservice.Service(folder, "b" * 20, {}).close()
+    (folder / "build" / "inside.md").write_text("a document in an ignored directory\n")
+    with pytest.raises(SystemExit):                                     # an ignored markdown file is a document the service reads
+        sourceservice.Service(folder, "b" * 20, {})
+
+
+def test_the_overview_says_a_git_add_that_fails_cleanly_is_refused_and_anything_else_stops_the_service():
+    text = (Path(__file__).resolve().parent.parent / "docs" / "source-service.md").read_text()
+    overview = text[text.index("## What the reference service assumes"):text.index("## Failure")]
+    assert "fails cleanly" in overview and "stops" in overview and "or the rollback" in overview

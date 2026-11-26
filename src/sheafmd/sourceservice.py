@@ -380,8 +380,10 @@ class Service:
             got = self._git("status", "--porcelain", "--untracked-files=all", "--ignored", "--", ".")
             if got.returncode != 0:
                 return "git status failed"
-            if got.stdout.strip():
-                return "the folder has unstaged, untracked or ignored files that are not committed"
+            for line in got.stdout.splitlines():
+                if line.startswith("!!") and not line.rstrip().endswith(".md"):
+                    continue                    # ignored build output, an environment: not a document the service reads
+                return "the folder has unstaged, untracked or ignored Markdown files that are not committed"
         except (OSError, subprocess.SubprocessError):
             return "the repository cannot be read"
         return None
